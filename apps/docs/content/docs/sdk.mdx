@@ -1,0 +1,86 @@
+---
+title: JavaScript SDK
+description: The official Peridot ID SDK for the browser
+---
+
+The SDK (`@peridot/sdk-js`) wraps the API for browsers. It sends credentials with every
+request, so the API's cookies are handled automatically.
+
+## Install
+
+```bash
+npm install @peridot/sdk-js
+```
+
+## Initialize
+
+```ts
+import { Peridot } from '@peridot/sdk-js';
+
+const peridot = Peridot({
+  baseUrl: 'https://api.peridot.id',
+  onUnauthorized: async () => {
+    // Access token expired — try to refresh silently before redirecting to login
+    const ok = await peridot.auth.refresh();
+    if (!ok) {
+      await peridot.auth.login(); // redirects the browser to Google
+    }
+  },
+});
+```
+
+## Sign in
+
+`auth.login()` redirects the browser to Google. The user signs in and is sent back to
+`CLIENT_SUCCESS_URL` with the session cookies already set.
+
+```ts
+await peridot.auth.login();
+```
+
+## Identity
+
+```ts
+const me = await peridot.identity.me();
+// { id: "2f4b1c1e-...", createdAt: "2026-08-03T13:30:00.000Z" }
+```
+
+## Profile
+
+```ts
+const profile = await peridot.profile.me();
+// { id, identityId, displayName, avatarUrl, locale, createdAt, updatedAt }
+
+const updated = await peridot.profile.update({
+  displayName: 'PeridotPlayer',
+  locale: 'en-US',
+});
+```
+
+## Log out
+
+```ts
+await peridot.auth.logout();
+```
+
+## Refreshing
+
+Usually you never call `refresh()` directly — the `onUnauthorized` callback does it. If
+you need to force a refresh:
+
+```ts
+const ok = await peridot.auth.refresh(); // true if a new session was issued
+```
+
+## Errors
+
+Methods return the API error object instead of throwing for failed requests:
+
+```ts
+const result = await peridot.profile.me();
+if ('statusCode' in result && result.statusCode === 401) {
+  // handle unauthenticated
+}
+```
+
+See [Errors](/docs/errors) for the full error contract.

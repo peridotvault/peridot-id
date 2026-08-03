@@ -1,0 +1,359 @@
+openapi: 3.0.3
+info:
+  title: Peridot ID API
+  version: 1.0.0
+  description: |
+    Gaming Identity Platform — Authentication, Identity, and Profile for the Peridot ecosystem.
+
+    ## Base URL
+    All endpoints are prefixed with `/v1`.
+
+    | Environment | Base URL |
+    |---|---|
+    | Production | `https://api.peridot.id/v1` |
+    | Local dev | `http://localhost:3000/v1` |
+
+    ## Authentication
+    Authentication is **cookie-based**. After a successful Google sign-in the API sets two
+    `HttpOnly` cookies:
+
+    - `peridot_access` — short-lived JWT access token (15 min), sent on every request.
+    - `peridot_refresh` — long-lived rotating refresh token (30 days), only sent to `/v1/auth`.
+
+    Browsers handle these automatically; non-browser clients must send
+    `Cookie: peridot_access=<token>` on each request and call `/v1/auth/refresh` before the
+    access token expires.
+  contact:
+    name: Peridot ID
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:3000/v1
+    description: Local development
+
+tags:
+  - name: auth
+    description: Login, logout, and token refresh
+  - name: identity
+    description: The user's identity across products
+  - name: profile
+    description: The user's public profile
+  - name: openapi
+    description: Machine-readable API specification
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Start Google login
+      description: |
+        Returns the URL a client should navigate to in order to begin Google OAuth.
+        The URL points to `GET /auth/google`, which redirects the browser to Google's
+        consent screen. After the user consents, the browser is redirected back through
+        `/auth/google/callback` and session cookies are set.
+      responses:
+        "200":
+          description: Google authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+              example:
+                url: "http://localhost:3000/v1/auth/google"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/google:
+    get:
+      tags: [auth]
+      summary: Redirect to Google OAuth consent screen
+      description: |
+        Redirects (HTTP 302) to Google's OAuth consent screen with `scope=profile email`.
+        Not meant to be called directly by clients — use `POST /auth/login` to obtain the URL.
+      responses:
+        "302":
+          description: Redirect to Google consent screen
+        "503":
+          $ref: "#/components/responses/GoogleNotConfigured"
+
+  /auth/google/callback:
+    get:
+      tags: [auth]
+      summary: Google OAuth callback
+      description: |
+        Handles the redirect back from Google. On success it:
+
+        1. Creates the identity + profile on first sign-in, or links to the existing identity.
+        2. Issues `peridot_access` and `peridot_refresh` cookies.
+        3. Redirects to the `CLIENT_SUCCESS_URL` configured on the server.
+
+        Both cookies are `HttpOnly; SameSite=Lax`. In production the `Secure` flag is set.
+      responses:
+        "302":
+          description: Redirect to CLIENT_SUCCESS_URL with session cookies set
+        "503":
+          $ref: "#/components/responses/GoogleNotConfigured"
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the refresh token
+      description: |
+        Rotates the refresh token and issues a fresh access token. The current `peridot_refresh`
+        cookie is **invalidated** and replaced with a new one (rotation), so each refresh token
+        can be used exactly once.
+
+        - 401 if the refresh token is missing, expired, already rotated, or forged.
+        - Rate limited to 10 requests / minute.
+      responses:
+        "204":
+          description: New access + refresh cookies set; old refresh token revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Log out
+      description: |
+        Revokes the current refresh token and clears both session cookies. Idempotent — safe to
+        call when already logged out.
+      responses:
+        "200":
+          description: Session ended and cookies cleared
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /identity/me:
+    get:
+      tags: [identity]
+      summary: Get the current identity
+      description: |
+        Returns the identity of the authenticated user. The identity ID is stable across every
+        product in the Peridot ecosystem.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The current identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Identity"
+              example:
+                id: "2f4b1c1e-8a6f-4d7a-9c3d-1a2b3c4d5e6f"
+                createdAt: "2026-08-03T13:30:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /profile/me:
+    get:
+      tags: [profile]
+      summary: Get the current profile
+      description: Returns the profile of the authenticated user.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The current profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /profile:
+    patch:
+      tags: [profile]
+      summary: Update the current profile
+      description: Updates one or more profile fields. Only provided fields are changed.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdate"
+            examples:
+              set-display-name:
+                summary: Set a display name and locale
+                value:
+                  displayName: "PeridotPlayer"
+                  locale: "en-US"
+              clear-avatar:
+                summary: Remove the avatar
+                value:
+                  avatarUrl: null
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /openapi.yaml:
+    get:
+      tags: [openapi]
+      summary: Get this specification
+      description: Returns the raw OpenAPI 3.0 document as `application/yaml`.
+      responses:
+        "200":
+          description: The OpenAPI specification
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: peridot_access
+      description: "JWT access token set by /auth/google/callback or /auth/refresh"
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 400
+            message: ["displayName must be shorter than or equal to 64 characters"]
+    Unauthorized:
+      description: Missing, expired, or invalid access/refresh token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 401
+            message: "Unauthorized"
+    NotFound:
+      description: The identity or profile does not exist
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 404
+            message: "No Identity found"
+    RateLimited:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 429
+            message: "ThrottlerException: Too Many Requests"
+    GoogleNotConfigured:
+      description: Google OAuth credentials are not set on the server
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 503
+            message: "Google OAuth is not configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET in .env"
+
+  schemas:
+    LoginResponse:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Navigate here to start Google sign-in
+      example:
+        url: "http://localhost:3000/v1/auth/google"
+
+    Identity:
+      type: object
+      required: [id, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable identifier for this user across all Peridot products
+        createdAt:
+          type: string
+          format: date-time
+
+    Profile:
+      type: object
+      required: [id, identityId, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        identityId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+          nullable: true
+          maxLength: 64
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+        locale:
+          type: string
+          nullable: true
+          maxLength: 16
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProfileUpdate:
+      type: object
+      properties:
+        displayName:
+          type: string
+          nullable: true
+          maxLength: 64
+          description: "Set to null to clear"
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: "Set to null to clear"
+        locale:
+          type: string
+          nullable: true
+          maxLength: 16
+          description: "e.g. en-US. Set to null to clear"
+
+    ApiError:
+      type: object
+      required: [statusCode, message]
+      properties:
+        statusCode:
+          type: integer
+        message:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string

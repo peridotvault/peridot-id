@@ -1,0 +1,31 @@
+---
+title: Overview
+description: What Peridot ID is and what it provides
+---
+
+Peridot ID is a **Gaming Identity Platform** for the Peridot ecosystem. It provides
+Authentication, Identity, and Profile so every Peridot product shares a single user
+account.
+
+## What you get
+
+- **Authentication** — Google sign-in with secure, rotating sessions
+- **Identity** — a stable identity ID for each user across all products
+- **Profile** — per-user profile data (`displayName`, `avatarUrl`, `locale`)
+
+## Key facts
+
+| Fact | Value |
+|---|---|
+| API versioning | All endpoints are under `/v1` |
+| Authentication | `HttpOnly` cookies (JWT access token + rotating refresh token) |
+| Access token lifetime | 15 minutes |
+| Refresh token lifetime | 30 days (rotated on every use) |
+| Spec | [OpenAPI 3.0](/docs/api/auth) — also served by the API at `GET /v1/openapi.yaml` |
+
+## Next steps
+
+- [Getting started](/docs/getting-started) — base URLs and your first request
+- [Authentication](/docs/authentication) — how login, refresh, and logout work
+- [SDK](/docs/sdk) — the JavaScript SDK
+- [API reference](/docs/api/auth) — every endpoint, schema, and example

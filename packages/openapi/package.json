@@ -1,0 +1,9 @@
+{
+  "name": "@peridot/openapi",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'static spec, nothing to build'",
+    "typecheck": "echo 'no types'"
+  }
+}

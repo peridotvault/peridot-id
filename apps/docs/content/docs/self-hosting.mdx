@@ -1,0 +1,59 @@
+---
+title: Self-hosting
+description: Run the Peridot ID API yourself
+---
+
+## Requirements
+
+- Node.js 20+
+- pnpm
+- PostgreSQL 16+
+- Redis 7+
+
+## Environment variables
+
+All configuration is loaded from `.env` in the API package. Copy
+`apps/api/.env.example` to `apps/api/.env` and fill it in:
+
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | yes | PostgreSQL connection string |
+| `REDIS_URL` | yes | Redis connection string |
+| `JWT_ACCESS_SECRET` | yes | Secret for signing access tokens (32+ chars) |
+| `JWT_REFRESH_SECRET` | yes | Secret for signing refresh tokens (32+ chars) |
+| `GOOGLE_CLIENT_ID` | yes* | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | yes* | Google OAuth client secret |
+| `GOOGLE_CALLBACK_URL` | yes* | Must match the authorized redirect URI |
+| `COOKIE_SECURE` | no | `true` in production (cookies only over HTTPS) |
+| `COOKIE_DOMAIN` | no | Cookie domain (default `localhost`) |
+| `CLIENT_SUCCESS_URL` | no | Where users land after Google sign-in |
+| `ACCESS_TOKEN_TTL` | no | Access token lifetime (default `15m`) |
+| `REFRESH_TOKEN_TTL` | no | Refresh token lifetime (default `30d`) |
+| `PORT` | no | HTTP port (default `3000`) |
+
+`*` Google endpoints return `503` until these are set. Create credentials at the
+[Google Cloud console](https://console.cloud.google.com/apis/credentials) and add
+`GOOGLE_CALLBACK_URL` as an authorized redirect URI.
+
+## Local development with Docker
+
+```bash
+docker compose up -d          # Postgres + Redis
+pnpm install
+pnpm db:migrate               # apply Prisma migrations
+pnpm dev                      # API on http://localhost:3000
+```
+
+The docs site runs separately:
+
+```bash
+pnpm --filter @peridot/docs dev
+```
+
+## Production build
+
+```bash
+pnpm build
+pnpm --filter @peridot/api db:migrate deploy
+pnpm --filter @peridot/api start
+```

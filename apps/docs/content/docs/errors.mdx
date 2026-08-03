@@ -1,0 +1,57 @@
+---
+title: Errors
+description: Error format, status codes, and rate limits
+---
+
+All errors are returned as JSON with a consistent shape.
+
+## Error format
+
+```json
+{
+  "statusCode": 401,
+  "message": "Unauthorized"
+}
+```
+
+`message` is a string for a single error. When validation fails it can be an array of
+strings:
+
+```json
+{
+  "statusCode": 400,
+  "message": ["displayName must be shorter than or equal to 64 characters"]
+}
+```
+
+## Status codes
+
+| Status | Meaning |
+|---|---|
+| `200` | Success |
+| `204` | Success, no content (e.g. `POST /v1/auth/refresh`) |
+| `302` | Redirect (Google OAuth flow) |
+| `400` | Validation error — one or more fields are invalid |
+| `401` | Missing, expired, or invalid access/refresh token |
+| `404` | Identity or profile does not exist |
+| `429` | Rate limit exceeded |
+| `503` | Google OAuth is not configured on the server |
+
+## Authentication errors
+
+A `401` from a protected endpoint means the access token is missing or expired. Recover by
+calling `POST /v1/auth/refresh`. If refresh itself returns `401`, the session is
+unrecoverable and the user must sign in again.
+
+## Rate limits
+
+Auth endpoints are rate limited to protect against brute force:
+
+| Endpoint | Limit |
+|---|---|
+| `POST /v1/auth/refresh` | 10 requests / minute |
+| `POST /v1/auth/login` | 20 requests / minute |
+| `POST /v1/auth/logout` | 20 requests / minute |
+| `GET /v1/auth/google`, `/v1/auth/google/callback` | 100 requests / minute |
+
+Exceeding a limit returns `429`. Clients should back off and retry.

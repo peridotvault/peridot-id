@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Identity {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile      Profile?
+  authAccounts AuthAccount[]
+  devices      Device[]
+
+  @@map("identities")
+}
+
+model Profile {
+  id          String   @id @default(uuid())
+  identityId  String   @unique
+  identity    Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  displayName String?
+  avatarUrl   String?
+  locale      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+model AuthAccount {
+  id         String   @id @default(uuid())
+  provider   String
+  providerId String
+  email      String?
+  identityId String
+  identity   Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([provider, providerId])
+  @@map("auth_accounts")
+}
+
+model Device {
+  id         String   @id @default(uuid())
+  identityId String
+  identity   Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  userAgent  String?
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  sessions   Session[]
+
+  @@map("devices")
+}
+
+model Session {
+  id          String   @id
+  deviceId    String
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  rotatedFrom String?
+  revokedAt   DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@map("sessions")
+}
