@@ -10,7 +10,7 @@ info:
 
     | Environment | Base URL |
     |---|---|
-    | Production | `https://api.peridot.id/v1` |
+    | Production | `https://api.peridot-id.peridotvault.com/v1` |
     | Local dev | `http://localhost:3301/v1` |
 
     ## Authentication
@@ -29,6 +29,8 @@ info:
     name: Proprietary
 
 servers:
+  - url: https://api.peridot-id.peridotvault.com/v1
+    description: Production
   - url: http://localhost:3301/v1
     description: Local development
 

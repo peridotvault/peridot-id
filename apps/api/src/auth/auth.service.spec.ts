@@ -10,6 +10,7 @@ function configMock(overrides: Record<string, unknown> = {}) {
     REFRESH_TOKEN_TTL: "30d",
     COOKIE_SECURE: "false",
     COOKIE_DOMAIN: "localhost",
+    COOKIE_SAMESITE: "lax",
     ...overrides,
   };
   return {
@@ -21,24 +22,14 @@ function configMock(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function redisMock() {
-  const store = new Map<string, string>();
-  return {
-    store,
-    set: jest.fn(async (key: string, val: string) => {
-      store.set(key, val);
-      return "OK";
-    }),
-    get: jest.fn(async (key: string) => store.get(key) ?? null),
-    del: jest.fn(async (...keys: string[]) => {
-      for (const k of keys) store.delete(k);
-      return keys.length;
-    }),
-  };
+interface StoredSession {
+  deviceId: string;
+  revokedAt: Date | null;
+  expiresAt: Date;
 }
 
 function prismaMock() {
-  const sessions = new Map<string, { deviceId: string; revokedAt: Date | null }>();
+  const sessions = new Map<string, StoredSession>();
   return {
     device: {
       create: jest.fn(async (args: { data: { identityId: string; userAgent: string | null } }) => ({
@@ -48,11 +39,18 @@ function prismaMock() {
       update: jest.fn(async () => ({})),
     },
     session: {
-      create: jest.fn(async (args: { data: { id: string; deviceId: string } }) => {
-        sessions.set(args.data.id, { deviceId: args.data.deviceId, revokedAt: null });
-        return args.data;
-      }),
+      create: jest.fn(
+        async (args: { data: { id: string; deviceId: string; expiresAt: Date; rotatedFrom: string | null } }) => {
+          sessions.set(args.data.id, { deviceId: args.data.deviceId, revokedAt: null, expiresAt: args.data.expiresAt });
+          return args.data;
+        },
+      ),
       findUnique: jest.fn(async ({ where }: { where: { id: string } }) => sessions.get(where.id) ?? null),
+      update: jest.fn(async ({ where, data }: { where: { id: string }; data: { revokedAt: Date } }) => {
+        const s = sessions.get(where.id);
+        if (s) s.revokedAt = data.revokedAt;
+        return s ?? null;
+      }),
       updateMany: jest.fn(async ({ where, data }: { where: { id: string }; data: { revokedAt: Date } }) => {
         const s = sessions.get(where.id);
         if (s) s.revokedAt = data.revokedAt;
@@ -67,71 +65,58 @@ function resMock() {
 }
 
 function setup() {
-  const prisma = prismaMock() as unknown as never;
-  const redis = redisMock();
+  const prisma = prismaMock();
   const jwt = new JwtService({});
   const config = configMock();
-  const service = new AuthService(prisma, redis as never, jwt, config as never);
-  return { service, prisma, redis, config, res: resMock() };
+  const service = new AuthService(prisma as never, jwt, config as never);
+  return { service, prisma, config, res: resMock() };
+}
+
+function reqWithToken(token: string) {
+  return { cookies: { peridot_refresh: token }, headers: { "user-agent": "test-agent" } } as never;
 }
 
 describe("AuthService", () => {
-  it("issueSession stores a refresh token and sets both cookies", async () => {
-    const { service, redis, res } = setup();
+  it("issueSession creates a session row and sets both cookies", async () => {
+    const { service, prisma, res } = setup();
     const tokens = await service.issueSession(res as never, "identity-1", "test-agent");
 
     expect(tokens.accessToken).toBeTruthy();
     expect(tokens.refreshToken).toBeTruthy();
-    expect(redis.set).toHaveBeenCalledWith(expect.stringMatching(/^rt:/), "identity-1", "EX", expect.any(Number));
+    expect(prisma.session.create).toHaveBeenCalled();
     expect(res.cookie).toHaveBeenCalledTimes(2);
   });
 
   it("rotateSession revokes the old token and issues a new one", async () => {
-    const { service, redis, res } = setup();
+    const { service, prisma, res } = setup();
     const first = await service.issueSession(res as never, "identity-1", "test-agent");
     const oldJti = jwtPayload(first.refreshToken).jti;
-    expect(redis.store.get(`rt:${oldJti}`)).toBe("identity-1");
 
-    await service.rotateSession(
-      { cookies: { peridot_refresh: first.refreshToken }, headers: { "user-agent": "test-agent" } } as never,
-      res as never,
-    );
+    await service.rotateSession(reqWithToken(first.refreshToken), res as never);
 
-    expect(redis.store.get(`rt:${oldJti}`)).toBeUndefined();
-    const remaining = [...redis.store.entries()].filter(([k]) => k.startsWith("rt:"));
-    expect(remaining).toHaveLength(1);
+    const old = (await prisma.session.findUnique({ where: { id: oldJti } })) as StoredSession;
+    expect(old.revokedAt).toBeInstanceOf(Date);
   });
 
   it("rejects a reused (already rotated) refresh token", async () => {
-    const { service, redis, res } = setup();
+    const { service, res } = setup();
     const first = await service.issueSession(res as never, "identity-1", "test-agent");
-    await service.rotateSession(
-      { cookies: { peridot_refresh: first.refreshToken }, headers: { "user-agent": "test-agent" } } as never,
-      res as never,
-    );
+    await service.rotateSession(reqWithToken(first.refreshToken), res as never);
 
-    await expect(
-      service.rotateSession(
-        { cookies: { peridot_refresh: first.refreshToken }, headers: { "user-agent": "test-agent" } } as never,
-        res as never,
-      ),
-    ).rejects.toThrow(UnauthorizedException);
+    await expect(service.rotateSession(reqWithToken(first.refreshToken), res as never)).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it("rejects a forged refresh token", async () => {
-    const { service, redis, res } = setup();
+    const { service, res } = setup();
     const jwt = new JwtService({});
     const forged = await jwt.signAsync(
       { sub: "victim", jti: "does-not-exist", type: "refresh" },
       { secret: "refresh-secret-test", expiresIn: "30d" },
     );
 
-    await expect(
-      service.rotateSession(
-        { cookies: { peridot_refresh: forged }, headers: {} } as never,
-        res as never,
-      ),
-    ).rejects.toThrow(UnauthorizedException);
+    await expect(service.rotateSession(reqWithToken(forged), res as never)).rejects.toThrow(UnauthorizedException);
   });
 });
 

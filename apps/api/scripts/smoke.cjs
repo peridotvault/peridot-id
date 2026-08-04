@@ -1,5 +1,4 @@
 const { PrismaClient } = require("@prisma/client");
-const Redis = require("ioredis");
 const { JwtService } = require("@nestjs/jwt");
 const { randomUUID } = require("crypto");
 
@@ -8,13 +7,11 @@ const jwt = new JwtService({});
 
 const config = {
   DATABASE_URL: process.env.DATABASE_URL || "postgresql://ranaufal@localhost:5432/peridot",
-  REDIS_URL: process.env.REDIS_URL || "redis://localhost:6379",
   ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || "dev-access-secret-please-change-0123456789abcdef",
   REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || "dev-refresh-secret-please-change-0123456789abcdef",
 };
 
 const prisma = new PrismaClient({ datasources: { db: { url: config.DATABASE_URL } } });
-const redis = new Redis(config.REDIS_URL);
 
 let pass = 0;
 let fail = 0;
@@ -42,7 +39,6 @@ async function main() {
     { sub: identity.id, jti, type: "refresh" },
     { secret: config.REFRESH_SECRET, expiresIn: "30d" },
   );
-  await redis.set(`rt:${jti}`, identity.id, "EX", 2592000);
   await prisma.session.create({
     data: { id: jti, deviceId: device.id, rotatedFrom: null, expiresAt: new Date(Date.now() + 30 * 86400000) },
   });
@@ -61,7 +57,8 @@ async function main() {
   let res = await fetch(`${BASE}/v1/auth/refresh`, { method: "POST", headers: { cookie: cookieHeader() } });
   check("refresh returns 204", res.status === 204);
   setCookies(res);
-  check("old refresh token revoked in redis", (await redis.get(`rt:${jti}`)) === null);
+  const revoked = await prisma.session.findUnique({ where: { id: jti } });
+  check("old refresh token session revoked", revoked?.revokedAt != null);
 
   res = await fetch(`${BASE}/v1/identity/me`, { method: "GET", headers: { cookie: cookieHeader() } });
   check("identity/me returns 200", res.status === 200);
@@ -102,13 +99,11 @@ async function main() {
   await prisma.identity.delete({ where: { id: identity.id } });
   console.log(`\n${pass} passed, ${fail} failed`);
   await prisma.$disconnect();
-  redis.disconnect();
   process.exit(fail ? 1 : 0);
 }
 
 main().catch(async (e) => {
   console.error(e);
   await prisma.$disconnect();
-  redis.disconnect();
   process.exit(1);
 });

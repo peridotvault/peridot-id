@@ -9,7 +9,8 @@ const REFRESH_PATH = "/v1/auth";
 export function setAuthCookies(res: Response, config: ConfigService, access: string, refresh: string): void {
   const secure = config.get<string>("COOKIE_SECURE", "false") === "true";
   const domain = config.get<string>("COOKIE_DOMAIN", "");
-  const common: Record<string, unknown> = { httpOnly: true, sameSite: "lax", secure };
+  const sameSite = config.get<string>("COOKIE_SAMESITE", "lax") as "lax" | "strict" | "none";
+  const common: Record<string, unknown> = { httpOnly: true, sameSite, secure };
   // Omitting `domain` for localhost avoids a known browser cookie-rejection gotcha.
   if (domain && domain !== "localhost") common.domain = domain;
   res.cookie(ACCESS_COOKIE, access, { ...common, maxAge: ms(config.get<string>("ACCESS_TOKEN_TTL", "15m")) });

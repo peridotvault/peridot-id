@@ -7,8 +7,9 @@ description: Run the Peridot ID API yourself
 
 - Node.js 20+
 - pnpm
-- PostgreSQL 16+
-- Redis 7+
+- PostgreSQL 16+ (Supabase works great)
+
+Refresh-token state lives in the `sessions` table, so **PostgreSQL is the only datastore** — no Redis needed.
 
 ## Environment variables
 
@@ -17,16 +18,17 @@ All configuration is loaded from `.env` in the API package. Copy
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | yes | PostgreSQL connection string |
-| `REDIS_URL` | yes | Redis connection string |
+| `DATABASE_URL` | yes | PostgreSQL connection string. For Supabase, use the **transaction pooler** (port `6543`) with `?pgbouncer=true&connection_limit=1` |
 | `JWT_ACCESS_SECRET` | yes | Secret for signing access tokens (32+ chars) |
 | `JWT_REFRESH_SECRET` | yes | Secret for signing refresh tokens (32+ chars) |
 | `GOOGLE_CLIENT_ID` | yes* | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | yes* | Google OAuth client secret |
 | `GOOGLE_CALLBACK_URL` | yes* | Must match the authorized redirect URI |
 | `COOKIE_SECURE` | no | `true` in production (cookies only over HTTPS) |
-| `COOKIE_DOMAIN` | no | Cookie domain (default `localhost`) |
+| `COOKIE_DOMAIN` | no | Cookie domain; omit for localhost |
+| `COOKIE_SAMESITE` | no | `lax` (default) or `none` (cross-site clients, requires `COOKIE_SECURE=true`) |
 | `CLIENT_SUCCESS_URL` | no | Where users land after Google sign-in |
+| `CORS_ORIGINS` | no | Comma-separated extra client origins allowed by CORS |
 | `ACCESS_TOKEN_TTL` | no | Access token lifetime (default `15m`) |
 | `REFRESH_TOKEN_TTL` | no | Refresh token lifetime (default `30d`) |
 | `PORT` | no | HTTP port (default `3301`) |
@@ -38,17 +40,33 @@ All configuration is loaded from `.env` in the API package. Copy
 ## Local development with Docker
 
 ```bash
-docker compose up -d          # Postgres + Redis
+docker compose up -d          # Postgres
 pnpm install
 pnpm db:migrate               # apply Prisma migrations
 pnpm dev                      # API on http://localhost:3301, docs on http://localhost:3300
 ```
 
-The docs site runs separately:
+## Deploy to Vercel + Supabase
 
-```bash
-pnpm --filter @peridot/docs dev
-```
+1. **Supabase** — create a project, then run migrations against it (use the session pooler,
+   port `5432`, for migrations):
+
+   ```bash
+   DATABASE_URL="postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres" \
+     pnpm --filter @peridot/api db:migrate deploy
+   ```
+
+2. **Vercel — API** (`apps/api/vercel.json` is already configured for serverless). Add a
+   project rooted at `apps/api` and set these env vars:
+   `DATABASE_URL` (transaction pooler, port `6543`, `?pgbouncer=true`), `JWT_ACCESS_SECRET`,
+   `JWT_REFRESH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+   `GOOGLE_CALLBACK_URL`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE`, `CLIENT_SUCCESS_URL`,
+   `CORS_ORIGINS`.
+
+3. **Vercel — docs** (`apps/docs/vercel.json` is already configured). Add a project rooted at
+   `apps/docs`; no env vars needed.
+
+4. Attach your custom domains and point DNS at Vercel.
 
 ## Production build
 

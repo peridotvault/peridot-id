@@ -6,7 +6,6 @@ import { Request, Response } from "express";
 import ms from "ms";
 import { clearAuthCookies, REFRESH_COOKIE, setAuthCookies } from "../common/cookies";
 import { PrismaService } from "../prisma/prisma.service";
-import { RedisService } from "../redis/redis.service";
 
 export interface AccessTokenPayload {
   sub: string;
@@ -30,7 +29,6 @@ export interface GoogleProfile {
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly redis: RedisService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
   ) {}
@@ -78,8 +76,6 @@ export class AuthService {
       { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"), expiresIn: refreshTtl },
     );
 
-    await this.redis.set(`rt:${jti}`, identityId, "EX", Math.floor(ms(refreshTtl) / 1000));
-
     let deviceId: string;
     if (rotatedFrom) {
       const oldSession = await this.prisma.session.findUnique({ where: { id: rotatedFrom } });
@@ -111,11 +107,12 @@ export class AuthService {
     }
     if (payload.type !== "refresh") throw new UnauthorizedException("Invalid refresh token");
 
-    const stored = await this.redis.get(`rt:${payload.jti}`);
-    if (stored !== payload.sub) throw new UnauthorizedException("Refresh token revoked");
+    const session = await this.prisma.session.findUnique({ where: { id: payload.jti } });
+    if (!session || session.revokedAt || session.expiresAt <= new Date()) {
+      throw new UnauthorizedException("Refresh token revoked");
+    }
 
-    await this.redis.del(`rt:${payload.jti}`);
-    await this.prisma.session.updateMany({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
+    await this.prisma.session.update({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
 
     await this.issueSession(res, payload.sub, req.headers["user-agent"], payload.jti);
   }
@@ -125,7 +122,6 @@ export class AuthService {
     if (token) {
       try {
         const payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
-        await this.redis.del(`rt:${payload.jti}`);
         await this.prisma.session.updateMany({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
       } catch {
         // already invalid, just clear

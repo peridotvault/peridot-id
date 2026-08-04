@@ -2,8 +2,9 @@
 
 ```text
 Clients -> SDK -> Peridot ID API -> PostgreSQL
-                          -> Redis
 ```
+
+Refresh-token state lives in the `sessions` table — PostgreSQL is the only datastore.
 
 Modules:
 - auth
@@ -13,6 +14,7 @@ Modules:
 Repo:
 ```
 apps/api
+apps/docs
 packages/sdk-js
 packages/types
 packages/openapi
