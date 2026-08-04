@@ -1,6 +1,7 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "other",
   "installCommand": "pnpm install",
   "buildCommand": "pnpm --filter @peridot/api build",
-  "builds": [{ "src": "dist/serverless.js", "use": "@vercel/node" }],
-  "routes": [{ "src": "/(.*)", "dest": "dist/serverless.js" }]
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
 }
