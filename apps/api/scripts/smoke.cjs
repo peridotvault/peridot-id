@@ -3,7 +3,7 @@ const Redis = require("ioredis");
 const { JwtService } = require("@nestjs/jwt");
 const { randomUUID } = require("crypto");
 
-const BASE = "http://localhost:3000";
+const BASE = "http://localhost:3301";
 const jwt = new JwtService({});
 
 const config = {

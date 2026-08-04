@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Peridot ID API
-  version: 1.0.0
+  version: 0.1.0
   description: |
     Gaming Identity Platform — Authentication, Identity, and Profile for the Peridot ecosystem.
 
@@ -11,7 +11,7 @@ info:
     | Environment | Base URL |
     |---|---|
     | Production | `https://api.peridot.id/v1` |
-    | Local dev | `http://localhost:3000/v1` |
+    | Local dev | `http://localhost:3301/v1` |
 
     ## Authentication
     Authentication is **cookie-based**. After a successful Google sign-in the API sets two
@@ -29,7 +29,7 @@ info:
     name: Proprietary
 
 servers:
-  - url: http://localhost:3000/v1
+  - url: http://localhost:3301/v1
     description: Local development
 
 tags:
@@ -60,7 +60,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
               example:
-                url: "http://localhost:3000/v1/auth/google"
+                url: "http://localhost:3301/v1/auth/google"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -283,7 +283,7 @@ components:
           format: uri
           description: Navigate here to start Google sign-in
       example:
-        url: "http://localhost:3000/v1/auth/google"
+        url: "http://localhost:3301/v1/auth/google"
 
     Identity:
       type: object

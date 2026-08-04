@@ -29,7 +29,7 @@ All configuration is loaded from `.env` in the API package. Copy
 | `CLIENT_SUCCESS_URL` | no | Where users land after Google sign-in |
 | `ACCESS_TOKEN_TTL` | no | Access token lifetime (default `15m`) |
 | `REFRESH_TOKEN_TTL` | no | Refresh token lifetime (default `30d`) |
-| `PORT` | no | HTTP port (default `3000`) |
+| `PORT` | no | HTTP port (default `3301`) |
 
 `*` Google endpoints return `503` until these are set. Create credentials at the
 [Google Cloud console](https://console.cloud.google.com/apis/credentials) and add
@@ -41,7 +41,7 @@ All configuration is loaded from `.env` in the API package. Copy
 docker compose up -d          # Postgres + Redis
 pnpm install
 pnpm db:migrate               # apply Prisma migrations
-pnpm dev                      # API on http://localhost:3000
+pnpm dev                      # API on http://localhost:3301, docs on http://localhost:3300
 ```
 
 The docs site runs separately:

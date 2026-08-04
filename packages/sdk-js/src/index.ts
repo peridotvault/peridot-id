@@ -11,11 +11,6 @@ export interface PeridotOptions {
   onUnauthorized?: () => void;
 }
 
-const unauthorized = (onUnauthorized?: () => void): ApiError => {
-  onUnauthorized?.();
-  return { statusCode: 401, message: "Unauthorized" };
-};
-
 export class PeridotAuth {
   constructor(private client: PeridotClient) {}
 
@@ -74,8 +69,15 @@ class PeridotClient {
       credentials: "include",
       headers: { "Content-Type": "application/json", ...init.headers },
     });
-    if (res.status === 401) return { ok: false, data: unauthorized(this.onUnauthorized) };
-    const data = res.status === 204 ? ({} as T) : await res.json();
+    if (res.status === 401) {
+      // Never re-trigger the handler from auth endpoints (e.g. refresh failing) —
+      // that would recurse when the handler itself calls auth.refresh().
+      if (!path.startsWith("/v1/auth/")) this.onUnauthorized?.();
+      return { ok: false, data: { statusCode: 401, message: "Unauthorized" } };
+    }
+    const data = res.status === 204 || !res.headers.get("content-type")?.includes("application/json")
+      ? ({} as T)
+      : await res.json();
     return { ok: res.ok, data };
   }
 

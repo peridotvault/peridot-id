@@ -4,9 +4,13 @@ export interface Identity {
 }
 
 export interface Profile {
+  id: string;
+  identityId: string;
   displayName: string | null;
   avatarUrl: string | null;
   locale: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProfileUpdate {
@@ -21,5 +25,5 @@ export interface LoginResponse {
 
 export interface ApiError {
   statusCode: number;
-  message: string;
+  message: string | string[];
 }

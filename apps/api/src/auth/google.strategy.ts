@@ -40,6 +40,6 @@ export function googleOAuthOptionsFactory(config: ConfigService): GoogleOAuthOpt
   return {
     clientID,
     clientSecret,
-    callbackURL: config.get<string>("GOOGLE_CALLBACK_URL", "http://localhost:3000/v1/auth/google/callback"),
+    callbackURL: config.get<string>("GOOGLE_CALLBACK_URL", "http://localhost:3301/v1/auth/google/callback"),
   };
 }

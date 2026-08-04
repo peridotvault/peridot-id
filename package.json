@@ -17,7 +17,10 @@
     ]
   },
   "scripts": {
-    "dev": "pnpm --filter @peridot/api dev",
+    "dev": "pnpm -r --parallel dev",
+    "dev:api": "pnpm --filter @peridot/api dev",
+    "dev:docs": "pnpm --filter @peridot/docs dev",
+    "start": "pnpm -r --parallel start",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",

@@ -7,7 +7,7 @@ Gaming Identity Platform — Authentication, Identity, and Profile for the Perid
 The developer documentation site lives in `apps/docs` (Fumadocs + Next.js) and renders the
 canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 
-- Run locally: `pnpm --filter @peridot/docs dev` → `http://localhost:3000`
+- Run locally: `pnpm --filter @peridot/docs dev` → `http://localhost:3300`
 - API also serves the raw spec at `GET /v1/openapi.yaml` (Swagger UI at `/docs`)
 
 ## Repository layout
@@ -36,8 +36,10 @@ packages/openapi    OpenAPI 3.0 specification (source of truth)
 docker compose up -d        # Postgres + Redis
 pnpm install
 pnpm db:migrate             # apply Prisma migrations
-pnpm dev                    # API on http://localhost:3000
+pnpm dev                    # API on http://localhost:3301, docs on http://localhost:3300
 ```
+
+Run each individually with `pnpm dev:api` / `pnpm dev:docs`.
 
 Copy `apps/api/.env.example` to `apps/api/.env` and add Google OAuth credentials to test the
 login flow.
