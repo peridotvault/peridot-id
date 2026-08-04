@@ -1,7 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "other",
+  "framework": "nestjs",
   "installCommand": "pnpm install",
-  "buildCommand": "pnpm --filter @peridot/api build",
-  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
+  "buildCommand": "pnpm --filter @peridot/api build"
 }
