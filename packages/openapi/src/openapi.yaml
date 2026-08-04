@@ -26,7 +26,8 @@ info:
   contact:
     name: Peridot ID
   license:
-    name: Proprietary
+    name: MIT
+    url: https://opensource.org/licenses/MIT
 
 servers:
   - url: https://api.peridot-id.peridotvault.com/v1
