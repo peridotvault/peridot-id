@@ -39,6 +39,11 @@ Browser                    Peridot ID                 Google
 For a first-time sign-in the API creates an identity, a profile (pre-filled from the
 Google account), and a linked auth account. Subsequent sign-ins link to the same identity.
 
+> **Note:** `GET /v1/auth/google` and `/v1/auth/google/callback` are **browser-navigation only**.
+> They respond with `302` redirects that a `fetch()`/Swagger "Send" call cannot follow
+> (the cross-origin redirect to Google is CORS-blocked, showing `Failed to fetch`). Always
+> open the login URL in a browser tab — never call these two endpoints from JavaScript.
+
 ## Refreshing tokens
 
 The access token expires after 15 minutes. Instead of asking the user to log in again,

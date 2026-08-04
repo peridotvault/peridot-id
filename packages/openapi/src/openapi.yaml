@@ -73,6 +73,11 @@ paths:
       summary: Redirect to Google OAuth consent screen
       description: |
         Redirects (HTTP 302) to Google's OAuth consent screen with `scope=profile email`.
+
+        **Browser-navigation only.** Open the URL in a browser tab (top-level navigation);
+        it cannot be called via `fetch()` or the Swagger "Send" button — the cross-origin
+        redirect to Google is blocked by CORS and appears as `Failed to fetch`, which is expected.
+
         Not meant to be called directly by clients — use `POST /auth/login` to obtain the URL.
       responses:
         "302":
@@ -92,6 +97,9 @@ paths:
         3. Redirects to the `CLIENT_SUCCESS_URL` configured on the server.
 
         Both cookies are `HttpOnly; SameSite=Lax`. In production the `Secure` flag is set.
+
+        **Browser-navigation only.** Google redirects the browser here; do not call it
+        directly via `fetch()`.
       responses:
         "302":
           description: Redirect to CLIENT_SUCCESS_URL with session cookies set
