@@ -1,7 +1,12 @@
-import { IsOptional, IsString, IsUrl, MaxLength } from "class-validator";
+import { IsOptional, IsString, IsUrl, Matches, MaxLength } from "class-validator";
 import { ProfileUpdate } from "@peridot/types";
+import { USERNAME_REGEX } from "../../common/username";
 
 export class UpdateProfileDto implements ProfileUpdate {
+  @IsOptional()
+  @Matches(USERNAME_REGEX, { message: "username harus 3-20 karakter: huruf kecil, angka, underscore" })
+  username?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(64)

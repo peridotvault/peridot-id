@@ -1,6 +1,7 @@
 import type {
   ApiError,
   Identity,
+  IdentityCredential,
   LoginResponse,
   Profile,
   ProfileUpdate,
@@ -35,6 +36,16 @@ export class PeridotIdentity {
   async me(): Promise<Identity | ApiError> {
     const res = await this.client.get<Identity>("/v1/identity/me");
     return res.data;
+  }
+
+  async credentials(): Promise<IdentityCredential[] | ApiError> {
+    const res = await this.client.get<IdentityCredential[]>("/v1/identity/credentials");
+    return res.data;
+  }
+
+  async unlinkCredential(id: string): Promise<boolean> {
+    const res = await this.client.delete(`/v1/identity/credentials/${id}`);
+    return res.ok;
   }
 }
 
@@ -91,6 +102,10 @@ class PeridotClient {
 
   patch<T>(path: string, body: unknown) {
     return this.request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+  }
+
+  delete<T>(path: string) {
+    return this.request<T>(path, { method: "DELETE" });
   }
 }
 

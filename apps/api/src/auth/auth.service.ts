@@ -5,6 +5,8 @@ import { randomUUID } from "crypto";
 import { Request, Response } from "express";
 import ms from "ms";
 import { clearAuthCookies, REFRESH_COOKIE, setAuthCookies } from "../common/cookies";
+import { newPid } from "../common/pid";
+import { generateUsername } from "../common/username";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface AccessTokenPayload {
@@ -35,23 +37,36 @@ export class AuthService {
 
   async upsertGoogleIdentity(googleProfile: GoogleProfile) {
     const providerId = googleProfile.id;
-    const existing = await this.prisma.authAccount.findUnique({
-      where: { provider_providerId: { provider: "google", providerId } },
+    const existing = await this.prisma.identityCredential.findUnique({
+      where: { provider_providerUserId: { provider: "google", providerUserId: providerId } },
       include: { identity: true },
     });
-    if (existing) return existing.identity;
+    if (existing) {
+      await this.prisma.identityCredential.update({ where: { id: existing.id }, data: { lastLoginAt: new Date() } });
+      return existing.identity;
+    }
 
     return this.prisma.$transaction(async (tx) => {
-      const identity = await tx.identity.create({ data: {} });
+      const username = await generateUsername(tx, googleProfile.displayName);
+      const identity = await tx.identity.create({
+        data: { id: newPid(), status: "active" },
+      });
       await tx.profile.create({
         data: {
           identityId: identity.id,
+          username,
           displayName: googleProfile.displayName ?? null,
           avatarUrl: googleProfile.photos?.[0]?.value ?? null,
         },
       });
-      await tx.authAccount.create({
-        data: { provider: "google", providerId, email: googleProfile.emails?.[0]?.value ?? null, identityId: identity.id },
+      await tx.identityCredential.create({
+        data: {
+          provider: "google",
+          providerUserId: providerId,
+          email: googleProfile.emails?.[0]?.value ?? null,
+          identityId: identity.id,
+          lastLoginAt: new Date(),
+        },
       });
       return identity;
     });

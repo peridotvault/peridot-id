@@ -30,35 +30,53 @@ interface StoredSession {
 
 function prismaMock() {
   const sessions = new Map<string, StoredSession>();
-  return {
-    device: {
-      create: jest.fn(async (args: { data: { identityId: string; userAgent: string | null } }) => ({
-        id: "device-1",
-        ...args.data,
-      })),
-      update: jest.fn(async () => ({})),
-    },
-    session: {
-      create: jest.fn(
-        async (args: { data: { id: string; deviceId: string; expiresAt: Date; rotatedFrom: string | null } }) => {
-          sessions.set(args.data.id, { deviceId: args.data.deviceId, revokedAt: null, expiresAt: args.data.expiresAt });
-          return args.data;
-        },
-      ),
-      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => sessions.get(where.id) ?? null),
-      update: jest.fn(async ({ where, data }: { where: { id: string }; data: { revokedAt: Date } }) => {
-        const s = sessions.get(where.id);
-        if (s) s.revokedAt = data.revokedAt;
-        return s ?? null;
-      }),
-      updateMany: jest.fn(async ({ where, data }: { where: { id: string }; data: { revokedAt: Date } }) => {
-        const s = sessions.get(where.id);
-        if (s) s.revokedAt = data.revokedAt;
-        return { count: s ? 1 : 0 };
-      }),
-    },
-  };
-}
+    const mocks: Record<string, unknown> = {
+      identityCredential: {
+        findUnique: jest.fn(async () => null),
+        update: jest.fn(async (args: { data: { lastLoginAt: Date } }) => args.data),
+        create: jest.fn(async (args: { data: unknown }) => args.data),
+      },
+      identity: {
+        create: jest.fn(async (args: { data: { id: string; status: string } }) => args.data),
+      },
+      profile: {
+        create: jest.fn(async (args: { data: unknown }) => args.data),
+        findUnique: jest.fn(async () => null),
+      },
+      device: {
+        create: jest.fn(async (args: { data: { identityId: string; userAgent: string | null } }) => ({
+          id: "device-1",
+          ...args.data,
+        })),
+        update: jest.fn(async () => ({})),
+      },
+      session: {
+        create: jest.fn(
+          async (args: { data: { id: string; deviceId: string; expiresAt: Date; rotatedFrom: string | null } }) => {
+            sessions.set(args.data.id, {
+              deviceId: args.data.deviceId,
+              revokedAt: null,
+              expiresAt: args.data.expiresAt,
+            });
+            return args.data;
+          },
+        ),
+        findUnique: jest.fn(async ({ where }: { where: { id: string } }) => sessions.get(where.id) ?? null),
+        update: jest.fn(async ({ where, data }: { where: { id: string }; data: { revokedAt: Date } }) => {
+          const s = sessions.get(where.id);
+          if (s) s.revokedAt = data.revokedAt;
+          return s ?? null;
+        }),
+        updateMany: jest.fn(async ({ where, data }: { where: { id: string }; data: { revokedAt: Date } }) => {
+          const s = sessions.get(where.id);
+          if (s) s.revokedAt = data.revokedAt;
+          return { count: s ? 1 : 0 };
+        }),
+      },
+    };
+    mocks.$transaction = jest.fn(async (fn: (tx: unknown) => unknown) => fn(mocks));
+    return mocks as any;
+  }
 
 function resMock() {
   return { cookie: jest.fn(), clearCookie: jest.fn() };
@@ -77,6 +95,35 @@ function reqWithToken(token: string) {
 }
 
 describe("AuthService", () => {
+  it("signup creates identity with pid_ ULID, profile and credential", async () => {
+    const { service, prisma } = setup();
+    const identity = await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal Muha" });
+
+    expect(identity.id).toMatch(/^pid_[0-9A-HJKMNP-TV-Z]+$/);
+    expect(prisma.identity.create).toHaveBeenCalledWith({ data: { id: identity.id, status: "active" } });
+    expect(prisma.profile.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ username: "ranaufal" }) }),
+    );
+    expect(prisma.identityCredential.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ provider: "google", providerUserId: "google-1" }),
+    });
+  });
+
+  it("login with existing credential reuses the identity and bumps lastLoginAt", async () => {
+    const { service, prisma } = setup();
+    prisma.identityCredential.findUnique.mockResolvedValue({
+      identity: { id: "pid_01HASH", status: "active" },
+    });
+
+    const identity = await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal" });
+
+    expect(identity.id).toBe("pid_01HASH");
+    expect(prisma.identityCredential.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ lastLoginAt: expect.any(Date) }) }),
+    );
+    expect(prisma.identity.create).not.toHaveBeenCalled();
+  });
+
   it("issueSession creates a session row and sets both cookies", async () => {
     const { service, prisma, res } = setup();
     const tokens = await service.issueSession(res as never, "identity-1", "test-agent");

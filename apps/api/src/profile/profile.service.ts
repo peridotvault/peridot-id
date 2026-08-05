@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { ConflictException, Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { Profile } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -10,7 +11,23 @@ export class ProfileService {
     return this.prisma.profile.findUniqueOrThrow({ where: { identityId } });
   }
 
-  update(identityId: string, data: Partial<Pick<Profile, "displayName" | "avatarUrl" | "locale">>): Promise<Profile> {
-    return this.prisma.profile.update({ where: { identityId }, data });
+  async update(
+    identityId: string,
+    data: { username?: string } & Partial<Pick<Profile, "displayName" | "avatarUrl" | "locale">>,
+  ): Promise<Profile> {
+    const update: Prisma.ProfileUpdateInput = { ...data };
+    if (data.username !== undefined) {
+      const current = await this.prisma.profile.findUniqueOrThrow({ where: { identityId } });
+      update.username = data.username.toLowerCase();
+      if (current.username !== update.username) update.usernameChangedAt = new Date();
+    }
+    try {
+      return await this.prisma.profile.update({ where: { identityId }, data: update });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        throw new ConflictException("username sudah dipakai");
+      }
+      throw err;
+    }
   }
 }

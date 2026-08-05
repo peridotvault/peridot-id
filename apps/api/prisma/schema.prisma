@@ -8,42 +8,53 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Identity {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum IdentityStatus {
+  active
+  suspended
+  deleted
+}
 
-  profile      Profile?
-  authAccounts AuthAccount[]
-  devices      Device[]
+model Identity {
+  id        String         @id
+  status    IdentityStatus @default(active)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  deletedAt DateTime?
+
+  profile     Profile?
+  credentials IdentityCredential[]
+  devices     Device[]
 
   @@map("identities")
 }
 
 model Profile {
-  id          String   @id @default(uuid())
-  identityId  String   @unique
-  identity    Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
-  displayName String?
-  avatarUrl   String?
-  locale      String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String   @id @default(uuid())
+  identityId        String   @unique
+  identity          Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  username          String?  @unique
+  usernameChangedAt DateTime?
+  displayName       String?
+  avatarUrl         String?
+  locale            String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@map("profiles")
 }
 
-model AuthAccount {
-  id         String   @id @default(uuid())
-  provider   String
-  providerId String
-  email      String?
-  identityId String
-  identity   Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
+model IdentityCredential {
+  id             String   @id @default(uuid())
+  identityId     String
+  identity       Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  provider       String
+  providerUserId String
+  email          String?
+  linkedAt       DateTime @default(now())
+  lastLoginAt    DateTime?
 
-  @@unique([provider, providerId])
-  @@map("auth_accounts")
+  @@unique([provider, providerUserId])
+  @@map("identity_credentials")
 }
 
 model Device {
