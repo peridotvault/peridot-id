@@ -291,7 +291,7 @@ const Scene: React.FC<SceneProps> = ({
     video.loop = true;
     video.muted = true;
     video.playsInline = true;
-    video.play().catch((e) => console.error("Video play failed", e));
+    video.load();
 
     const texture = new THREE.VideoTexture(video);
     texture.minFilter = THREE.LinearFilter;

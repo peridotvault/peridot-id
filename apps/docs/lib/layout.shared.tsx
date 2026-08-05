@@ -34,7 +34,7 @@ export function baseOptions(): BaseLayoutProps {
         ],
       },
       { url: '/docs', text: 'Docs', active: 'nested-url' },
-      { url: '/docs/api/auth', text: 'API Reference', active: 'nested-url' },
+      { url: '/docs/api/auth/google/get', text: 'API Reference', active: 'nested-url' },
     ],
   };
 }
