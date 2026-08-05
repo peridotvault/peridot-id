@@ -27,7 +27,7 @@ packages/openapi    OpenAPI 3.0 specification (source of truth)
 - [PRD.md](PRD.md) — scope v1 (Google login, JWT + refresh, identity, profile, JS SDK)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — modules and repo layout
 - [TECH_STACK.md](TECH_STACK.md) — NestJS, PostgreSQL, Prisma, JWT, Passport
-- [DATABASE.md](DATABASE.md) — ERD (identities, auth_accounts, profiles, devices, sessions)
+- [DATABASE.md](DATABASE.md) — ERD (identities, identity_credentials, profiles, devices, sessions)
 - [API_SPEC.md](API_SPEC.md) — endpoint list
 - [SECURITY.md](SECURITY.md) — cookies, token rotation, rate limiting
 - [ROADMAP.md](ROADMAP.md) — Foundation → Social → Gaming → Ecosystem

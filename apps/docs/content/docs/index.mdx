@@ -9,15 +9,17 @@ account.
 
 ## What you get
 
-- **Authentication** — Google sign-in with secure, rotating sessions
-- **Identity** — a stable identity ID for each user across all products
-- **Profile** — per-user profile data (`displayName`, `avatarUrl`, `locale`)
+- **Authentication** — provider sign-in with secure, rotating sessions
+- **Identity** — a stable PID for each user across all products (`pid_<ULID>`, never changes)
+- **Profile** — per-user profile data (`username`, `displayName`, `avatarUrl`, `locale`)
 
 ## Key facts
 
 | Fact | Value |
 |---|---|
 | API versioning | All endpoints are under `/v1` |
+| Identity ID | `pid_<ULID>` — permanent, never changes |
+| Login credentials | `(provider, providerUserId)` is unique; email is metadata only |
 | Authentication | `HttpOnly` cookies (JWT access token + rotating refresh token) |
 | Access token lifetime | 15 minutes |
 | Refresh token lifetime | 30 days (rotated on every use) |

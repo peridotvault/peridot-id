@@ -33,16 +33,43 @@ Browser                    Peridot ID                 Google
 1. Call `POST /v1/auth/login` (or use the SDK) to get the Google authorization URL.
 2. Navigate the browser to that URL. The user consents on Google.
 3. Google redirects to `GET /v1/auth/google/callback?code=...`. The API exchanges the
-   code, creates or links the identity, and issues both session cookies.
+   code, resolves or creates the identity, and issues both session cookies.
 4. The browser lands on `CLIENT_SUCCESS_URL` with a logged-in session.
 
-For a first-time sign-in the API creates an identity, a profile (pre-filled from the
-Google account), and a linked auth account. Subsequent sign-ins link to the same identity.
+On a first-time sign-in the API creates a new identity (`pid_<ULID>`), a profile
+(pre-filled from the Google account), and a linked Google credential. On every later
+sign-in the same Google credential is found and you land back on the **same identity** —
+the PID never changes, no matter which providers you link or unlink later.
 
 > **Note:** `GET /v1/auth/google` and `/v1/auth/google/callback` are **browser-navigation only**.
 > They respond with `302` redirects that a `fetch()`/Swagger "Send" call cannot follow
 > (the cross-origin redirect to Google is CORS-blocked, showing `Failed to fetch`). Always
 > open the login URL in a browser tab — never call these two endpoints from JavaScript.
+
+## Login credentials
+
+Every way to log in — Google, Discord, Apple, email+password, passkeys — is a
+**credential**. Credentials belong to an identity:
+
+- The pair `(provider, providerUserId)` is unique — it is the source of truth, not the
+  email.
+- The **email is metadata only**. Changing an email on a provider changes the credential's
+  email, never the identity. A new provider with a different email can still log into the
+  same PID.
+- The identity (PID) is the only source of truth. Credentials are just the keys that prove
+  ownership of a PID.
+
+List and unlink credentials via the SDK:
+
+```ts
+const credentials = await peridot.identity.credentials();
+// [{ id, provider: "google", email, linkedAt, lastLoginAt }]
+
+await peridot.identity.unlinkCredential(credentials[0].id);
+```
+
+An identity must always keep **at least one credential** — unlinking the last one returns
+`400`. This prevents a user from locking themselves out.
 
 ## Refreshing tokens
 

@@ -42,20 +42,36 @@ await peridot.auth.login();
 
 ```ts
 const me = await peridot.identity.me();
-// { id: "2f4b1c1e-...", createdAt: "2026-08-03T13:30:00.000Z" }
+// { id: "pid_01K4Y4DWMK7YSH8X4JQY9M4T6P", status: "active", createdAt: "2026-08-03T13:30:00.000Z" }
 ```
+
+### Login credentials
+
+```ts
+const credentials = await peridot.identity.credentials();
+// [{ id: "3f9c...", provider: "google", email: "a@b.com", linkedAt, lastLoginAt }]
+
+await peridot.identity.unlinkCredential(credentials[0].id); // true if unlinked
+```
+
+Unlinking the identity's last credential fails (returns `false`) — every identity must
+keep at least one way to log in.
 
 ## Profile
 
 ```ts
 const profile = await peridot.profile.me();
-// { id, identityId, displayName, avatarUrl, locale, createdAt, updatedAt }
+// { id, identityId, username, usernameChangedAt, displayName, avatarUrl, locale, createdAt, updatedAt }
 
 const updated = await peridot.profile.update({
+  username: 'peridotplayer',
   displayName: 'PeridotPlayer',
   locale: 'en-US',
 });
 ```
+
+Usernames are lowercase `[a-z0-9_]`, 3–20 characters. `update` returns the API error
+object if the username is already taken.
 
 ## Log out
 

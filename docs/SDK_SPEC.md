@@ -17,9 +17,11 @@ await peridot.auth.logout();
 await peridot.auth.refresh(); // boolean
 
 await peridot.identity.me();
+await peridot.identity.credentials();         // list login credentials
+await peridot.identity.unlinkCredential(id);  // boolean; false if it's the last one
 
 await peridot.profile.me();
-await peridot.profile.update({ displayName: "PeridotPlayer" });
+await peridot.profile.update({ username: "peridotplayer", displayName: "PeridotPlayer" });
 ```
 
 Notes:

@@ -31,6 +31,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter @peridot/api test",
     "db:migrate": "pnpm --filter @peridot/api db:migrate",
+    "db:deploy": "pnpm --filter @peridot/api db:deploy",
     "db:generate": "pnpm --filter @peridot/api db:generate",
     "db:studio": "pnpm --filter @peridot/api db:studio"
   }

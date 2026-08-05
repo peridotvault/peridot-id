@@ -34,7 +34,7 @@ pnpm dev                                 # API on :3301, docs on :3300
 ```
 
 Scripts: `pnpm dev`, `pnpm dev:api`, `pnpm dev:docs`, `pnpm build`, `pnpm test`, `pnpm typecheck`,
-`pnpm db:migrate`.
+`pnpm db:migrate` (dev), `pnpm db:deploy` (apply migrations to a remote DB).
 
 ## SDK
 

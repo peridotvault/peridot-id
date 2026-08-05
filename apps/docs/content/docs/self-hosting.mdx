@@ -53,7 +53,7 @@ pnpm dev                      # API on http://localhost:3301, docs on http://loc
 
    ```bash
    DATABASE_URL="postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres" \
-     pnpm --filter @peridot/api db:migrate deploy
+     pnpm --filter @peridot/api db:deploy
    ```
 
 2. **Vercel — API** (`apps/api/vercel.json` is already configured for serverless). Add a
@@ -72,6 +72,6 @@ pnpm dev                      # API on http://localhost:3301, docs on http://loc
 
 ```bash
 pnpm build
-pnpm --filter @peridot/api db:migrate deploy
+pnpm --filter @peridot/api db:deploy
 pnpm --filter @peridot/api start
 ```
