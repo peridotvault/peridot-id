@@ -24,6 +24,7 @@ model Identity {
   profile     Profile?
   credentials IdentityCredential[]
   devices     Device[]
+  wallets     Wallet[]
 
   @@map("identities")
 }
@@ -79,4 +80,21 @@ model Session {
   createdAt   DateTime @default(now())
 
   @@map("sessions")
+}
+
+model Wallet {
+  id         String         @id @default(uuid())
+  identityId String         @unique
+  identity   Identity       @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  chain      String
+  address    String
+  status     IdentityStatus @default(active)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  // ADR 003: `onDelete: Cascade` is defensive, matching the identity -> credential/device
+  // convention. PID deletion is soft (status/deletedAt); the wallet soft-deletes with the
+  // PID, so the hard cascade is never reached. One wallet per PID via `identityId @unique`.
+  // No key material or provider (Google) fields — record-only custody (ADR 003).
+  @@map("wallets")
 }

@@ -20,7 +20,7 @@ explicit non-goal.**
 |---|---|---|---|
 | PID identity, immutable | `Identity.id = pid_<ULID>` (`common/pid.ts`), `docs/DATABASE.md` | EXISTS | Preserve only |
 | Provider uniqueness `(provider, providerUserId)` | `@@unique` in `schema.prisma`, migration `20260805045707` | EXISTS | Preserve only |
-| Email uniqueness (one email = one PID, reject collision) | `docs/DATABASE.md`: "email is **metadata only**, not an identity"; `upsertGoogleIdentity` never checks email | **CONFLICTING** | Decision (002) + handling (004) |
+| Email uniqueness (one email = one PID, reject collision) | `docs/DATABASE.md` (now: non-null email unique, `docs/adr/002`); `upsertGoogleIdentity` never checks email | **DECIDED — enforce (option A)** | Handling (004), docs-site copy (009) |
 | Google OAuth → PID → session | `auth/google.strategy.ts`, `auth.controller.ts`, `auth.service.ts` | EXISTS | Preserve only |
 | Sessions (rotation, reuse rejection, revocation) | `sessions` table, `rotateSession`, refresh cookie path-scoped | EXISTS | Preserve only |
 | Last-credential unlink guard | `IdentityService.unlinkCredential` rejects count ≤ 1 | EXISTS | Preserve + regression test with wallet present |

@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { randomUUID } from "crypto";
@@ -46,6 +46,15 @@ export class AuthService {
       return existing.identity;
     }
 
+    const email = googleProfile.emails?.[0]?.value ?? null;
+    if (email) {
+      const emailOwner = await this.prisma.identityCredential.findFirst({
+        where: { email },
+        select: { id: true },
+      });
+      if (emailOwner) throw new ConflictException("Email sudah terhubung dengan akun lain");
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const username = await generateUsername(tx, googleProfile.displayName);
       const identity = await tx.identity.create({
@@ -63,7 +72,7 @@ export class AuthService {
         data: {
           provider: "google",
           providerUserId: providerId,
-          email: googleProfile.emails?.[0]?.value ?? null,
+          email,
           identityId: identity.id,
           lastLoginAt: new Date(),
         },

@@ -1,4 +1,4 @@
-import { UnauthorizedException } from "@nestjs/common";
+import { ConflictException, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { AuthService, RefreshTokenPayload } from "./auth.service";
 
@@ -33,6 +33,7 @@ function prismaMock() {
     const mocks: Record<string, unknown> = {
       identityCredential: {
         findUnique: jest.fn(async () => null),
+        findFirst: jest.fn(async () => null),
         update: jest.fn(async (args: { data: { lastLoginAt: Date } }) => args.data),
         create: jest.fn(async (args: { data: unknown }) => args.data),
       },
@@ -122,6 +123,58 @@ describe("AuthService", () => {
       expect.objectContaining({ data: expect.objectContaining({ lastLoginAt: expect.any(Date) }) }),
     );
     expect(prisma.identity.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a new Google credential whose email belongs to another PID", async () => {
+    const { service, prisma } = setup();
+    prisma.identityCredential.findFirst.mockResolvedValue({ id: "cred-other" });
+
+    const promise = service.upsertGoogleIdentity({
+      id: "google-new",
+      displayName: "Ranaufal",
+      emails: [{ value: "taken@example.com" }],
+    });
+    await expect(promise).rejects.toThrow(ConflictException);
+    await expect(promise).rejects.toThrow("Email sudah terhubung dengan akun lain");
+    expect(prisma.identity.create).not.toHaveBeenCalled();
+    expect(prisma.identityCredential.create).not.toHaveBeenCalled();
+  });
+
+  it("returns the existing identity without an email-collision check on returning login", async () => {
+    const { service, prisma } = setup();
+    prisma.identityCredential.findUnique.mockResolvedValue({
+      identity: { id: "pid_01HASH", status: "active" },
+    });
+
+    await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal", emails: [{ value: "mine@example.com" }] });
+
+    expect(prisma.identityCredential.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("skips the email-collision check when the Google profile has no email", async () => {
+    const { service, prisma } = setup();
+
+    await service.upsertGoogleIdentity({ id: "google-2", displayName: "Ranaufal" });
+
+    expect(prisma.identityCredential.findFirst).not.toHaveBeenCalled();
+    expect(prisma.identityCredential.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ provider: "google", providerUserId: "google-2", email: null }),
+    });
+  });
+
+  it("signup with a free email stores the email and skips rejection", async () => {
+    const { service, prisma } = setup();
+
+    const identity = await service.upsertGoogleIdentity({
+      id: "google-3",
+      displayName: "Ranaufal",
+      emails: [{ value: "free@example.com" }],
+    });
+
+    expect(identity.id).toMatch(/^pid_[0-9A-HJKMNP-TV-Z]+$/);
+    expect(prisma.identityCredential.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ email: "free@example.com" }),
+    });
   });
 
   it("issueSession creates a session row and sets both cookies", async () => {
