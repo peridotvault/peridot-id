@@ -6,6 +6,7 @@ import { IdentityModule } from "./identity/identity.module";
 import { OpenApiModule } from "./openapi/openapi.module";
 import { ProfileModule } from "./profile/profile.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { WalletModule } from "./wallet/wallet.module";
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     AuthModule,
     IdentityModule,
     ProfileModule,
+    WalletModule,
     OpenApiModule,
   ],
 })
