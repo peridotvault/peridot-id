@@ -1,14 +1,3 @@
 {
-  "pages": [
-    "index",
-    "---Getting Started---",
-    "getting-started",
-    "self-hosting",
-    "---Guides---",
-    "authentication",
-    "sdk",
-    "errors",
-    "---API Reference---",
-    "api"
-  ]
+  "pages": ["(general)", "api"]
 }

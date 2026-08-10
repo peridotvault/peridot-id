@@ -33,7 +33,7 @@ const FEATURES: Feature[] = [
     title: "Provable, sealed control",
     body: "OAuth2-ready flows, hardware-backed keys, and full audit trails keep every sign-in accountable and ready for any auditor.",
     meta: "Governance · Peridot ID Vault",
-    href: "/docs/api/auth/google/get",
+    href: "/docs/api",
   },
 ];
 

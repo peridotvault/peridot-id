@@ -5,7 +5,7 @@ import { baseOptions } from '@/lib/layout.shared';
 
 export default function RootDocsLayout({ children }: { children: ReactNode }) {
   return (
-    <DocsLayout tree={source.getPageTree()} {...baseOptions()}>
+    <DocsLayout tree={source.getPageTree()} {...baseOptions()} sidebar={{ defaultOpenLevel: 1 }}>
       {children}
     </DocsLayout>
   );
