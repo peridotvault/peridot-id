@@ -12,6 +12,7 @@ account.
 - **Authentication** — provider sign-in with secure, rotating sessions
 - **Identity** — a stable PID for each user across all products (`pid_<ULID>`, never changes)
 - **Profile** — per-user profile data (`username`, `displayName`, `avatarUrl`, `locale`)
+- **Wallet** — a Solana wallet address associated with the PID (record-only custody, one per PID)
 
 ## Key facts
 
@@ -19,10 +20,11 @@ account.
 |---|---|
 | API versioning | All endpoints are under `/v1` |
 | Identity ID | `pid_<ULID>` — permanent, never changes |
-| Login credentials | `(provider, providerUserId)` is unique; email is metadata only |
+| Login credentials | `(provider, providerUserId)` is unique; a non-null email is unique per account |
 | Authentication | `HttpOnly` cookies (JWT access token + rotating refresh token) |
 | Access token lifetime | 15 minutes |
 | Refresh token lifetime | 30 days (rotated on every use) |
+| Wallet | One per PID; user-supplied Solana address; record-only custody (no key material) |
 | Spec | [OpenAPI 3.0](/docs/api) — also served by the API at `GET /v1/openapi.yaml` |
 
 ## Next steps

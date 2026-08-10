@@ -73,6 +73,25 @@ const updated = await peridot.profile.update({
 Usernames are lowercase `[a-z0-9_]`, 3–20 characters. `update` returns the API error
 object if the username is already taken.
 
+## Wallet
+
+Each identity can have **one wallet** — a Solana address associated with the PID. Custody is
+**record-only**: Peridot never generates, holds, or returns any key material.
+
+```ts
+const wallet = await peridot.wallet.me();
+// { id, chain: "solana", address, status: "active", createdAt }
+// or ApiError { statusCode: 404 } when the PID has no wallet
+
+const created = await peridot.wallet.create("2nBoE7F2vLkGtvXh7QnUhvW5mYPbRmY8GXJqPz9tKcQ");
+// { id, chain: "solana", address, status: "active", createdAt }
+```
+
+- Creating again returns the **existing** wallet — a PID can never have more than one.
+- The wallet belongs to the PID, not to Google (or any other provider). Unlinking a
+  credential leaves it untouched, and logging in from another device does not change it.
+- `create` returns the API error object on validation failure (`400`).
+
 ## Log out
 
 ```ts

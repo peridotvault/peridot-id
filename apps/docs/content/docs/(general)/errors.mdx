@@ -33,7 +33,8 @@ strings:
 | `302` | Redirect (Google OAuth flow) |
 | `400` | Validation error — one or more fields are invalid |
 | `401` | Missing, expired, or invalid access/refresh token |
-| `404` | Identity or profile does not exist |
+| `404` | Identity, profile, or wallet does not exist |
+| `409` | Conflict — e.g. email already associated with another account, or username taken |
 | `429` | Rate limit exceeded |
 | `503` | Google OAuth is not configured on the server |
 
@@ -53,5 +54,6 @@ Auth endpoints are rate limited to protect against brute force:
 | `POST /v1/auth/login` | 20 requests / minute |
 | `POST /v1/auth/logout` | 20 requests / minute |
 | `GET /v1/auth/google`, `/v1/auth/google/callback` | 100 requests / minute |
+| `POST /v1/wallet` | 10 requests / minute |
 
 Exceeding a limit returns `429`. Clients should back off and retry.

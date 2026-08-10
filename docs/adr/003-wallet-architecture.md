@@ -222,7 +222,8 @@ No V2 user gets a wallet; backfill forbidden without a future ADR. `docs/tasks/R
   credential path is introduced (PRD §15: security over convenience).
 - **Account takeover / unlink-relink:** wallet is gated on the same `JwtAuthGuard` and identity
   `status === "active"` checks as the rest of the API (`jwt.strategy.ts`); unlinking Google
-  cannot touch the wallet (PRD §3). Full §9 disposition list is task 008's deliverable.
+  cannot touch the wallet (PRD §3). Each PRD §9 bullet has a one-line disposition in
+  `docs/SECURITY.md` (final placement per task 009).
 - **OAuth-provider verification** (ADR 002's email rule) is unaffected: wallet association never
   implies email or provider identity.
 

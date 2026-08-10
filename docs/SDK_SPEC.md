@@ -22,6 +22,9 @@ await peridot.identity.unlinkCredential(id);  // boolean; false if it's the last
 
 await peridot.profile.me();
 await peridot.profile.update({ username: "peridotplayer", displayName: "PeridotPlayer" });
+
+await peridot.wallet.me();                    // wallet or ApiError (404 when none)
+await peridot.wallet.create(address);         // wallet; second call returns the existing one
 ```
 
 Notes:
@@ -29,3 +32,5 @@ Notes:
 - Cookies are handled automatically (`credentials: "include"`).
 - `onUnauthorized` fires only for protected-resource 401s — never for auth endpoints, so the
   refresh-on-401 pattern cannot recurse.
+- The wallet is **record-only**: no key material is stored, generated, or returned. `me()`
+  returns an `ApiError` (`404`) when the PID has no wallet.

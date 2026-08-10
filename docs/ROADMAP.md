@@ -1,7 +1,7 @@
 # Roadmap
 
 ## Foundation
-Authentication, Identity, Profile
+Authentication, Identity, Profile, Wallet
 
 ## Social
 Friends, Presence, Notifications

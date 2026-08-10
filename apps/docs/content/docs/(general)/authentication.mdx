@@ -51,11 +51,11 @@ the PID never changes, no matter which providers you link or unlink later.
 Every way to log in — Google, Discord, Apple, email+password, passkeys — is a
 **credential**. Credentials belong to an identity:
 
-- The pair `(provider, providerUserId)` is unique — it is the source of truth, not the
-  email.
-- The **email is metadata only**. Changing an email on a provider changes the credential's
-  email, never the identity. A new provider with a different email can still log into the
-  same PID.
+- The pair `(provider, providerUserId)` is unique — it is the source of truth.
+- A non-null `email` is **unique across accounts**: one email = one PID. If a new login
+  presents an email already associated with another account, it is rejected with `409`
+  (`Email sudah terhubung dengan akun lain`) — accounts are never merged, moved, or minted
+  twice (see [Errors](/docs/errors)).
 - The identity (PID) is the only source of truth. Credentials are just the keys that prove
   ownership of a PID.
 
@@ -69,7 +69,9 @@ await peridot.identity.unlinkCredential(credentials[0].id);
 ```
 
 An identity must always keep **at least one credential** — unlinking the last one returns
-`400`. This prevents a user from locking themselves out.
+`400`. This prevents a user from locking themselves out. Unlinking a credential never
+touches the identity or its wallet (if any) — the wallet belongs to the PID, not to a
+provider.
 
 ## Refreshing tokens
 

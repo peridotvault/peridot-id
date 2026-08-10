@@ -10,6 +10,7 @@ Modules:
 - auth
 - identity
 - profile
+- wallet
 
 Repo:
 ```

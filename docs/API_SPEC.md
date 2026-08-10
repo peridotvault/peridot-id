@@ -10,3 +10,5 @@ GET /v1/identity/credentials
 DELETE /v1/identity/credentials/:id
 GET /v1/profile/me
 PATCH /v1/profile
+GET /v1/wallet/me
+POST /v1/wallet

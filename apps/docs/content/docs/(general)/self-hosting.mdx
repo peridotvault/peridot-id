@@ -75,3 +75,29 @@ pnpm build
 pnpm --filter @peridot/api db:deploy
 pnpm --filter @peridot/api start
 ```
+
+## V2 → V3 migration notes
+
+V3 adds the `wallets` table and an email-uniqueness index. The migration is **additive**:
+existing `identities`, `identity_credentials`, `profiles`, `devices`, and `sessions` rows are
+untouched.
+
+1. **Before deploying to a database with existing rows**, run the email-duplicate audit and
+   resolve any collisions (a non-null email is unique — one email = one PID):
+
+   ```sql
+   SELECT lower(email) AS email, count(*), array_agg("identityId")
+   FROM identity_credentials
+   WHERE email IS NOT NULL
+   GROUP BY lower(email)
+   HAVING count(*) > 1;
+   ```
+
+   Collisions must be resolved per case before deploy; the email-uniqueness index fails the
+   migration if duplicates remain.
+
+2. Deploy with `pnpm --filter @peridot/api db:deploy` (same flow as the Supabase steps above).
+
+3. **No backfill.** Existing users get **no wallet** — wallets are created only by explicit
+   user action (`POST /v1/wallet`), so nothing is silently created for existing accounts
+   (PRD §12).
