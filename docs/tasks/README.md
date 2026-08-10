@@ -1,7 +1,9 @@
 # V3 Task Plan — Peridot ID
 
 Source of truth: `docs/prds/PRD_v3.md`. Generated after a full repository audit (2026-08-10).
-Planning only — no implementation has started.
+All nine tasks (001–009) are complete — decisions, migrations, API, contract, security tests,
+and documentation are implemented and merged. The matrix below records the audit state each
+task started from; the ADRs record the decisions.
 
 ## Repository Audit Summary
 
