@@ -37,6 +37,18 @@ export interface LoginResponse {
   url: string;
 }
 
+export interface Wallet {
+  id: string;
+  chain: string;
+  address: string;
+  status: IdentityStatus;
+  createdAt: string;
+}
+
+export interface WalletCreate {
+  address: string;
+}
+
 export interface ApiError {
   statusCode: number;
   message: string | string[];

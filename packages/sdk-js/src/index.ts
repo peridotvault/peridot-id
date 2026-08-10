@@ -5,6 +5,7 @@ import type {
   LoginResponse,
   Profile,
   ProfileUpdate,
+  Wallet,
 } from "@peridot/types";
 
 export interface PeridotOptions {
@@ -63,15 +64,31 @@ export class PeridotProfile {
   }
 }
 
+export class PeridotWallet {
+  constructor(private client: PeridotClient) {}
+
+  async me(): Promise<Wallet | ApiError> {
+    const res = await this.client.get<Wallet>("/v1/wallet/me");
+    return res.data;
+  }
+
+  async create(address: string): Promise<Wallet | ApiError> {
+    const res = await this.client.post<Wallet>("/v1/wallet", { address });
+    return res.data;
+  }
+}
+
 class PeridotClient {
   readonly auth: PeridotAuth;
   readonly identity: PeridotIdentity;
   readonly profile: PeridotProfile;
+  readonly wallet: PeridotWallet;
 
   constructor(private baseUrl: string, private onUnauthorized?: () => void) {
     this.auth = new PeridotAuth(this);
     this.identity = new PeridotIdentity(this);
     this.profile = new PeridotProfile(this);
+    this.wallet = new PeridotWallet(this);
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<{ ok: boolean; data: T | ApiError }> {

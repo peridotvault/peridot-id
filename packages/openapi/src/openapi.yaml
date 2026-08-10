@@ -42,6 +42,8 @@ tags:
     description: The user's identity across products
   - name: profile
     description: The user's public profile
+  - name: wallet
+    description: The user's wallet, associated with their PID
   - name: openapi
     description: Machine-readable API specification
 
@@ -283,6 +285,68 @@ paths:
                 statusCode: 409
                 message: "username sudah dipakai"
 
+  /wallet/me:
+    get:
+      tags: [wallet]
+      summary: Get the current wallet
+      description: |
+        Returns the wallet associated with the authenticated PID. The wallet belongs to the
+        PID, never to a specific login provider — unlinking Google does not affect it.
+
+        Only public association fields are exposed (chain, address, status). No key material
+        is ever stored or returned (PRD §9).
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The current wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wallet"
+              example:
+                id: "a3f2c9e0-4b7d-4c1a-8e5f-0d1a2b3c4d5e"
+                chain: "solana"
+                address: "2nBoE7F2vLkGtvXh7QnUhvW5mYPbRmY8GXJqPz9tKcQ"
+                status: "active"
+                createdAt: "2026-08-10T12:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /wallet:
+    post:
+      tags: [wallet]
+      summary: Create the wallet
+      description: |
+        Creates the wallet for the authenticated PID with a user-supplied Solana address.
+        The chain is fixed to `solana` for V3 (single-chain MVP, ADR 003).
+
+        A PID has at most one wallet: creating again returns the existing wallet. Custody is
+        record-only — Peridot does not generate, hold, or return any key material.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletCreate"
+      responses:
+        "200":
+          description: The wallet (existing or newly created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wallet"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /openapi.yaml:
     get:
       tags: [openapi]
@@ -471,6 +535,39 @@ components:
           nullable: true
           maxLength: 16
           description: "e.g. en-US. Set to null to clear"
+
+    Wallet:
+      type: object
+      required: [id, chain, address, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        chain:
+          type: string
+          description: "Blockchain the wallet is on — fixed to `solana` for V3"
+          example: "solana"
+        address:
+          type: string
+          maxLength: 64
+          description: "User-supplied wallet address. Public data only — no key material is stored or returned."
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+          description: Wallet lifecycle status (mirrors the identity status convention)
+        createdAt:
+          type: string
+          format: date-time
+
+    WalletCreate:
+      type: object
+      required: [address]
+      properties:
+        address:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: "The Solana address to associate with this PID"
 
     ApiError:
       type: object
