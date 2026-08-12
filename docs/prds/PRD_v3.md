@@ -10,13 +10,27 @@ The previous version focused on identity and authentication. V3 expands the prod
 2. Authentication
 3. Wallet
 
-For V3, the initial authentication provider is **Google OAuth**.
+For V3, the initial authentication provider is **Google OAuth**, with **Discord** and additional providers supported through an extensible provider architecture (see PRD_v4.md).
 
 V3 should also introduce a wallet associated with a Peridot ID.
 
 However, **do not assume a specific wallet architecture, Account Abstraction implementation, custody model, key-management model, blockchain implementation, SDK, or third-party provider yet.**
 
 The existing repository must be audited first.
+
+## Relationship to PRD_v4
+
+This document is the audit-phase PRD for V3. The architecture decisions that this document leaves open ("determine after audit", "do not assume") have since been finalized in **PRD_v4.md**, which is the implementation PRD.
+
+The fundamentals are identical between the two documents:
+
+- Peridot ID is the canonical, immutable identity.
+- OAuth providers are credentials that authenticate the identity, never the wallet owner.
+- The wallet belongs to the identity, not to any provider.
+- The system is non-custodial: no plaintext private key or seed phrase is stored server-side.
+- OAuth authentication is never treated as blockchain signing authority.
+
+Where V3 says "the exact implementation must be determined after auditing the repository", the answer is now the decision recorded in PRD_v4 (Solana Smart Account, user-controlled fee payer, no gas sponsorship in V1). The audit verifies the repository aligns with that decision rather than inventing alternatives.
 
 Your job as the AI coding agent is to:
 
@@ -102,19 +116,21 @@ V3 initially supports:
 
 ```text
 Google OAuth
+Discord OAuth
 ```
 
 The authentication system must:
 
-- authenticate users through Google
-- resolve the Google credential to a Peridot ID
+- authenticate users through Google and Discord
+- resolve the provider credential to a Peridot ID
 - create an authenticated session
 - preserve the existing identity uniqueness rules
 - allow the identity to exist independently from a specific OAuth provider
+- provide an extensible provider architecture so additional providers can be added without restructuring (see PRD_v4.md)
 
-Do not add Apple, Discord, Steam, wallet login, email/password, or other providers unless they already exist and are required for backward compatibility.
+Do not add Apple, Steam, wallet login, email/password, or other providers unless they already exist and are required for backward compatibility.
 
-V3 is intentionally starting with Google.
+V3 onboards Google first, then Discord, per the provider roadmap in PRD_v4.md.
 
 ---
 
@@ -122,9 +138,9 @@ V3 is intentionally starting with Google.
 
 A Peridot ID can have an associated wallet.
 
-The exact wallet architecture must NOT be assumed before repository audit.
+The wallet architecture is decided in **PRD_v4.md**: a non-custodial **Solana Smart Account** (program-derived PDA) operated by a user-controlled cryptographic authority, with a **user-controlled fee payer** paying SOL fees. Gas sponsorship and server-side custody are explicitly out of scope for V1.
 
-The agent must investigate and determine the appropriate implementation based on:
+The audit verifies that the repository aligns with this architecture rather than inventing alternatives. The agent must confirm:
 
 - current codebase
 - current database model
@@ -136,7 +152,7 @@ The agent must investigate and determine the appropriate implementation based on
 - existing product decisions
 - maintainability
 
-The agent should explicitly identify the available architectural options before selecting one if the repository does not make the answer obvious.
+If the repository contradicts the PRD_v4 architecture, document the conflict explicitly before proceeding.
 
 ---
 
@@ -284,38 +300,30 @@ This is a product requirement, not an instruction to use a specific technical im
 
 # 6. Account Abstraction
 
-Account Abstraction has been identified as a potentially relevant concept for the wallet architecture.
+Account Abstraction was identified as a potentially relevant concept for the wallet architecture.
 
-However:
+The decision is made in **PRD_v4.md**: V1 uses a Solana program-derived **Smart Account** (a form of account abstraction) owned by the Peridot Solana program and authorized by a user-controlled cryptographic authority.
 
-**Do not assume that V3 must use a particular Account Abstraction standard or implementation.**
+This is **not** an ERC-4337-style implementation, and the following remain explicitly excluded from V1 (deferred in PRD_v4):
 
-The agent must investigate the repository and determine whether AA is relevant and, if so:
+- paymaster / gas sponsorship
+- session keys
+- MagicBlock or other external AA providers
+- EVM smart accounts
 
-- where it belongs
-- what problem it solves
-- whether it should be implemented in V3
-- whether it should be abstracted behind the wallet domain
-- whether an external service/provider is appropriate
-- whether the existing blockchain stack supports it
-
-Do not introduce ERC-4337, smart accounts, session keys, paymasters, MagicBlock, or another specific technology solely because they are mentioned in this PRD.
-
-Those are architectural possibilities to investigate, not requirements.
+The audit must verify the repository's blockchain stack supports the Solana Smart Account design and document any conflict before proceeding.
 
 ---
 
 # 7. Blockchain Scope
 
-The repository should be audited to determine the currently intended blockchain scope.
+**Solana is the V1 chain** (decided in PRD_v4.md). The audit confirms the repository supports this and preserves any existing blockchain-related implementation or decisions.
 
-If the existing project already contains blockchain-related implementation or decisions, preserve and build upon them where appropriate.
+Multi-chain support is future scope only: additional chains (EVM, Bitcoin, Sui, Aptos, etc.) must arrive through the **Chain Adapter** interface defined in PRD_v4, not as hardcoded V3 logic.
 
-If the repository does not provide enough evidence to determine the correct wallet architecture:
+Do not build EVM smart accounts, cross-chain bridging, or multi-chain wallet support in V3.
 
-**stop and document the architectural decision that requires clarification rather than inventing one.**
-
-Do not expand V3 into multi-chain wallet support unless required by existing project context or explicitly justified by the audit.
+If the repository does not provide enough evidence to support the Solana Smart Account design, **stop and document the architectural decision that requires clarification rather than inventing one.**
 
 ---
 
@@ -406,7 +414,16 @@ The audit must specifically investigate:
 
 The implementation must not expose private keys or sensitive signing material through normal API responses.
 
-If the existing architecture cannot safely support the proposed wallet architecture, document the issue before implementation.
+## Core security fundamentals (PRD_v4)
+
+The following fundamentals apply and must not be weakened:
+
+- **OAuth identity is never blockchain signing authority.** A valid Google/Discord login must never by itself allow the backend to manufacture an arbitrary transaction signature.
+- **Non-custodial.** No plaintext blockchain private key or seed phrase is stored server-side. Peridot must not possess unilateral control over user assets.
+- **User-controlled fee payer.** Solana fees are paid by a user-controlled signer holding SOL. No gas sponsorship, paymaster, or Peridot treasury funding in V1.
+- **Cryptographic authorization.** On-chain authorization is cryptographic and domain-separated; sign requests bind user/account, chain, network, action, destination, amount, nonce, and expiration.
+
+If the existing architecture cannot safely support these fundamentals, document the issue before implementation.
 
 ---
 
@@ -634,7 +651,9 @@ V3 is considered complete when:
 ### Authentication
 
 - Google OAuth works.
-- Google resolves to the correct PID.
+- Discord OAuth works.
+- Each provider resolves to the correct PID.
+- The provider architecture supports additional providers without restructuring.
 - Sessions work according to the existing session architecture.
 - Credential unlinking follows the established security rules.
 

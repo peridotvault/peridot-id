@@ -1,80 +1,94 @@
-# V3 Task Plan — Peridot ID
+# Task Plan — Peridot ID
 
-Source of truth: `docs/prds/PRD_v3.md`. Generated after a full repository audit (2026-08-10).
-All nine tasks (001–009) are complete — decisions, migrations, API, contract, security tests,
-and documentation are implemented and merged. The matrix below records the audit state each
-task started from; the ADRs record the decisions.
+Source of truth: `docs/prds/PRD_v4.md` (implementation PRD). The Phase-0 architecture lock
+lives in ADRs 004–007 (`docs/adr/`).
 
-## Repository Audit Summary
+History: the completed V3 task set (identity + record-only wallet, old tasks 001–009) was
+removed from this directory. Its decisions remain in ADRs 002–003 and in git history. What
+V3 delivered and V4 builds on: Google OAuth → PID → session, email uniqueness (ADR 002),
+and the record-only `wallets` table (migrated into V4's `chain_accounts` per ADR 004).
 
-**Stack:** pnpm monorepo. `apps/api` = NestJS 11 + Prisma 6 + PostgreSQL (Supabase), Passport
-Google OAuth, JWT access cookie + rotating refresh cookie (state in `sessions` table),
-`@nestjs/throttler`, Swagger, Vercel serverless. `packages/openapi` (openapi.yaml is the API
-source of truth), `packages/types`, `packages/sdk-js` (browser fetch SDK), `apps/docs` (Fumadocs).
+## Stack
 
-**REST-first, cookie-auth, no GraphQL. No blockchain/wallet code or dependencies anywhere
-(zero hits for solana/web3/ethers/viem/wallet outside the PRDs). V1 PRD listed blockchain as an
-explicit non-goal.**
+pnpm monorepo. `apps/api` = NestJS 11 + Prisma 6 + PostgreSQL (Supabase), Passport Google
+OAuth, JWT access cookie + rotating refresh cookie, `@nestjs/throttler`, Swagger, Vercel
+serverless. `packages/openapi` (openapi.yaml is the API source of truth), `packages/types`,
+`packages/sdk-js`, `apps/docs` (Fumadocs). REST-first, cookie-auth, no GraphQL.
 
-### Requirement → Repository Matrix
+V4 adds: `programs/peridot-smart-account` (Anchor/Rust) and `packages/solana` — the only
+package allowed to import `@solana/web3.js` (ADR 007).
 
-| V3 Requirement | Repository Evidence | State | Required Change |
-|---|---|---|---|
-| PID identity, immutable | `Identity.id = pid_<ULID>` (`common/pid.ts`), `docs/DATABASE.md` | EXISTS | Preserve only |
-| Provider uniqueness `(provider, providerUserId)` | `@@unique` in `schema.prisma`, migration `20260805045707` | EXISTS | Preserve only |
-| Email uniqueness (one email = one PID, reject collision) | `docs/DATABASE.md` (now: non-null email unique, `docs/adr/002`); `upsertGoogleIdentity` never checks email | **DECIDED — enforce (option A)** | Handling (004), docs-site copy (009) |
-| Google OAuth → PID → session | `auth/google.strategy.ts`, `auth.controller.ts`, `auth.service.ts` | EXISTS | Preserve only |
-| Sessions (rotation, reuse rejection, revocation) | `sessions` table, `rotateSession`, refresh cookie path-scoped | EXISTS | Preserve only |
-| Last-credential unlink guard | `IdentityService.unlinkCredential` rejects count ≤ 1 | EXISTS | Preserve + regression test with wallet present |
-| Wallet associated with PID | Nothing — no table, module, dep, or doc | **MISSING** | Decision (003) → schema (005) → API (006) |
-| Unlink Google keeps wallet | Unlink deletes only the credential row; wallet will hang off `identities` | Compatible by design | Verify via tests (006, 008) |
-| Wallet lifecycle (create/retrieve/persist/delete) | No evidence anywhere | **MISSING** | Decision (003), document (009) |
-| PID deletion | `status`/`deletedAt` fields exist; **no delete endpoint exists** | PARTIALLY_EXISTS | Define semantics in 003, document in 009 |
-| API/SDK wallet surface | REST + OpenAPI + `PeridotClient` pattern established | MISSING (wallet part) | 007 (follow existing conventions) |
-| Migration of V2 users | Wallet table is additive; no backfill decided yet | UNKNOWN pending 003 | 005 + migration notes in 009 |
-| Security §9 (keys, signing, authz) | No key material exists today; env-based JWT secrets; throttling in place | N/A until 003 | 003 (decide) + 008 (verify) |
+**Open gate:** ADR 005 (authority model: Ed25519 vs secp256r1 passkey) is `proposed` and
+needs stakeholder sign-off. Until it lands, tasks 005 and 007 stay blocked (PRD_v4 §29/§32).
 
 ## Task Graph
 
 ```text
-V3 Milestone
+Milestone (PRD_v4)
 │
-├── 001 Architecture audit report .................. P0  doc        deps: —
-├── 002 ADR: email uniqueness reconciliation ....... P0  decision   deps: —
-├── 003 ADR: wallet architecture & lifecycle ....... P0  decision   deps: —
+├── 001 Architecture lock: ADRs 004–007 ............ P0  decision   deps: —
 │
-├── 004 Identity: email-collision handling ......... P1  identity   deps: 002
+├── 003 DB: V4 account model migration ............. P0  database   deps: 001
+├── 002 Discord OAuth + security events ............ P1  identity   deps: 001, 003
+├── 004 Account service + API ...................... P1  account    deps: 003
 │
-├── 005 DB: wallets table migration ................ P1  database   deps: 003
-├── 006 API: wallet module (create/retrieve) ....... P1  wallet     deps: 005, 003
-├── 007 Contract: OpenAPI + types + SDK ............ P1  api/sdk    deps: 006
+├── 005 Credential registration & lifecycle API .... P1  crypto     deps: 001*, 003, 004
+├── 006 Recovery & multi-device flows .............. P1  crypto     deps: 005, 007, 010
 │
-├── 008 Security: wallet authz & abuse tests ....... P1  security   deps: 006
+├── 007 Anchor smart account program ............... P1  program    deps: 001*
+├── 008 Program tests + devnet deploy .............. P1  program    deps: 007
 │
-└── 009 Docs: architecture, DB, API, SDK, migration  P2  docs       deps: 006, 007
+├── 010 Solana adapter + RPC abstraction ........... P1  solana     deps: 001, 007
+├── 009 Intent & policy services ................... P1  wallet     deps: 003, 004, 010
+├── 011 Wallet SDK + fee payer client .............. P1  sdk        deps: 004, 005, 009, 010
+│
+├── 012 E2E devnet transaction ..................... P0  e2e        deps: 002, 004–006, 008–011
+│
+└── 013 Production hardening (pre-mainnet) ......... P0  security   deps: 012
 ```
 
-Independent chains: `002 → 004` and `003 → 005 → 006 → 007 → 008` can run in parallel.
-001 should be written first (PRD §13–14 require the audit artifact before coding).
+\* additionally blocked on the ADR 005 stakeholder decision.
+
+Parallel tracks after 001+003: identity (002), program (007→008→010), and API
+(004→005→006→009→011) converge at 012.
 
 ## Tasks
 
-| ID | Title | Category | Priority | Dependencies | PRD refs |
+| ID | Title | Category | Priority | Dependencies | PRD_v4 refs |
 |---|---|---|---|---|---|
-| 001 | V3 architecture audit report | doc | P0 | — | §13, §14 |
-| 002 | ADR: email uniqueness vs "email is metadata" | decision | P0 | — | §4, §16 |
-| 003 | ADR: wallet architecture, custody & lifecycle | decision | P0 | — | §2.3, §5–§9, §12 |
-| 004 | Identity: credential email-collision handling | identity | P1 | 002 | §4, §16 |
-| 005 | DB: `wallets` table + migration | database | P1 | 003 | §11, §12 |
-| 006 | API: wallet module (retrieve + create per ADR) | wallet | P1 | 003, 005 | §1, §3, §5, §8, §10 |
-| 007 | Contract: OpenAPI + types + SDK wallet support | api/sdk | P1 | 006 | §10, §16 |
-| 008 | Security: wallet authorization & abuse-case tests | security | P1 | 006 | §9, §16 |
-| 009 | Docs: update product docs + migration notes | docs | P2 | 006, 007 | §12, §16 |
+| 001 | Architecture lock: ADRs 004–007 | decision | P0 | — | §7–§12, §29, §32 |
+| 002 | Discord OAuth + security events | identity | P1 | 001, 003 | §5.1, §16, §22, §28 |
+| 003 | DB: V4 account model migration | database | P0 | 001 | §9, §15, §28 |
+| 004 | Account service + API | account | P1 | 003 | §5.2, §7.1, §16, §28 |
+| 005 | Credential registration & lifecycle API | crypto | P1 | 001*, 003, 004 | §8–§10, §16, §28 |
+| 006 | Recovery & multi-device flows | crypto | P1 | 005, 007, 010 | §10, §23, §28 |
+| 007 | Anchor smart account program | program | P1 | 001* | §11, §24–§26 |
+| 008 | Program tests + devnet deploy | program | P1 | 007 | §27, §28 |
+| 009 | Intent & policy services | wallet | P1 | 003, 004, 010 | §5.4, §5.5, §25 |
+| 010 | Solana adapter + RPC abstraction | solana | P1 | 001, 007 | §5.6, §13, §19 |
+| 011 | Wallet SDK + fee payer client | sdk | P1 | 004, 005, 009, 010 | §8.3, §17, §30 |
+| 012 | E2E devnet transaction | e2e | P0 | 002, 004–006, 008–011 | §27, §28, §30 |
+| 013 | Production hardening (pre-mainnet) | security | P0 | 012 | §22–§24, §29 |
+
+## ADRs
+
+| ADR | Title | Status |
+|---|---|---|
+| 002 | Email uniqueness (V3) | accepted |
+| 003 | Wallet architecture, custody & lifecycle (V3) | accepted — superseded by 004 for V4 |
+| 004 | V4 account model (ACCOUNT_MODEL) | accepted |
+| 005 | Signing authority model (AUTHORITY_MODEL) | **proposed — stakeholder decision required** |
+| 006 | Wallet security & recovery model (WALLET_SECURITY_MODEL) | accepted |
+| 007 | Solana program & chain adapter architecture | accepted |
 
 ## Conventions
 
 - One file per task: `NNN-kebab-title.md`, status starts as `planned`.
-- The repo is REST-first with `packages/openapi/src/openapi.yaml` as the API source of truth —
-  no new transport style may be introduced (PRD §10).
+- REST-first with `packages/openapi/src/openapi.yaml` as the API source of truth — no new
+  transport style (PRD_v3 §10, still binding).
 - Existing API error messages are in Indonesian; follow that convention.
-- No new dependency may be added without an ADR-level justification (PRD §15–16).
+- No new dependency without an ADR-level justification.
+- PRD_v4 §32: never implement server-side key custody or mock authorization to make tests
+  pass; unresolved security choices stop at the ADR, not at a code shortcut.
+- Frontend components (PRD_v4 §18) are deferred until a consuming app (`apps/web`) exists —
+  recorded in task 011.

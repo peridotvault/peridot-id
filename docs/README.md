@@ -25,6 +25,9 @@ packages/openapi    OpenAPI 3.0 specification (source of truth)
 ## Core docs
 
 - [PRD.md](PRD.md) — scope v1 (Google login, JWT + refresh, identity, profile, JS SDK)
+- [prds/PRD_v3.md](prds/PRD_v3.md) — V3 (identity + wallet association) — implemented
+- [prds/PRD_v4.md](prds/PRD_v4.md) — V4 (non-custodial Solana smart wallet) — current; tasks
+  001–013 and ADRs 004–007 in [tasks/](tasks/README.md) / [adr/](adr/)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — modules and repo layout
 - [TECH_STACK.md](TECH_STACK.md) — NestJS, PostgreSQL, Prisma, JWT, Passport
 - [DATABASE.md](DATABASE.md) — ERD (identities, identity_credentials, profiles, wallets, devices, sessions)
