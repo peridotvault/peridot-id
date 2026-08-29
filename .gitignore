@@ -12,3 +12,9 @@ coverage/
 *.rdb
 *.tsbuildinfo
 graphify-out/
+
+# Rust / Solana program builds
+programs/**/target/
+programs/**/test-ledger/
+
+test-ledger/

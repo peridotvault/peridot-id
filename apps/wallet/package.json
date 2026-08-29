@@ -1,0 +1,27 @@
+{
+  "name": "@peridot/wallet",
+  "version": "0.1.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "dev": "expo start",
+    "dev:web": "expo start --web",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@peridot/sdk-js": "workspace:*",
+    "@peridot/solana": "workspace:*",
+    "@peridot/types": "workspace:*",
+    "expo": "~57.0.18",
+    "expo-status-bar": "~3.0.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-native": "0.81.0",
+    "react-native-web": "^0.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "@types/react": "~19.0.0",
+    "typescript": "~5.9.0"
+  }
+}

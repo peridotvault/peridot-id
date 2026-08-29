@@ -1,0 +1,31 @@
+[package]
+name = "peridot-smart-account"
+version = "0.1.0"
+description = "PeridotID smart account program (Pinocchio)"
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.75"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+# Pinned to the pinocchio line whose MSRV (1.84) matches the solana 2.3.x platform-tools
+# toolchain bundled here. pinocchio 0.11+/system 0.6+/token 0.7+ need rustc 1.89.
+pinocchio = { version = "0.10.2", features = ["cpi", "copy"] }
+pinocchio-log = "0.5.1"
+pinocchio-system = "0.5.0"
+pinocchio-token = "0.5.0"
+# Pinned so `cargo update` cannot drift it to a version needing rustc 1.89.
+solana-address = "=2.1.0"
+
+[features]
+no-entrypoint = []
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+opt-level = 3
+
+[workspace]
+members = ["."]

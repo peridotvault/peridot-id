@@ -1,15 +1,27 @@
 import type {
   ApiError,
+  Authority,
   Identity,
   IdentityCredential,
   LoginResponse,
   Profile,
   ProfileUpdate,
-  Wallet,
+  RegisterStart,
 } from "@peridot/types";
+import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client";
+import { registerPasskey, BrowserPasskeySigner } from "./wallet/passkey";
+import { FeePayerManager, type SecretStore } from "./wallet/fee-payer";
+
+export { PeridotWallet, type PeridotWalletOptions };
+export { BrowserPasskeySigner, registerPasskey };
+export { FeePayerManager, type SecretStore };
 
 export interface PeridotOptions {
   baseUrl: string;
+  /** Solana RPC endpoint (devnet/local) used for smart-account transactions. */
+  solanaRpcUrl: string | string[];
+  /** Fee-payer secure storage (defaults to an in-memory store). */
+  feePayerStore?: SecretStore;
   onUnauthorized?: () => void;
 }
 
@@ -64,16 +76,31 @@ export class PeridotProfile {
   }
 }
 
-export class PeridotWallet {
+/** Passkey credential management (task 003 ceremonies, wrapped for convenience). */
+export class PeridotPasskey {
   constructor(private client: PeridotClient) {}
 
-  async me(): Promise<Wallet | ApiError> {
-    const res = await this.client.get<Wallet>("/v1/wallet/me");
+  async list(): Promise<Authority[] | ApiError> {
+    const res = await this.client.get<Authority[]>("/v1/credentials");
     return res.data;
   }
 
-  async create(address: string): Promise<Wallet | ApiError> {
-    const res = await this.client.post<Wallet>("/v1/wallet", { address });
+  async register(): Promise<Authority> {
+    return registerPasskey({
+      registerStart: async () => {
+        const res = await this.client.post<RegisterStart>("/v1/credentials/register/start");
+        if (!res.ok) throw new Error("Gagal memulai registrasi passkey");
+        return res.data as RegisterStart;
+      },
+      registerFinish: async (input) => {
+        const res = await this.client.post<Authority>("/v1/credentials/register/finish", input);
+        return res.data;
+      },
+    });
+  }
+
+  async revoke(id: string): Promise<Authority | ApiError> {
+    const res = await this.client.delete<Authority>(`/v1/credentials/${id}`);
     return res.data;
   }
 }
@@ -82,13 +109,15 @@ class PeridotClient {
   readonly auth: PeridotAuth;
   readonly identity: PeridotIdentity;
   readonly profile: PeridotProfile;
+  readonly passkey: PeridotPasskey;
   readonly wallet: PeridotWallet;
 
-  constructor(private baseUrl: string, private onUnauthorized?: () => void) {
+  constructor(private baseUrl: string, walletOptions: PeridotWalletOptions, private onUnauthorized?: () => void) {
     this.auth = new PeridotAuth(this);
     this.identity = new PeridotIdentity(this);
     this.profile = new PeridotProfile(this);
-    this.wallet = new PeridotWallet(this);
+    this.passkey = new PeridotPasskey(this);
+    this.wallet = new PeridotWallet(this, walletOptions);
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<{ ok: boolean; data: T | ApiError }> {
@@ -98,8 +127,6 @@ class PeridotClient {
       headers: { "Content-Type": "application/json", ...init.headers },
     });
     if (res.status === 401) {
-      // Never re-trigger the handler from auth endpoints (e.g. refresh failing) —
-      // that would recurse when the handler itself calls auth.refresh().
       if (!path.startsWith("/v1/auth/")) this.onUnauthorized?.();
       return { ok: false, data: { statusCode: 401, message: "Unauthorized" } };
     }
@@ -126,8 +153,9 @@ class PeridotClient {
   }
 }
 
+export { PeridotClient };
 export function Peridot(options: PeridotOptions): PeridotClient {
-  return new PeridotClient(options.baseUrl, options.onUnauthorized);
+  return new PeridotClient(options.baseUrl, { solanaRpcUrl: options.solanaRpcUrl, feePayerStore: options.feePayerStore }, options.onUnauthorized);
 }
 
 export default Peridot;

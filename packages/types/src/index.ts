@@ -49,6 +49,80 @@ export interface WalletCreate {
   address: string;
 }
 
+export interface ChainAccount {
+  id: string;
+  chainNamespace: string;
+  chainReference: string;
+  address: string;
+  accountType: "smart_account" | "linked_address";
+  status: IdentityStatus;
+  createdAt: string;
+}
+
+export interface Account {
+  id: string;
+  status: IdentityStatus;
+  version: number;
+  createdAt: string;
+  chainAccounts: ChainAccount[];
+}
+
+export interface Authority {
+  id: string;
+  type: "secp256r1";
+  credentialId: string | null;
+  /** 33-byte compressed secp256r1 public key, base64url — the on-chain authority. */
+  publicKey: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export type IntentType = "WITHDRAW_SOL" | "WITHDRAW_TOKEN";
+
+export interface IntentPayload {
+  amount: string;
+  destination?: string;
+  mint?: string;
+  destinationAta?: string;
+}
+
+export interface Intent {
+  id: string;
+  type: IntentType;
+  payload: IntentPayload & {
+    chain: string;
+    network: string;
+    accountId: string;
+    smartAccountAddress: string;
+  };
+  status: "pending" | "approved" | "executed" | "expired" | "rejected" | "cancelled";
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface IntentCreate {
+  type: IntentType;
+  payload: IntentPayload;
+}
+
+export interface WalletTransaction {
+  id: string;
+  intentId: string | null;
+  chain: string;
+  network: string;
+  txHash: string | null;
+  status: "prepared" | "submitted" | "confirmed" | "failed";
+  createdAt: string;
+}
+
+/** WebAuthn registration ceremony (task 003). */
+export interface RegisterStart {
+  registrationId: string;
+  options: Record<string, unknown>;
+  isAdditional: boolean;
+  approval: Record<string, unknown> | null;
+}
+
 export interface ApiError {
   statusCode: number;
   message: string | string[];

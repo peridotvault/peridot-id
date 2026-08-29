@@ -43,7 +43,17 @@ tags:
   - name: profile
     description: The user's public profile
   - name: wallet
-    description: The user's wallet, associated with their PID
+    description: |
+      The user's wallet, associated with their PID. **Deprecated (V3 surface)** — preserved
+      for existing clients, backed by `linked_address` chain accounts. Use `/accounts` and
+      the smart account instead (ADR 004).
+  - name: account
+    description: PeridotID account — owns chain accounts (smart account PDA, legacy linked address)
+  - name: credentials
+    description: |
+      Signing authorities (secp256r1 passkeys, ADR 005). Google OAuth proves identity; a
+      passkey authorizes the wallet. The first credential registers freely; each additional
+      credential requires approval by an existing credential (ADR 006 §4).
   - name: openapi
     description: Machine-readable API specification
 
@@ -287,6 +297,7 @@ paths:
 
   /wallet/me:
     get:
+      deprecated: true
       tags: [wallet]
       summary: Get the current wallet
       description: |
@@ -317,6 +328,7 @@ paths:
 
   /wallet:
     post:
+      deprecated: true
       tags: [wallet]
       summary: Create the wallet
       description: |
@@ -346,6 +358,369 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /accounts:
+    post:
+      tags: [account]
+      summary: Create the default PeridotID account
+      description: |
+        Creates (or returns) the identity's default account, including the Solana
+        `smart_account` chain account whose address is deterministically derived (PDA) and
+        resolvable before any on-chain initialization (ADR 004 §5). Smart-account
+        initialization happens on the user's first on-chain top-up (PRD_v5 §3), not here.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    get:
+      tags: [account]
+      summary: List the authenticated PID's accounts
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /accounts/{id}:
+    get:
+      tags: [account]
+      summary: Get one account (ownership-checked)
+      description: |
+        Returns the account only when it belongs to the authenticated PID. Resolution is
+        strictly from the access token — a client-supplied account id never changes the
+        owner (no IDOR).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /accounts/{id}/chains:
+    get:
+      tags: [account]
+      summary: List an account's chain accounts
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The chain accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChainAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /credentials:
+    get:
+      tags: [credentials]
+      summary: List signing authorities (passkeys)
+      description: |
+        Returns the authenticated PID's active passkey authorities for their account.
+        Public fields only — credential ID, last-used; never key material (ADR 006).
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The authorities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Authority"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /credentials/register/start:
+    post:
+      tags: [credentials]
+      summary: Begin passkey registration
+      description: |
+        Returns WebAuthn registration options. When the account already has a credential,
+        `isAdditional` is true and an `approval` challenge is included — the client must
+        assert with an existing credential to authorize adding the new one (ADR 006 §4).
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Registration options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterStart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /credentials/register/finish:
+    post:
+      tags: [credentials]
+      summary: Complete passkey registration
+      description: |
+        Verifies the WebAuthn attestation against the single-use, expiring challenge and
+        stores the public key + credential ID (public material only). Rejects a second
+        credential without a valid existing-credential approval, a replayed challenge, or
+        a duplicated credential ID.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterFinish"
+      responses:
+        "200":
+          description: The registered authority
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Authority"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /credentials/authenticate/start:
+    post:
+      tags: [credentials]
+      summary: Begin credential authentication
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Authentication options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticateStart"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /credentials/authenticate/finish:
+    post:
+      tags: [credentials]
+      summary: Complete credential authentication
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthenticateFinish"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /credentials/{id}:
+    delete:
+      tags: [credentials]
+      summary: Revoke a signing authority
+      description: |
+        Revokes a passkey. The account must keep at least one active authority — revoking
+        the last one is rejected (ADR 006 §5).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The revoked authority
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Authority"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /wallet/intents:
+    post:
+      tags: [wallet]
+      summary: Create a withdrawal intent
+      description: |
+        Validates and persists a desired withdrawal (WITHDRAW_SOL / WITHDRAW_TOKEN) for the
+        authenticated PID's smart account. Policy: account + registered passkey required,
+        amount > 0, valid destination, destination != the smart account. The intent is
+        single-use and expires (PRD_v4 §22) — reusing or exceeding it is rejected.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntentCreate"
+      responses:
+        "200":
+          description: The created intent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Intent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/intents/{id}:
+    get:
+      tags: [wallet]
+      summary: Get an intent (ownership-checked)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The intent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Intent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /wallet/transactions/submit:
+    post:
+      tags: [wallet]
+      summary: Record a submitted on-chain transaction
+      description: |
+        Records the on-chain submission against a pending, unexpired intent and marks it
+        executed (single-use replay protection). Submission itself happens through the
+        SDK/adapter.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransactionSubmit"
+      responses:
+        "200":
+          description: The recorded transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/transactions/{id}:
+    get:
+      tags: [wallet]
+      summary: Get a transaction (ownership-checked)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletTransaction"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /openapi.yaml:
     get:
@@ -568,6 +943,219 @@ components:
           minLength: 1
           maxLength: 64
           description: "The Solana address to associate with this PID"
+
+    ChainAccount:
+      type: object
+      required: [id, chainNamespace, chainReference, address, accountType, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        chainNamespace:
+          type: string
+          description: "CAIP-2 namespace — `solana` (V1)"
+          example: "solana"
+        chainReference:
+          type: string
+          description: "CAIP-2 reference — mainnet-beta genesis-hash prefix for Solana"
+          example: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z"
+        address:
+          type: string
+          description: "PDA (smart_account) or user-supplied address (linked_address). Public data only."
+        accountType:
+          type: string
+          enum: [smart_account, linked_address]
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+        createdAt:
+          type: string
+          format: date-time
+
+    Account:
+      type: object
+      required: [id, status, version, createdAt, chainAccounts]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+        version:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        chainAccounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChainAccount"
+
+    Authority:
+      type: object
+      required: [id, type, credentialId, publicKey, createdAt, lastUsedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [secp256r1]
+          description: "Passkey authority model (ADR 005 Option B)"
+        credentialId:
+          type: string
+          nullable: true
+          description: "WebAuthn credential ID — public data"
+        publicKey:
+          type: string
+          description: "33-byte compressed secp256r1 public key, base64url — the on-chain smart-account authority"
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    RegisterStart:
+      type: object
+      required: [registrationId, options, isAdditional, approval]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        options:
+          type: object
+          description: "PublicKeyCredentialCreationOptionsJSON for navigator.credentials.create"
+        isAdditional:
+          type: boolean
+        approval:
+          type: object
+          nullable: true
+          description: "PublicKeyCredentialRequestOptionsJSON for existing-credential approval (null for the first credential)"
+
+    RegisterFinish:
+      type: object
+      required: [registrationId, credential]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        credential:
+          type: object
+          description: "WebAuthn RegistrationResponseJSON"
+        approval:
+          type: object
+          nullable: true
+          description: "Existing-credential AuthenticationResponseJSON — required when isAdditional"
+
+    AuthenticateStart:
+      type: object
+      required: [authenticationId, options]
+      properties:
+        authenticationId:
+          type: string
+          format: uuid
+        options:
+          type: object
+          description: "PublicKeyCredentialRequestOptionsJSON for navigator.credentials.get"
+
+    AuthenticateFinish:
+      type: object
+      required: [authenticationId, credential]
+      properties:
+        authenticationId:
+          type: string
+          format: uuid
+        credential:
+          type: object
+          description: "WebAuthn AuthenticationResponseJSON"
+
+    IntentCreate:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          enum: [WITHDRAW_SOL, WITHDRAW_TOKEN]
+        payload:
+          type: object
+          required: [amount]
+          properties:
+            amount:
+              type: string
+              description: "Amount as a decimal string (no JS float precision loss)"
+              example: "5000000"
+            destination:
+              type: string
+              description: "WITHDRAW_SOL — destination Solana address"
+            mint:
+              type: string
+              description: "WITHDRAW_TOKEN — token mint"
+            destinationAta:
+              type: string
+              description: "WITHDRAW_TOKEN — destination associated token account"
+
+    Intent:
+      type: object
+      required: [id, type, payload, status, expiresAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [WITHDRAW_SOL, WITHDRAW_TOKEN]
+        payload:
+          type: object
+          description: "Intent payload + resolved context (chain, network, smartAccountAddress)"
+        status:
+          type: string
+          enum: [pending, approved, executed, expired, rejected, cancelled]
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    TransactionSubmit:
+      type: object
+      required: [intentId, txHash]
+      properties:
+        intentId:
+          type: string
+          format: uuid
+        txHash:
+          type: string
+        network:
+          type: string
+
+    WalletTransaction:
+      type: object
+      required: [id, intentId, chain, network, txHash, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+          nullable: true
+        chain:
+          type: string
+        network:
+          type: string
+        txHash:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [prepared, submitted, confirmed, failed]
+        createdAt:
+          type: string
+          format: date-time
 
     ApiError:
       type: object

@@ -37,23 +37,49 @@ describe("Wallet authorization & abuse cases (routes)", () => {
           return status ? { status } : null;
         }),
       },
-      wallet: {
-        findUnique: jest.fn(async ({ where, select }: { where: { identityId: string }; select?: Record<string, boolean> }) => {
+      peridotAccount: {
+        findFirst: jest.fn(async ({ where }: { where: { identityId: string; status?: string } }) => {
           const row = state.wallets.get(where.identityId);
-          return row ? pick(row, select) : null;
+          if (!row) return null;
+          return {
+            id: `acc-${where.identityId}`,
+            identityId: where.identityId,
+            status: "active",
+            version: 1,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            chainAccounts: [{ ...row, id: row.id, accountId: `acc-${where.identityId}`, chainNamespace: row.chain }],
+          };
+        }),
+        create: jest.fn(async ({ data }: { data: { identityId: string } }) => ({
+          id: `acc-${data.identityId}`,
+          identityId: data.identityId,
+          status: "active",
+          version: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })),
+      },
+      chainAccount: {
+        findFirst: jest.fn(async ({ where }: { where: { accountId: string; accountType: string } }) => {
+          const identityId = where.accountId.replace(/^acc-/, "");
+          const row = state.wallets.get(identityId);
+          return row || null;
         }),
         create: jest.fn(
-          async ({ data, select }: { data: { identityId: string; chain: string; address: string }; select: Record<string, boolean> }) => {
+          async ({ data, select }: { data: { accountId: string; chainNamespace: string; chainReference: string; address: string; accountType: string }; select: Record<string, boolean> }) => {
+            const identityId = data.accountId.replace(/^acc-/, "");
             const row: WalletRow = {
-              id: `w-${state.wallets.size + 1}`,
-              identityId: data.identityId,
-              chain: data.chain,
+              id: `w-${identityId}`,
+              identityId,
+              chain: data.chainNamespace,
+              chainNamespace: data.chainNamespace,
               address: data.address,
               status: "active",
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
-            state.wallets.set(data.identityId, row);
+            state.wallets.set(identityId, row);
             return pick(row, select);
           },
         ),

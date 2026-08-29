@@ -14,6 +14,27 @@ enum IdentityStatus {
   deleted
 }
 
+enum AuthorityStatus {
+  active
+  revoked
+}
+
+enum IntentStatus {
+  pending
+  approved
+  executed
+  expired
+  rejected
+  cancelled
+}
+
+enum TransactionStatus {
+  prepared
+  submitted
+  confirmed
+  failed
+}
+
 model Identity {
   id        String         @id
   status    IdentityStatus @default(active)
@@ -24,7 +45,9 @@ model Identity {
   profile     Profile?
   credentials IdentityCredential[]
   devices     Device[]
-  wallets     Wallet[]
+
+  peridotAccounts PeridotAccount[]
+  securityEvents  SecurityEvent[]
 
   @@map("identities")
 }
@@ -82,19 +105,153 @@ model Session {
   @@map("sessions")
 }
 
-model Wallet {
+// ADR 004: PeridotID account — the wallet-owning entity. V1 creates exactly one default
+// account per identity (API exposes 1); schema permits many so a future multi-account
+// product needs no migration.
+model PeridotAccount {
   id         String         @id @default(uuid())
-  identityId String         @unique
+  identityId String
   identity   Identity       @relation(fields: [identityId], references: [id], onDelete: Cascade)
-  chain      String
-  address    String
   status     IdentityStatus @default(active)
+  version    Int            @default(1)
   createdAt  DateTime       @default(now())
   updatedAt  DateTime       @updatedAt
 
-  // ADR 003: `onDelete: Cascade` is defensive, matching the identity -> credential/device
-  // convention. PID deletion is soft (status/deletedAt); the wallet soft-deletes with the
-  // PID, so the hard cascade is never reached. One wallet per PID via `identityId @unique`.
-  // No key material or provider (Google) fields — record-only custody (ADR 003).
-  @@map("wallets")
+  chainAccounts  ChainAccount[]
+  authorities    Authority[]
+  transactions   Transaction[]
+  intents        Intent[]
+  securityEvents SecurityEvent[]
+  challenges     CredentialChallenge[]
+
+  @@map("peridot_accounts")
+}
+
+// ADR 005: single-use, expiring WebAuthn ceremony state. No secret material — the challenge
+// is a random nonce (PRD_v4 §22: replay protection). `approvalChallenge` carries the
+// existing-credential approval required to add a second credential (ADR 006 §4).
+model CredentialChallenge {
+  id                String           @id @default(uuid())
+  accountId         String
+  account           PeridotAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  kind              String
+  challenge         String
+  approvalChallenge String?
+  isAdditional      Boolean          @default(false)
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  createdAt         DateTime         @default(now())
+
+  @@index([accountId])
+  @@map("credential_challenges")
+}
+
+// ADR 004: one row per chain account. `account_type` = smart_account (program PDA) or
+// linked_address (migrated V3 record-only). The unique constraint encodes one smart
+// account per chain per account in V1 while letting a migrated linked_address coexist.
+// No key-material columns, ever (ADR 003 rule carried).
+model ChainAccount {
+  id             String         @id @default(uuid())
+  accountId      String
+  account        PeridotAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  chainNamespace String
+  chainReference String
+  address        String
+  accountType    String
+  status         IdentityStatus @default(active)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  feePayers    WalletFeePayer[]
+  transactions Transaction[]
+
+  @@unique([accountId, chainNamespace, chainReference, accountType])
+  @@map("chain_accounts")
+}
+
+// ADR 004/005: signing authority for a PeridotID account. Public material only — the
+// secret never leaves the client authenticator (passkey/secp256r1) or device.
+model Authority {
+  id           String          @id @default(uuid())
+  accountId    String
+  account      PeridotAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type         String
+  publicKey    Bytes
+  credentialId String?
+  status       AuthorityStatus @default(active)
+  createdAt    DateTime        @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([accountId])
+  @@map("authorities")
+}
+
+// ADR 006: user-controlled fee payer — address only; the key never leaves the client.
+model WalletFeePayer {
+  id             String         @id @default(uuid())
+  chainAccountId String
+  chainAccount   ChainAccount   @relation(fields: [chainAccountId], references: [id], onDelete: Cascade)
+  address        String
+  status         IdentityStatus @default(active)
+  createdAt      DateTime       @default(now())
+
+  @@index([chainAccountId])
+  @@map("wallet_fee_payers")
+}
+
+// ADR 004/PRD_v4 §5.4: application expresses a desired action; validated, policy-checked,
+// and given an expiry before anything is signed.
+model Intent {
+  id        String         @id @default(uuid())
+  accountId String
+  account   PeridotAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type      String
+  payload   Json
+  status    IntentStatus   @default(pending)
+  createdAt DateTime       @default(now())
+  expiresAt DateTime
+
+  transactions Transaction[]
+
+  @@index([accountId])
+  @@map("intents")
+}
+
+model Transaction {
+  id             String            @id @default(uuid())
+  accountId      String
+  account        PeridotAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  chainAccountId String
+  chainAccount   ChainAccount      @relation(fields: [chainAccountId], references: [id], onDelete: Cascade)
+  intentId       String?
+  intent         Intent?           @relation(fields: [intentId], references: [id], onDelete: SetNull)
+  chain          String
+  network        String
+  txHash         String?
+  status         TransactionStatus @default(prepared)
+  createdAt      DateTime          @default(now())
+  confirmedAt    DateTime?
+  errorCode      String?
+  errorMessage   String?
+
+  @@index([accountId])
+  @@index([chainAccountId])
+  @@map("transactions")
+}
+
+// ADR 004/PRD_v4 §22: audit log written by auth, credential, wallet, and program-facing
+// flows. Metadata is JSONB; never contains secrets.
+model SecurityEvent {
+  id         String           @id @default(uuid())
+  identityId String
+  identity   Identity         @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  accountId  String?
+  account    PeridotAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  eventType  String
+  metadata   Json
+  createdAt  DateTime         @default(now())
+
+  @@index([identityId])
+  @@index([accountId])
+  @@map("security_events")
 }

@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "PeridotID Wallet",
+    "slug": "peridot-wallet",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "peridotwallet",
+    "userInterfaceStyle": "light",
+    "web": {
+      "bundler": "metro"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "id.peridot.wallet"
+    },
+    "android": {
+      "package": "id.peridot.wallet"
+    }
+  }
+}

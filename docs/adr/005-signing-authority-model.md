@@ -1,7 +1,20 @@
 # ADR 005 — Signing Authority Model: Ed25519 vs secp256r1/WebAuthn
 
-Status: **proposed — requires stakeholder decision** (blocks tasks 005 and 007; PRD_v4 §29
-Phase 0 forbids production smart-account code before this is resolved)
+Status: **accepted — Option B (secp256r1 passkey) selected by stakeholder decision
+(2026-08-27, PRD_v5 §6).** Tasks 005 and 007 are unblocked.
+
+## Fallback consideration resolved (2026-08-27, task 004)
+
+A transient fallback invocation (Ed25519 signer authority) was reconsidered and **reverted**
+when a compatible crate was found: `pinocchio-secp256r1-instruction` (MIT) provides the
+Secp256r1 precompile deserializer Pinocchio was missing, and pinocchio's
+`Instructions` sysvar exposes `get_instruction_relative` — the introspection pattern the
+fallback claimed was impossible. The program was vendored/adapted for pinocchio 0.10 and
+**V1 ships Option B: secp256r1 passkey authority**, verified on-chain via the precompile +
+instruction introspection. See `docs/tasks/004-smart-account-program.md` for the binding
+design (signer == authority, message-data hash binding, challenge == payload, expiry,
+nonce) and the verified attack tests (wrong passkey, replay, expiry, transaction
+substitution, destination mismatch).
 
 This ADR is the **AUTHORITY_MODEL.md** deliverable of PRD_v4 Phase 0.
 
@@ -86,8 +99,14 @@ Smart Account authorization
 
 ## Recommendation to the stakeholder
 
-**Adopt Option B (secp256r1 passkey) as the V1 authority, with Option A as the documented
-fallback trigger.** Rationale:
+**Adopt Option B (secp256r1 passkey) as the V1 authority — decided by the stakeholder
+(2026-08-27).** Option A remains the documented fallback trigger only: if task 007/008
+cannot land precompile verification inside its test budget, the stakeholder may flip to
+Option A by amending this ADR — the schema (ADR 004) and program state (ADR 007) already
+carry a `type` discriminant and model-dependent authority sizing, so the flip is an ADR
+amendment, not a rewrite.
+
+Rationale, confirmed by the stakeholder:
 
 1. It is the PRD's own stated preference (§8.2) and the only option where the
    *asset-controlling* secret is non-extractable.
@@ -98,9 +117,10 @@ fallback trigger.** Rationale:
    test budget, the stakeholder may flip to Option A by amending this ADR** — the schema
    (ADR 004) and program state (ADR 007) already carry a `type` discriminant and
    model-dependent authority sizing, so the flip is an ADR amendment, not a rewrite.
+4. **Chain longevity:** the same passkey model carries to future EVM smart accounts
+   (secp256r1 verification, RIP-7212-style) — one credential across chains (PRD_v5 §6).
 
-The question the stakeholder must answer: **is the Phase-4 complexity budget for
-WebAuthn-on-chain verification acceptable for V1, or does V1 ship Option A?**
+The fallback trigger above stays in effect as the only remaining open risk.
 
 ## Consequences (either option)
 

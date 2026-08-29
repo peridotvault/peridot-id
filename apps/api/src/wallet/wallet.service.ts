@@ -1,40 +1,75 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, Wallet } from "@prisma/client";
+import { IdentityStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
-export type WalletView = Pick<Wallet, "id" | "chain" | "address" | "status" | "createdAt">;
+export interface WalletView {
+  id: string;
+  chain: string;
+  address: string;
+  status: IdentityStatus;
+  createdAt: Date;
+}
 
-// ADR 003: single-chain Solana MVP. Multi-chain is out of V3.
-const WALLET_CHAIN = "solana";
+// ADR 004: the V3 wallet surface is preserved as a read of the default account's
+// `linked_address` chain account. Deprecated — never returns `smart_account` rows.
+const CHAIN_NAMESPACE = "solana";
+const SOLANA_MAINNET_REFERENCE = "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
+const ACCOUNT_TYPE_LINKED = "linked_address";
 
-// Explicit select — no sensitive material can appear in a response (PRD §9).
-const WALLET_SELECT = { id: true, chain: true, address: true, status: true, createdAt: true } as const;
+function toView(ca: {
+  id: string;
+  chainNamespace: string;
+  address: string;
+  status: IdentityStatus;
+  createdAt: Date;
+}): WalletView {
+  return { id: ca.id, chain: ca.chainNamespace, address: ca.address, status: ca.status, createdAt: ca.createdAt };
+}
 
 @Injectable()
 export class WalletService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getMe(identityId: string): Promise<WalletView> {
-    const wallet = await this.prisma.wallet.findUnique({ where: { identityId }, select: WALLET_SELECT });
-    if (!wallet) throw new NotFoundException("Wallet tidak ditemukan");
-    return wallet;
+    const account = await this.prisma.peridotAccount.findFirst({
+      where: { identityId, status: "active" },
+      include: { chainAccounts: { where: { accountType: ACCOUNT_TYPE_LINKED }, take: 1 } },
+    });
+    const linked = account?.chainAccounts[0];
+    if (!linked) throw new NotFoundException("Wallet tidak ditemukan");
+    return toView(linked);
   }
 
   async create(identityId: string, address: string): Promise<WalletView> {
-    const existing = await this.prisma.wallet.findUnique({ where: { identityId }, select: WALLET_SELECT });
-    if (existing) return existing;
+    let account = await this.prisma.peridotAccount.findFirst({ where: { identityId, status: "active" } });
+    if (!account) {
+      account = await this.prisma.peridotAccount.create({ data: { identityId } });
+    }
+
+    const existing = await this.prisma.chainAccount.findFirst({
+      where: { accountId: account.id, accountType: ACCOUNT_TYPE_LINKED },
+    });
+    if (existing) return toView(existing);
 
     try {
-      return await this.prisma.wallet.create({
-        data: { identityId, chain: WALLET_CHAIN, address },
-        select: WALLET_SELECT,
+      const created = await this.prisma.chainAccount.create({
+        data: {
+          accountId: account.id,
+          chainNamespace: CHAIN_NAMESPACE,
+          chainReference: SOLANA_MAINNET_REFERENCE,
+          address,
+          accountType: ACCOUNT_TYPE_LINKED,
+        },
       });
+      return toView(created);
     } catch (err) {
-      // ADR 003: one wallet per PID. A concurrent duplicate hits the unique index — return
-      // the existing wallet instead of failing (same P2002 pattern as profile.service).
+      // ADR 004: one linked_address per default account. A concurrent duplicate hits the
+      // unique index — return the existing row instead of failing (P2002, as before).
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-        const wallet = await this.prisma.wallet.findUnique({ where: { identityId }, select: WALLET_SELECT });
-        if (wallet) return wallet;
+        const existing2 = await this.prisma.chainAccount.findFirst({
+          where: { accountId: account.id, accountType: ACCOUNT_TYPE_LINKED },
+        });
+        if (existing2) return toView(existing2);
       }
       throw err;
     }

@@ -16,18 +16,29 @@ a replaceable RPC abstraction (§19). The repo is a pnpm TypeScript monorepo (`a
 
 ## Decision
 
-### 1. Framework — Anchor
+### 1. Framework — Pinocchio (stakeholder override, 2026-08-27)
 
-PRD_v4 §11: "Use Anchor unless there is a strong technical reason to use native Rust." No
-strong reason exists (team is TypeScript-first; Anchor gives IDL, account validation, and
-test tooling for free). Workspace layout per PRD_v4 §20:
+PRD_v4 §11 defaulted to Anchor "unless there is a strong technical reason." The
+**stakeholder overrode this to Pinocchio** (PRD_v5 §5), and this ADR is amended
+accordingly. Recorded reasons:
+
+- The instruction surface is tiny — `initialize`, withdrawals, `update_authority`,
+  `close` — so Anchor's account-validation machinery buys little here.
+- Pinocchio's minimal compute-unit footprint matters at gaming transaction volume.
+- PRD_v5 additionally drops deposit instructions entirely (deposits are plain
+  transfers, §3 below), shrinking the program further.
+
+Workspace layout (no Anchor workspace/IDL; plain Cargo):
 
 ```text
 programs/peridot-smart-account/
-  Anchor.toml
   Cargo.toml
-  src/lib.rs, state.rs, errors.rs, instructions/{initialize,execute,update_authority,close}.rs
+  src/lib.rs, state.rs, errors.rs, instructions/{initialize,withdraw_sol,withdraw_token,update_authority,close}.rs
 ```
+
+Consequence: `packages/solana` (§8) builds instructions against the program directly
+(no Anchor client/IDL); discriminators and account layouts are defined in the program
+crate and mirrored in `packages/solana`.
 
 ### 2. Account state — PDA, model-sized authority
 
@@ -40,12 +51,16 @@ programs/peridot-smart-account/
 ### 3. Instructions
 
 - `initialize(account_id, authority)` — creates the PDA, sets authority/nonce=0/version=1,
-  emits `AccountInitialized`. Anyone may pay rent for creation, but the recorded authority is
-  fixed at creation and comes from the authenticated registration flow (ADR 005/006).
-- `execute(nonce, action)` — the only value-moving path. Must, in order (PRD_v4 §11.2):
-  verify authority per the ADR 005 model; verify `nonce == account.nonce`; decode and
-  validate the domain-separated action (§5 below); perform the allowed CPI; increment nonce;
-  emit `TransactionExecuted`. **No placeholder authorization, ever** (PRD_v4 §11.2, §24,
+  emits `AccountInitialized`. Anyone may pay rent for creation, but the recorded authority
+  is fixed at creation and comes from the authenticated registration flow (ADR 005/006).
+- **No deposit instructions.** Deposits are plain System/Token Program transfers into the
+  PDA / its ATAs, with on-demand ATA creation via the ATA program's idempotent creation
+  (PRD_v5 §4). The program never custodies the deposit path.
+- `withdraw_sol(amount)` / `withdraw_token(mint, amount)` — the only value-moving paths.
+  Each must, in order (PRD_v4 §11.2): verify authority per the ADR 005 model (secp256r1
+  passkey — accepted); verify `nonce == account.nonce`; validate the domain-separated
+  action (§5 below); perform the allowed CPI; increment nonce; emit
+  `TransactionExecuted`. **No placeholder authorization, ever** (PRD_v4 §11.2, §24,
   §32 — mock checks are test-only).
 - `update_authority(new_authority)` — rotation; authorized by a current valid authority;
   emits `AuthorityUpdated` (PRD_v4 §10/§24).
@@ -55,10 +70,10 @@ programs/peridot-smart-account/
 
 ### 4. Controlled CPI — allowlist, not arbitrary
 
-V1 `execute` permits exactly: **System Program SOL transfer** from the smart account. SPL
-token transfer is added only if it fits the same allowlist mechanism cleanly (PRD_v4 §28).
-Arbitrary CPI is explicitly prevented (PRD_v4 §24): the program validates target program id
-and account set per action type; no generic "call any program with any data" instruction.
+V1 withdrawals permit exactly: **System Program SOL transfer** and **Token Program SPL
+transfer** from the smart account / its ATAs (PRD_v5 expands V1 to SPL withdrawals).
+Arbitrary CPI is explicitly prevented (PRD_v4 §24): the program validates target program
+id and account set per instruction; no generic "call any program with any data" path.
 
 ### 5. Domain separation & replay
 
@@ -105,8 +120,8 @@ rotation procedure are documented in task 013 before mainnet.
 
 ## Rejected alternatives
 
-- **Native Rust program** — rejected: no strong technical reason over Anchor (PRD_v4 §11
-  default stands).
+- **Anchor framework** — superseded by stakeholder override to Pinocchio (§1,
+  2026-08-27). Kept here as the record of the change.
 - **Arbitrary-CPI generic executor** — rejected: violates PRD_v4 §24; unbounded attack
   surface for zero V1 need.
 - **RPC calls embedded in NestJS controllers/modules** — rejected: violates the adapter
@@ -119,10 +134,11 @@ rotation procedure are documented in task 013 before mainnet.
 
 ## Consequences
 
-- New workspace members: `programs/peridot-smart-account` (Rust/Anchor) and
-  `packages/solana` (TypeScript). CI gains `anchor test` and program lint steps (task 008).
-- `packages/solana` is the only package allowed to depend on `@solana/web3.js` (and Anchor
-  client libs); the dependency is ADR-justified here per the tasks README convention.
+- New workspace members: `programs/peridot-smart-account` (Rust/Pinocchio) and
+  `packages/solana` (TypeScript). CI gains program build/test and lint steps (task 008).
+- `packages/solana` is the only package allowed to depend on `@solana/web3.js`; it
+  encodes the program's instruction/account layouts directly (no Anchor IDL — §1). The
+  dependency is ADR-justified here per the tasks README convention.
 - Tasks: 007 (program), 008 (tests + devnet deploy), 010 (adapter/RPC), 009 (intent/policy
   consuming the adapter), 011 (SDK over the adapter).
 - Devnet program id and upgrade-authority custody are recorded in task 008/013 outputs.

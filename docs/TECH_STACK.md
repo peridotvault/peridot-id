@@ -8,3 +8,7 @@
 - OpenAPI
 - TypeScript
 - Vercel (serverless) for deployment
+- Solana program: Rust + Pinocchio (`programs/peridot-smart-account`, ADR 007)
+- Solana client: `@solana/web3.js` in `packages/solana` only (ADR 007 §8)
+- Signing: secp256r1 passkey authority (WebAuthn) + Ed25519 device fee payer (ADR 005/006)
+- Client: Expo (one codebase → web + iOS + Android, PRD_v5 §9); Chrome extension later over the sdk-js core
