@@ -10,10 +10,10 @@ Tables:
   `docs/adr/002-email-uniqueness.md`.
 - `profiles` — `username` (unique, lowercase, `^[a-z0-9_]{3,20}$`), `usernameChangedAt`,
   `displayName`, `avatarUrl`, `locale`.
-- `peridot_accounts` — the wallet-owning entity (ADR 004). `identityId` FK → `identities.id`;
+- `pid_accounts` — the wallet-owning entity (ADR 004). `identityId` FK → `identities.id`;
   `status` (soft-delete convention), `version`. V1 creates exactly one default account per
   identity; schema permits many (future multi-account).
-- `chain_accounts` — one row per chain account. `accountId` FK → `peridot_accounts.id`;
+- `chain_accounts` — one row per chain account. `accountId` FK → `pid_accounts.id`;
   CAIP-2 `chainNamespace`/`chainReference` (Solana V1); `address` (PDA for `smart_account`,
   user-supplied for `linked_address`); `accountType ∈ {smart_account, linked_address}`.
   `@@unique([accountId, chainNamespace, chainReference, accountType])` — one smart account
@@ -39,10 +39,10 @@ ERD:
 ```text
 identities 1--* identity_credentials
 identities 1--1 profiles
-identities 1--* peridot_accounts 1--* chain_accounts 1--* wallet_fee_payers
-peridot_accounts 1--* authorities
-peridot_accounts 1--* intents 1--* transactions *--1 chain_accounts
-identities 1--* security_events *--1 peridot_accounts
+identities 1--* pid_accounts 1--* chain_accounts 1--* wallet_fee_payers
+pid_accounts 1--* authorities
+pid_accounts 1--* intents 1--* transactions *--1 chain_accounts
+identities 1--* security_events *--1 pid_accounts
 identities 1--* devices 1--* sessions
 ```
 
@@ -52,7 +52,7 @@ Invariants:
 - A non-null `email` is unique across `identity_credentials` (one email = one PID; enforced by
   a partial unique index plus the login-path check — ADR 002).
 - An identity always keeps at least one credential (unlink of the last one is rejected).
-- V1: one default `peridot_accounts` per identity (app-level; schema permits many).
+- V1: one default `pid_accounts` per identity (app-level; schema permits many).
 - At most one `smart_account` chain account per account per chain (unique constraint);
   `linked_address` rows may coexist (legacy V3 records).
 - The PID is the only source of truth — changing email, username, avatar, or linking/unlinking
@@ -81,6 +81,6 @@ Invariants:
 The `wallets` table (V3, ADR 003) was migrated into `chain_accounts` as
 `account_type = 'linked_address'`, `chain_namespace = 'solana'`,
 `chain_reference = '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z'` (mainnet-beta genesis-hash prefix),
-under each wallet-holding identity's default `peridot_accounts` row. The migration verifies
+under each wallet-holding identity's default `pid_accounts` row. The migration verifies
 the copy before dropping `wallets`. Smart-account creation is **not** backfilled — explicit
 user action only (ADR 004 §4).

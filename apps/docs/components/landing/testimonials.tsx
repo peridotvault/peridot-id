@@ -24,7 +24,7 @@ const TESTIMONIALS: Testimonial[] = [
   },
   {
     quote:
-      "We cut login churn from minutes to seconds. Instead of drowning players in new accounts, Peridot ID hands them the one Google sign-in that just works — every single time.",
+      "We cut login churn from minutes to seconds. Instead of drowning players in new accounts, PeridotID hands them the one Google sign-in that just works — every single time.",
     name: "Priya Anand",
     role: "Head of Platform at Halcyon",
     image: "/testimonials/person-2.jpg",

@@ -9,7 +9,7 @@ export {
   DOMAIN,
   INSTRUCTIONS_SYSVAR,
   IX,
-  PERIDOT_PROGRAM_ID,
+  PID_PROGRAM_ID,
   SECP256R1_PRECOMPILE,
   sha256,
 } from "./core";

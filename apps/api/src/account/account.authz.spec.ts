@@ -32,7 +32,7 @@ describe("Account authorization & abuse cases (routes)", () => {
           return status ? { status } : null;
         }),
       },
-      peridotAccount: {
+      pidAccount: {
         findFirst: jest.fn(async ({ where, include }: { where: { id?: string; identityId: string; status?: string }; include?: { chainAccounts: object } }) => {
           const row = [...state.accounts.values()].find((a) => a.identityId === where.identityId && (!where.id || a.id === where.id));
           if (!row) return null;
@@ -79,7 +79,7 @@ describe("Account authorization & abuse cases (routes)", () => {
           provide: ConfigService,
           useValue: {
             get: jest.fn(),
-            getOrThrow: jest.fn((key: string) => (key === "PERIDOT_PROGRAM_ID" ? PROGRAM_ID : SECRET)),
+            getOrThrow: jest.fn((key: string) => (key === "PID_PROGRAM_ID" ? PROGRAM_ID : SECRET)),
           },
         },
         { provide: PrismaService, useValue: prisma },
@@ -110,14 +110,14 @@ describe("Account authorization & abuse cases (routes)", () => {
 
   it("rejects a token for an unknown PID", async () => {
     const t = await token("pid_does_not_exist");
-    await request(app.getHttpServer()).get("/v1/accounts").set("Cookie", `peridot_access=${t}`).expect(401);
+    await request(app.getHttpServer()).get("/v1/accounts").set("Cookie", `pid_access=${t}`).expect(401);
   });
 
   it("creates the default account with a smart_account chain account", async () => {
     state.identities.set("pid_a", "active");
     const t = await token("pid_a");
 
-    const res = await request(app.getHttpServer()).post("/v1/accounts").set("Cookie", `peridot_access=${t}`).expect(200);
+    const res = await request(app.getHttpServer()).post("/v1/accounts").set("Cookie", `pid_access=${t}`).expect(200);
 
     expect(res.body.id).toBe("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
     expect(res.body.chainAccounts).toHaveLength(1);
@@ -131,21 +131,21 @@ describe("Account authorization & abuse cases (routes)", () => {
     state.accounts.set("11111111-1111-4111-8111-111111111111", { id: "11111111-1111-4111-8111-111111111111", identityId: "pid_a" });
     const tB = await token("pid_b");
 
-    await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111").set("Cookie", `peridot_access=${tB}`).expect(404);
+    await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111").set("Cookie", `pid_access=${tB}`).expect(404);
   });
 
   it("returns 404 for an unknown account id", async () => {
     state.identities.set("pid_a", "active");
     const t = await token("pid_a");
 
-    await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111").set("Cookie", `peridot_access=${t}`).expect(404);
+    await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111").set("Cookie", `pid_access=${t}`).expect(404);
   });
 
   it("rejects a malformed account id with 400", async () => {
     state.identities.set("pid_a", "active");
     const t = await token("pid_a");
 
-    await request(app.getHttpServer()).get("/v1/accounts/not-a-uuid").set("Cookie", `peridot_access=${t}`).expect(400);
+    await request(app.getHttpServer()).get("/v1/accounts/not-a-uuid").set("Cookie", `pid_access=${t}`).expect(400);
   });
 
   it("GET /v1/accounts/:id/chains is ownership-checked too", async () => {
@@ -153,6 +153,6 @@ describe("Account authorization & abuse cases (routes)", () => {
     state.accounts.set("11111111-1111-4111-8111-111111111111", { id: "11111111-1111-4111-8111-111111111111", identityId: "pid_a" });
     const tB = await token("pid_b");
 
-    await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111/chains").set("Cookie", `peridot_access=${tB}`).expect(404);
+    await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111/chains").set("Cookie", `pid_access=${tB}`).expect(404);
   });
 });

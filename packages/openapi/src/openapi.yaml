@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Peridot ID API
+  title: PeridotID API
   version: 0.1.0
   description: |
     Gaming Identity Platform — Authentication, Identity, and Profile for the Peridot ecosystem.
@@ -17,14 +17,14 @@ info:
     Authentication is **cookie-based**. After a successful Google sign-in the API sets two
     `HttpOnly` cookies:
 
-    - `peridot_access` — short-lived JWT access token (15 min), sent on every request.
-    - `peridot_refresh` — long-lived rotating refresh token (30 days), only sent to `/v1/auth`.
+    - `pid_access` — short-lived JWT access token (15 min), sent on every request.
+    - `pid_refresh` — long-lived rotating refresh token (30 days), only sent to `/v1/auth`.
 
     Browsers handle these automatically; non-browser clients must send
-    `Cookie: peridot_access=<token>` on each request and call `/v1/auth/refresh` before the
+    `Cookie: pid_access=<token>` on each request and call `/v1/auth/refresh` before the
     access token expires.
   contact:
-    name: Peridot ID
+    name: PeridotID
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
@@ -106,7 +106,7 @@ paths:
 
         1. Creates a new identity + profile on first sign-in, or logs into the existing
            identity when the Google credential `(provider, providerUserId)` is already linked.
-        2. Issues `peridot_access` and `peridot_refresh` cookies.
+        2. Issues `pid_access` and `pid_refresh` cookies.
         3. Redirects to the `CLIENT_SUCCESS_URL` configured on the server.
 
         Both cookies are `HttpOnly; SameSite=Lax`. In production the `Secure` flag is set.
@@ -124,7 +124,7 @@ paths:
       tags: [auth]
       summary: Rotate the refresh token
       description: |
-        Rotates the refresh token and issues a fresh access token. The current `peridot_refresh`
+        Rotates the refresh token and issues a fresh access token. The current `pid_refresh`
         cookie is **invalidated** and replaced with a new one (rotation), so each refresh token
         can be used exactly once.
 
@@ -740,7 +740,7 @@ components:
     cookieAuth:
       type: apiKey
       in: cookie
-      name: peridot_access
+      name: pid_access
       description: "JWT access token set by /auth/google/callback or /auth/refresh"
 
   responses:

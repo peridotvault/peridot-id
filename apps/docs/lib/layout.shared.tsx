@@ -10,7 +10,7 @@ function NavTitle() {
         className={`h-7 w-7 bg-foreground ${CUT}`}
         aria-hidden="true"
       />
-      <span className="text-[17px] font-semibold tracking-tight">Peridot ID</span>
+      <span className="text-[17px] font-semibold tracking-tight">PeridotID</span>
     </span>
   );
 }

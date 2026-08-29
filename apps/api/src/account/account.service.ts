@@ -72,14 +72,14 @@ export class AccountService {
   ) {}
 
   private programId(): string {
-    return this.config.getOrThrow<string>("PERIDOT_PROGRAM_ID");
+    return this.config.getOrThrow<string>("PID_PROGRAM_ID");
   }
 
   /** Find or create the identity's default Peridot account + its smart-account chain row. */
   async createAccount(identityId: string): Promise<AccountView> {
-    let account = await this.prisma.peridotAccount.findFirst({ where: { identityId, status: "active" } });
+    let account = await this.prisma.pidAccount.findFirst({ where: { identityId, status: "active" } });
     if (!account) {
-      account = await this.prisma.peridotAccount.create({ data: { identityId } });
+      account = await this.prisma.pidAccount.create({ data: { identityId } });
       await this.security.log(identityId, "account.created", {}, account.id);
     }
 
@@ -110,7 +110,7 @@ export class AccountService {
   }
 
   async getAccounts(identityId: string): Promise<AccountView[]> {
-    const accounts = await this.prisma.peridotAccount.findMany({
+    const accounts = await this.prisma.pidAccount.findMany({
       where: { identityId, status: "active" },
       include: { chainAccounts: { where: { status: "active" } } },
       orderBy: { createdAt: "asc" },
@@ -120,7 +120,7 @@ export class AccountService {
 
   /** Ownership strictly from the token — never a client-supplied identity. */
   async getAccount(identityId: string, accountId: string): Promise<AccountView> {
-    const account = await this.prisma.peridotAccount.findFirst({
+    const account = await this.prisma.pidAccount.findFirst({
       where: { id: accountId, identityId, status: "active" },
       include: { chainAccounts: { where: { status: "active" } } },
     });
@@ -129,7 +129,7 @@ export class AccountService {
   }
 
   async getAccountChains(identityId: string, accountId: string): Promise<ChainAccountView[]> {
-    const account = await this.prisma.peridotAccount.findFirst({
+    const account = await this.prisma.pidAccount.findFirst({
       where: { id: accountId, identityId, status: "active" },
       include: { chainAccounts: { where: { status: "active" } } },
     });

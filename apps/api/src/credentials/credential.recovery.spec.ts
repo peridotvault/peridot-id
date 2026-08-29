@@ -41,7 +41,7 @@ function setup() {
   };
   const security = { log: jest.fn(async () => undefined) };
   const prisma = {
-    peridotAccount: { findFirst: jest.fn(async () => ({ id: ACCOUNT_ID, identityId: "pid_01HASH", status: "active" }) as any) },
+    pidAccount: { findFirst: jest.fn(async () => ({ id: ACCOUNT_ID, identityId: "pid_01HASH", status: "active" }) as any) },
     authority: {
       findMany: jest.fn(async () => [] as any),
       findFirst: jest.fn(async () => null as any),
@@ -133,7 +133,7 @@ describe("Recovery & multi-device (task 008)", () => {
 
   it("get/list throws NotFound when the account does not exist", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(null as any);
+    prisma.pidAccount.findFirst.mockResolvedValue(null as any);
 
     await expect(service.list("pid_nobody")).rejects.toThrow(NotFoundException);
   });

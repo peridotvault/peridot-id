@@ -46,7 +46,7 @@ export function CaseStudy(): ReactNode {
             <CornerPlus className="left-0 top-0 hidden -translate-x-1/2 -translate-y-1/2 lg:block" />
             <CornerPlus className="bottom-0 left-0 hidden -translate-x-1/2 translate-y-1/2 lg:block" />
             <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
-              Spotify replaced six disconnected auth flows with Peridot ID,
+              Spotify replaced six disconnected auth flows with PeridotID,
               wiring sign-in, sessions, and audit into a single governed pipeline
               — and cut time to first session by 10×.
             </p>

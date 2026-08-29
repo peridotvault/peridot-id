@@ -11,7 +11,7 @@ import {
   buildAuthorizationPayload,
   buildWebAuthnMessage,
   deriveSmartAccountAddress,
-  PERIDOT_PROGRAM_ID,
+  PID_PROGRAM_ID,
 } from "./core";
 import {
   buildDepositSolInstruction,
@@ -56,7 +56,7 @@ const DEFAULT_EXPIRY_TTL_SECONDS = 300;
 export class SolanaAdapter {
   constructor(
     private readonly rpc: SolanaRpc,
-    private readonly programId: PublicKey = PERIDOT_PROGRAM_ID,
+    private readonly programId: PublicKey = PID_PROGRAM_ID,
   ) {}
 
   getAddress(accountId: string): PublicKey {

@@ -1,5 +1,5 @@
 {
-  "name": "@peridot/wallet",
+  "name": "@antigane/wallet",
   "version": "0.1.0",
   "private": true,
   "main": "node_modules/expo/AppEntry.js",
@@ -9,9 +9,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@peridot/sdk-js": "workspace:*",
-    "@peridot/solana": "workspace:*",
-    "@peridot/types": "workspace:*",
+    "@antigane/sdk-js": "workspace:*",
+    "@antigane/solana": "workspace:*",
+    "@antigane/types": "workspace:*",
     "expo": "~57.0.18",
     "expo-status-bar": "~3.0.0",
     "react": "19.0.0",

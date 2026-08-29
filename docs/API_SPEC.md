@@ -29,5 +29,5 @@ Deprecated (V3 record-only): GET /v1/wallet/me · POST /v1/wallet
 
 ## Client
 
-The SDK (`@peridot/sdk-js`) wraps these:
+The SDK (`@antigane/sdk-js`) wraps these:
 `peridot.auth/identity/profile/passkey` and `peridot.wallet.{me,createAccount,topup,withdraw,getTransactionStatus,getBalance}`.

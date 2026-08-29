@@ -19,7 +19,7 @@ import {
 const PROGRAM = new PublicKey(process.argv[2] || "G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G");
 const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 const INSTRUCTIONS = new PublicKey("Sysvar1nstructions1111111111111111111111111");
-const DOMAIN = Buffer.from("PERIDOT|SOLANA|SMART_ACCOUNT|v1");
+const DOMAIN = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v1");
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 
 const conn = new Connection("http://127.0.0.1:8899", "confirmed");
@@ -157,7 +157,7 @@ async function main() {
   const now = () => vclock;
   const accountId32 = uuidTo32(crypto.randomBytes(16).toString("hex"));
   const [pda, bump] = PublicKey.findProgramAddressSync(
-    [Buffer.from("peridot"), Buffer.from("account"), accountId32], PROGRAM);
+    [Buffer.from("peridot_id"), Buffer.from("account"), accountId32], PROGRAM);
   console.log(`program ${PROGRAM.toBase58()} pda ${pda.toBase58()} bump ${bump}`);
 
   // ---- initialize ----
@@ -214,7 +214,7 @@ async function main() {
 
   // ---- account mismatch (wrong PDA in args vs actual) ----
   const otherId = uuidTo32(crypto.randomBytes(16).toString("hex"));
-  const [otherPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot"), Buffer.from("account"), otherId], PROGRAM);
+  const [otherPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), otherId], PROGRAM);
   const a6 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry));
   await expectErr(withdrawIx(otherPda, dest.publicKey, 1, 1_000_000, destBytes, expiry, { privateKey, publicKey }, a6), [rentPayer], "account (PDA) mismatch rejected");
 

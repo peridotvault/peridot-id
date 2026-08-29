@@ -6,7 +6,7 @@ const BASE = "http://localhost:3301";
 const jwt = new JwtService({});
 
 const config = {
-  DATABASE_URL: process.env.DATABASE_URL || "postgresql://ranaufal@localhost:5432/peridot",
+  DATABASE_URL: process.env.DATABASE_URL || "postgresql://ranaufal@localhost:5432/peridot_id",
   ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || "dev-access-secret-please-change-0123456789abcdef",
   REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || "dev-refresh-secret-please-change-0123456789abcdef",
 };
@@ -44,7 +44,7 @@ async function main() {
   });
 
   const jar = new Map();
-  jar.set("peridot_refresh", refresh);
+  jar.set("pid_refresh", refresh);
   const setCookies = (res) => {
     for (const c of res.headers.getSetCookie()) {
       const [pair] = c.split(";");
@@ -82,7 +82,7 @@ async function main() {
 
   res = await fetch(`${BASE}/v1/auth/refresh`, {
     method: "POST",
-    headers: { cookie: `peridot_refresh=${refresh}` },
+    headers: { cookie: `pid_refresh=${refresh}` },
   });
   check("reused refresh token 401", res.status === 401);
 

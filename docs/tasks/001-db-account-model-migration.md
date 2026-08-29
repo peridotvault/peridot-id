@@ -6,7 +6,7 @@ planned
 
 ## Objective
 
-Implement the ADR 004 schema: `peridot_accounts`, `chain_accounts`, `authorities`,
+Implement the ADR 004 schema: `pid_accounts`, `chain_accounts`, `authorities`,
 `wallet_fee_payers`, `transactions`, `intents`, `security_events` — including the
 `wallets → chain_accounts` data migration.
 
@@ -33,7 +33,7 @@ credentials, intents, transactions) persists through this task's tables.
 - New Prisma models exactly per ADR 004 §2/§3/§6 — including
   `@@unique([account_id, chain_namespace, chain_reference, account_type])` on
   `chain_accounts` and `account_type ∈ {smart_account, linked_address}`.
-- Data migration: create default `peridot_accounts` for wallet-holding identities → copy
+- Data migration: create default `pid_accounts` for wallet-holding identities → copy
   `wallets` rows as `linked_address` chain accounts → verify counts → drop `wallets`.
 - **No smart-account backfill** (ADR 004 §4; explicit user action only).
 - Regenerate Prisma client; update `docs/DATABASE.md` ERD.
@@ -54,7 +54,7 @@ credentials, intents, transactions) persists through this task's tables.
   pre-existing rows survive; every `wallets` row appears in `chain_accounts`.
 - No provider (Google) fields on any wallet-side table (PRD_v3 §5/§11).
 - No key-material columns anywhere.
-- `pnpm --filter @peridot/api db:generate` and `pnpm typecheck` pass.
+- `pnpm --filter @antigane/api db:generate` and `pnpm typecheck` pass.
 
 ## Testing Requirements
 

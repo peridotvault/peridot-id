@@ -1,9 +1,9 @@
 # Architecture
 
 ```text
-Clients (Expo web/iOS/Android) -> SDK (@peridot/sdk-js) -> Peridot ID API -> PostgreSQL
+Clients (Expo web/iOS/Android) -> SDK (@antigane/sdk-js) -> PeridotID API -> PostgreSQL
                                   |
-                                  +-> Solana adapter (@peridot/solana) -> Solana RPC(s)
+                                  +-> Solana adapter (@antigane/solana) -> Solana RPC(s)
                                         |
                                         +-> Peridot smart-account program (Pinocchio, PDA)
 ```
@@ -20,7 +20,7 @@ Modules:
 - wallet (deprecated V3 record-only surface)
 
 Non-custodial wallet model (ADR 004–007):
-- Smart Account = a program PDA seeded `["peridot","account",account_id]`; authority is the
+- Smart Account = a program PDA seeded `["peridot_id","account",account_id]`; authority is the
   user's secp256r1 passkey, verified on-chain via the Secp256r1 precompile + instruction
   introspection (ADR 005 Option B).
 - Fee payer = client-held Ed25519 keypair (ADR 006). The server holds no key material.

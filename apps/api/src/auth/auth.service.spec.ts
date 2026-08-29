@@ -92,7 +92,7 @@ function setup() {
 }
 
 function reqWithToken(token: string) {
-  return { cookies: { peridot_refresh: token }, headers: { "user-agent": "test-agent" } } as never;
+  return { cookies: { pid_refresh: token }, headers: { "user-agent": "test-agent" } } as never;
 }
 
 describe("AuthService", () => {

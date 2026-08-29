@@ -88,7 +88,7 @@ pub fn process(
 
     let signer_seeds = [bump];
     let seeds = [
-        Seed::from(b"peridot".as_slice()),
+        Seed::from(b"peridot_id".as_slice()),
         Seed::from(b"account".as_slice()),
         Seed::from(account_id.as_slice()),
         Seed::from(signer_seeds.as_slice()),

@@ -1,4 +1,4 @@
-# Peridot ID
+# PeridotID
 
 Gaming Identity Platform — Authentication, Identity, and Profile for the Peridot ecosystem.
 One Google sign-in, one stable identity, one profile across every Peridot product.
@@ -25,6 +25,9 @@ packages/openapi    OpenAPI 3.0 specification (source of truth)
 
 Prereqs: Node.js 20+, pnpm, PostgreSQL 16+ (or Supabase).
 
+The local Postgres database is **`peridot_id`** (not `peridot` — that's the wider
+ecosystem). `docker compose up -d` creates it; `DATABASE_URL` in `apps/api/.env`.
+
 ```bash
 pnpm install
 cp apps/api/.env.example apps/api/.env   # add Google OAuth creds to test login
@@ -39,7 +42,7 @@ Scripts: `pnpm dev`, `pnpm dev:api`, `pnpm dev:docs`, `pnpm build`, `pnpm test`,
 ## SDK
 
 ```ts
-import { Peridot } from '@peridot/sdk-js';
+import { Peridot } from '@antigane/sdk-js';
 
 const peridot = Peridot({
   baseUrl: 'https://api.peridot-id.peridotvault.com',

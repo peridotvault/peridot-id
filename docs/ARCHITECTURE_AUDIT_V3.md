@@ -28,10 +28,10 @@ Supabase — refresh-token state lives in the `sessions` table, Postgres is the 
 **Authentication flow** (documented in `apps/docs/content/docs/(general)/authentication.mdx`):
 `POST /v1/auth/login` returns the Google authorization URL → `GET /v1/auth/google` redirects to
 Google consent → `GET /v1/auth/google/callback` exchanges the code, resolves or creates the
-identity, and sets two HttpOnly cookies (`peridot_access`, `peridot_refresh`) →
+identity, and sets two HttpOnly cookies (`pid_access`, `pid_refresh`) →
 redirect to `CLIENT_SUCCESS_URL`.
 
-**SDK.** `@peridot/sdk-js` is a thin `fetch` client, one class per domain
+**SDK.** `@antigane/sdk-js` is a thin `fetch` client, one class per domain
 (`PeridotAuth`, `PeridotIdentity`, `PeridotProfile`), cookie handling via
 `credentials: "include"`, 401 handling that never recurses on `/v1/auth/*`
 (`packages/sdk-js/src/index.ts`).
@@ -136,7 +136,7 @@ marked **deferred** are open until tasks 002/003 decide them; they are listed, n
   timing (in-flow vs explicit action).
 - **Auth boundary:** reuse the existing cookie-JWT/session mechanism; wallet routes require
   `JwtAuthGuard`; ownership resolved strictly from the token. No new transport or auth model.
-- **Contract:** extend `@peridot/types` and `@peridot/sdk-js` with a `PeridotWallet` domain
+- **Contract:** extend `@antigane/types` and `@antigane/sdk-js` with a `PeridotWallet` domain
   class. No new dependencies.
 - **Custody/key model, chain, AA:** **deferred to 003** — the repository gives no evidence;
   PRD §7 requires documenting the decision rather than guessing.

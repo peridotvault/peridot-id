@@ -42,8 +42,8 @@ crate and mirrored in `packages/solana`.
 
 ### 2. Account state — PDA, model-sized authority
 
-- PDA seeds: `["peridot", "account", account_id]` with `account_id` = 32-byte derivation from
-  `peridot_accounts.id` (ADR 004 §5). The PDA holds SOL/SPL assets; the program controls it.
+- PDA seeds: `["peridot_id", "account", account_id]` with `account_id` = 32-byte derivation from
+  `pid_accounts.id` (ADR 004 §5). The PDA holds SOL/SPL assets; the program controls it.
 - State: `account_id: [u8; 32]`, `authority` (**sized per ADR 005**: 32 B Ed25519 or 33/64 B
   secp256r1 — PRD_v4 §7.1 note; stored with a 1-byte model tag), `status: u8`,
   `nonce: u64`, `version: u8`. No 32-byte hardcoding if ADR 005 selects secp256r1.

@@ -3,15 +3,15 @@ title: Authentication
 description: Google sign-in, cookies, refresh rotation, and logout
 ---
 
-Peridot ID authentication is **cookie-based**. After a successful Google sign-in the API
+PeridotID authentication is **cookie-based**. After a successful Google sign-in the API
 sets two `HttpOnly` cookies on your domain.
 
 ## The two cookies
 
 | Cookie | Purpose | Lifetime | Path |
 |---|---|---|---|
-| `peridot_access` | JWT access token, sent with every request | 15 minutes | `/` |
-| `peridot_refresh` | Rotating refresh token, only used to mint new access tokens | 30 days | `/v1/auth` |
+| `pid_access` | JWT access token, sent with every request | 15 minutes | `/` |
+| `pid_refresh` | Rotating refresh token, only used to mint new access tokens | 30 days | `/v1/auth` |
 
 Both are `HttpOnly; SameSite=Lax`. In production the `Secure` flag is also set, so they
 are only sent over HTTPS.
@@ -19,7 +19,7 @@ are only sent over HTTPS.
 ## Sign-in flow
 
 ```text
-Browser                    Peridot ID                 Google
+Browser                    PeridotID                 Google
    │  POST /v1/auth/login     │                        │
    │  ← {"url": "/v1/auth/google"}                     │
    │  GET  /v1/auth/google ──►│  302 ─────────────────►│  consent screen
@@ -27,7 +27,7 @@ Browser                    Peridot ID                 Google
    │  ◄───────────────────────────── 302 + auth code ──  │
    │  GET  /v1/auth/google/callback?code=...            │
    │                        │  exchange code, create or link identity
-   │  ◄─ 302 CLIENT_SUCCESS_URL + peridot_access + peridot_refresh cookies
+   │  ◄─ 302 CLIENT_SUCCESS_URL + pid_access + pid_refresh cookies
 ```
 
 1. Call `POST /v1/auth/login` (or use the SDK) to get the Google authorization URL.
@@ -78,7 +78,7 @@ provider.
 The access token expires after 15 minutes. Instead of asking the user to log in again,
 call `POST /v1/auth/refresh`. It:
 
-1. Verifies the current `peridot_refresh` cookie.
+1. Verifies the current `pid_refresh` cookie.
 2. **Revokes it** (rotation) and issues a new access + refresh pair as cookies.
 
 Because each refresh token can be used exactly once, a stolen token that is replayed after

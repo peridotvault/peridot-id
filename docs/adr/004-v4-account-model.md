@@ -8,7 +8,7 @@ custody model lands, a follow-up ADR is required").
 
 ## Context
 
-PRD_v4 defines the target model: `users → peridot_accounts → chain_accounts`, plus
+PRD_v4 defines the target model: `users → pid_accounts → chain_accounts`, plus
 `authorities`, `wallet_fee_payers`, `transactions`, `intents`, `security_events`
 (PRD_v4 §15), with the on-chain account being a Solana PDA smart account (§7). PRD_v4 §20
 commands: adapt the recommended structure to the existing repository rather than blindly
@@ -36,7 +36,7 @@ not a bare address record hanging off the identity.
 |---|---|
 | `users` | existing `identities` (unchanged) |
 | `oauth_identities` | existing `identity_credentials` (unchanged; ADR 002 rules hold) |
-| `peridot_accounts` | **new** table |
+| `pid_accounts` | **new** table |
 | `chain_accounts` | **new** table; supersedes `wallets` (see §4) |
 | `authorities` | **new** table |
 | `wallet_fee_payers` | **new** table |
@@ -47,7 +47,7 @@ not a bare address record hanging off the identity.
 Renaming `identities`/`identity_credentials` to the PRD's names is rejected: pure churn
 against every existing module, migration, and doc for zero semantic gain.
 
-### 2. `peridot_accounts` — the wallet-owning entity
+### 2. `pid_accounts` — the wallet-owning entity
 
 ```text
 id          uuid (PK)
@@ -57,7 +57,7 @@ version     int, default 1
 created_at / updated_at
 ```
 
-- Ownership chain is `chain_accounts → peridot_accounts → identities`. A chain account never
+- Ownership chain is `chain_accounts → pid_accounts → identities`. A chain account never
   references a credential or provider directly (PRD_v3 §5 preserved: wallet → PID, never
   wallet → Google).
 - **V1 creates exactly one default account per identity** (app-level invariant; schema permits
@@ -67,7 +67,7 @@ created_at / updated_at
 
 ```text
 id               uuid (PK)
-account_id       FK → peridot_accounts.id
+account_id       FK → pid_accounts.id
 chain_namespace  string   -- CAIP-2 namespace: "solana" (V1), "eip155" (future)
 chain_reference  string   -- CAIP-2 reference: genesis-hash prefix for Solana
 address          string   -- PDA (smart_account) or user-supplied (linked_address)
@@ -88,7 +88,7 @@ created_at / updated_at
 
 - Every existing `wallets` row is migrated to `chain_accounts` with
   `account_type = "linked_address"`, `chain_namespace = "solana"`, under the identity's
-  default `peridot_accounts` row (created during the migration for identities that hold a
+  default `pid_accounts` row (created during the migration for identities that hold a
   wallet). No row is dropped; the migration is data-preserving per repo convention.
 - A V3 linked address is **not** a smart account and is never promoted to one. It remains a
   record-only association with ADR 003's accepted limitation (association ≠ on-chain
@@ -96,15 +96,15 @@ created_at / updated_at
 - The `wallets` table is dropped in the same migration after data is copied (the V3 API
   surface is preserved — see Consequences). If the copy verification fails, the migration
   aborts before the drop.
-- **No smart-account backfill**: existing users get a `peridot_accounts` default row only;
+- **No smart-account backfill**: existing users get a `pid_accounts` default row only;
   smart-account initialization remains an explicit user action (extends ADR 003 Decision 4/6,
   PRD_v3 §12 — no silent creation, now with real on-chain cost).
 
 ### 5. Smart account identity — PDA derivation
 
 - On-chain account = PDA of the Peridot program (ADR 007) with seeds
-  `["peridot", "account", account_id]` where `account_id` is the 32-byte representation of the
-  `peridot_accounts.id` row (UUID bytes, zero-padded derivation documented in task 004).
+  `["peridot_id", "account", account_id]` where `account_id` is the 32-byte representation of the
+  `pid_accounts.id` row (UUID bytes, zero-padded derivation documented in task 004).
 - Therefore the smart-account `address` is **deterministically resolvable** off-chain before
   any on-chain initialization (PRD_v4 §28 Wallet: "deterministically resolvable") — the API
   can return the address before the program account exists; `status`/`deployment` tracking
@@ -135,7 +135,7 @@ created_at / updated_at
 - **Bolt smart-account columns onto `wallets`** — rejected: mixes record-only and programmable
   custody semantics in one row; the V3/V4 lifecycle rules differ (ADR 003 PID-deletion
   soft-delete vs on-chain PDA that a DB delete cannot close).
-- **Merge `peridot_accounts` into `identities`** — rejected: breaks PRD_v4's layering and
+- **Merge `pid_accounts` into `identities`** — rejected: breaks PRD_v4's layering and
   pre-commits against multi-account futures the schema already cheaply permits.
 - **Keep `wallets` as a parallel permanent table** — rejected: two sources of truth for
   "user's Solana address association"; migrated into `chain_accounts` instead.
@@ -146,7 +146,7 @@ created_at / updated_at
 ### Schema (task 003)
 
 New Prisma models per §2/§3/§6 with repo conventions (`@@map`, `onDelete: Cascade` from
-`identities` → `peridot_accounts` → `chain_accounts` as defensive cascades; only soft-delete
+`identities` → `pid_accounts` → `chain_accounts` as defensive cascades; only soft-delete
 is reachable). Data migration for `wallets` per §4. `pnpm db:generate` + `typecheck` must
 pass; migration must apply on a database containing live V2/V3 data.
 
@@ -161,7 +161,7 @@ deprecated in OpenAPI and never return `smart_account` rows.
 
 - Wallet persistence guarantees of ADR 003 carry over unchanged (hangs off the identity
   lineage, survives provider unlink/session rotation/device change).
-- PID deletion: soft-delete cascades down `peridot_accounts`/`chain_accounts` by `status`,
+- PID deletion: soft-delete cascades down `pid_accounts`/`chain_accounts` by `status`,
   same as today. **Documented divergence (PRD_v3 §8):** a DB delete cannot close the on-chain
   PDA; the program's `close` instruction (ADR 007) is the only on-chain teardown and is not
   exposed by any V1 API.
@@ -184,7 +184,7 @@ deprecated in OpenAPI and never return `smart_account` rows.
 ## Migration considerations
 
 - Single additive-then-copy-then-drop migration (task 003): create new tables → create default
-  `peridot_accounts` for wallet-holding identities → copy `wallets` → verify counts → drop
+  `pid_accounts` for wallet-holding identities → copy `wallets` → verify counts → drop
   `wallets`. Production path: existing `pnpm db:deploy` against Supabase.
 - Backfill stance: `wallets → chain_accounts` copy **required**; smart-account creation
   backfill **forbidden** (explicit user action only).

@@ -162,7 +162,7 @@ The program supports exactly:
 The program must:
 
 - initialize the Smart Account using a deterministic PDA
-  (seeds: `["peridot", "account", account_id]`, ADR 004/007);
+  (seeds: `["peridot_id", "account", account_id]`, ADR 004/007);
 - associate the Smart Account with the user's PeridotID;
 - verify secp256r1 passkey authorization on every withdrawal via the native secp256r1
   precompile, with the WebAuthn challenge bound to the domain-separated payload
@@ -352,7 +352,7 @@ for debugging and security audits (PRD_v4 §17).
 - SPL token withdrawals (`withdraw_token`, passkey-authorized)
 - secp256r1 passkey authority (ADR 005 Option B) + Ed25519 device fee payer (ADR 006)
 - Google OAuth login with device-saved sessions; multi-device login on one account
-- One Expo client serving web + iOS + Android, built on the `@peridot/sdk-js` core
+- One Expo client serving web + iOS + Android, built on the `@antigane/sdk-js` core
 - Authorization and security validation
 - Devnet testing
 - Mainnet deployment

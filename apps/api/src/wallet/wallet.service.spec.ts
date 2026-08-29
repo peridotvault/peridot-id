@@ -32,7 +32,7 @@ function accountRow(identityId: string, withLinked: boolean, address: string) {
 
 function prismaMock() {
   const mocks: Record<string, unknown> = {
-    peridotAccount: {
+    pidAccount: {
       findFirst: jest.fn(async () => null),
       create: jest.fn(
         async (args: { data: { identityId: string } }) => ({
@@ -72,7 +72,7 @@ function setup() {
 describe("WalletService", () => {
   it("getMe returns the linked_address for the authenticated PID", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", true, "addr-1"));
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", true, "addr-1"));
 
     const wallet = await service.getMe("pid_01HASH");
 
@@ -83,7 +83,7 @@ describe("WalletService", () => {
       status: "active",
       createdAt: expect.any(Date),
     });
-    expect(prisma.peridotAccount.findFirst).toHaveBeenCalledWith(
+    expect(prisma.pidAccount.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { identityId: "pid_01HASH", status: "active" },
       }),
@@ -101,7 +101,7 @@ describe("WalletService", () => {
 
     const wallet = await service.create("pid_01HASH", "addr-solana");
 
-    expect(prisma.peridotAccount.create).toHaveBeenCalledWith({
+    expect(prisma.pidAccount.create).toHaveBeenCalledWith({
       data: { identityId: "pid_01HASH" },
     });
     expect(prisma.chainAccount.create).toHaveBeenCalledWith(
@@ -121,7 +121,7 @@ describe("WalletService", () => {
 
   it("create returns the existing linked_address instead of creating a duplicate", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", true, "addr-1"));
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", true, "addr-1"));
     prisma.chainAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", true, "addr-1").chainAccounts[0]);
 
     const wallet = await service.create("pid_01HASH", "addr-2");
@@ -132,7 +132,7 @@ describe("WalletService", () => {
 
   it("create returns the existing wallet when a concurrent duplicate hits the unique index", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", false, ""));
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", false, ""));
     prisma.chainAccount.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
         code: "P2002",

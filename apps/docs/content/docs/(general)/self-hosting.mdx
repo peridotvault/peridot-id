@@ -1,6 +1,6 @@
 ---
 title: Self-hosting
-description: Run the Peridot ID API yourself
+description: Run the PeridotID API yourself
 ---
 
 ## Requirements
@@ -53,7 +53,7 @@ pnpm dev                      # API on http://localhost:3301, docs on http://loc
 
    ```bash
    DATABASE_URL="postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres" \
-     pnpm --filter @peridot/api db:deploy
+     pnpm --filter @antigane/api db:deploy
    ```
 
 2. **Vercel — API** (`apps/api/vercel.json` is already configured for serverless). Add a
@@ -72,8 +72,8 @@ pnpm dev                      # API on http://localhost:3301, docs on http://loc
 
 ```bash
 pnpm build
-pnpm --filter @peridot/api db:deploy
-pnpm --filter @peridot/api start
+pnpm --filter @antigane/api db:deploy
+pnpm --filter @antigane/api start
 ```
 
 ## V2 → V3 migration notes
@@ -96,7 +96,7 @@ untouched.
    Collisions must be resolved per case before deploy; the email-uniqueness index fails the
    migration if duplicates remain.
 
-2. Deploy with `pnpm --filter @peridot/api db:deploy` (same flow as the Supabase steps above).
+2. Deploy with `pnpm --filter @antigane/api db:deploy` (same flow as the Supabase steps above).
 
 3. **No backfill.** Existing users get **no wallet** — wallets are created only by explicit
    user action (`POST /v1/wallet`), so nothing is silently created for existing accounts

@@ -119,7 +119,7 @@ impl<'data> SmartAccountMut<'data> {
     }
 }
 
-/// Verify the smart account PDA against seeds `["peridot", "account", account_id]` and
+/// Verify the smart account PDA against seeds `["peridot_id", "account", account_id]` and
 /// return the bump used (needed for CPI signer seeds).
 ///
 /// On host (unit tests) the bpf-gated syscall derivation is unavailable; the real PDA
@@ -133,7 +133,7 @@ pub fn verify_pda(
     #[cfg(any(target_os = "solana", target_arch = "bpf"))]
     {
         let (expected, bump) =
-            pinocchio::Address::find_program_address(&[b"peridot", b"account", &account_id], program_id);
+            pinocchio::Address::find_program_address(&[b"peridot_id", b"account", &account_id], program_id);
         if smart_account.address() != &expected {
             return Err(PeridotError::InvalidPda.into());
         }

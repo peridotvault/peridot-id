@@ -18,21 +18,21 @@ const FEATURES: Feature[] = [
     shape: "scan",
     title: "One identity, every product",
     body: "Every game, web app, and tool in the ecosystem reads the same player profile — sign in once and it just works everywhere.",
-    meta: "Identity · Peridot ID Core",
+    meta: "Identity · PeridotID Core",
     href: "/docs/getting-started",
   },
   {
     shape: "shield",
     title: "Sessions without the drift",
     body: "Centralized session management keeps tokens fresh, valid, and revocable — no more duplicated logins or stale auth state.",
-    meta: "Sessions · Peridot ID Auth",
+    meta: "Sessions · PeridotID Auth",
     href: "/docs/authentication",
   },
   {
     shape: "key",
     title: "Provable, sealed control",
     body: "OAuth2-ready flows, hardware-backed keys, and full audit trails keep every sign-in accountable and ready for any auditor.",
-    meta: "Governance · Peridot ID Vault",
+    meta: "Governance · PeridotID Vault",
     href: "/docs/api",
   },
 ];
@@ -55,7 +55,7 @@ export function Features(): ReactNode {
           every sign-in
         </h2>
         <p className="mt-4 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-          Peridot ID collapses fragmented accounts into a single system of record
+          PeridotID collapses fragmented accounts into a single system of record
           — built to sign in, manage sessions, and prove control without the
           integration tax.
         </p>

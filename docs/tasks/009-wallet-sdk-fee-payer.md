@@ -21,7 +21,7 @@ end-to-end against a local validator.
 
 ## Cross-package change
 
-`@peridot/solana` was made **browser-safe**: no Buffer/node:crypto — a pure `bytes.ts`
+`@antigane/solana` was made **browser-safe**: no Buffer/node:crypto — a pure `bytes.ts`
 (Uint8Array helpers, WebCrypto SHA-256, DER→raw, low-S) and async payload builders.
 Confirmed no regression via the adapter e2e.
 

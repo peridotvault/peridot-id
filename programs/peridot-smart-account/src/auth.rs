@@ -23,7 +23,7 @@ use pinocchio::{
 };
 
 /// Domain separator for the signed authorization payload (PRD_v4 §25).
-pub const DOMAIN: &[u8] = b"PERIDOT|SOLANA|SMART_ACCOUNT|v1";
+pub const DOMAIN: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v1";
 
 /// sha256 — pure-Rust implementation (the `sol_sha256` syscall crashes this SBF toolchain).
 #[inline(always)]

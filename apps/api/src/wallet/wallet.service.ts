@@ -31,7 +31,7 @@ export class WalletService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getMe(identityId: string): Promise<WalletView> {
-    const account = await this.prisma.peridotAccount.findFirst({
+    const account = await this.prisma.pidAccount.findFirst({
       where: { identityId, status: "active" },
       include: { chainAccounts: { where: { accountType: ACCOUNT_TYPE_LINKED }, take: 1 } },
     });
@@ -41,9 +41,9 @@ export class WalletService {
   }
 
   async create(identityId: string, address: string): Promise<WalletView> {
-    let account = await this.prisma.peridotAccount.findFirst({ where: { identityId, status: "active" } });
+    let account = await this.prisma.pidAccount.findFirst({ where: { identityId, status: "active" } });
     if (!account) {
-      account = await this.prisma.peridotAccount.create({ data: { identityId } });
+      account = await this.prisma.pidAccount.create({ data: { identityId } });
     }
 
     const existing = await this.prisma.chainAccount.findFirst({

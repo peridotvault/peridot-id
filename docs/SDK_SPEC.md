@@ -1,6 +1,6 @@
 # SDK
 
-Browser SDK (`@peridot/sdk-js`). Full usage guide: see the public docs at `apps/docs`
+Browser SDK (`@antigane/sdk-js`). Full usage guide: see the public docs at `apps/docs`
 (`content/docs/sdk.mdx`).
 
 ```ts

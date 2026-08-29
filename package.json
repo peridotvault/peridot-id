@@ -23,16 +23,16 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel dev",
-    "dev:api": "pnpm --filter @peridot/api dev",
-    "dev:docs": "pnpm --filter @peridot/docs dev",
+    "dev:api": "pnpm --filter @antigane/api dev",
+    "dev:docs": "pnpm --filter @antigane/docs dev",
     "start": "pnpm -r --parallel start",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @peridot/api test",
-    "db:migrate": "pnpm --filter @peridot/api db:migrate",
-    "db:deploy": "pnpm --filter @peridot/api db:deploy",
-    "db:generate": "pnpm --filter @peridot/api db:generate",
-    "db:studio": "pnpm --filter @peridot/api db:studio"
+    "test": "pnpm --filter @antigane/api test",
+    "db:migrate": "pnpm --filter @antigane/api db:migrate",
+    "db:deploy": "pnpm --filter @antigane/api db:deploy",
+    "db:generate": "pnpm --filter @antigane/api db:generate",
+    "db:studio": "pnpm --filter @antigane/api db:studio"
   }
 }

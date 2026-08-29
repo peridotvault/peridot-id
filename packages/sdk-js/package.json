@@ -1,12 +1,12 @@
 {
-  "name": "@peridot/sdk-js",
+  "name": "@antigane/sdk-js",
   "version": "0.1.0",
   "private": true,
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
-    "@peridot/solana": "workspace:*",
-    "@peridot/types": "workspace:*",
+    "@antigane/solana": "workspace:*",
+    "@antigane/types": "workspace:*",
     "@solana/web3.js": "^1.98.4"
   },
   "scripts": {

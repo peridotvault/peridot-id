@@ -3,7 +3,7 @@ import { AccountService } from "./account.service";
 
 const PROGRAM_ID = "9LCZEdXdmLeEyU8Fik2721R28K4xWXTrVd76r4tczNZY";
 const ACCOUNT_ID = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
-const DERIVED = "2NLJ3iEMJoL6SyvvUeVcHLrKiqw4L5xEwUSnn4wnpiDq"; // reference vector, task 002
+const DERIVED = "E51nPEyN8TFAXQSxQoZBGgRG9XvLRA37d4ZMobA19cs"; // reference vector (seed = peridot_id)
 
 const SMART = "smart_account";
 
@@ -38,7 +38,7 @@ function setup() {
   const config = { getOrThrow: jest.fn(() => PROGRAM_ID) };
   const security = { log: jest.fn(async () => undefined) };
   const prisma = {
-    peridotAccount: {
+    pidAccount: {
       findFirst: jest.fn(async () => null as any),
       findMany: jest.fn(async () => [] as any),
       create: jest.fn(async () => accountRow()),
@@ -56,13 +56,13 @@ function setup() {
 describe("AccountService", () => {
   it("createAccount seeds the smart_account with the derived PDA address", async () => {
     const { service, prisma, security } = setup();
-    prisma.peridotAccount.findFirst
+    prisma.pidAccount.findFirst
       .mockResolvedValueOnce(null) // initial existence check
       .mockResolvedValueOnce(accountRow({ chainAccounts: [chainRow()] })); // getAccount
 
     const view = await service.createAccount("pid_01HASH");
 
-    expect(prisma.peridotAccount.create).toHaveBeenCalledWith({ data: { identityId: "pid_01HASH" } });
+    expect(prisma.pidAccount.create).toHaveBeenCalledWith({ data: { identityId: "pid_01HASH" } });
     expect(prisma.chainAccount.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
@@ -81,21 +81,21 @@ describe("AccountService", () => {
 
   it("createAccount returns the existing account instead of creating a duplicate", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst
+    prisma.pidAccount.findFirst
       .mockResolvedValueOnce(accountRow()) // initial check
       .mockResolvedValueOnce(accountRow({ chainAccounts: [chainRow()] })); // getAccount
     prisma.chainAccount.findFirst.mockResolvedValue(chainRow()); // smart row already exists
 
     const view = await service.createAccount("pid_01HASH");
 
-    expect(prisma.peridotAccount.create).not.toHaveBeenCalled();
+    expect(prisma.pidAccount.create).not.toHaveBeenCalled();
     expect(prisma.chainAccount.create).not.toHaveBeenCalled();
     expect(view.chainAccounts[0].address).toBe(DERIVED);
   });
 
   it("createAccount does not reseed the smart row when it already exists", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(accountRow({ chainAccounts: [chainRow()] }));
+    prisma.pidAccount.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(accountRow({ chainAccounts: [chainRow()] }));
     prisma.chainAccount.findFirst.mockResolvedValue(chainRow());
 
     await service.createAccount("pid_01HASH");
@@ -117,7 +117,7 @@ describe("AccountService", () => {
 
   it("getAccounts maps active accounts with their chain accounts", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findMany.mockResolvedValue([accountRow({ chainAccounts: [chainRow()] })]);
+    prisma.pidAccount.findMany.mockResolvedValue([accountRow({ chainAccounts: [chainRow()] })]);
 
     const views = await service.getAccounts("pid_01HASH");
 

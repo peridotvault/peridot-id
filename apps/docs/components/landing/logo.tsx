@@ -8,13 +8,13 @@ export function Logo(): ReactNode {
     <a
       href="/"
       className="focus-ring group inline-flex items-center gap-2.5"
-      aria-label="Peridot ID home"
+      aria-label="PeridotID home"
     >
       <span
         className={`h-7 w-7 bg-foreground transition-transform duration-300 group-hover:rotate-3 ${CUT}`}
         aria-hidden="true"
       />
-      <span className="text-[17px] font-semibold tracking-tight">Peridot ID</span>
+      <span className="text-[17px] font-semibold tracking-tight">PeridotID</span>
     </a>
   );
 }

@@ -23,10 +23,10 @@ async function bootstrap(): Promise<void> {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle("Peridot ID API")
+    .setTitle("PeridotID API")
     .setDescription("Gaming Identity Platform - Authentication, Identity, Profile")
     .setVersion("0.1.0")
-    .addCookieAuth("peridot_access")
+    .addCookieAuth("pid_access")
     .build();
   SwaggerModule.setup("docs", app, SwaggerModule.createDocument(app, swaggerConfig));
 

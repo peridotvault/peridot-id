@@ -177,7 +177,7 @@ export function Pricing(): ReactNode {
             with your playerbase
           </h2>
           <p className="mt-4 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Every plan runs the full Peridot ID engine. Add titles, sessions, and
+            Every plan runs the full PeridotID engine. Add titles, sessions, and
             governance as your ecosystem grows — billed per user, with no
             per-sign-in surprises.
           </p>

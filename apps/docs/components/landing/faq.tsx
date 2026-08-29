@@ -10,29 +10,29 @@ type QA = { question: string; answer: string };
 
 const FAQS: QA[] = [
   {
-    question: "What exactly is Peridot ID?",
+    question: "What exactly is PeridotID?",
     answer:
-      "Peridot ID is a unified identity platform that collapses sign-in, session management, and player profiles into one system of record. Every game, web app, and tool in the ecosystem reads the same identity — so players sign in once and it just works everywhere.",
+      "PeridotID is a unified identity platform that collapses sign-in, session management, and player profiles into one system of record. Every game, web app, and tool in the ecosystem reads the same identity — so players sign in once and it just works everywhere.",
   },
   {
-    question: "Which products and environments does Peridot ID cover?",
+    question: "Which products and environments does PeridotID cover?",
     answer:
-      "Peridot ID works across web, mobile, and desktop titles from a single control plane. The SDKs cover the common frameworks in minutes, while a full REST API handles anything custom behind your own infrastructure.",
+      "PeridotID works across web, mobile, and desktop titles from a single control plane. The SDKs cover the common frameworks in minutes, while a full REST API handles anything custom behind your own infrastructure.",
   },
   {
-    question: "How does Peridot ID handle data security and compliance?",
+    question: "How does PeridotID handle data security and compliance?",
     answer:
-      "Data is encrypted in transit and at rest with hardware-backed keys, and every sign-in is written to an immutable audit trail. Peridot ID is SOC 2 Type II and ISO 27001 certified, with regional data residency available for GDPR and HIPAA programs.",
+      "Data is encrypted in transit and at rest with hardware-backed keys, and every sign-in is written to an immutable audit trail. PeridotID is SOC 2 Type II and ISO 27001 certified, with regional data residency available for GDPR and HIPAA programs.",
   },
   {
     question: "How long does it take to deploy?",
     answer:
-      "Most studios ship their first sign-in on day one. Wire up Google OAuth through the guided setup, and Peridot ID starts managing sessions immediately — no professional-services engagement or multi-quarter rollout required.",
+      "Most studios ship their first sign-in on day one. Wire up Google OAuth through the guided setup, and PeridotID starts managing sessions immediately — no professional-services engagement or multi-quarter rollout required.",
   },
   {
     question: "Will it integrate with our existing stack?",
     answer:
-      "Yes. Peridot ID ships with native SDKs for the common frameworks plus a full REST API and webhooks, so you can wire unified auth into whatever you already run.",
+      "Yes. PeridotID ships with native SDKs for the common frameworks plus a full REST API and webhooks, so you can wire unified auth into whatever you already run.",
   },
   {
     question: "How is access controlled and audited?",
@@ -40,9 +40,9 @@ const FAQS: QA[] = [
       "Granular role-based access, SSO, and SCIM provisioning keep permissions tight, while every login and change is logged and exportable. Sessions can be revoked the instant a risky pattern is detected.",
   },
   {
-    question: "Can Peridot ID be self-hosted?",
+    question: "Can PeridotID be self-hosted?",
     answer:
-      "Teams with strict data-control requirements can run Peridot ID entirely within their own VPC or private cloud. You keep full ownership of the data plane while still receiving managed updates to the identity engine.",
+      "Teams with strict data-control requirements can run PeridotID entirely within their own VPC or private cloud. You keep full ownership of the data plane while still receiving managed updates to the identity engine.",
   },
 ];
 
@@ -154,7 +154,7 @@ export function Faq(): ReactNode {
             Frequently asked questions
           </h2>
           <p className="mt-6 max-w-sm text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Everything you need to know about deploying Peridot ID. Can&apos;t find
+            Everything you need to know about deploying PeridotID. Can&apos;t find
             an answer? Our team is one message away.
           </p>
           <div className="mt-8">

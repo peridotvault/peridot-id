@@ -60,7 +60,7 @@ export class IntentService {
 
   /** The identity's default account with its smart-account chain row (ownership from token). */
   private async resolveAccount(identityId: string) {
-    const account = await this.prisma.peridotAccount.findFirst({
+    const account = await this.prisma.pidAccount.findFirst({
       where: { identityId, status: "active" },
       include: { chainAccounts: { where: { status: "active" } } },
     });

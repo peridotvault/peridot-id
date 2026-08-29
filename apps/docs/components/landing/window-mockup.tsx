@@ -119,7 +119,7 @@ function Sidebar(): ReactNode {
       <div className="flex h-14 items-center gap-2.5 border-b border-border/60 px-4">
         <span className={`h-6 w-6 bg-foreground ${CUT}`} aria-hidden="true" />
         <span className="text-[15px] font-semibold tracking-tight">
-          Peridot ID
+          PeridotID
         </span>
       </div>
 
@@ -379,7 +379,7 @@ export function WindowMockup(): ReactNode {
           <span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
         </div>
         <span className="pointer-events-none absolute inset-x-0 text-center text-xs font-normal text-muted-foreground">
-          Peridot ID
+          PeridotID
         </span>
       </div>
 

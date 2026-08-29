@@ -12,8 +12,8 @@
 import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
-import { PeridotWallet } from "@peridot/sdk-js";
-import { b64url, buildWebAuthnMessage, toHex } from "@peridot/solana";
+import { PeridotWallet } from "@antigane/sdk-js";
+import { b64url, buildWebAuthnMessage, toHex } from "@antigane/solana";
 
 const RPC = "https://api.devnet.solana.com";
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");

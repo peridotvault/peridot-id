@@ -50,7 +50,7 @@ function setup() {
   const config = { get: jest.fn((key: string) => (key === "SOLANA_NETWORK" ? "devnet" : undefined)) };
   const security = { log: jest.fn(async () => undefined) };
   const prisma = {
-    peridotAccount: { findFirst: jest.fn(async () => null as any) },
+    pidAccount: { findFirst: jest.fn(async () => null as any) },
     authority: { count: jest.fn(async () => 1) },
     intent: {
       create: jest.fn(async () => intentRow()),
@@ -72,7 +72,7 @@ const DEST = "DeSt1111111111111111111111111111111111111";
 describe("IntentService", () => {
   it("creates a WITHDRAW_SOL intent with policy + ownership context", async () => {
     const { service, prisma, security } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
 
     const view = await service.createIntent("pid_01HASH", {
       type: "WITHDRAW_SOL",
@@ -95,7 +95,7 @@ describe("IntentService", () => {
 
   it("rejects a zero/negative amount", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
 
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "0", destination: DEST } })).rejects.toThrow(BadRequestException);
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "-5", destination: DEST } })).rejects.toThrow(BadRequestException);
@@ -103,21 +103,21 @@ describe("IntentService", () => {
 
   it("rejects an invalid destination", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
 
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "1", destination: "not-a-pubkey!" } })).rejects.toThrow(BadRequestException);
   });
 
   it("rejects withdrawing to the smart account itself", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
 
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "1", destination: SMART_ADDR } })).rejects.toThrow(BadRequestException);
   });
 
   it("rejects an account with no registered authority (passkey)", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
     prisma.authority.count.mockResolvedValue(0);
 
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "1", destination: DEST } })).rejects.toThrow(BadRequestException);
@@ -125,7 +125,7 @@ describe("IntentService", () => {
 
   it("records a submitted transaction and marks the intent executed (single-use)", async () => {
     const { service, prisma, security } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
     prisma.intent.findFirst.mockResolvedValue(intentRow());
 
     const view = await service.recordTransaction("pid_01HASH", { intentId: "intent-1", txHash: "sig1" });
@@ -137,7 +137,7 @@ describe("IntentService", () => {
 
   it("rejects replaying an already-executed intent", async () => {
     const { service, prisma, security } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
     prisma.intent.findFirst.mockResolvedValue(intentRow({ status: "executed" }));
 
     await expect(service.recordTransaction("pid_01HASH", { intentId: "intent-1", txHash: "sig2" })).rejects.toThrow(BadRequestException);
@@ -147,7 +147,7 @@ describe("IntentService", () => {
 
   it("rejects an expired intent", async () => {
     const { service, prisma } = setup();
-    prisma.peridotAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
     prisma.intent.findFirst.mockResolvedValue(intentRow({ expiresAt: new Date(Date.now() - 1000) }));
 
     await expect(service.recordTransaction("pid_01HASH", { intentId: "intent-1", txHash: "sig3" })).rejects.toThrow(BadRequestException);

@@ -1,9 +1,9 @@
 ---
 title: API Reference
-description: Every endpoint of the Peridot ID API
+description: Every endpoint of the PeridotID API
 ---
 
-The Peridot ID API is versioned under `/v1` and grouped by concern:
+The PeridotID API is versioned under `/v1` and grouped by concern:
 
 - **Auth** — Google login, OAuth callback, token refresh, logout
 - **Identity** — the stable per-user identity and its login credentials
@@ -24,11 +24,11 @@ All endpoints are prefixed with `/v1`.
 
 Authentication is **cookie-based**. After Google sign-in the API sets two `HttpOnly` cookies:
 
-- `peridot_access` — short-lived JWT access token (15 min), sent on every request.
-- `peridot_refresh` — long-lived rotating refresh token (30 days), only sent to `/v1/auth`.
+- `pid_access` — short-lived JWT access token (15 min), sent on every request.
+- `pid_refresh` — long-lived rotating refresh token (30 days), only sent to `/v1/auth`.
 
 Browsers handle these automatically; non-browser clients must send
-`Cookie: peridot_access=<token>` on each request and call `/v1/auth/refresh` before the
+`Cookie: pid_access=<token>` on each request and call `/v1/auth/refresh` before the
 access token expires.
 
 Browse the endpoints in the sidebar, or read the raw

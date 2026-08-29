@@ -1,12 +1,12 @@
 // Browser WebAuthn passkey integration (task 009). Provides the PasskeySigner the Solana
 // adapter needs, plus the registration ceremony client for the credentials API (task 003).
 
-import { b64url, b64urlToBytes, derToRawEcdsa } from "@peridot/solana";
-import type { PasskeyAssertion, PasskeySigner } from "@peridot/solana";
+import { b64url, b64urlToBytes, derToRawEcdsa } from "@antigane/solana";
+import type { PasskeyAssertion, PasskeySigner } from "@antigane/solana";
 import type {
   Authority,
   RegisterStart,
-} from "@peridot/types";
+} from "@antigane/types";
 
 function bytesOf(v: ArrayBuffer | ArrayBufferView): Uint8Array {
   return v instanceof Uint8Array ? v : new Uint8Array(v as ArrayBuffer);

@@ -2,8 +2,8 @@ import { Response } from "express";
 import { ConfigService } from "@nestjs/config";
 import ms from "ms";
 
-export const ACCESS_COOKIE = "peridot_access";
-export const REFRESH_COOKIE = "peridot_refresh";
+export const ACCESS_COOKIE = "pid_access";
+export const REFRESH_COOKIE = "pid_refresh";
 const REFRESH_PATH = "/v1/auth";
 
 export function setAuthCookies(res: Response, config: ConfigService, access: string, refresh: string): void {

@@ -46,7 +46,7 @@ model Identity {
   credentials IdentityCredential[]
   devices     Device[]
 
-  peridotAccounts PeridotAccount[]
+  pidAccounts PidAccount[]
   securityEvents  SecurityEvent[]
 
   @@map("identities")
@@ -108,7 +108,7 @@ model Session {
 // ADR 004: PeridotID account — the wallet-owning entity. V1 creates exactly one default
 // account per identity (API exposes 1); schema permits many so a future multi-account
 // product needs no migration.
-model PeridotAccount {
+model PidAccount {
   id         String         @id @default(uuid())
   identityId String
   identity   Identity       @relation(fields: [identityId], references: [id], onDelete: Cascade)
@@ -124,7 +124,7 @@ model PeridotAccount {
   securityEvents SecurityEvent[]
   challenges     CredentialChallenge[]
 
-  @@map("peridot_accounts")
+  @@map("pid_accounts")
 }
 
 // ADR 005: single-use, expiring WebAuthn ceremony state. No secret material — the challenge
@@ -133,7 +133,7 @@ model PeridotAccount {
 model CredentialChallenge {
   id                String           @id @default(uuid())
   accountId         String
-  account           PeridotAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account           PidAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
   kind              String
   challenge         String
   approvalChallenge String?
@@ -153,7 +153,7 @@ model CredentialChallenge {
 model ChainAccount {
   id             String         @id @default(uuid())
   accountId      String
-  account        PeridotAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account        PidAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   chainNamespace String
   chainReference String
   address        String
@@ -174,7 +174,7 @@ model ChainAccount {
 model Authority {
   id           String          @id @default(uuid())
   accountId    String
-  account      PeridotAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account      PidAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   type         String
   publicKey    Bytes
   credentialId String?
@@ -204,7 +204,7 @@ model WalletFeePayer {
 model Intent {
   id        String         @id @default(uuid())
   accountId String
-  account   PeridotAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account   PidAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   type      String
   payload   Json
   status    IntentStatus   @default(pending)
@@ -220,7 +220,7 @@ model Intent {
 model Transaction {
   id             String            @id @default(uuid())
   accountId      String
-  account        PeridotAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account        PidAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
   chainAccountId String
   chainAccount   ChainAccount      @relation(fields: [chainAccountId], references: [id], onDelete: Cascade)
   intentId       String?
@@ -246,7 +246,7 @@ model SecurityEvent {
   identityId String
   identity   Identity         @relation(fields: [identityId], references: [id], onDelete: Cascade)
   accountId  String?
-  account    PeridotAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  account    PidAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
   eventType  String
   metadata   Json
   createdAt  DateTime         @default(now())

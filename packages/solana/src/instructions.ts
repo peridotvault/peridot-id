@@ -15,7 +15,7 @@ import {
 } from "@solana/spl-token";
 import { concat, u16le, u64le, i64le, fromAscii } from "./bytes";
 import type { Bytes } from "./bytes";
-import { IX, INSTRUCTIONS_SYSVAR, PERIDOT_PROGRAM_ID, SECP256R1_PRECOMPILE } from "./core";
+import { IX, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE } from "./core";
 
 /** Build the `initialize(account_id, authority)` instruction (disc 0). */
 export function buildInitializeInstruction(
@@ -32,7 +32,7 @@ export function buildInitializeInstruction(
       { pubkey: smartAccount, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
-    programId: PERIDOT_PROGRAM_ID,
+    programId: PID_PROGRAM_ID,
     data: concat([IX.initialize], accountId32, authorityCompressed) as unknown as Buffer,
   });
 }
@@ -78,7 +78,7 @@ export function buildWithdrawSolInstruction(
       { pubkey: destination, isSigner: false, isWritable: true },
       { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
     ],
-    programId: PERIDOT_PROGRAM_ID,
+    programId: PID_PROGRAM_ID,
     data: concat([IX.withdrawSol], u64le(nonce), u64le(amount), destination.toBytes(), i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
@@ -103,7 +103,7 @@ export function buildWithdrawTokenInstruction(
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
     ],
-    programId: PERIDOT_PROGRAM_ID,
+    programId: PID_PROGRAM_ID,
     data: concat([IX.withdrawToken], u64le(nonce), u64le(amount), destinationAta.toBytes(), i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
@@ -122,7 +122,7 @@ export function buildUpdateAuthorityInstruction(
       { pubkey: smartAccount, isSigner: false, isWritable: true },
       { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
     ],
-    programId: PERIDOT_PROGRAM_ID,
+    programId: PID_PROGRAM_ID,
     data: concat([IX.updateAuthority], u64le(nonce), newAuthorityCompressed, i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }

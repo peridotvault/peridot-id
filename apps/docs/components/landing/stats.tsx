@@ -117,12 +117,12 @@ export function Stats(): ReactNode {
           <h2 className="text-balance font-serif text-3xl font-normal leading-[1.12] tracking-[-0.01em] sm:text-4xl lg:text-[2.75rem]">
             Real outcomes from teams running{" "}
             <span className="font-sans font-semibold tracking-tight">
-              Peridot ID
+              PeridotID
             </span>
           </h2>
           <p className="mt-4 max-w-md text-sm leading-relaxed text-muted-foreground sm:text-base">
             From faster sign-in to a leaner stack, studios cut the friction and
-            consolidate auth the moment Peridot ID goes live — with full
+            consolidate auth the moment PeridotID goes live — with full
             governance from day one.
           </p>
         </div>

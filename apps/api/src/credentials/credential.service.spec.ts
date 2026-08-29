@@ -32,7 +32,7 @@ function setup() {
   };
   const security = { log: jest.fn(async () => undefined) };
   const prisma = {
-    peridotAccount: {
+    pidAccount: {
       findFirst: jest.fn(async () => ({ id: ACCOUNT_ID, identityId: "pid_01HASH", status: "active" })),
     },
     authority: {

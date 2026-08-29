@@ -12,7 +12,7 @@ import {
   verifyRegistrationResponse,
   type WebAuthnCredential,
 } from "@simplewebauthn/server";
-import { Authority, AuthorityStatus, PeridotAccount } from "@prisma/client";
+import { Authority, AuthorityStatus, PidAccount } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { coseToCompressedBase64url } from "./cose";
@@ -96,8 +96,8 @@ export class CredentialService {
     return this.config.get<string>("WEBAUTHN_RP_NAME") ?? "PeridotID";
   }
 
-  private async resolveAccount(identityId: string): Promise<PeridotAccount> {
-    const account = await this.prisma.peridotAccount.findFirst({ where: { identityId, status: "active" } });
+  private async resolveAccount(identityId: string): Promise<PidAccount> {
+    const account = await this.prisma.pidAccount.findFirst({ where: { identityId, status: "active" } });
     if (!account) throw new NotFoundException("Akun tidak ditemukan");
     return account;
   }
@@ -111,7 +111,7 @@ export class CredentialService {
     if (!pending) throw new BadRequestException("Tantangan tidak ditemukan atau sudah dipakai");
     if (pending.expiresAt < new Date()) throw new BadRequestException("Tantangan sudah kedaluwarsa");
 
-    const account = await this.prisma.peridotAccount.findFirst({ where: { id: pending.accountId, identityId, status: "active" } });
+    const account = await this.prisma.pidAccount.findFirst({ where: { id: pending.accountId, identityId, status: "active" } });
     if (!account) throw new NotFoundException("Akun tidak ditemukan");
 
     await this.prisma.credentialChallenge.update({ where: { id }, data: { consumedAt: new Date() } });

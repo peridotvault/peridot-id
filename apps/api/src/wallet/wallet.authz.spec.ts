@@ -37,7 +37,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
           return status ? { status } : null;
         }),
       },
-      peridotAccount: {
+      pidAccount: {
         findFirst: jest.fn(async ({ where }: { where: { identityId: string; status?: string } }) => {
           const row = state.wallets.get(where.identityId);
           if (!row) return null;
@@ -124,43 +124,43 @@ describe("Wallet authorization & abuse cases (routes)", () => {
   it("rejects a forged access token", async () => {
     await request(app.getHttpServer())
       .get("/v1/wallet/me")
-      .set("Cookie", "peridot_access=forged.token.value")
+      .set("Cookie", "pid_access=forged.token.value")
       .expect(401);
   });
 
   it("rejects an expired access token", async () => {
     state.identities.set("pid_a", "active");
     const t = await token("pid_a", { exp: Math.floor(Date.now() / 1000) - 60 });
-    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `peridot_access=${t}`).expect(401);
+    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `pid_access=${t}`).expect(401);
   });
 
   it("rejects a refresh-typed token on wallet routes", async () => {
     state.identities.set("pid_a", "active");
     const t = await new JwtService({}).signAsync({ sub: "pid_a", type: "refresh" }, { secret: SECRET });
-    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `peridot_access=${t}`).expect(401);
+    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `pid_access=${t}`).expect(401);
   });
 
   it("rejects a token for a suspended PID", async () => {
     state.identities.set("pid_a", "suspended");
     const t = await token("pid_a");
-    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `peridot_access=${t}`).expect(401);
+    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `pid_access=${t}`).expect(401);
   });
 
   it("rejects a token for a deleted PID", async () => {
     state.identities.set("pid_a", "deleted");
     const t = await token("pid_a");
-    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `peridot_access=${t}`).expect(401);
+    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `pid_access=${t}`).expect(401);
   });
 
   it("rejects a token for an unknown PID", async () => {
     const t = await token("pid_does_not_exist");
-    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `peridot_access=${t}`).expect(401);
+    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `pid_access=${t}`).expect(401);
   });
 
   it("returns 404 for a valid token with no wallet", async () => {
     state.identities.set("pid_a", "active");
     const t = await token("pid_a");
-    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `peridot_access=${t}`).expect(404);
+    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `pid_access=${t}`).expect(404);
   });
 
   it("returns only public wallet fields for the authenticated PID", async () => {
@@ -176,7 +176,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     });
     const t = await token("pid_a");
 
-    const res = await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `peridot_access=${t}`).expect(200);
+    const res = await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `pid_access=${t}`).expect(200);
 
     expect(Object.keys(res.body).sort()).toEqual([...PUBLIC_FIELDS].sort());
     expect(res.body).toEqual({ id: "w1", chain: "solana", address: "addr-1", status: "active", createdAt: "2026-08-10T12:00:00.000Z" });
@@ -194,7 +194,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     });
     const tB = await token("pid_b");
 
-    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `peridot_access=${tB}`).expect(404);
+    await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `pid_access=${tB}`).expect(404);
   });
 
   it("creates a wallet for the authenticated PID only", async () => {
@@ -203,7 +203,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
 
     const res = await request(app.getHttpServer())
       .post("/v1/wallet")
-      .set("Cookie", `peridot_access=${t}`)
+      .set("Cookie", `pid_access=${t}`)
       .send({ address: "addr-new" })
       .expect(200);
 
@@ -226,7 +226,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
 
     const res = await request(app.getHttpServer())
       .post("/v1/wallet")
-      .set("Cookie", `peridot_access=${t}`)
+      .set("Cookie", `pid_access=${t}`)
       .send({ address: "addr-2" })
       .expect(200);
 
@@ -240,7 +240,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
 
     await request(app.getHttpServer())
       .post("/v1/wallet")
-      .set("Cookie", `peridot_access=${t}`)
+      .set("Cookie", `pid_access=${t}`)
       .send({ address: "" })
       .expect(400);
   });

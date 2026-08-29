@@ -62,7 +62,7 @@ export function Hero(): ReactNode {
             transition={itemTransition}
             className="mt-4 max-w-xl text-balance text-[15px] leading-relaxed text-muted-foreground sm:text-base"
           >
-            Peridot ID gives every product in the Peridot ecosystem the building
+            PeridotID gives every product in the Peridot ecosystem the building
             blocks for unified identity — Google sign-in, session management, and
             profiles that follow players everywhere.
           </motion.p>
