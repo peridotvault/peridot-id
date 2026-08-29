@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { StatusBar } from "expo-status-bar";
-import { SafeAreaView, StyleSheet } from "react-native";
+import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
 import { Peridot } from "@peridot/sdk-js";
 import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
 import { AppContext } from "./src/AppContext";
@@ -16,6 +16,31 @@ type Screen = "login" | "home" | "topup" | "withdraw" | "passkey";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
+  const [bootstrapping, setBootstrapping] = useState(true);
+
+  // After an OAuth redirect returns, detect the existing session and go straight home.
+  const bootstrap = useCallback(async () => {
+    try {
+      const me = await peridot.identity.me();
+      if (me && !("statusCode" in me)) setScreen("home");
+    } catch {
+      // not logged in — stay on login
+    } finally {
+      setBootstrapping(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    bootstrap();
+  }, [bootstrap]);
+
+  if (bootstrapping) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <ActivityIndicator />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <AppContext.Provider value={{ peridot }}>
@@ -40,4 +65,5 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
 });
