@@ -8,9 +8,9 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
 - **Brand:** `PeridotID` in product copy; `peridot_id` for the Postgres DB name; `pid`
   for long identifiers (cookies `pid_access`/`pid_refresh`, table `pid_accounts`, env
   `PID_*`). "Peridot ecosystem" refers to the wider Peridot products — a different thing.
-- **NPM packages:** `@antigane/*` (company: PT ANTIGANE LABS INDONESIA) — e.g.
-  `@antigane/api`, `@antigane/types`, `@antigane/sdk-js`, `@antigane/solana`,
-  `@antigane/openapi`, `@antigane/docs`, `@antigane/wallet`.
+- **NPM packages:** `@peridotvault/pid-*` (npm org: `@peridotvault`; company: PT ANTIGANE LABS INDONESIA) — e.g.
+  `@peridotvault/pid-api`, `@peridotvault/pid-types`, `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`,
+  `@peridotvault/pid-openapi`, `@peridotvault/pid-docs`, `@peridotvault/pid-wallet`.
 - **On-chain:** PDA seed `["peridot_id", "account", account_id]`; signed-payload domain
   `PID|SOLANA|SMART_ACCOUNT|v1`; program id `G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G`.
 - **Identity:** PID = `pid_<ULID>`; identity credentials key on `(provider, providerUserId)`.
@@ -36,7 +36,7 @@ solana config set --url http://127.0.0.1:8899 && solana airdrop 5
 cd programs/peridot-smart-account
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot-smart-account-keypair.json
-pnpm --filter @antigane/api dev        # API on :3301
+pnpm --filter @peridotvault/pid-api dev        # API on :3301
 cd apps/wallet && pnpm dev:web         # Expo web on :8081
 ```
 
@@ -46,7 +46,7 @@ Env to set in `apps/api/.env`: `GOOGLE_CLIENT_ID/SECRET`, `PID_PROGRAM_ID=G8tPC.
 
 ## Verification
 
-- API: `pnpm --filter @antigane/api exec jest` (83 tests).
+- API: `pnpm --filter @peridotvault/pid-api exec jest` (83 tests).
 - Program: `cargo test` (12) + `tests/integration.mjs` (13 cases) against the local
   validator; devnet E2E `packages/sdk-js/test/devnet.e2e.mjs`.
 - Full: `pnpm typecheck`.

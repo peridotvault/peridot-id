@@ -13,7 +13,7 @@ Web bundle verified (`expo export --platform web`). Run with `pnpm dev:web`.
   shows the deterministic smart-account address + balance), **Top Up** (first top-up
   initializes the account in the same tx), **Tarik/Withdraw** (passkey-authorized),
   **Passkey** (register/list credentials).
-- Uses `@antigane/sdk-js` (`Peridot`, `PeridotWallet`, `PeridotPasskey`); no chain/PDA logic
+- Uses `@peridotvault/pid-sdk-js` (`Peridot`, `PeridotWallet`, `PeridotPasskey`); no chain/PDA logic
   in the app. Config via `EXPO_PUBLIC_API_URL` / `EXPO_PUBLIC_SOLANA_RPC_URL`.
 - Fee payer uses the SDK's default in-memory store — swap to Expo SecureStore (mobile) /
   WebCrypto non-extractable (web) for production via the SDK `SecretStore`.

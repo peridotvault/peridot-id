@@ -1,5 +1,5 @@
 import { IsOptional, IsString, IsUrl, Matches, MaxLength } from "class-validator";
-import { ProfileUpdate } from "@antigane/types";
+import { ProfileUpdate } from "@peridotvault/pid-types";
 import { USERNAME_REGEX } from "../../common/username";
 
 export class UpdateProfileDto implements ProfileUpdate {

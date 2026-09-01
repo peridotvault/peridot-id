@@ -2,7 +2,7 @@
 import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { SolanaRpc, SolanaAdapter, buildWebAuthnMessage, base64url } from "@antigane/solana/dist/index.js";
+import { SolanaRpc, SolanaAdapter, buildWebAuthnMessage, base64url } from "@peridotvault/pid-solana/dist/index.js";
 
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 const conn = new Connection("http://127.0.0.1:8899", "confirmed");

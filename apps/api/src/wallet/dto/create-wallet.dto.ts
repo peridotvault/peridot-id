@@ -1,5 +1,5 @@
 import { IsString, Length } from "class-validator";
-import { WalletCreate } from "@antigane/types";
+import { WalletCreate } from "@peridotvault/pid-types";
 
 export class CreateWalletDto implements WalletCreate {
   @IsString()

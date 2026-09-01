@@ -23,16 +23,17 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel dev",
-    "dev:api": "pnpm --filter @antigane/api dev",
-    "dev:docs": "pnpm --filter @antigane/docs dev",
+    "dev:api": "pnpm --filter @peridotvault/pid-api dev",
+    "dev:docs": "pnpm --filter @peridotvault/pid-docs dev",
     "start": "pnpm -r --parallel start",
+    "postinstall": "pnpm --filter @peridotvault/pid-types --filter @peridotvault/pid-solana --filter @peridotvault/pid-sdk-js build",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @antigane/api test",
-    "db:migrate": "pnpm --filter @antigane/api db:migrate",
-    "db:deploy": "pnpm --filter @antigane/api db:deploy",
-    "db:generate": "pnpm --filter @antigane/api db:generate",
-    "db:studio": "pnpm --filter @antigane/api db:studio"
+    "test": "pnpm --filter @peridotvault/pid-api test",
+    "db:migrate": "pnpm --filter @peridotvault/pid-api db:migrate",
+    "db:deploy": "pnpm --filter @peridotvault/pid-api db:deploy",
+    "db:generate": "pnpm --filter @peridotvault/pid-api db:generate",
+    "db:studio": "pnpm --filter @peridotvault/pid-api db:studio"
   }
 }

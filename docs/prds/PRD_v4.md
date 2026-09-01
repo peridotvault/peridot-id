@@ -1098,15 +1098,15 @@ Create a first-party SDK.
 Suggested packages:
 
 ```text
-@antigane/id
-@antigane/wallet
-@antigane/solana
+@peridotvault/pid-id
+@peridotvault/pid-wallet
+@peridotvault/pid-solana
 ```
 
 Potential unified package:
 
 ```text
-@antigane/sdk
+@peridotvault/pid-sdk
 ```
 
 ## Desired developer experience

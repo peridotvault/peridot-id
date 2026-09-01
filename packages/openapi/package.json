@@ -1,5 +1,5 @@
 {
-  "name": "@antigane/openapi",
+  "name": "@peridotvault/pid-openapi",
   "version": "0.1.0",
   "private": true,
   "scripts": {

@@ -54,7 +54,7 @@ credentials, intents, transactions) persists through this task's tables.
   pre-existing rows survive; every `wallets` row appears in `chain_accounts`.
 - No provider (Google) fields on any wallet-side table (PRD_v3 §5/§11).
 - No key-material columns anywhere.
-- `pnpm --filter @antigane/api db:generate` and `pnpm typecheck` pass.
+- `pnpm --filter @peridotvault/pid-api db:generate` and `pnpm typecheck` pass.
 
 ## Testing Requirements
 

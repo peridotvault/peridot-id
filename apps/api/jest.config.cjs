@@ -8,6 +8,6 @@ module.exports = {
   },
   testEnvironment: "node",
   moduleNameMapper: {
-    "^@antigane/types$": "<rootDir>/../../packages/types/src",
+    "^@peridotvault/pid-types$": "<rootDir>/../../packages/types/src",
   },
 };

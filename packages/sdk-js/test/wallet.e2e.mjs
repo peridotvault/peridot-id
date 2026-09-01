@@ -2,8 +2,8 @@
 import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
-import { PeridotWallet } from "@antigane/sdk-js";
-import { b64url, buildWebAuthnMessage } from "@antigane/solana";
+import { PeridotWallet } from "@peridotvault/pid-sdk-js";
+import { b64url, buildWebAuthnMessage } from "@peridotvault/pid-solana";
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 const conn = new Connection("http://127.0.0.1:8899", "confirmed");
 const ACCOUNT_ID = crypto.randomUUID();

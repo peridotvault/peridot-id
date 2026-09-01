@@ -352,7 +352,7 @@ for debugging and security audits (PRD_v4 §17).
 - SPL token withdrawals (`withdraw_token`, passkey-authorized)
 - secp256r1 passkey authority (ADR 005 Option B) + Ed25519 device fee payer (ADR 006)
 - Google OAuth login with device-saved sessions; multi-device login on one account
-- One Expo client serving web + iOS + Android, built on the `@antigane/sdk-js` core
+- One Expo client serving web + iOS + Android, built on the `@peridotvault/pid-sdk-js` core
 - Authorization and security validation
 - Devnet testing
 - Mainnet deployment

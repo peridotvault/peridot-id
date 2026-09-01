@@ -42,7 +42,7 @@ Scripts: `pnpm dev`, `pnpm dev:api`, `pnpm dev:docs`, `pnpm build`, `pnpm test`,
 ## SDK
 
 ```ts
-import { Peridot } from '@antigane/sdk-js';
+import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
   baseUrl: 'https://api.peridot-id.peridotvault.com',

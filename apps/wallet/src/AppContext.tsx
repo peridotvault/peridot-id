@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { Peridot, type PeridotClient } from "@antigane/sdk-js";
+import { Peridot, type PeridotClient } from "@peridotvault/pid-sdk-js";
 
 export interface AppContextValue {
   peridot: PeridotClient;

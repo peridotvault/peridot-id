@@ -1,9 +1,9 @@
 # Architecture
 
 ```text
-Clients (Expo web/iOS/Android) -> SDK (@antigane/sdk-js) -> PeridotID API -> PostgreSQL
+Clients (Expo web/iOS/Android) -> SDK (@peridotvault/pid-sdk-js) -> PeridotID API -> PostgreSQL
                                   |
-                                  +-> Solana adapter (@antigane/solana) -> Solana RPC(s)
+                                  +-> Solana adapter (@peridotvault/pid-solana) -> Solana RPC(s)
                                         |
                                         +-> Peridot smart-account program (Pinocchio, PDA)
 ```

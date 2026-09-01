@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { Authority } from "@antigane/types";
+import type { Authority } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 
 export function PasskeyScreen({ onDone }: { onDone: () => void }) {

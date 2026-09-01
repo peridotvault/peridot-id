@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, Res, UseGuards 
 import { ConfigService } from "@nestjs/config";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { Request, Response } from "express";
-import { LoginResponse } from "@antigane/types";
+import { LoginResponse } from "@peridotvault/pid-types";
 import { AuthService } from "./auth.service";
 import { GoogleGuard } from "./google.guard";
 

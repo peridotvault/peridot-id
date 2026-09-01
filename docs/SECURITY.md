@@ -24,7 +24,7 @@ owner: stakeholder — never silently dropped). Source: ADR 003, tasks 006/008.
   secrets; the wallet holds only public address data.
 - **Server-side signing** — accepted: signing location is **none** in V3; no signing code exists
   to secure.
-- **Client-side signing** — accepted: no signing client is introduced; `@antigane/sdk-js` remains
+- **Client-side signing** — accepted: no signing client is introduced; `@peridotvault/pid-sdk-js` remains
   a thin fetch client.
 - **Auth → wallet authorization boundary** — mitigated-by-`JwtAuthGuard` + token-derived
   `identityId` only + explicit Prisma `select` of public fields (task 006); verified by

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { Account } from "@antigane/types";
+import type { Account } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 
 interface HomeScreenProps {

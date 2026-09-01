@@ -2,5 +2,5 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nestjs",
   "installCommand": "pnpm install",
-  "buildCommand": "pnpm --filter @antigane/api build"
+  "buildCommand": "pnpm --filter @peridotvault/pid-api build"
 }

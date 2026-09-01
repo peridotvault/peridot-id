@@ -7,7 +7,7 @@ Authentication, Identity, Profile, Wallet
 - Passkey credential lifecycle + recovery/multi-device (task 003/008)
 - Solana adapter + RPC failover (`packages/solana`)
 - Withdrawal intents + policy (task 007)
-- Wallet SDK + fee-payer client (`@antigane/sdk-js`)
+- Wallet SDK + fee-payer client (`@peridotvault/pid-sdk-js`)
 - Expo wallet client (web + iOS + Android)
 - Devnet E2E verified (task 011)
 

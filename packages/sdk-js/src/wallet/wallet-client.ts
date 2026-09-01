@@ -1,11 +1,11 @@
 // Peridot wallet client (task 009) — the PRD_v5 §9 surface over the Solana adapter.
 
 import { PublicKey } from "@solana/web3.js";
-import { b64urlToBytes, SolanaAdapter, SolanaRpc } from "@antigane/solana";
-import type { Account, ApiError, Authority } from "@antigane/types";
-import type { TransactionStatus } from "@antigane/solana";
+import { b64urlToBytes, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
+import type { Account, ApiError, Authority } from "@peridotvault/pid-types";
+import type { TransactionStatus } from "@peridotvault/pid-solana";
 import { BrowserPasskeySigner } from "./passkey";
-import type { PasskeySigner } from "@antigane/solana";
+import type { PasskeySigner } from "@peridotvault/pid-solana";
 import { FeePayerManager, type SecretStore } from "./fee-payer";
 
 export interface PeridotWalletOptions {

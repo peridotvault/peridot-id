@@ -1,5 +1,5 @@
 {
-  "name": "@antigane/api",
+  "name": "@peridotvault/pid-api",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -23,7 +23,7 @@
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
     "@nestjs/throttler": "^6.4.0",
-    "@antigane/types": "workspace:*",
+    "@peridotvault/pid-types": "workspace:*",
     "@prisma/client": "^6.2.0",
     "@simplewebauthn/server": "^13.3.3",
     "class-transformer": "^0.5.1",

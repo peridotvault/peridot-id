@@ -7,7 +7,7 @@ import type {
   Profile,
   ProfileUpdate,
   RegisterStart,
-} from "@antigane/types";
+} from "@peridotvault/pid-types";
 import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client";
 import { registerPasskey, BrowserPasskeySigner } from "./wallet/passkey";
 import { FeePayerManager, type SecretStore } from "./wallet/fee-payer";

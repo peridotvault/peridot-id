@@ -15,9 +15,6 @@ importers:
 
   apps/api:
     dependencies:
-      '@antigane/types':
-        specifier: workspace:*
-        version: link:../../packages/types
       '@nestjs/common':
         specifier: ^11.0.0
         version: 11.1.28(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -42,6 +39,9 @@ importers:
       '@nestjs/throttler':
         specifier: ^6.4.0
         version: 6.5.0(@nestjs/common@11.1.28(class-transformer@0.5.1)(class-validator@0.14.4)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)(reflect-metadata@0.2.2)
+      '@peridotvault/pid-types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@prisma/client':
         specifier: ^6.2.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
@@ -206,13 +206,13 @@ importers:
 
   apps/wallet:
     dependencies:
-      '@antigane/sdk-js':
+      '@peridotvault/pid-sdk-js':
         specifier: workspace:*
         version: link:../../packages/sdk-js
-      '@antigane/solana':
+      '@peridotvault/pid-solana':
         specifier: workspace:*
         version: link:../../packages/solana
-      '@antigane/types':
+      '@peridotvault/pid-types':
         specifier: workspace:*
         version: link:../../packages/types
       expo:
@@ -248,10 +248,10 @@ importers:
 
   packages/sdk-js:
     dependencies:
-      '@antigane/solana':
+      '@peridotvault/pid-solana':
         specifier: workspace:*
         version: link:../solana
-      '@antigane/types':
+      '@peridotvault/pid-types':
         specifier: workspace:*
         version: link:../types
       '@solana/web3.js':
@@ -264,7 +264,7 @@ importers:
 
   packages/solana:
     dependencies:
-      '@antigane/types':
+      '@peridotvault/pid-types':
         specifier: workspace:*
         version: link:../types
       '@solana/spl-token':

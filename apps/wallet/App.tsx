@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
-import { Peridot } from "@antigane/sdk-js";
+import { Peridot } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
 import { AppContext } from "./src/AppContext";
 import { LoginScreen } from "./src/screens/LoginScreen";

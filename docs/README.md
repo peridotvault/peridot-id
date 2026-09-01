@@ -9,7 +9,7 @@ canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 
 - Docs (Vercel): `https://peridot-id.peridotvault.com`
 - API (Vercel): `https://api.peridot-id.peridotvault.com/v1`
-- Run locally: `pnpm --filter @antigane/docs dev` → `http://localhost:3300`
+- Run locally: `pnpm --filter @peridotvault/pid-docs dev` → `http://localhost:3300`
 - API also serves the raw spec at `GET /v1/openapi.yaml` (Swagger UI at `/docs`)
 
 ## Repository layout
