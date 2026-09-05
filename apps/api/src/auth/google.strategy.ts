@@ -21,6 +21,12 @@ export class GoogleStrategy extends PassportStrategy(Strategy, "google") {
     });
   }
 
+  // Force the Google account chooser on every sign-in (the OAuth2 base passes the
+  // per-request options to authorizationParams, not the constructor config).
+  authorizationParams(): Record<string, string> {
+    return { prompt: "select_account" };
+  }
+
   async validate(accessToken: string, refreshToken: string, profile: GoogleProfile, done: VerifyCallback): Promise<void> {
     try {
       const identity = await this.authService.upsertGoogleIdentity(profile);

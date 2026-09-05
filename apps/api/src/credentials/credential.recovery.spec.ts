@@ -2,8 +2,9 @@ import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { CredentialService } from "../credentials/credential.service";
 
 const ACCOUNT_ID = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
+// Correct ES256 COSE_Key: map(5) = kty, alg, crv, x, y (matches real simplewebauthn output).
 const COSE = Buffer.concat([
-  Buffer.from([0xa4, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
+  Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
   Buffer.alloc(32, 0x11),
   Buffer.from([0x22, 0x58, 0x20]),
   Buffer.alloc(32, 0x22),

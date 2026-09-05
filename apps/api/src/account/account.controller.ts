@@ -2,12 +2,16 @@ import { Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, UseG
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { ActivationService, ActivationView } from "./activation.service";
 import { AccountService, AccountView, ChainAccountView } from "./account.service";
 
 @Controller("v1/accounts")
 @UseGuards(ThrottlerGuard)
 export class AccountController {
-  constructor(private readonly accountService: AccountService) {}
+  constructor(
+    private readonly accountService: AccountService,
+    private readonly activationService: ActivationService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.OK)
@@ -33,5 +37,19 @@ export class AccountController {
   @UseGuards(JwtAuthGuard)
   chains(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<ChainAccountView[]> {
     return this.accountService.getAccountChains(user.identityId, id);
+  }
+
+  @Get(":id/activation")
+  @UseGuards(JwtAuthGuard)
+  activation(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<ActivationView> {
+    return this.activationService.viewOf(user, id);
+  }
+
+  @Post(":id/activate")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  activate(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<ActivationView> {
+    return this.activationService.activate(user, id);
   }
 }

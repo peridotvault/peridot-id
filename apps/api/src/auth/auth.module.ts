@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
+import { CredentialModule } from "../credentials/credential.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { GoogleGuard } from "./google.guard";
@@ -12,6 +13,7 @@ import { JwtStrategy } from "./jwt.strategy";
   imports: [
     PassportModule.register({ session: false }),
     JwtModule.register({}),
+    CredentialModule,
   ],
   controllers: [AuthController],
   providers: [

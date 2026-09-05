@@ -23,6 +23,7 @@
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
     "@nestjs/throttler": "^6.4.0",
+    "@peridotvault/pid-solana": "workspace:*",
     "@peridotvault/pid-types": "workspace:*",
     "@prisma/client": "^6.2.0",
     "@simplewebauthn/server": "^13.3.3",

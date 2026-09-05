@@ -9,5 +9,6 @@ module.exports = {
   testEnvironment: "node",
   moduleNameMapper: {
     "^@peridotvault/pid-types$": "<rootDir>/../../packages/types/src",
+    "^@peridotvault/pid-solana$": "<rootDir>/../../packages/solana/src",
   },
 };

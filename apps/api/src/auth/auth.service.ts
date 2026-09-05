@@ -52,7 +52,7 @@ export class AuthService {
         where: { email },
         select: { id: true },
       });
-      if (emailOwner) throw new ConflictException("Email sudah terhubung dengan akun lain");
+      if (emailOwner) throw new ConflictException("Email is already linked to another account");
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -152,5 +152,51 @@ export class AuthService {
       }
     }
     clearAuthCookies(res, this.config);
+  }
+
+  /** Decode a refresh JWT to its session jti (null if invalid). */
+  async currentSessionJti(token: string | undefined): Promise<string | null> {
+    if (!token) return null;
+    try {
+      const payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
+      return payload.type === "refresh" ? payload.jti : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Active sessions for an identity, joined to their device (newest first). */
+  async listSessions(identityId: string, currentJti: string | null): Promise<
+    { id: string; userAgent: string | null; lastSeenAt: Date; createdAt: Date; expiresAt: Date; isCurrent: boolean }[]
+  > {
+    const sessions = await this.prisma.session.findMany({
+      where: { device: { identityId }, revokedAt: null, expiresAt: { gt: new Date() } },
+      include: { device: true },
+      orderBy: { createdAt: "desc" },
+    });
+    return sessions.map((s) => ({
+      id: s.id,
+      userAgent: s.device.userAgent,
+      lastSeenAt: s.device.lastSeenAt,
+      createdAt: s.createdAt,
+      expiresAt: s.expiresAt,
+      isCurrent: currentJti != null && s.id === currentJti,
+    }));
+  }
+
+  /** Revoke every other active session (current refresh jti kept). */
+  async revokeOtherSessions(identityId: string, currentJti: string | null): Promise<void> {
+    await this.prisma.session.updateMany({
+      where: { device: { identityId }, revokedAt: null, ...(currentJti ? { id: { not: currentJti } } : {}) },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  /** Revoke a single session owned by the identity. */
+  async revokeSession(identityId: string, sessionId: string): Promise<void> {
+    await this.prisma.session.updateMany({
+      where: { id: sessionId, device: { identityId } },
+      data: { revokedAt: new Date() },
+    });
   }
 }

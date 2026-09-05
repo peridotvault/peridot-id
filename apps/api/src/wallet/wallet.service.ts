@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { IdentityStatus, Prisma } from "@prisma/client";
+import { ChainAccountStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface WalletView {
   id: string;
   chain: string;
   address: string;
-  status: IdentityStatus;
+  status: ChainAccountStatus;
   createdAt: Date;
 }
 
@@ -20,7 +20,7 @@ function toView(ca: {
   id: string;
   chainNamespace: string;
   address: string;
-  status: IdentityStatus;
+  status: ChainAccountStatus;
   createdAt: Date;
 }): WalletView {
   return { id: ca.id, chain: ca.chainNamespace, address: ca.address, status: ca.status, createdAt: ca.createdAt };
@@ -36,7 +36,7 @@ export class WalletService {
       include: { chainAccounts: { where: { accountType: ACCOUNT_TYPE_LINKED }, take: 1 } },
     });
     const linked = account?.chainAccounts[0];
-    if (!linked) throw new NotFoundException("Wallet tidak ditemukan");
+    if (!linked) throw new NotFoundException("Wallet not found");
     return toView(linked);
   }
 

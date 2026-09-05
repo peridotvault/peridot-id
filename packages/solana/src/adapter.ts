@@ -14,6 +14,7 @@ import {
   PID_PROGRAM_ID,
 } from "./core";
 import {
+  buildActivateInstruction,
   buildDepositSolInstruction,
   buildDepositTokenInstruction,
   buildInitializeInstruction,
@@ -22,7 +23,7 @@ import {
   buildWithdrawSolInstruction,
   buildWithdrawTokenInstruction,
 } from "./instructions";
-import type { SolanaRpc } from "./rpc";
+import type { SolanaRpc, TokenBalance } from "./rpc";
 
 /** A WebAuthn assertion as produced by a passkey. */
 export interface PasskeyAssertion {
@@ -75,6 +76,14 @@ export class SolanaAdapter {
     return (await this.rpc.getAccountInfo(this.getAddress(accountId))) !== null;
   }
 
+  /** True when the smart-account PDA is actually owned by our program (i.e. activated). */
+  async isActivated(address: string | PublicKey): Promise<boolean> {
+    const pub = typeof address === "string" ? new PublicKey(address) : address;
+    const info = await this.rpc.getAccountInfo(pub);
+    if (!info || info.data.length === 0) return false;
+    return info.owner.toBase58() === this.programId.toBase58();
+  }
+
   private async buildTx(instructions: TransactionInstruction[], feePayer: PublicKey): Promise<Transaction> {
     const tx = new Transaction();
     for (const ix of instructions) tx.add(ix);
@@ -91,6 +100,74 @@ export class SolanaAdapter {
       payer.publicKey,
     );
     return this.send(tx, [payer]);
+  }
+
+  /** Activate the smart account via the relayer (disc 5). Returns the tx signature. */
+  async activate(
+    accountId: string,
+    authorityCompressed: Uint8Array<ArrayBufferLike>,
+    activationFeeLamports: bigint,
+    relayer: Keypair,
+    treasury: PublicKey,
+  ): Promise<string> {
+    const smartAccount = this.getAddress(accountId);
+    const tx = await this.buildTx(
+      [
+        buildActivateInstruction(
+          accountIdToSeed32(accountId),
+          authorityCompressed,
+          activationFeeLamports,
+          relayer.publicKey,
+          smartAccount,
+          treasury,
+        ),
+      ],
+      relayer.publicKey,
+    );
+    return this.send(tx, [relayer]);
+  }
+
+  /** Balance of the smart account address (lamports). */
+  async getBalanceOf(address: string | PublicKey): Promise<number> {
+    const pub = typeof address === "string" ? new PublicKey(address) : address;
+    return this.rpc.getBalance(pub);
+  }
+
+  /** Real-time cost to activate: rent(80B) + message fee + margin (rate on rent+fee). */
+  async estimateActivationCost(marginRate: number): Promise<{
+    rentLamports: bigint;
+    feeLamports: bigint;
+    marginLamports: bigint;
+    totalLamports: bigint;
+  }> {
+    const conn = this.rpc.connection;
+    const accountId = "00000000000000000000000000000000";
+    const dummyAuthority = new Uint8Array(33);
+    const smartAccount = this.getAddress(accountId);
+    const dummyRelayer = Keypair.generate().publicKey;
+    const dummyTreasury = Keypair.generate().publicKey;
+    const ix = buildActivateInstruction(
+      accountIdToSeed32(accountId),
+      dummyAuthority,
+      0n,
+      dummyRelayer,
+      smartAccount,
+      dummyTreasury,
+    );
+    const rawTx = new Transaction();
+    rawTx.add(ix);
+    rawTx.feePayer = dummyRelayer;
+    rawTx.recentBlockhash = await this.rpc.getLatestBlockhash();
+    const msg = rawTx.compileMessage();
+    const [fee, rent] = await Promise.all([
+      conn.getFeeForMessage(msg, "confirmed"),
+      conn.getMinimumBalanceForRentExemption(80, "confirmed"),
+    ]);
+    const feeLamports = BigInt(fee.value ?? 0);
+    const rentLamports = BigInt(rent);
+    const base = rentLamports + feeLamports;
+    const margin = (base * BigInt(Math.round(marginRate * 1000))) / 1000n;
+    return { rentLamports, feeLamports, marginLamports: margin, totalLamports: base + margin };
   }
 
   /** Top-up SOL into the smart account — a plain transfer, no program instruction (PRD_v5 §4). */
@@ -230,6 +307,17 @@ export class SolanaAdapter {
 
   async getBalance(accountId: string): Promise<number> {
     return this.rpc.getBalance(this.getAddress(accountId));
+  }
+
+  /** SPL token balances held by an explicit smart-account address (no re-derivation). */
+  async getTokenBalancesOf(address: string | PublicKey): Promise<TokenBalance[]> {
+    const pub = typeof address === "string" ? new PublicKey(address) : address;
+    return this.rpc.getTokenAccountsByOwner(pub);
+  }
+
+  /** SPL token balances held by the smart account (raw units + decimals per mint). */
+  async getTokenBalances(accountId: string): Promise<TokenBalance[]> {
+    return this.rpc.getTokenAccountsByOwner(this.getAddress(accountId));
   }
 }
 

@@ -7,5 +7,6 @@ import { CredentialService } from "./credential.service";
   imports: [SecurityModule],
   controllers: [CredentialController],
   providers: [CredentialService],
+  exports: [CredentialService],
 })
 export class CredentialModule {}

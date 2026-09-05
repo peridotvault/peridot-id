@@ -23,7 +23,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
       where: { id: payload.sub },
       select: { status: true },
     });
-    if (!identity || identity.status !== "active") throw new UnauthorizedException("Identity tidak aktif");
+    if (!identity || identity.status !== "active") throw new UnauthorizedException("Identity is not active");
     return { identityId: payload.sub };
   }
 }

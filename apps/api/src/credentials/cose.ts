@@ -63,6 +63,30 @@ class Cbor {
     if (major !== 5) throw new CoseError("cbor: expected map");
     return value;
   }
+
+  /**
+   * Skip a value of the given major type. Ints (0/1) are carried entirely in the header;
+   * bytes/text (2/3) have a length prefix; arrays (4) and maps (5) recurse. Bounds-checked.
+   */
+  skipValue(major: number, value: number): void {
+    if (major === 2 || major === 3) {
+      if (this.offset + value > this.buf.length) throw new CoseError("cbor: truncated");
+      this.offset += value;
+    } else if (major === 4) {
+      for (let i = 0; i < value; i++) {
+        const { major: m, value: v } = this.readHeader();
+        this.skipValue(m, v);
+      }
+    } else if (major === 5) {
+      for (let i = 0; i < value; i++) {
+        const k = this.readHeader();
+        this.skipValue(k.major, k.value);
+        const v = this.readHeader();
+        this.skipValue(v.major, v.value);
+      }
+    }
+    // major 0/1 (int) and 7 (simple/undefined) need no skip; major 6 (tag) not expected here.
+  }
 }
 
 /**
@@ -83,9 +107,11 @@ export function coseToCompressedSecp256r1(cose: Buffer): Buffer {
     } else if (key === KEY_Y) {
       y = c.readBytes();
     } else {
-      // Skip unknown value (int, bytes, or short text/array). Values here are small.
+      // Skip unknown value — may be an int (header-carrying, e.g. kty/alg), a byte string,
+      // or a nested array/map. Skipping ints by their *number* as an offset corrupts the
+      // stream, so use a proper recursive skip that treats ints as zero-length.
       const { major, value } = c.readHeader();
-      c.offset += value;
+      c.skipValue(major, value);
     }
   }
   if (!x || !y || x.length !== 32 || y.length !== 32) {

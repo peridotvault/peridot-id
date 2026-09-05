@@ -1,5 +1,7 @@
 import type {
+  ActivityRecord,
   ApiError,
+  AuthenticateStart,
   Authority,
   Identity,
   IdentityCredential,
@@ -7,13 +9,16 @@ import type {
   Profile,
   ProfileUpdate,
   RegisterStart,
+  Session,
+  WalletTransaction,
 } from "@peridotvault/pid-types";
 import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client";
-import { registerPasskey, BrowserPasskeySigner } from "./wallet/passkey";
+import { authenticatePasskey, registerPasskey, BrowserPasskeySigner } from "./wallet/passkey";
 import { FeePayerManager, type SecretStore } from "./wallet/fee-payer";
 
 export { PeridotWallet, type PeridotWalletOptions };
-export { BrowserPasskeySigner, registerPasskey };
+export type { ActivationView, ActivationStatus } from "./wallet/wallet-client";
+export { authenticatePasskey, BrowserPasskeySigner, registerPasskey };
 export { FeePayerManager, type SecretStore };
 
 export interface PeridotOptions {
@@ -33,12 +38,51 @@ export class PeridotAuth {
     if (res.ok) window.location.assign((res.data as LoginResponse).url);
   }
 
+  /**
+   * Sign in with a discoverable passkey (WebAuthn get). Resolves false ONLY when the
+   * WebAuthn ceremony is cancelled by the user; genuine errors throw.
+   */
+  async loginWithPasskey(): Promise<boolean> {
+    try {
+      await authenticatePasskey({
+        start: async () => {
+          const res = await this.client.post<AuthenticateStart>("/v1/auth/passkey/start");
+          if (!res.ok) throw new Error("Failed to start passkey login");
+          return res.data as AuthenticateStart;
+        },
+        finish: async (input) => {
+          const res = await this.client.post<{ ok: boolean }>("/v1/auth/passkey/finish", input);
+          return res.data;
+        },
+      });
+      return true;
+    } catch (e) {
+      if (e instanceof Error && /cancelled/i.test(e.message)) return false;
+      throw e;
+    }
+  }
+
   async logout(): Promise<void> {
     await this.client.post("/v1/auth/logout");
   }
 
   async refresh(): Promise<boolean> {
     const res = await this.client.post("/v1/auth/refresh");
+    return res.ok;
+  }
+
+  async sessions(): Promise<Session[] | ApiError> {
+    const res = await this.client.get<Session[]>("/v1/auth/sessions");
+    return res.data;
+  }
+
+  async revokeOtherSessions(): Promise<boolean> {
+    const res = await this.client.delete("/v1/auth/sessions/revoke-others");
+    return res.ok;
+  }
+
+  async revokeSession(id: string): Promise<boolean> {
+    const res = await this.client.delete(`/v1/auth/sessions/${id}`);
     return res.ok;
   }
 }
@@ -58,6 +102,12 @@ export class PeridotIdentity {
 
   async unlinkCredential(id: string): Promise<boolean> {
     const res = await this.client.delete(`/v1/identity/credentials/${id}`);
+    return res.ok;
+  }
+
+  /** Soft-delete the Peridot ID (revokes all sessions). */
+  async deleteAccount(): Promise<boolean> {
+    const res = await this.client.delete("/v1/identity/me");
     return res.ok;
   }
 }
@@ -89,7 +139,7 @@ export class PeridotPasskey {
     return registerPasskey({
       registerStart: async () => {
         const res = await this.client.post<RegisterStart>("/v1/credentials/register/start");
-        if (!res.ok) throw new Error("Gagal memulai registrasi passkey");
+        if (!res.ok) throw new Error("Failed to start passkey registration");
         return res.data as RegisterStart;
       },
       registerFinish: async (input) => {

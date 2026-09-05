@@ -6,7 +6,7 @@ implemented (2026-08-28) — secp256r1 passkey adversarial suite + devnet deploy
 
 ## Results
 
-**Deployed:** program id `G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G` (devnet),
+**Deployed:** program id `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT` (devnet),
 upgrade authority `EJq6txD8FBD8tcy6TCEX5Fv1oU1oX6zHFLxq1mp1EeH9` (dev keypair — hardened in
 task 012). Keypair: `programs/peridot-smart-account/target/deploy/peridot-smart-account-keypair.json`
 (never committed). Devnet id is never reused for mainnet (ADR 007 §9).

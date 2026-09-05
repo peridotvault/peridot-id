@@ -55,7 +55,9 @@ export interface ChainAccount {
   chainReference: string;
   address: string;
   accountType: "smart_account" | "linked_address";
-  status: IdentityStatus;
+  status: "inactivated" | "funded" | "ready" | "activating" | "active" | "insufficient";
+  activationBalance: number | null;
+  activationRequired: number | null;
   createdAt: string;
 }
 
@@ -108,11 +110,35 @@ export interface IntentCreate {
 export interface WalletTransaction {
   id: string;
   intentId: string | null;
+  type: "DEPOSIT" | "WITHDRAW" | "ACTIVATION" | null;
+  amount: string | null;
+  asset: string | null;
+  direction: "in" | "out" | null;
+  counterparty: string | null;
   chain: string;
   network: string;
   txHash: string | null;
   status: "prepared" | "submitted" | "confirmed" | "failed";
   createdAt: string;
+  confirmedAt: string | null;
+}
+
+export interface ActivityRecord {
+  type: "DEPOSIT" | "WITHDRAW" | "ACTIVATION";
+  amount: string;
+  asset: string;
+  direction: "in" | "out";
+  counterparty?: string;
+  txHash?: string;
+}
+
+export interface Session {
+  id: string;
+  userAgent: string | null;
+  lastSeenAt: string | null;
+  createdAt: string;
+  expiresAt: string;
+  isCurrent?: boolean;
 }
 
 /** WebAuthn registration ceremony (task 003). */
@@ -121,6 +147,12 @@ export interface RegisterStart {
   options: Record<string, unknown>;
   isAdditional: boolean;
   approval: Record<string, unknown> | null;
+}
+
+/** WebAuthn authentication ceremony start (passkey login). */
+export interface AuthenticateStart {
+  authenticationId: string;
+  options: Record<string, unknown>;
 }
 
 export interface ApiError {

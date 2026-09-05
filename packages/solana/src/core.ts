@@ -8,7 +8,7 @@ import { PublicKey } from "@solana/web3.js";
 import { concat, fromAscii, sha256 as hashSha256, u64le, i64le } from "./bytes";
 import type { Bytes } from "./bytes";
 
-export const PID_PROGRAM_ID = new PublicKey("G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G");
+export const PID_PROGRAM_ID = new PublicKey("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
 export const SECP256R1_PRECOMPILE = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 export const INSTRUCTIONS_SYSVAR = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 
@@ -22,6 +22,7 @@ export const IX = {
   withdrawToken: 2,
   updateAuthority: 3,
   close: 4,
+  activate: 5,
 } as const;
 
 export function sha256(data: Uint8Array): Promise<Uint8Array> {

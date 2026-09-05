@@ -73,6 +73,24 @@ function prismaMock() {
           if (s) s.revokedAt = data.revokedAt;
           return { count: s ? 1 : 0 };
         }),
+        findMany: jest.fn(async ({ where }: { where: { device: { identityId: string } } }) =>
+          [...sessions.entries()]
+            .filter(([, s]) => s.revokedAt === null && s.expiresAt > new Date())
+            .map(([id, s]) => ({
+              id,
+              deviceId: s.deviceId,
+              revokedAt: s.revokedAt,
+              expiresAt: s.expiresAt,
+              createdAt: new Date(),
+              device: {
+                id: s.deviceId,
+                identityId: where.device.identityId,
+                userAgent: "test-agent",
+                lastSeenAt: new Date(),
+                createdAt: new Date(),
+              },
+            })),
+        ),
       },
     };
     mocks.$transaction = jest.fn(async (fn: (tx: unknown) => unknown) => fn(mocks));
@@ -135,7 +153,7 @@ describe("AuthService", () => {
       emails: [{ value: "taken@example.com" }],
     });
     await expect(promise).rejects.toThrow(ConflictException);
-    await expect(promise).rejects.toThrow("Email sudah terhubung dengan akun lain");
+    await expect(promise).rejects.toThrow("Email is already linked to another account");
     expect(prisma.identity.create).not.toHaveBeenCalled();
     expect(prisma.identityCredential.create).not.toHaveBeenCalled();
   });
@@ -217,6 +235,39 @@ describe("AuthService", () => {
     );
 
     await expect(service.rotateSession(reqWithToken(forged), res as never)).rejects.toThrow(UnauthorizedException);
+  });
+
+  it("listSessions marks only the current refresh jti as current", async () => {
+    const { service, res } = setup();
+    const tokens = await service.issueSession(res as never, "identity-1", "test-agent");
+    const currentJti = jwtPayload(tokens.refreshToken).jti;
+
+    const sessions = await service.listSessions("identity-1", currentJti);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].isCurrent).toBe(true);
+    expect(sessions[0].id).toBe(currentJti);
+  });
+
+  it("revokeOtherSessions keeps the current session and revokes the rest", async () => {
+    const { service, prisma, res } = setup();
+    const tokens = await service.issueSession(res as never, "identity-1", "test-agent");
+    const currentJti = jwtPayload(tokens.refreshToken).jti;
+
+    await service.revokeOtherSessions("identity-1", currentJti);
+
+    expect(prisma.session.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ device: { identityId: "identity-1" }, id: { not: currentJti } }),
+        data: { revokedAt: expect.any(Date) },
+      }),
+    );
+  });
+
+  it("currentSessionJti returns null for a bad token", async () => {
+    const { service } = setup();
+    expect(await service.currentSessionJti(undefined)).toBeNull();
+    expect(await service.currentSessionJti("not-a-jwt")).toBeNull();
   });
 });
 

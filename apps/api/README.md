@@ -23,7 +23,7 @@ for Vercel.
 ## Environment
 
 `DATABASE_URL` (Postgres **`peridot_id`**), `GOOGLE_CLIENT_ID`/`SECRET`,
-`PID_PROGRAM_ID=G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G`, `WEBAUTHN_ORIGINS`,
+`PID_PROGRAM_ID=CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`, `WEBAUTHN_ORIGINS`,
 `CLIENT_SUCCESS_URL`, `CORS_ORIGINS`. See `.env.example`.
 
 ## Modules

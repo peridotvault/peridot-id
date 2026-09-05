@@ -2,7 +2,7 @@ import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { IntentService } from "./intent.service";
 
 const ACCOUNT_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
-const SMART_ADDR = "G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G";
+const SMART_ADDR = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
 
 function accountRow() {
   return {
@@ -59,8 +59,9 @@ function setup() {
       updateMany: jest.fn(async () => ({ count: 0 })),
     },
     transaction: {
-      create: jest.fn(async () => txRow()),
+      create: jest.fn(async (args: { data: Record<string, unknown> }) => txRow({ ...args.data })),
       findFirst: jest.fn(async () => null as any),
+      findMany: jest.fn(async () => [] as any),
     },
   };
   const service = new IntentService(prisma as never, config as never, security as never);
@@ -157,5 +158,62 @@ describe("IntentService", () => {
     const { service } = setup();
 
     await expect(service.getTransaction("pid_OTHER", "tx-1")).rejects.toThrow(NotFoundException);
+  });
+
+  it("records an activity entry (deposit/withdraw/activation) with metadata", async () => {
+    const { service, prisma, security } = setup();
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+
+    const view = await service.recordActivity("pid_01HASH", {
+      type: "WITHDRAW",
+      amount: "5000000",
+      asset: "SOL",
+      direction: "out",
+      counterparty: DEST,
+      txHash: "sig1",
+    });
+
+    expect(view.type).toBe("WITHDRAW");
+    expect(view.amount).toBe("5000000");
+    expect(view.counterparty).toBe(DEST);
+    expect(prisma.transaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          accountId: ACCOUNT_ID,
+          chainAccountId: "chain-1",
+          type: "WITHDRAW",
+          amount: 5000000n,
+          direction: "out",
+          status: "submitted",
+        }),
+      }),
+    );
+    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "activity.recorded", expect.any(Object), ACCOUNT_ID);
+  });
+
+  it("records activity without a counterparty (deposits)", async () => {
+    const { service, prisma } = setup();
+    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+
+    await service.recordActivity("pid_01HASH", { type: "DEPOSIT", amount: "1000000", asset: "SOL", direction: "in", txHash: "sig2" });
+
+    expect(prisma.transaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ direction: "in", counterparty: null }) }),
+    );
+  });
+
+  it("lists transaction history newest-first, scoped to the identity", async () => {
+    const { service, prisma } = setup();
+    prisma.transaction.findMany = jest.fn(async () => [txRow()]);
+
+    const views = await service.listTransactions("pid_01HASH");
+
+    expect(views).toHaveLength(1);
+    expect(prisma.transaction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { account: { identityId: "pid_01HASH" } },
+        orderBy: { createdAt: "desc" },
+      }),
+    );
   });
 });

@@ -8,6 +8,7 @@ import request from "supertest";
 import { JwtStrategy } from "../auth/jwt.strategy";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
+import { ActivationService } from "./activation.service";
 import { AccountController } from "./account.controller";
 import { AccountService } from "./account.service";
 
@@ -84,6 +85,7 @@ describe("Account authorization & abuse cases (routes)", () => {
         },
         { provide: PrismaService, useValue: prisma },
         { provide: SecurityEventService, useValue: { log: jest.fn(async () => undefined) } },
+        { provide: ActivationService, useValue: { activate: jest.fn(), viewOf: jest.fn(), poll: jest.fn() } },
       ],
     }).compile();
 

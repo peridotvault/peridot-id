@@ -31,11 +31,26 @@ export interface IntentView {
 export interface TransactionView {
   id: string;
   intentId: string | null;
+  type: string | null;
+  amount: string | null;
+  asset: string | null;
+  direction: string | null;
+  counterparty: string | null;
   chain: string;
   network: string;
   txHash: string | null;
   status: string;
   createdAt: Date;
+  confirmedAt: Date | null;
+}
+
+export interface ActivityInput {
+  type: "DEPOSIT" | "WITHDRAW" | "ACTIVATION";
+  amount: string; // lamports / raw token units as decimal string
+  asset: string;
+  direction: "in" | "out";
+  counterparty?: string;
+  txHash?: string;
 }
 
 function toIntentView(i: Intent): IntentView {
@@ -43,7 +58,21 @@ function toIntentView(i: Intent): IntentView {
 }
 
 function toTxView(t: Transaction): TransactionView {
-  return { id: t.id, intentId: t.intentId, chain: t.chain, network: t.network, txHash: t.txHash, status: t.status, createdAt: t.createdAt };
+  return {
+    id: t.id,
+    intentId: t.intentId,
+    type: t.type,
+    amount: t.amount == null ? null : t.amount.toString(),
+    asset: t.asset,
+    direction: t.direction,
+    counterparty: t.counterparty,
+    chain: t.chain,
+    network: t.network,
+    txHash: t.txHash,
+    status: t.status,
+    createdAt: t.createdAt,
+    confirmedAt: t.confirmedAt,
+  };
 }
 
 @Injectable()
@@ -64,20 +93,20 @@ export class IntentService {
       where: { identityId, status: "active" },
       include: { chainAccounts: { where: { status: "active" } } },
     });
-    if (!account) throw new NotFoundException("Akun tidak ditemukan");
+    if (!account) throw new NotFoundException("Account not found");
     const smart = account.chainAccounts.find((c) => c.accountType === "smart_account");
-    if (!smart) throw new BadRequestException("Akun pintar belum dibuat");
+    if (!smart) throw new BadRequestException("Smart account not created");
     return { account, smart };
   }
 
   private async assertAuthority(accountId: string): Promise<void> {
     const count = await this.prisma.authority.count({ where: { accountId, status: "active" } });
-    if (count === 0) throw new BadRequestException("Tidak ada kredensial terdaftar");
+    if (count === 0) throw new BadRequestException("No registered credentials");
   }
 
   private assertPubkey(value: string | undefined, field: string): void {
     if (!value || !SOLANA_PUBKEY_RE.test(value)) {
-      throw new BadRequestException(`${field} tidak valid`);
+      throw new BadRequestException(`${field} is invalid`);
     }
   }
 
@@ -96,13 +125,13 @@ export class IntentService {
     if (input.type === "WITHDRAW_SOL") {
       this.assertPubkey(input.payload.destination, "Tujuan");
       if (input.payload.destination === smart.address) {
-        throw new BadRequestException("Tujuan tidak boleh akun pintar sendiri");
+        throw new BadRequestException("Destination cannot be the smart account itself");
       }
     } else if (input.type === "WITHDRAW_TOKEN") {
       this.assertPubkey(input.payload.mint, "Mint");
       this.assertPubkey(input.payload.destinationAta, "Tujuan");
     } else {
-      throw new BadRequestException("Tipe intent tidak didukung");
+      throw new BadRequestException("Unsupported intent type");
     }
 
     const intent = await this.prisma.intent.create({
@@ -128,7 +157,7 @@ export class IntentService {
     const intent = await this.prisma.intent.findFirst({
       where: { id: intentId, account: { identityId } },
     });
-    if (!intent) throw new NotFoundException("Intent tidak ditemukan");
+    if (!intent) throw new NotFoundException("Intent not found");
     return toIntentView(intent);
   }
 
@@ -145,7 +174,7 @@ export class IntentService {
     const intent = await this.prisma.intent.findFirst({
       where: { id: input.intentId, accountId: account.id },
     });
-    if (!intent) throw new NotFoundException("Intent tidak ditemukan");
+    if (!intent) throw new NotFoundException("Intent not found");
 
     if (intent.status !== "pending") {
       await this.security.log(identityId, "intent.replay_rejected", { intentId: intent.id }, account.id);
@@ -177,7 +206,42 @@ export class IntentService {
     const tx = await this.prisma.transaction.findFirst({
       where: { id: txId, account: { identityId } },
     });
-    if (!tx) throw new NotFoundException("Transaksi tidak ditemukan");
+    if (!tx) throw new NotFoundException("Transaction not found");
+    return toTxView(tx);
+  }
+
+  /** Newest-first activity history for the identity's default account. */
+  async listTransactions(identityId: string, take = 50): Promise<TransactionView[]> {
+    const txs = await this.prisma.transaction.findMany({
+      where: { account: { identityId } },
+      orderBy: { createdAt: "desc" },
+      take,
+    });
+    return txs.map(toTxView);
+  }
+
+  /**
+   * Record a completed on-chain operation (deposit/withdrawal/activation) directly as a
+   * Transaction row — the activity-history record. No intent lifecycle involved.
+   */
+  async recordActivity(identityId: string, input: ActivityInput): Promise<TransactionView> {
+    const { account, smart } = await this.resolveAccount(identityId);
+    const tx = await this.prisma.transaction.create({
+      data: {
+        accountId: account.id,
+        chainAccountId: smart.id,
+        type: input.type,
+        amount: BigInt(input.amount),
+        asset: input.asset,
+        direction: input.direction,
+        counterparty: input.counterparty ?? null,
+        chain: "solana",
+        network: this.network(),
+        txHash: input.txHash ?? null,
+        status: "submitted" as TransactionStatus,
+      },
+    });
+    await this.security.log(identityId, "activity.recorded", { txId: tx.id, type: input.type }, account.id);
     return toTxView(tx);
   }
 

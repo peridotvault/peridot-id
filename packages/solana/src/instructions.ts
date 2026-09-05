@@ -38,6 +38,33 @@ export function buildInitializeInstruction(
 }
 
 /**
+ * Build the `activate(account_id, authority, activation_fee)` instruction (disc 5).
+ * Peridot-sponsored activation: relayer claims the (possibly pre-funded) PDA, then the
+ * activation fee is reimbursed from the smart account to `treasury`.
+ */
+export function buildActivateInstruction(
+  accountId32: Uint8Array,
+  authorityCompressed: Uint8Array,
+  activationFeeLamports: bigint,
+  relayer: PublicKey,
+  smartAccount: PublicKey,
+  treasury: PublicKey,
+): TransactionInstruction {
+  if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
+  if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: relayer, isSigner: true, isWritable: true },
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: PID_PROGRAM_ID,
+    data: concat([IX.activate], accountId32, authorityCompressed, u64le(activationFeeLamports)) as unknown as Buffer,
+  });
+}
+
+/**
  * Build the Secp256r1 precompile instruction that carries the passkey signature.
  * Layout: [num_sigs=1][pad=0][offsets 14B][pubkey 33B @16][signature 64B @49][message @113].
  */

@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CreateIntentDto, RecordTransactionDto } from "./dto/intent.dto";
+import { CreateIntentDto, RecordActivityDto, RecordTransactionDto } from "./dto/intent.dto";
 import { IntentService, IntentView, TransactionView } from "./intent.service";
 
 @Controller("v1/wallet")
@@ -32,9 +32,30 @@ export class IntentController {
     return this.intentService.recordTransaction(user.identityId, dto);
   }
 
+  @Post("transactions")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  recordActivity(@CurrentUser() user: AuthenticatedUser, @Body() dto: RecordActivityDto): Promise<TransactionView> {
+    return this.intentService.recordActivity(user.identityId, {
+      type: dto.type,
+      amount: dto.amount,
+      asset: dto.asset,
+      direction: dto.direction,
+      counterparty: dto.counterparty,
+      txHash: dto.txHash,
+    });
+  }
+
   @Get("transactions/:id")
   @UseGuards(JwtAuthGuard)
   getTransaction(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<TransactionView> {
     return this.intentService.getTransaction(user.identityId, id);
+  }
+
+  @Get("transactions")
+  @UseGuards(JwtAuthGuard)
+  listTransactions(@CurrentUser() user: AuthenticatedUser): Promise<TransactionView[]> {
+    return this.intentService.listTransactions(user.identityId);
   }
 }

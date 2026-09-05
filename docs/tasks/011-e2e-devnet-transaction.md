@@ -9,7 +9,7 @@ follow-up requiring the stakeholder's Google test app.
 ## Devnet on-chain E2E (verified)
 
 `packages/sdk-js/test/devnet.e2e.mjs` (run with `tsx` against
-`https://api.devnet.solana.com`, program `G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G`):
+`https://api.devnet.solana.com`, program `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`):
 
 - fee payer funded (devnet CLI wallet; faucet is rate-limited so it falls back to the CLI
   keypair);

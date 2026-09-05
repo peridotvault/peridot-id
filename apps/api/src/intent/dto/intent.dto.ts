@@ -7,15 +7,15 @@ class IntentPayloadDto {
   amount!: string;
 
   @IsOptional()
-  @Matches(SOLANA_PUBKEY_RE, { message: "Tujuan tidak valid" })
+  @Matches(SOLANA_PUBKEY_RE, { message: "Destination is invalid" })
   destination?: string;
 
   @IsOptional()
-  @Matches(SOLANA_PUBKEY_RE, { message: "Mint tidak valid" })
+  @Matches(SOLANA_PUBKEY_RE, { message: "Mint is invalid" })
   mint?: string;
 
   @IsOptional()
-  @Matches(SOLANA_PUBKEY_RE, { message: "Tujuan tidak valid" })
+  @Matches(SOLANA_PUBKEY_RE, { message: "Destination is invalid" })
   destinationAta?: string;
 }
 
@@ -39,4 +39,27 @@ export class RecordTransactionDto {
   @IsOptional()
   @IsString()
   network?: string;
+}
+
+export class RecordActivityDto {
+  @IsEnum(["DEPOSIT", "WITHDRAW", "ACTIVATION"])
+  type!: "DEPOSIT" | "WITHDRAW" | "ACTIVATION";
+
+  @Matches(/^\d+$/, { message: "Jumlah harus lebih dari 0" })
+  amount!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  asset!: string;
+
+  @IsEnum(["in", "out"])
+  direction!: "in" | "out";
+
+  @IsOptional()
+  @IsString()
+  counterparty?: string;
+
+  @IsOptional()
+  @IsString()
+  txHash?: string;
 }

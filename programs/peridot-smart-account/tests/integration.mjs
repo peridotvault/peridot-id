@@ -16,7 +16,7 @@ import {
   sendAndConfirmTransaction, LAMPORTS_PER_SOL, TransactionInstruction,
 } from "@solana/web3.js";
 
-const PROGRAM = new PublicKey(process.argv[2] || "G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G");
+const PROGRAM = new PublicKey(process.argv[2] || "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
 const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 const INSTRUCTIONS = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 const DOMAIN = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v1");
@@ -143,6 +143,21 @@ async function expectErr(tx, signers, label) {
   }
 }
 
+// disc=5 activate: account_id(32) | authority(33) | activation_fee u64
+function activateIx(accountId32, authorityComp, activationFee, relayerPub, pda, treasuryPub) {
+  const fee = Buffer.alloc(8); fee.writeBigUInt64LE(BigInt(activationFee));
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: relayerPub, isSigner: true, isWritable: true },
+      { pubkey: pda, isSigner: false, isWritable: true },
+      { pubkey: treasuryPub, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM,
+    data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, fee]),
+  });
+}
+
 async function main() {
   const { privateKey, publicKey } = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   const authorityComp = compressedPub(publicKey);
@@ -181,6 +196,42 @@ async function main() {
 
   // ---- initialize again → AlreadyInitialized ----
   await expectErr(new Transaction().add(initIx), [rentPayer], "re-initialize rejected");
+
+  // ---- activate: Peridot-sponsored claim + reimbursement (disc 5) ----
+  {
+    const actId = uuidTo32(crypto.randomBytes(16).toString("hex"));
+    const [actPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), actId], PROGRAM);
+    const relayer = Keypair.generate();
+    const treasury = Keypair.generate();
+    await conn.confirmTransaction(await conn.requestAirdrop(relayer.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
+
+    // Pre-fund the PDA (the user's deposit) more than enough to cover activation.
+    const funded = 150_000_000; // 0.15 SOL
+    await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: actPda, lamports: funded })
+    ), [rentPayer], { commitment: "confirmed" }), "confirmed");
+
+    const beforeTreasury = (await conn.getAccountInfo(treasury.publicKey))?.lamports ?? 0;
+    const activationFee = 1_592_460;
+    await expectOk(new Transaction().add(
+      activateIx(actId, authorityComp, activationFee, relayer.publicKey, actPda, treasury.publicKey)
+    ), [relayer], "activate claims PDA and reimburses treasury");
+
+    const claimed = await conn.getAccountInfo(actPda);
+    assert.ok(claimed, "activate created on-chain account");
+    assert.equal(claimed.data.length, 80, "activate wrote 80-byte state");
+    assert.equal(claimed.owner.toBase58(), PROGRAM.toBase58(), "activate transferred ownership to program");
+    // Fee moved out of the PDA to the treasury; deposit minus fee remains.
+    assert.equal(claimed.lamports, funded - activationFee, "activation fee reimbursed out of PDA");
+    const afterTreasury = (await conn.getAccountInfo(treasury.publicKey))?.lamports ?? 0;
+    assert.equal(afterTreasury - beforeTreasury, activationFee, "treasury received the activation fee");
+    results.push("PASS activate state + reimbursement");
+  }
+
+  // ---- activate an already-initialized account → rejected ----
+  await expectErr(new Transaction().add(
+    activateIx(accountId32, authorityComp, 1000, rentPayer.publicKey, pda, dest.publicKey)
+  ), [rentPayer], "activate on initialized account rejected");
 
   // ---- deposit (plain transfer) ----
   await sendAndConfirmTransaction(conn, new Transaction().add(

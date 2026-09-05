@@ -12,7 +12,7 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   `@peridotvault/pid-api`, `@peridotvault/pid-types`, `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`,
   `@peridotvault/pid-openapi`, `@peridotvault/pid-docs`, `@peridotvault/pid-wallet`.
 - **On-chain:** PDA seed `["peridot_id", "account", account_id]`; signed-payload domain
-  `PID|SOLANA|SMART_ACCOUNT|v1`; program id `G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G`.
+  `PID|SOLANA|SMART_ACCOUNT|v1`; program id `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
 - **Identity:** PID = `pid_<ULID>`; identity credentials key on `(provider, providerUserId)`.
 
 ## Environment
@@ -46,7 +46,7 @@ Env to set in `apps/api/.env`: `GOOGLE_CLIENT_ID/SECRET`, `PID_PROGRAM_ID=G8tPC.
 
 ## Verification
 
-- API: `pnpm --filter @peridotvault/pid-api exec jest` (83 tests).
+- API: `pnpm --filter @peridotvault/pid-api exec jest` (94 tests).
 - Program: `cargo test` (12) + `tests/integration.mjs` (13 cases) against the local
   validator; devnet E2E `packages/sdk-js/test/devnet.e2e.mjs`.
 - Full: `pnpm typecheck`.

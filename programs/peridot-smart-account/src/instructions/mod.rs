@@ -2,6 +2,7 @@
 
 use pinocchio::error::ProgramError;
 
+pub mod activate;
 pub mod close;
 pub mod initialize;
 pub mod update_authority;
@@ -16,6 +17,7 @@ pub enum Instruction {
     WithdrawToken = 2,
     UpdateAuthority = 3,
     Close = 4,
+    Activate = 5,
 }
 
 impl TryFrom<u8> for Instruction {
@@ -28,6 +30,7 @@ impl TryFrom<u8> for Instruction {
             2 => Ok(Self::WithdrawToken),
             3 => Ok(Self::UpdateAuthority),
             4 => Ok(Self::Close),
+            5 => Ok(Self::Activate),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
@@ -41,6 +44,7 @@ impl TryFrom<u8> for Instruction {
 /// - WithdrawToken:   nonce u64 | amount u64 | destination_ata [u8; 32] | expiry i64 | len u16 | clientDataJSON
 /// - UpdateAuthority: nonce u64 | new_authority [u8; 33] | expiry i64 | len u16 | clientDataJSON
 /// - Close:           nonce u64 | expiry i64 | len u16 | clientDataJSON
+/// - Activate:        account_id [u8; 32] | authority [u8; 33] | activation_fee u64
 /// The `len u16` prefixes the raw WebAuthn clientDataJSON passed for on-chain verification.
 pub struct InstructionData<'a> {
     data: &'a [u8],

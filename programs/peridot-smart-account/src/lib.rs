@@ -28,7 +28,7 @@ use pinocchio::{error::ProgramError, program_entrypoint, AccountView, Address, P
 
 use instructions::{Instruction, InstructionData};
 
-pinocchio::address::declare_id!("G8tPCQRqZAg5R2TDGkcRKw8vZN3tJMdtyHGbaQhW5o4G");
+pinocchio::address::declare_id!("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
 
 program_entrypoint!(process_instruction);
 pinocchio::default_allocator!();
@@ -54,10 +54,11 @@ pub fn process_instruction(
     let instruction_data = InstructionData::new(data)?;
 
     match Instruction::try_from(*discriminator)? {
-        Instruction::Initialize => instructions::initialize::process(program_id, accounts, &instruction_data),
-        Instruction::WithdrawSol => instructions::withdraw_sol::process(program_id, accounts, &instruction_data),
-        Instruction::WithdrawToken => instructions::withdraw_token::process(program_id, accounts, &instruction_data),
-        Instruction::UpdateAuthority => instructions::update_authority::process(program_id, accounts, &instruction_data),
-        Instruction::Close => instructions::close::process(program_id, accounts, &instruction_data),
-    }
+            Instruction::Initialize => instructions::initialize::process(program_id, accounts, &instruction_data),
+            Instruction::WithdrawSol => instructions::withdraw_sol::process(program_id, accounts, &instruction_data),
+            Instruction::WithdrawToken => instructions::withdraw_token::process(program_id, accounts, &instruction_data),
+            Instruction::UpdateAuthority => instructions::update_authority::process(program_id, accounts, &instruction_data),
+            Instruction::Close => instructions::close::process(program_id, accounts, &instruction_data),
+            Instruction::Activate => instructions::activate::process(program_id, accounts, &instruction_data),
+        }
 }

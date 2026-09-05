@@ -1,0 +1,132 @@
+import { useCallback, useEffect, useState } from "react";
+import { Button, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ArrowDownLeft, ArrowUpRight, ArrowLeft, Rocket, ChevronRight, RefreshCw } from "lucide-react-native";
+import type { WalletTransaction } from "@peridotvault/pid-types";
+import { usePeridot } from "../AppContext";
+import { theme, styles as s } from "../theme";
+
+const LAMPORTS_PER_SOL = 1e9;
+
+function fmtAmount(t: WalletTransaction): string {
+  if (t.amount == null) return "";
+  const asset = t.asset === "SOL" ? "SOL" : t.asset;
+  const value = Number(t.amount) / (t.asset === "SOL" ? LAMPORTS_PER_SOL : 1e6);
+  const sign = t.direction === "in" ? "+" : t.direction === "out" ? "−" : "";
+  return `${sign}${value.toLocaleString("en-US", { maximumFractionDigits: 4 })} ${asset}`;
+}
+
+function meta(t: WalletTransaction): { label: string; icon: typeof ArrowUpRight; color: string } {
+  switch (t.type) {
+    case "DEPOSIT":
+      return { label: "Receive", icon: ArrowDownLeft, color: theme.colors.success };
+    case "WITHDRAW":
+      return { label: "Send", icon: ArrowUpRight, color: theme.colors.foreground };
+    case "ACTIVATION":
+      return { label: "Activation", icon: Rocket, color: theme.colors.foreground };
+    default:
+      return { label: "Transaction", icon: RefreshCw, color: theme.colors.mutedForeground };
+  }
+}
+
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+export function ActivityScreen({
+  onDone,
+  onSelect,
+}: {
+  onDone: () => void;
+  onSelect: (id: string) => void;
+}) {
+  const { peridot } = usePeridot();
+  const [items, setItems] = useState<WalletTransaction[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await peridot.wallet.transactions();
+      setItems((Array.isArray(res) ? res : []) as WalletTransaction[]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [peridot]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+      <TouchableOpacity style={styles.back} onPress={onDone}>
+        <ArrowLeft size={18} color={theme.colors.foreground} />
+        <Text style={styles.backLabel}>Back</Text>
+      </TouchableOpacity>
+
+      <View style={styles.headRow}>
+        <Text style={s.title}>Activity</Text>
+        <TouchableOpacity style={styles.iconBtn} onPress={load} disabled={busy}>
+          <RefreshCw size={16} color={theme.colors.foreground} />
+        </TouchableOpacity>
+      </View>
+
+      {error && <Text style={s.error}>{error}</Text>}
+      {busy && <Text style={s.hint}>Loading…</Text>}
+
+      {items.length === 0 && !busy && (
+        <Text style={s.hint}>No activity yet — send, receive, or activate your account to get started.</Text>
+      )}
+
+      {items.map((t) => {
+        const m = meta(t);
+        const Icon = m.icon;
+        return (
+          <TouchableOpacity key={t.id} style={s.card} onPress={() => onSelect(t.id)}>
+            <View style={styles.row}>
+              <View style={[styles.icon, { backgroundColor: m.color + "22" }]}>
+                <Icon size={16} color={m.color} />
+              </View>
+              <View style={styles.meta}>
+                <Text style={styles.label}>{m.label}</Text>
+                <Text style={styles.muted}>{fmtDate(t.createdAt)} · {t.status}</Text>
+              </View>
+              {t.amount != null && <Text style={styles.amount}>{fmtAmount(t)}</Text>}
+              <ChevronRight size={16} color={theme.colors.mutedForeground} />
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+
+      <Button title="Back" onPress={onDone} />
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: theme.colors.background },
+  container: { padding: 24, gap: 12 },
+  back: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
+  backLabel: { fontSize: 14, color: theme.colors.foreground },
+  headRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: theme.colors.surface,
+  },
+  row: { flexDirection: "row", alignItems: "center", gap: 12 },
+  icon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  meta: { flex: 1, gap: 2 },
+  label: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground },
+  muted: { fontSize: 12, color: theme.colors.mutedForeground },
+  amount: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: "monospace" },
+});

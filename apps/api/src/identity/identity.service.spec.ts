@@ -90,4 +90,38 @@ describe("IdentityService", () => {
       status: "active",
     });
   });
+
+  it("deleteAccount revokes all sessions and soft-deletes the identity", async () => {
+    const updated: Array<Record<string, unknown>> = [];
+    const prisma: Record<string, unknown> = {
+      $transaction: jest.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
+      session: {
+        updateMany: jest.fn(async ({ where, data }: { where: unknown; data: unknown }) => {
+          updated.push({ op: "session.updateMany", where, data });
+          return { count: 2 };
+        }),
+      },
+      identity: {
+        update: jest.fn(async ({ where, data }: { where: unknown; data: unknown }) => {
+          updated.push({ op: "identity.update", where, data });
+          return { id: "pid_01HASH", ...(data as Record<string, unknown>) };
+        }),
+      },
+    };
+    const service = new IdentityService(prisma as never);
+
+    await service.deleteAccount("pid_01HASH");
+
+    expect(updated).toHaveLength(2);
+    expect(updated[0]).toEqual(
+      expect.objectContaining({ op: "session.updateMany", where: { device: { identityId: "pid_01HASH" } }, data: { revokedAt: expect.any(Date) } }),
+    );
+    expect(updated[1]).toEqual(
+      expect.objectContaining({
+        op: "identity.update",
+        where: { id: "pid_01HASH" },
+        data: expect.objectContaining({ status: "deleted", deletedAt: expect.any(Date) }),
+      }),
+    );
+  });
 });

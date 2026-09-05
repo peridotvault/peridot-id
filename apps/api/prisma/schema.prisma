@@ -35,6 +35,15 @@ enum TransactionStatus {
   failed
 }
 
+enum ChainAccountStatus {
+  inactivated
+  funded
+  ready
+  activating
+  active
+  insufficient
+}
+
 model Identity {
   id        String         @id
   status    IdentityStatus @default(active)
@@ -132,8 +141,8 @@ model PidAccount {
 // existing-credential approval required to add a second credential (ADR 006 §4).
 model CredentialChallenge {
   id                String           @id @default(uuid())
-  accountId         String
-  account           PidAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId         String?
+  account           PidAccount?  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   kind              String
   challenge         String
   approvalChallenge String?
@@ -151,16 +160,18 @@ model CredentialChallenge {
 // account per chain per account in V1 while letting a migrated linked_address coexist.
 // No key-material columns, ever (ADR 003 rule carried).
 model ChainAccount {
-  id             String         @id @default(uuid())
-  accountId      String
-  account        PidAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  chainNamespace String
-  chainReference String
-  address        String
-  accountType    String
-  status         IdentityStatus @default(active)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id                 String            @id @default(uuid())
+  accountId          String
+  account            PidAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  chainNamespace     String
+  chainReference     String
+  address            String
+  accountType        String
+  status             ChainAccountStatus @default(inactivated)
+  activationBalance  BigInt?     // lamports detected at last poll (null = unpolled)
+  activationRequired BigInt?     // lamports needed to activate (rent+fee+margin)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   feePayers    WalletFeePayer[]
   transactions Transaction[]
@@ -225,6 +236,11 @@ model Transaction {
   chainAccount   ChainAccount      @relation(fields: [chainAccountId], references: [id], onDelete: Cascade)
   intentId       String?
   intent         Intent?           @relation(fields: [intentId], references: [id], onDelete: SetNull)
+  type           String?
+  amount         BigInt?
+  asset          String?
+  direction      String?
+  counterparty   String?
   chain          String
   network        String
   txHash         String?

@@ -1,11 +1,18 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import { CredentialService } from "./credential.service";
+
+jest.mock("@simplewebauthn/server", () => {
+  const actual = jest.requireActual("@simplewebauthn/server") as object;
+  return { ...actual, verifyAuthenticationResponse: jest.fn() };
+});
 
 const ACCOUNT_ID = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
 
 // A valid COSE_Key (ES256) with x = 0x11*32, y = 0x22*32 → compressed 0x02 || x.
-const COSE_KEY = Buffer.concat([
-  Buffer.from([0xa4, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
+// map(5): kty, alg, crv, x, y (matches real simplewebauthn output — do not revert to map(4)).
+export const COSE_KEY = Buffer.concat([
+  Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
   Buffer.alloc(32, 0x11),
   Buffer.from([0x22, 0x58, 0x20]),
   Buffer.alloc(32, 0x22),
@@ -84,9 +91,27 @@ describe("CredentialService", () => {
     expect(result.approval).toBeNull();
     expect(result.options.challenge).toBeDefined();
     expect(result.options.pubKeyCredParams[0].alg).toBe(-7); // ES256 = secp256r1
+    // First passkey is pinned to the platform authenticator.
+    expect((result.options.authenticatorSelection as Record<string, unknown>).authenticatorAttachment).toBe("platform");
     expect(prisma.credentialChallenge.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ kind: "registration", isAdditional: false, accountId: ACCOUNT_ID }),
+      }),
+    );
+  });
+
+  it("registerStart for an additional credential allows a roaming authenticator / security key", async () => {
+    const { service, prisma } = setup();
+    prisma.authority.findMany.mockResolvedValue([authority()]);
+
+    const result = await service.registerStart("pid_01HASH");
+
+    expect(result.isAdditional).toBe(true);
+    // Not constrained to the platform authenticator → cross-device/roaming enrollment allowed.
+    expect((result.options.authenticatorSelection as Record<string, unknown>)).not.toHaveProperty("authenticatorAttachment");
+    expect(prisma.credentialChallenge.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ isAdditional: true, approvalChallenge: expect.any(String) }),
       }),
     );
   });
@@ -216,6 +241,105 @@ describe("CredentialService", () => {
       service.authenticateFinish("pid_01HASH", {
         authenticationId: "c1",
         credential: { id: "nope", rawId: "nope", response: { clientDataJSON: "y", authenticatorData: "a", signature: "s" } },
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("loginStart issues an unauthenticated discoverable-credential challenge (no accountId)", async () => {
+    const { service, prisma } = setup();
+
+    const result = await service.loginStart();
+
+    expect(result.authenticationId).toBe("challenge-1");
+    expect(result.options.challenge).toBeDefined();
+    expect(prisma.credentialChallenge.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ kind: "login" }) }),
+    );
+    // login challenge is deliberately scoped to no account (pre-auth).
+    const call = prisma.credentialChallenge.create.mock.calls[0][0] as { data: { accountId?: unknown } };
+    expect(call.data).not.toHaveProperty("accountId");
+  });
+
+  it("loginFinish returns the identity for a verified passkey", async () => {
+    const { service, prisma } = setup();
+    prisma.credentialChallenge.findFirst.mockResolvedValue({
+      id: "challenge-1",
+      accountId: null,
+      kind: "login",
+      challenge: "challenge-a",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    prisma.authority.findFirst.mockResolvedValue(
+      authority({ id: "auth-1", credentialId: "cred-1", account: { identityId: "pid_01HASH" } }),
+    );
+    const verify = (await import("@simplewebauthn/server")).verifyAuthenticationResponse as jest.Mock;
+    verify.mockResolvedValue({ verified: true });
+
+    const result = await service.loginFinish({
+      authenticationId: "challenge-1",
+      credential: {
+        id: "cred-1",
+        rawId: "cred-1",
+        response: {
+          clientDataJSON: "y",
+          authenticatorData: "a",
+          signature: "s",
+          userHandle: createHash("sha256").update("pid_01HASH").digest("base64url"),
+        },
+      },
+    });
+
+    expect(result.identityId).toBe("pid_01HASH");
+    expect(prisma.authority.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "auth-1" }, data: { lastUsedAt: expect.any(Date) } }),
+    );
+  });
+
+  it("loginFinish rejects a credential whose userHandle does not match the identity", async () => {
+    const { service, prisma } = setup();
+    prisma.credentialChallenge.findFirst.mockResolvedValue({
+      id: "challenge-1",
+      accountId: null,
+      kind: "login",
+      challenge: "challenge-a",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    prisma.authority.findFirst.mockResolvedValue(
+      authority({ id: "auth-1", credentialId: "cred-1", account: { identityId: "pid_01HASH" } }),
+    );
+
+    await expect(
+      service.loginFinish({
+        authenticationId: "challenge-1",
+        credential: {
+          id: "cred-1",
+          rawId: "cred-1",
+          response: { clientDataJSON: "y", authenticatorData: "a", signature: "s", userHandle: "wrong-handle" },
+        },
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.authority.update).not.toHaveBeenCalled();
+  });
+
+  it("loginFinish rejects an unknown credential", async () => {
+    const { service, prisma } = setup();
+    prisma.credentialChallenge.findFirst.mockResolvedValue({
+      id: "challenge-1",
+      accountId: null,
+      kind: "login",
+      challenge: "challenge-a",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    prisma.authority.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.loginFinish({
+        authenticationId: "challenge-1",
+        credential: {
+          id: "nope",
+          rawId: "nope",
+          response: { clientDataJSON: "y", authenticatorData: "a", signature: "s" },
+        },
       }),
     ).rejects.toThrow(BadRequestException);
   });

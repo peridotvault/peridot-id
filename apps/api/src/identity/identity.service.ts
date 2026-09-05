@@ -26,11 +26,25 @@ export class IdentityService {
       where: { id: credentialId, identityId },
       select: { id: true },
     });
-    if (!credential) throw new NotFoundException("Credential tidak ditemukan");
+    if (!credential) throw new NotFoundException("Credential not found");
 
     const count = await this.prisma.identityCredential.count({ where: { identityId } });
     if (count <= 1) throw new BadRequestException("Kamu butuh minimal satu credential untuk login");
 
     await this.prisma.identityCredential.delete({ where: { id: credentialId } });
+  }
+
+  /** Soft-delete the identity: revoke all sessions, mark deleted. Rows are retained. */
+  async deleteAccount(identityId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.session.updateMany({
+        where: { device: { identityId } },
+        data: { revokedAt: new Date() },
+      });
+      await tx.identity.update({
+        where: { id: identityId },
+        data: { status: "deleted", deletedAt: new Date() },
+      });
+    });
   }
 }

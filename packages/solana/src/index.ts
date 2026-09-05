@@ -29,6 +29,7 @@ export {
 } from "./bytes";
 export type { Bytes } from "./bytes";
 export {
+  buildActivateInstruction,
   buildDepositSolInstruction,
   buildDepositTokenInstruction,
   buildInitializeInstruction,
@@ -39,6 +40,8 @@ export {
   smartAccountAta,
 } from "./instructions";
 export { SolanaRpc } from "./rpc";
-export type { ChainRpc } from "./rpc";
+export type { ChainRpc, TokenBalance } from "./rpc";
 export { SolanaAdapter } from "./adapter";
 export type { PasskeyAssertion, PasskeySigner, TransactionStatus } from "./adapter";
+export { Keypair, PublicKey } from "@solana/web3.js";
+export type { Keypair as SolanaKeypair } from "@solana/web3.js";

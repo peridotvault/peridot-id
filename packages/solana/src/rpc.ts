@@ -22,6 +22,14 @@ export interface ChainRpc {
   getAccountInfo(address: PublicKey): Promise<AccountInfo<Buffer> | null>;
   /** Chain clock (used for passkey authorization expiries — the program checks the Clock sysvar). */
   getBlockTime(): Promise<number>;
+  getTokenAccountsByOwner(owner: PublicKey): Promise<TokenBalance[]>;
+}
+
+export interface TokenBalance {
+  mint: string;
+  /** Raw token-account balance (not scaled by decimals). */
+  amount: string;
+  decimals: number;
 }
 
 const DEFAULT_COMMITMENT: Finality = "confirmed";
@@ -106,4 +114,20 @@ export class SolanaRpc implements ChainRpc {
     if (time === null) throw new Error("block time unavailable");
     return time;
   }
+
+  getTokenAccountsByOwner(owner: PublicKey): Promise<TokenBalance[]> {
+    return this.withFailover(async (c) => {
+      const res = await c.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID });
+      return res.value.map((v) => {
+        const info = v.account.data.parsed.info;
+        return {
+          mint: (info.mint as string) ?? "",
+          amount: (info.tokenAmount.amount as string) ?? "0",
+          decimals: (info.tokenAmount.decimals as number) ?? 0,
+        };
+      });
+    });
+  }
 }
+
+const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
