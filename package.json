@@ -35,5 +35,8 @@
     "db:deploy": "pnpm --filter @peridotvault/pid-api db:deploy",
     "db:generate": "pnpm --filter @peridotvault/pid-api db:generate",
     "db:studio": "pnpm --filter @peridotvault/pid-api db:studio"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.0"
   }
 }
