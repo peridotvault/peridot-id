@@ -38,7 +38,26 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
         return;
       }
       const res = await peridot.wallet.withdraw({ amount: lamports, asset, to });
-      setResult(`Sent. Signature: ${res.signature}`);
+      const feeSol = Number(BigInt(res.relayFeeLamports)) / LAMPORTS_PER_SOL;
+      if (res.status === "confirmed") {
+        setResult(
+          `Sent and confirmed on-chain. Network fee ${feeSol.toFixed(6)} SOL was reimbursed from your balance.\nSignature: ${res.signature}`,
+        );
+      } else {
+        // Server already waited ~8s; give it a few more before reporting pending.
+        const outcome = await peridot.wallet.waitForConfirmation(res.signature, 6, 1200).catch(() => "pending");
+        if (outcome === "confirmed") {
+          setResult(
+            `Sent and confirmed on-chain. Network fee ${feeSol.toFixed(6)} SOL was reimbursed from your balance.\nSignature: ${res.signature}`,
+          );
+        } else if (outcome === "failed") {
+          setError("The transaction failed on-chain — the Solana network rejected it. No funds were moved.");
+        } else {
+          setError(
+            "Transaction submitted but not yet confirmed. Check your Activity in a moment — no funds were lost.",
+          );
+        }
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -58,7 +77,7 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
       <Text style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</Text>
       {error && <Text style={s.error}>{error}</Text>}
       {result && <Text selectable style={s.mono}>{result}</Text>}
-      <Button title={busy ? "Waiting for passkey…" : "Send"} onPress={send} disabled={busy || !to || !amount} />
+      <Button title={busy ? "Sending…" : "Send"} onPress={send} disabled={busy || !to || !amount} />
       <Button title="Back" onPress={onDone} />
     </View>
   );

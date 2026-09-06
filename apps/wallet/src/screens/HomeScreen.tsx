@@ -50,7 +50,7 @@ interface HomeScreenProps {
   goReceive: () => void;
   goSwap: () => void;
   goActivity: () => void;
-  goActivityDetail: (id: string) => void;
+  goActivityDetail: (tx: WalletTransaction) => void;
   goActivation: () => void;
   goSettings: () => void;
   onLogout: () => void;
@@ -116,8 +116,8 @@ export function HomeScreen({
         setActivation(null);
       }
       try {
-        const txs = await peridot.wallet.transactions();
-        setActivity(Array.isArray(txs) ? (txs as WalletTransaction[]).slice(0, 5) : []);
+        const txs = await peridot.wallet.history();
+        setActivity((Array.isArray(txs) ? txs : []).slice(0, 5));
       } catch {
         setActivity([]);
       }
@@ -249,7 +249,7 @@ export function HomeScreen({
       </View>
       {activity.length === 0 && !busy && <Text style={s.hint}>No activity yet.</Text>}
       {activity.map((t) => (
-        <TouchableOpacity key={t.id} style={styles.activityRow} onPress={() => goActivityDetail(t.id)}>
+        <TouchableOpacity key={t.id} style={styles.activityRow} onPress={() => goActivityDetail(t)}>
           <View style={styles.activityMeta}>
             <Text style={styles.activityLabel}>{activityLabel(t)}</Text>
             <Text style={styles.activityDate}>{new Date(t.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</Text>

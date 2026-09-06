@@ -21,6 +21,7 @@ import { DangerZoneScreen } from "./src/screens/DangerZoneScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { ActivityDetailScreen } from "./src/screens/ActivityDetailScreen";
 import { ActivationScreen } from "./src/screens/ActivationScreen";
+import type { WalletTransaction } from "@peridotvault/pid-types";
 
 const peridot = Peridot({ baseUrl: API_BASE_URL, solanaRpcUrl: SOLANA_RPC_URL });
 
@@ -44,7 +45,7 @@ type Screen =
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [bootstrapping, setBootstrapping] = useState(true);
-  const [activityId, setActivityId] = useState<string | null>(null);
+  const [activityTx, setActivityTx] = useState<WalletTransaction | null>(null);
   const [passkeyReturn, setPasskeyReturn] = useState<Screen>("security");
 
   const goHome = useCallback(() => setScreen("home"), []);
@@ -56,8 +57,8 @@ export default function App() {
     setScreen("passkey");
   }, []);
 
-  const openActivityDetail = useCallback((id: string) => {
-    setActivityId(id);
+  const openActivityDetail = useCallback((tx: WalletTransaction) => {
+    setActivityTx(tx);
     setScreen("activity-detail");
   }, []);
 
@@ -138,7 +139,7 @@ export default function App() {
         {screen === "connected" && <ConnectedAccountsScreen onDone={() => go("security")} />}
         {screen === "danger" && <DangerZoneScreen onDone={() => go("settings")} onDeleted={goLogin} />}
         {screen === "activity" && <ActivityScreen onDone={goHome} onSelect={openActivityDetail} />}
-        {screen === "activity-detail" && activityId && <ActivityDetailScreen activityId={activityId} onDone={() => go("activity")} />}
+        {screen === "activity-detail" && activityTx && <ActivityDetailScreen tx={activityTx} onDone={() => go("activity")} />}
         <StatusBar style="light" />
       </SafeAreaView>
     </AppContext.Provider>

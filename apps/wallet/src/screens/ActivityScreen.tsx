@@ -37,7 +37,7 @@ export function ActivityScreen({
   onSelect,
 }: {
   onDone: () => void;
-  onSelect: (id: string) => void;
+  onSelect: (tx: WalletTransaction) => void;
 }) {
   const { peridot } = usePeridot();
   const [items, setItems] = useState<WalletTransaction[]>([]);
@@ -48,10 +48,11 @@ export function ActivityScreen({
     setBusy(true);
     setError(null);
     try {
-      const res = await peridot.wallet.transactions();
+      const res = await peridot.wallet.history();
       setItems((Array.isArray(res) ? res : []) as WalletTransaction[]);
     } catch (e) {
       setError(String(e));
+      // Non-fatal: keep showing cached local history if the RPC is unreachable.
     } finally {
       setBusy(false);
     }
@@ -86,7 +87,7 @@ export function ActivityScreen({
         const m = meta(t);
         const Icon = m.icon;
         return (
-          <TouchableOpacity key={t.id} style={s.card} onPress={() => onSelect(t.id)}>
+          <TouchableOpacity key={t.id} style={s.card} onPress={() => onSelect(t)}>
             <View style={styles.row}>
               <View style={[styles.icon, { backgroundColor: m.color + "22" }]}>
                 <Icon size={16} color={m.color} />
