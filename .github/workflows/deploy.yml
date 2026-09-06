@@ -1,0 +1,48 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.27.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate
+        run: pnpm --filter @peridotvault/pid-api db:generate
+      - name: Typecheck
+        run: pnpm typecheck
+
+  deploy-prod:
+    if: github.ref == 'refs/heads/main'
+    needs: [typecheck]
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: true
+    steps:
+      - name: Deploy to prod VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_VPS_HOST }}
+          username: ${{ secrets.PROD_VPS_USER }}
+          key: ${{ secrets.PROD_VPS_SSH_KEY }}
+          command_timeout: 60m
+          script_timeout: 60m
+          script: |
+            cd /opt/apps/peridot-id/peridot-id
+            git fetch "https://x-access-token:${{ secrets.GH_PAT }}@github.com/peridotvault/peridot-id.git" main
+            git reset --hard FETCH_HEAD
+            git checkout -B main FETCH_HEAD
+            ./deploy/up.sh main

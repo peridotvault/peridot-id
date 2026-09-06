@@ -1,0 +1,42 @@
+# dependencies
+**/node_modules
+
+# build artifacts
+**/dist
+**/.turbo
+target/
+**/target/
+test-ledger/
+
+# git
+.git
+.gitignore
+.gitattributes
+
+# env — never bake secrets
+.env
+.env.local
+.env.*.local
+apps/api/.env
+deploy/.env.*
+
+# docs and non-essential
+*.md
+!README.md
+docs/
+graphify-out/
+dump.rdb
+
+# editor
+.DS_Store
+.vscode
+.idea
+.opencode
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# typescript
+**/*.tsbuildinfo

@@ -1,0 +1,73 @@
+FROM node:22-slim AS base
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
+# OpenSSL + CA certs are required by Prisma at install (engine download) and runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+
+WORKDIR /app
+
+# Copy workspace manifests + package.jsons for every workspace member so pnpm can
+# resolve the graph without copying sources (better layer caching).
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/wallet/package.json ./apps/wallet/
+COPY apps/docs/package.json ./apps/docs/
+COPY packages/types/package.json ./packages/types/
+COPY packages/solana/package.json ./packages/solana/
+COPY packages/sdk-js/package.json ./packages/sdk-js/
+COPY packages/openapi/package.json ./packages/openapi/
+
+RUN pnpm install --frozen-lockfile
+
+FROM base AS builder
+
+# Cap Node heap so the nest build fits on small VPSes instead of OOM-ing.
+ENV NODE_OPTIONS=--max-old-space-size=1536
+
+COPY . .
+
+# Workspace build order: types -> solana -> sdk-js -> api (postinstall also builds
+# types/solana/sdk-js, but build explicitly so dist exists for the API import).
+RUN pnpm --filter @peridotvault/pid-types build
+RUN pnpm --filter @peridotvault/pid-solana build
+RUN pnpm --filter @peridotvault/pid-sdk-js build
+RUN pnpm --filter @peridotvault/pid-api db:generate
+RUN pnpm --filter @peridotvault/pid-api build
+
+FROM node:22-slim AS runner
+
+ENV NODE_ENV=production
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system --gid 1001 nodejs \
+    && useradd --system --uid 1001 --gid nodejs nestjs
+
+WORKDIR /app
+
+# Preserve pnpm's symlink layout: root node_modules holds .pnpm store, workspace
+# members' node_modules hold symlinks into it, and packages/* are the real sources
+# that the workspace symlinks point to. API needs pid-solana + pid-types + pid-sdk-js
+# + prisma client + the built dist.
+COPY --from=builder --chown=nestjs:nodejs /app/package.json /app/pnpm-workspace.yaml ./
+COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nestjs:nodejs /app/packages ./packages
+COPY --from=builder --chown=nestjs:nodejs /app/apps/api ./apps/api
+
+USER nestjs
+WORKDIR /app/apps/api
+
+EXPOSE 3301
+
+ENV PORT=3301
+ENV HOSTNAME="0.0.0.0"
+
+CMD ["node", "dist/main.js"]

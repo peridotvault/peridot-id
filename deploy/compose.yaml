@@ -1,0 +1,94 @@
+# PeridotID deploy for the Antigane VPS.
+#
+# Conforms to the infra platform contract (infra/docs/application.md): joins the
+# external `proxy` network, exposes internal ports only, owns its Traefik labels,
+# healthchecks, stdout logging. No infra repo changes required.
+#
+# Domains:  pid.peridotvault.com (web)   api.pid.peridotvault.com (API)
+#
+# main: cp deploy/.env.main.example deploy/.env.main && ./deploy/up.sh main
+#
+# ADR-0006: one VPS runs main + test behind a single Traefik; separation is by
+# hostname (ENV_SUFFIX), router namespace, and compose project name (up.sh).
+
+name: peridot-id
+
+networks:
+  proxy:
+    external: true
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile.api
+    image: peridot-id-api${NAMESPACE}:${TAG:-latest}
+    restart: unless-stopped
+    networks: [proxy]
+    expose: ["3301"]
+    environment:
+      NODE_ENV: production
+      PORT: "3301"
+      DATABASE_URL: ${DATABASE_URL}
+      DIRECT_URL: ${DIRECT_URL}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-30d}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
+      COOKIE_SECURE: "true"
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-.peridotvault.com}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      CLIENT_SUCCESS_URL: ${CLIENT_SUCCESS_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      PID_PROGRAM_ID: ${PID_PROGRAM_ID}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-pid.peridotvault.com}
+      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-PeridotID}
+      WEBAUTHN_ORIGINS: ${WEBAUTHN_ORIGINS}
+      SOLANA_NETWORK: ${SOLANA_NETWORK:-devnet}
+      PID_SOLANA_RPC_URL: ${PID_SOLANA_RPC_URL}
+      PID_RELAYER_SECRET: ${PID_RELAYER_SECRET}
+      PID_ACTIVATION_MARGIN_RATE: ${PID_ACTIVATION_MARGIN_RATE:-0.5}
+      PID_ACTIVATION_POLL_MS: ${PID_ACTIVATION_POLL_MS:-10000}
+      PID_ACTIVATION_CONFIRM_ATTEMPTS: ${PID_ACTIVATION_CONFIRM_ATTEMPTS:-15}
+      PID_ACTIVATION_CONFIRM_INTERVAL_MS: ${PID_ACTIVATION_CONFIRM_INTERVAL_MS:-1000}
+      PID_TREASURY_PUBKEY: ${PID_TREASURY_PUBKEY}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3301/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pid-api${NAMESPACE}.rule=Host(`api.pid.peridotvault.com`)"
+      - "traefik.http.routers.pid-api${NAMESPACE}.entrypoints=websecure"
+      - "traefik.http.routers.pid-api${NAMESPACE}.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
+      - "traefik.http.services.pid-api${NAMESPACE}.loadbalancer.server.port=3301"
+
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+      args:
+        EXPO_PUBLIC_API_URL: ${EXPO_PUBLIC_API_URL}
+    image: peridot-id-web${NAMESPACE}:${TAG:-latest}
+    restart: unless-stopped
+    networks: [proxy]
+    expose: ["3000"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pid-web${NAMESPACE}.rule=Host(`pid.peridotvault.com`)"
+      - "traefik.http.routers.pid-web${NAMESPACE}.entrypoints=websecure"
+      - "traefik.http.routers.pid-web${NAMESPACE}.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.pid-web${NAMESPACE}.middlewares=security-headers@file"
+      - "traefik.http.services.pid-web${NAMESPACE}.loadbalancer.server.port=3000"

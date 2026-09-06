@@ -11,12 +11,14 @@ import { ProfileModule } from "./profile/profile.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { SecurityModule } from "./security/security-event.module";
 import { WalletModule } from "./wallet/wallet.module";
+import { HealthModule } from "./health/health.module";
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([{ name: "default", ttl: 60000, limit: 100 }]),
     PrismaModule,
+    HealthModule,
     AuthModule,
     IdentityModule,
     ProfileModule,
