@@ -15,6 +15,7 @@ import {
   Connection, Keypair, PublicKey, SystemProgram, Transaction,
   sendAndConfirmTransaction, LAMPORTS_PER_SOL, TransactionInstruction,
 } from "@solana/web3.js";
+import { createMint, getOrCreateAssociatedTokenAccount, mintTo } from "@solana/spl-token";
 
 const PROGRAM = new PublicKey(process.argv[2] || "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
 const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
@@ -45,11 +46,12 @@ function compressedPub(pub) {
   return Buffer.concat([Buffer.from([(raw[64] & 1) ? 0x03 : 0x02]), X]);
 }
 
-function buildPayload(nonce, amount, destBytes, expiry) {
+function buildPayload(nonce, amount, destBytes, expiry, relayFee = 0n) {
   const nb = Buffer.alloc(8); nb.writeBigUInt64LE(BigInt(nonce));
   const ab = Buffer.alloc(8); ab.writeBigUInt64LE(BigInt(amount));
   const eb = Buffer.alloc(8); eb.writeBigInt64LE(BigInt(expiry));
-  return sha256(Buffer.concat([DOMAIN, nb, ab, destBytes, eb]));
+  const fb = Buffer.alloc(8); fb.writeBigUInt64LE(BigInt(relayFee));
+  return sha256(Buffer.concat([DOMAIN, nb, ab, destBytes, eb, fb]));
 }
 
 function makeAssertion(payloadHash) {
@@ -77,22 +79,26 @@ function wdData(disc, fields, clientDataJSON) {
   return Buffer.concat([Buffer.from([disc]), ...fields, lenB, clientDataJSON]);
 }
 
-// disc=1 withdraw_sol: nonce, amount, dest, expiry
-function withdrawIx(pda, destPub, nonce, amount, destBytes, expiry, keypair, assertion) {
-  const payload = buildPayload(nonce, amount, destBytes, expiry);
+// disc=1 sponsored withdraw_sol: nonce, amount, dest, expiry, relay_fee. Accounts include
+// the treasury (receives the reimbursed relay fee) and the relayer (tx signer / fee payer).
+function withdrawIx(pda, destPub, treasuryPub, relayerPub, nonce, amount, destBytes, relayFee, expiry, keypair, assertion) {
+  const payload = buildPayload(nonce, amount, destBytes, expiry, relayFee);
   const sig = lowS(crypto.sign("sha256", assertion.messageData, { key: keypair.privateKey, dsaEncoding: "ieee-p1363" }));
   const comp = compressedPub(keypair.publicKey);
   const nb = Buffer.alloc(8); nb.writeBigUInt64LE(BigInt(nonce));
   const ab = Buffer.alloc(8); ab.writeBigUInt64LE(BigInt(amount));
   const eb = Buffer.alloc(8); eb.writeBigInt64LE(BigInt(expiry));
+  const fb = Buffer.alloc(8); fb.writeBigUInt64LE(BigInt(relayFee));
   const programIx = new TransactionInstruction({
     keys: [
       { pubkey: pda, isSigner: false, isWritable: true },
       { pubkey: destPub, isSigner: false, isWritable: true },
+      { pubkey: treasuryPub, isSigner: false, isWritable: true },
+      { pubkey: relayerPub, isSigner: true, isWritable: true },
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
     ],
     programId: PROGRAM,
-    data: wdData(1, [nb, ab, destBytes, eb], assertion.clientDataJSON),
+    data: wdData(1, [nb, ab, destBytes, eb, fb], assertion.clientDataJSON),
   });
   return new Transaction().add(programIx, buildSecpIx(comp, sig, assertion.messageData));
 }
@@ -165,8 +171,12 @@ async function main() {
 
   const rentPayer = Keypair.generate();
   const dest = Keypair.generate();
+  const treasury = Keypair.generate();
+  const RELAY_FEE = 100_000n;
   await conn.confirmTransaction(await conn.requestAirdrop(rentPayer.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(dest.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
+  // Treasury must be rent-exempt: direct lamport writes to a non-existent account are rejected.
+  await conn.confirmTransaction(await conn.requestAirdrop(treasury.publicKey, LAMPORTS_PER_SOL), "confirmed");
 
   const vclock = await conn.getBlockTime(await conn.getSlot());
   const now = () => vclock;
@@ -238,36 +248,40 @@ async function main() {
     SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: pda, lamports: 10_000_000 })
   ), [rentPayer], { commitment: "confirmed" });
 
-  // ---- withdraw: valid ----
+  // ---- withdraw: valid (relayer-sponsored) — dest gets amount, treasury gets relay_fee ----
   const destBytes = dest.publicKey.toBuffer();
   const expiry = now() + 3600;
-  const a = makeAssertion(buildPayload(0, 5_000_000, destBytes, expiry));
-  await expectOk(withdrawIx(pda, dest.publicKey, 0, 5_000_000, destBytes, expiry, { privateKey, publicKey }, a), [rentPayer], "withdraw valid");
+  const treasury0 = (await conn.getAccountInfo(treasury.publicKey))?.lamports ?? 0;
+  const a = makeAssertion(buildPayload(0, 5_000_000, destBytes, expiry, RELAY_FEE));
+  await expectOk(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 0, 5_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a), [rentPayer], "withdraw valid");
+  const treasury1 = (await conn.getAccountInfo(treasury.publicKey))?.lamports ?? 0;
+  assert.equal(treasury1 - treasury0, Number(RELAY_FEE), "relay fee reimbursed to treasury");
+  results.push("PASS relay fee reimbursed");
 
   // ---- unauthorized transfer (wrong passkey) ----
-  const a1 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry));
-  await expectErr(withdrawIx(pda, dest.publicKey, 1, 1_000_000, destBytes, expiry, { privateKey: k2, publicKey: p2 }, a1), [rentPayer], "unauthorized passkey rejected");
+  const a1 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE));
+  await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey: k2, publicKey: p2 }, a1), [rentPayer], "unauthorized passkey rejected");
 
   // ---- invalid nonce / replay ----
-  const a2 = makeAssertion(buildPayload(0, 1_000_000, destBytes, expiry));
-  await expectErr(withdrawIx(pda, dest.publicKey, 0, 1_000_000, destBytes, expiry, { privateKey, publicKey }, a2), [rentPayer], "replay (nonce 0) rejected");
+  const a2 = makeAssertion(buildPayload(0, 1_000_000, destBytes, expiry, RELAY_FEE));
+  await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 0, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a2), [rentPayer], "replay (nonce 0) rejected");
 
-  const a3 = makeAssertion(buildPayload(99, 1_000_000, destBytes, expiry));
-  await expectErr(withdrawIx(pda, dest.publicKey, 99, 1_000_000, destBytes, expiry, { privateKey, publicKey }, a3), [rentPayer], "invalid nonce rejected");
+  const a3 = makeAssertion(buildPayload(99, 1_000_000, destBytes, expiry, RELAY_FEE));
+  await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 99, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a3), [rentPayer], "invalid nonce rejected");
 
   // ---- expired expiry ----
-  const a4 = makeAssertion(buildPayload(1, 1_000_000, destBytes, now() - 60));
-  await expectErr(withdrawIx(pda, dest.publicKey, 1, 1_000_000, destBytes, now() - 60, { privateKey, publicKey }, a4), [rentPayer], "expired expiry rejected");
+  const a4 = makeAssertion(buildPayload(1, 1_000_000, destBytes, now() - 60, RELAY_FEE));
+  await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, RELAY_FEE, now() - 60, { privateKey, publicKey }, a4), [rentPayer], "expired expiry rejected");
 
   // ---- transaction substitution (challenge binds amount X, executes Y) ----
-  const a5 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry));
-  await expectErr(withdrawIx(pda, dest.publicKey, 1, 9_000_000, destBytes, expiry, { privateKey, publicKey }, a5), [rentPayer], "challenge/args mismatch rejected");
+  const a5 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE));
+  await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 9_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a5), [rentPayer], "challenge/args mismatch rejected");
 
   // ---- account mismatch (wrong PDA in args vs actual) ----
   const otherId = uuidTo32(crypto.randomBytes(16).toString("hex"));
   const [otherPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), otherId], PROGRAM);
-  const a6 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry));
-  await expectErr(withdrawIx(otherPda, dest.publicKey, 1, 1_000_000, destBytes, expiry, { privateKey, publicKey }, a6), [rentPayer], "account (PDA) mismatch rejected");
+  const a6 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE));
+  await expectErr(withdrawIx(otherPda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a6), [rentPayer], "account (PDA) mismatch rejected");
 
   // ---- malformed instruction (truncated clientDataJSON length) ----
   const malformed = new TransactionInstruction({
@@ -291,15 +305,62 @@ async function main() {
   await expectOk(updateAuthIx(pda, 1, newAuth, expiry, { privateKey, publicKey }, ra), [rentPayer], "update_authority valid");
 
   // Now the OLD key must be rejected, the NEW key accepted.
-  const a7 = makeAssertion(buildPayload(2, 1_000_000, destBytes, expiry));
-  await expectErr(withdrawIx(pda, dest.publicKey, 2, 1_000_000, destBytes, expiry, { privateKey, publicKey }, a7), [rentPayer], "old authority rejected after rotation");
+  const a7 = makeAssertion(buildPayload(2, 1_000_000, destBytes, expiry, RELAY_FEE));
+  await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 2, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a7), [rentPayer], "old authority rejected after rotation");
 
-  const a8 = makeAssertion(buildPayload(2, 1_000_000, destBytes, expiry));
-  await expectOk(withdrawIx(pda, dest.publicKey, 2, 1_000_000, destBytes, expiry, { privateKey: k2, publicKey: p2 }, a8), [rentPayer], "new authority accepted after rotation");
+  const a8 = makeAssertion(buildPayload(2, 1_000_000, destBytes, expiry, RELAY_FEE));
+  await expectOk(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 2, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey: k2, publicKey: p2 }, a8), [rentPayer], "new authority accepted after rotation");
+
+  // ---- sponsored token withdraw (disc 2) — tokens move via SPL CPI, relay fee reimbursed ----
+  {
+    const TOKEN_PROG = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    const mintAuth = Keypair.generate();
+    await conn.confirmTransaction(await conn.requestAirdrop(mintAuth.publicKey, LAMPORTS_PER_SOL), "confirmed");
+    const mint = await createMint(conn, mintAuth, mintAuth.publicKey, null, 6);
+    const smartToken = await getOrCreateAssociatedTokenAccount(conn, mintAuth, mint, pda, true);
+    const destToken = await getOrCreateAssociatedTokenAccount(conn, mintAuth, mint, dest.publicKey);
+    await mintTo(conn, mintAuth, mint, smartToken.address, mintAuth, 10_000_000);
+    results.push("PASS token ATA + mint");
+    // nonce is 3 (after the two rotation withdraws).
+    const ttRelay = 100_000n;
+    const ttAmount = 2_000_000n;
+    const tokenAtaBytes = destToken.address.toBuffer();
+    const ttExpiry = now() + 3600;
+    const ttAssertion = makeAssertion(buildPayload(3, ttAmount, tokenAtaBytes, ttExpiry, ttRelay));
+    const ttSig = lowS(crypto.sign("sha256", ttAssertion.messageData, { key: k2, dsaEncoding: "ieee-p1363" }));
+    const ttComp = compressedPub(p2);
+    const nb = Buffer.alloc(8); nb.writeBigUInt64LE(3n);
+    const ab = Buffer.alloc(8); ab.writeBigUInt64LE(ttAmount);
+    const eb = Buffer.alloc(8); eb.writeBigInt64LE(BigInt(ttExpiry));
+    const fb = Buffer.alloc(8); fb.writeBigUInt64LE(ttRelay);
+    const tokenIx = new TransactionInstruction({
+      keys: [
+        { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: smartToken.address, isSigner: false, isWritable: true },
+        { pubkey: mint, isSigner: false, isWritable: false },
+        { pubkey: destToken.address, isSigner: false, isWritable: true },
+        { pubkey: TOKEN_PROG, isSigner: false, isWritable: false },
+        { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+        { pubkey: treasury.publicKey, isSigner: false, isWritable: true },
+        { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
+      ],
+      programId: PROGRAM,
+      data: wdData(2, [nb, ab, tokenAtaBytes, eb, fb], ttAssertion.clientDataJSON),
+    });
+    const treasuryBefore = (await conn.getAccountInfo(treasury.publicKey))?.lamports ?? 0;
+    await expectOk(new Transaction().add(tokenIx, buildSecpIx(ttComp, ttSig, ttAssertion.messageData)), [rentPayer], "sponsored withdraw token valid");
+    const smartBal = (await conn.getTokenAccountBalance(smartToken.address)).value.uiAmount;
+    const destBal = (await conn.getTokenAccountBalance(destToken.address)).value.uiAmount;
+    assert.equal(smartBal, 8, "smart ATA debited by token amount");
+    assert.equal(destBal, 2, "dest ATA credited");
+    const treasuryAfter = (await conn.getAccountInfo(treasury.publicKey))?.lamports ?? 0;
+    assert.equal(treasuryAfter - treasuryBefore, Number(ttRelay), "token withdraw relay fee reimbursed");
+    results.push("PASS token withdraw state + relay fee");
+  }
 
   console.log(results.join("\n"));
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed) process.exit(1);
   console.log("INTEGRATION OK");
 }
-main().catch((e) => { console.error("FAIL", e); process.exit(1); });
+main().catch((e) => { console.log(results.join("\n")); console.error("FAIL", e); process.exit(1); });

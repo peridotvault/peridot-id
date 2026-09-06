@@ -90,12 +90,19 @@ export function buildSecp256r1Instruction(
   });
 }
 
-/** `withdraw_sol(nonce, amount, destination, expiry)` — must be followed by the secp256r1 ix. */
+/**
+ * Sponsored `withdraw_sol(nonce, amount, destination, expiry, relay_fee)` — must be followed
+ * by the secp256r1 ix. The Peridot relayer is the tx signer/fee payer and `treasury` receives
+ * the reimbursed relay fee (network fee × (1 + margin)) from the smart account.
+ */
 export function buildWithdrawSolInstruction(
   smartAccount: PublicKey,
   destination: PublicKey,
+  treasury: PublicKey,
+  relayer: PublicKey,
   nonce: bigint,
   amount: bigint,
+  relayFeeLamports: bigint,
   expiry: number,
   clientDataJSON: Uint8Array,
 ): TransactionInstruction {
@@ -103,21 +110,30 @@ export function buildWithdrawSolInstruction(
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
       { pubkey: destination, isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: relayer, isSigner: true, isWritable: true },
       { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
     ],
     programId: PID_PROGRAM_ID,
-    data: concat([IX.withdrawSol], u64le(nonce), u64le(amount), destination.toBytes(), i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+    data: concat([IX.withdrawSol], u64le(nonce), u64le(amount), destination.toBytes(), i64le(expiry), u64le(relayFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
 
-/** `withdraw_token(nonce, amount, destination_ata, expiry)`. */
+/**
+ * Sponsored `withdraw_token(nonce, amount, destination_ata, expiry, relay_fee)`. The relay
+ * fee (SOL) is reimbursed from the smart account to the treasury; the token transfer runs
+ * through the SPL Token program via CPI.
+ */
 export function buildWithdrawTokenInstruction(
   smartAccount: PublicKey,
   sourceAta: PublicKey,
   destinationAta: PublicKey,
   mint: PublicKey,
+  treasury: PublicKey,
+  relayer: PublicKey,
   nonce: bigint,
   amount: bigint,
+  relayFeeLamports: bigint,
   expiry: number,
   clientDataJSON: Uint8Array,
 ): TransactionInstruction {
@@ -129,9 +145,11 @@ export function buildWithdrawTokenInstruction(
       { pubkey: destinationAta, isSigner: false, isWritable: true },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: relayer, isSigner: true, isWritable: true },
     ],
     programId: PID_PROGRAM_ID,
-    data: concat([IX.withdrawToken], u64le(nonce), u64le(amount), destinationAta.toBytes(), i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+    data: concat([IX.withdrawToken], u64le(nonce), u64le(amount), destinationAta.toBytes(), i64le(expiry), u64le(relayFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
 

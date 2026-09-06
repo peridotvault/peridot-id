@@ -7,17 +7,44 @@
 // is read against cluster state (commitment), not a single node's word (ADR 007 §8).
 
 import {
+  ConfirmedSignatureInfo,
   Connection,
   type AccountInfo,  type Finality,
   type Keypair,
+  ParsedTransactionWithMeta,
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
+
+export interface ParsedTx {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  err: unknown;
+  fee?: number;
+  accountKeys: string[];
+  preBalances?: number[];
+  postBalances?: number[];
+  preTokenBalances?: ParsedTokenBalance[];
+  postTokenBalances?: ParsedTokenBalance[];
+  logs?: string[];
+  computeUnitsConsumed?: number;
+}
+
+export interface ParsedTokenBalance {
+  mint: string;
+  owner: string;
+  accountIndex: number;
+  amount: string;
+  decimals: number;
+}
 
 export interface ChainRpc {
   getLatestBlockhash(): Promise<string>;
   sendTransaction(tx: Transaction, signers?: Keypair[]): Promise<string>;
   getTransaction(sig: string): Promise<{ err: unknown; computeUnitsConsumed?: number; logs?: string[] } | null>;
+  getParsedTransaction(sig: string): Promise<ParsedTx | null>;
+  getSignaturesForAddress(address: PublicKey, limit?: number): Promise<{ signature: string; err: unknown }[]>;
   getBalance(address: PublicKey): Promise<number>;
   getAccountInfo(address: PublicKey): Promise<AccountInfo<Buffer> | null>;
   /** Chain clock (used for passkey authorization expiries — the program checks the Clock sysvar). */
@@ -30,6 +57,8 @@ export interface TokenBalance {
   /** Raw token-account balance (not scaled by decimals). */
   amount: string;
   decimals: number;
+  /** The token account (ATA) that holds the balance at this address. */
+  account: string;
 }
 
 const DEFAULT_COMMITMENT: Finality = "confirmed";
@@ -100,6 +129,34 @@ export class SolanaRpc implements ChainRpc {
     };
   }
 
+  async getParsedTransaction(sig: string): Promise<ParsedTx | null> {
+    const meta = await this.withFailover((c) =>
+      c.getParsedTransaction(sig, { maxSupportedTransactionVersion: 0, commitment: this.commitment }),
+    );
+    if (!meta || !meta.meta) return null;
+    return {
+      signature: sig,
+      slot: meta.slot,
+      blockTime: meta.blockTime ?? null,
+      err: meta.meta.err ?? null,
+      fee: meta.meta.fee,
+      accountKeys: meta.transaction.message.accountKeys.map((k) => k.pubkey.toBase58()),
+      preBalances: meta.meta.preBalances,
+      postBalances: meta.meta.postBalances,
+      preTokenBalances: (meta.meta.preTokenBalances ?? []).map(toParsedTokenBal),
+      postTokenBalances: (meta.meta.postTokenBalances ?? []).map(toParsedTokenBal),
+      logs: meta.meta.logMessages ?? [],
+      computeUnitsConsumed: meta.meta.computeUnitsConsumed,
+    };
+  }
+
+  async getSignaturesForAddress(address: PublicKey, limit = 30): Promise<{ signature: string; err: unknown }[]> {
+    const sigs = await this.withFailover((c) =>
+      c.getSignaturesForAddress(address, { limit }, this.commitment),
+    );
+    return sigs.map((s: ConfirmedSignatureInfo) => ({ signature: s.signature, err: s.err }));
+  }
+
   getBalance(address: PublicKey): Promise<number> {
     return this.withFailover((c) => c.getBalance(address, this.commitment));
   }
@@ -124,10 +181,26 @@ export class SolanaRpc implements ChainRpc {
           mint: (info.mint as string) ?? "",
           amount: (info.tokenAmount.amount as string) ?? "0",
           decimals: (info.tokenAmount.decimals as number) ?? 0,
+          account: v.pubkey.toBase58(),
         };
       });
     });
   }
+}
+
+function toParsedTokenBal(t: {
+  mint: string;
+  owner?: string;
+  accountIndex: number;
+  uiTokenAmount: { amount: string; decimals: number };
+}): ParsedTokenBalance {
+  return {
+    mint: t.mint,
+    owner: t.owner ?? "",
+    accountIndex: t.accountIndex,
+    amount: t.uiTokenAmount.amount,
+    decimals: t.uiTokenAmount.decimals,
+  };
 }
 
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");

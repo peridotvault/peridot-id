@@ -40,7 +40,7 @@ export {
   smartAccountAta,
 } from "./instructions";
 export { SolanaRpc } from "./rpc";
-export type { ChainRpc, TokenBalance } from "./rpc";
+export type { ChainRpc, ParsedTx, TokenBalance } from "./rpc";
 export { SolanaAdapter } from "./adapter";
 export type { PasskeyAssertion, PasskeySigner, TransactionStatus } from "./adapter";
 export { Keypair, PublicKey } from "@solana/web3.js";

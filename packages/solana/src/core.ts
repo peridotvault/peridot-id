@@ -66,14 +66,15 @@ export async function buildAuthorizationPayload(parts: Uint8Array[]): Promise<Ui
   return hashSha256(concat(DOMAIN, ...parts));
 }
 
-/** Convenience for the common WITHDRAW_SOL payload. */
+/** Convenience for the common WITHDRAW_SOL payload (includes the relayer-reimbursed relay fee). */
 export async function buildWithdrawPayload(
   nonce: bigint,
   amount: bigint,
   destination: PublicKey,
   expiry: number,
+  relayFeeLamports: bigint = 0n,
 ): Promise<Uint8Array> {
-  return buildAuthorizationPayload([u64le(nonce), u64le(amount), destination.toBytes(), i64le(expiry)]);
+  return buildAuthorizationPayload([u64le(nonce), u64le(amount), destination.toBytes(), i64le(expiry), u64le(relayFeeLamports)]);
 }
 
 /**

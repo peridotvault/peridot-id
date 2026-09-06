@@ -40,11 +40,13 @@ impl TryFrom<u8> for Instruction {
 ///
 /// Layouts:
 /// - Initialize:      account_id [u8; 32] | authority [u8; 33]
-/// - WithdrawSol:     nonce u64 | amount u64 | destination [u8; 32] | expiry i64 | len u16 | clientDataJSON
-/// - WithdrawToken:   nonce u64 | amount u64 | destination_ata [u8; 32] | expiry i64 | len u16 | clientDataJSON
+/// - WithdrawSol:     nonce u64 | amount u64 | destination [u8; 32] | expiry i64 | relay_fee u64 | len u16 | clientDataJSON
+/// - WithdrawToken:   nonce u64 | amount u64 | destination_ata [u8; 32] | expiry i64 | relay_fee u64 | len u16 | clientDataJSON
 /// - UpdateAuthority: nonce u64 | new_authority [u8; 33] | expiry i64 | len u16 | clientDataJSON
 /// - Close:           nonce u64 | expiry i64 | len u16 | clientDataJSON
 /// - Activate:        account_id [u8; 32] | authority [u8; 33] | activation_fee u64
+/// Withdraws are relayer-sponsored: `relay_fee` (network fee × (1 + margin)) is reimbursed
+/// from the smart account to the Peridot treasury, and the relayer is the tx fee payer.
 /// The `len u16` prefixes the raw WebAuthn clientDataJSON passed for on-chain verification.
 pub struct InstructionData<'a> {
     data: &'a [u8],

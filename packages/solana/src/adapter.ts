@@ -23,7 +23,7 @@ import {
   buildWithdrawSolInstruction,
   buildWithdrawTokenInstruction,
 } from "./instructions";
-import type { SolanaRpc, TokenBalance } from "./rpc";
+import type { ParsedTx, SolanaRpc, TokenBalance } from "./rpc";
 
 /** A WebAuthn assertion as produced by a passkey. */
 export interface PasskeyAssertion {
@@ -82,6 +82,12 @@ export class SolanaAdapter {
     const info = await this.rpc.getAccountInfo(pub);
     if (!info || info.data.length === 0) return false;
     return info.owner.toBase58() === this.programId.toBase58();
+  }
+
+  /** Whether an account currently exists on-chain. */
+  async hasAccount(address: string | PublicKey): Promise<boolean> {
+    const pub = typeof address === "string" ? new PublicKey(address) : address;
+    return (await this.rpc.getAccountInfo(pub)) !== null;
   }
 
   private async buildTx(instructions: TransactionInstruction[], feePayer: PublicKey): Promise<Transaction> {
@@ -213,46 +219,73 @@ export class SolanaAdapter {
     return this.send(tx, [owner]);
   }
 
-  /** Passkey-authorized SOL withdrawal. */
-  async withdrawSol(
+  /**
+   * Sponsored SOL withdrawal. The Peridot relayer signs & pays the network fee; the smart
+   * account reimburses `relayFeeLamports` to the treasury. The passkey assertion (signed
+   * against nonce/amount/destination/expiry/relayFee) is supplied by the caller.
+   */
+  async sponsoredWithdrawSol(
     accountId: string,
     authorityCompressed: Uint8Array,
     destination: PublicKey,
     amount: bigint,
-    feePayer: Keypair,
-    signer: PasskeySigner,
-    opts: { allowCredentialId?: string; expiryTtlSeconds?: number } = {},
+    relayFeeLamports: bigint,
+    nonce: bigint,
+    expiry: number,
+    assertion: PasskeyAssertion,
+    relayer: Keypair,
+    treasury: PublicKey,
   ): Promise<string> {
     const smartAccount = this.getAddress(accountId);
-    const nonce = await this.getNonce(accountId);
-    const expiry = (await this.rpc.getBlockTime()) + (opts.expiryTtlSeconds ?? DEFAULT_EXPIRY_TTL_SECONDS);
-
-    const payload = await buildAuthorizationPayload([u64le(nonce), u64le(amount), destination.toBytes(), i64le(expiry)]);
-    const assertion = await signer.sign(payload, { allowCredentialId: opts.allowCredentialId });
-    const programIx = buildWithdrawSolInstruction(smartAccount, destination, nonce, amount, expiry, assertion.clientDataJSON);
-    return this.submitPasskeyTx(programIx, authorityCompressed, assertion, feePayer);
+    const programIx = buildWithdrawSolInstruction(
+      smartAccount,
+      destination,
+      treasury,
+      relayer.publicKey,
+      nonce,
+      amount,
+      relayFeeLamports,
+      expiry,
+      assertion.clientDataJSON,
+    );
+    return this.submitRelayedPasskeyTx(programIx, authorityCompressed, assertion, relayer);
   }
 
-  /** Passkey-authorized SPL token withdrawal. */
-  async withdrawToken(
+  /** Sponsored SPL token withdrawal (token amount via SPL CPI, relay fee reimbursed as SOL). */
+  async sponsoredWithdrawToken(
     accountId: string,
     authorityCompressed: Uint8Array,
     mint: PublicKey,
     destinationAta: PublicKey,
     amount: bigint,
-    feePayer: Keypair,
-    signer: PasskeySigner,
-    opts: { allowCredentialId?: string; expiryTtlSeconds?: number } = {},
+    relayFeeLamports: bigint,
+    nonce: bigint,
+    expiry: number,
+    assertion: PasskeyAssertion,
+    relayer: Keypair,
+    treasury: PublicKey,
   ): Promise<string> {
     const smartAccount = this.getAddress(accountId);
-    const nonce = await this.getNonce(accountId);
-    const expiry = (await this.rpc.getBlockTime()) + (opts.expiryTtlSeconds ?? DEFAULT_EXPIRY_TTL_SECONDS);
     const sourceAta = await getAssociatedTokenAddress(mint, smartAccount, true);
+    const programIx = buildWithdrawTokenInstruction(
+      smartAccount,
+      sourceAta,
+      destinationAta,
+      mint,
+      treasury,
+      relayer.publicKey,
+      nonce,
+      amount,
+      relayFeeLamports,
+      expiry,
+      assertion.clientDataJSON,
+    );
+    return this.submitRelayedPasskeyTx(programIx, authorityCompressed, assertion, relayer);
+  }
 
-    const payload = await buildAuthorizationPayload([u64le(nonce), u64le(amount), destinationAta.toBytes(), i64le(expiry)]);
-    const assertion = await signer.sign(payload, { allowCredentialId: opts.allowCredentialId });
-    const programIx = buildWithdrawTokenInstruction(smartAccount, sourceAta, destinationAta, mint, nonce, amount, expiry, assertion.clientDataJSON);
-    return this.submitPasskeyTx(programIx, authorityCompressed, assertion, feePayer);
+  /** True when the smart account holds `mint`'s ATA (so a token withdraw can point at it). */
+  async tokenAta(accountId: string, mint: PublicKey): Promise<PublicKey> {
+    return getAssociatedTokenAddress(mint, this.getAddress(accountId), true);
   }
 
   /** Rotate the smart-account authority to a new passkey public key. */
@@ -290,6 +323,54 @@ export class SolanaAdapter {
     return this.send(tx, [feePayer]);
   }
 
+  /** Same assembly as submitPasskeyTx but the Peridot relayer is the tx signer/fee payer. */
+  private async submitRelayedPasskeyTx(
+    programIx: TransactionInstruction,
+    authorityCompressed: Uint8Array,
+    assertion: PasskeyAssertion,
+    relayer: Keypair,
+  ): Promise<string> {
+    const secpIx = buildSecp256r1Instruction(
+      authorityCompressed,
+      normalizeLowS(assertion.signature),
+      await buildWebAuthnMessage(assertion.authenticatorData, assertion.clientDataJSON),
+    );
+    const tx = await this.buildTx([programIx, secpIx], relayer.publicKey);
+    return this.send(tx, [relayer]);
+  }
+
+  /** Chain block time (seconds) — used for passkey authorization expiries. */
+  async chainTime(): Promise<number> {
+    return this.rpc.getBlockTime();
+  }
+
+  /** Network fee for a sponsored withdraw (1 signature, relayer as fee payer) — the base the
+   *  margin is applied to. Mirrors estimateActivationCost's message-fee approach. */
+  async estimateWithdrawFee(): Promise<bigint> {
+    const conn = this.rpc.connection;
+    const accountId = "00000000000000000000000000000000";
+    const smartAccount = this.getAddress(accountId);
+    const dummy = Keypair.generate().publicKey;
+    const ix = buildWithdrawSolInstruction(
+      smartAccount,
+      dummy,
+      dummy,
+      dummy,
+      0n,
+      0n,
+      0n,
+      0,
+      new Uint8Array([0x7b, 0x7d]), // tiny clientDataJSON placeholder ("{}")
+    );
+    const rawTx = new Transaction();
+    rawTx.add(ix);
+    rawTx.feePayer = dummy;
+    rawTx.recentBlockhash = await this.rpc.getLatestBlockhash();
+    const msg = rawTx.compileMessage();
+    const fee = await conn.getFeeForMessage(msg, "confirmed");
+    return BigInt(fee.value ?? 0);
+  }
+
   async send(tx: Transaction, signers: Keypair[]): Promise<string> {
     return this.rpc.sendTransaction(tx, signers);
   }
@@ -303,6 +384,27 @@ export class SolanaAdapter {
       error: meta.err ? JSON.stringify(meta.err) : undefined,
       computeUnits: meta.computeUnitsConsumed,
     };
+  }
+
+  /** Confirm a signature for a few attempts; resolves "confirmed" | "failed" | "pending". */
+  async waitForConfirmation(signature: string, attempts = 8, intervalMs = 1000): Promise<"confirmed" | "failed" | "pending"> {
+    for (let i = 0; i < attempts; i++) {
+      const status = await this.getStatus(signature).catch(() => null);
+      if (status?.confirmed) return status.error ? "failed" : "confirmed";
+      if (status && status.error) return "failed";
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+    return "pending";
+  }
+
+  /** Recent confirmed transactions touching an address (newest first). */
+  async getHistory(address: string, limit = 30): Promise<{ signature: string; err: unknown }[]> {
+    return this.rpc.getSignaturesForAddress(new PublicKey(address), limit);
+  }
+
+  /** Full parsed metadata for a transaction. */
+  async parseTransaction(signature: string): Promise<ParsedTx | null> {
+    return this.rpc.getParsedTransaction(signature);
   }
 
   async getBalance(accountId: string): Promise<number> {

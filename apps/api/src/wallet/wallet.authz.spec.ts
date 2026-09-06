@@ -7,8 +7,20 @@ import cookieParser from "cookie-parser";
 import request from "supertest";
 import { JwtStrategy } from "../auth/jwt.strategy";
 import { PrismaService } from "../prisma/prisma.service";
+import { SecurityEventService } from "../security/security-event.service";
+import { SponsoredWithdrawService } from "./sponsored-withdraw.service";
 import { WalletController } from "./wallet.controller";
 import { WalletService } from "./wallet.service";
+
+// SponsoredWithdrawService lazily requires pid-solana at runtime; stub it so route tests
+// that reach the service don't try to load the real @solana/web3.js graph in Jest.
+jest.mock("@peridotvault/pid-solana", () => ({
+  Keypair: { fromSecretKey: jest.fn(() => ({ publicKey: { toBase58: () => "relayer" } })) },
+  PublicKey: class { toBase58() { return "x"; } },
+  SolanaAdapter: jest.fn(),
+  SolanaRpc: jest.fn(),
+  fromHex: jest.fn((s: string) => Uint8Array.from(Buffer.from(s, "hex"))),
+}));
 
 const SECRET = "authz-test-access-secret-0123456789abcdef";
 const PUBLIC_FIELDS = ["id", "chain", "address", "status", "createdAt"];
@@ -91,12 +103,14 @@ describe("Wallet authorization & abuse cases (routes)", () => {
       controllers: [WalletController],
       providers: [
         WalletService,
+        SponsoredWithdrawService,
         JwtStrategy,
         {
           provide: ConfigService,
           useValue: { get: jest.fn(), getOrThrow: jest.fn(() => SECRET) },
         },
         { provide: PrismaService, useValue: prisma },
+        { provide: SecurityEventService, useValue: { log: jest.fn(async () => undefined) } },
       ],
     }).compile();
 
@@ -243,5 +257,46 @@ describe("Wallet authorization & abuse cases (routes)", () => {
       .set("Cookie", `pid_access=${t}`)
       .send({ address: "" })
       .expect(400);
+  });
+
+  it("returns 400 (not 500) when the sponsored-withdraw body is missing the assertion", async () => {
+    // Regression: `whitelist: true` strips undecorated fields; a missing assertion used
+    // to reach the service as `undefined` and throw a 500 TypeError.
+    state.identities.set("pid_a", "active");
+    const t = await token("pid_a");
+
+    const res = await request(app.getHttpServer())
+      .post("/v1/wallet/withdraw")
+      .set("Cookie", `pid_access=${t}`)
+      .send({
+        asset: "SOL",
+        to: "DeSt1111111111111111111111111111111111111",
+        amount: "1000000",
+        nonce: "0",
+        expiry: 4100000000,
+        relayFeeLamports: "7500",
+      })
+      .expect(400);
+    expect(JSON.stringify(res.body)).toMatch(/assertion/);
+  });
+
+  it("accepts a well-formed sponsored-withdraw body (validation passes through)", async () => {
+    state.identities.set("pid_a", "active");
+    const t = await token("pid_a");
+    // Mock prisma so the service gets past account resolution — we only assert validation
+    // succeeds (the request is neither a 400 for the shape nor a raw TypeError).
+    await request(app.getHttpServer())
+      .post("/v1/wallet/withdraw")
+      .set("Cookie", `pid_access=${t}`)
+      .send({
+        asset: "SOL",
+        to: "DeSt1111111111111111111111111111111111111",
+        amount: "1000000",
+        nonce: "0",
+        expiry: 4100000000,
+        relayFeeLamports: "7500",
+        assertion: { id: "cred-1", signature: "A".repeat(86), authenticatorData: "B".repeat(50), clientDataJSON: "C".repeat(60) },
+      })
+      .expect(404); // reaches the service; mock has no account → NotFound, not a validation 400.
   });
 });

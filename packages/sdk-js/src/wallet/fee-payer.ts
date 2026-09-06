@@ -26,8 +26,36 @@ export class InMemorySecretStore implements SecretStore {
   }
 }
 
+/** localStorage-backed store — persists the fee payer across reloads (reused in defaults). */
+export class LocalStorageSecretStore implements SecretStore {
+  private readonly memory = new Map<string, string>();
+  private get storage(): Storage | null {
+    try {
+      return typeof localStorage !== "undefined" ? localStorage : null;
+    } catch {
+      return null;
+    }
+  }
+  async get(key: string): Promise<string | null> {
+    const fromStorage = this.storage?.getItem(key);
+    if (fromStorage != null) return fromStorage;
+    return this.memory.get(key) ?? null;
+  }
+  async set(key: string, value: string): Promise<void> {
+    if (this.storage) {
+      try {
+        this.storage.setItem(key, value);
+        return;
+      } catch {
+        // quota / privacy mode — fall back to memory
+      }
+    }
+    this.memory.set(key, value);
+  }
+}
+
 export class FeePayerManager {
-  constructor(private readonly store: SecretStore = new InMemorySecretStore()) {}
+  constructor(private readonly store: SecretStore = new LocalStorageSecretStore()) {}
 
   /** Get the device fee payer, generating + persisting it on first use. */
   async getOrCreate(): Promise<Keypair> {

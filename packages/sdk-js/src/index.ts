@@ -1,5 +1,4 @@
 import type {
-  ActivityRecord,
   ApiError,
   AuthenticateStart,
   Authority,
@@ -10,16 +9,17 @@ import type {
   ProfileUpdate,
   RegisterStart,
   Session,
-  WalletTransaction,
 } from "@peridotvault/pid-types";
 import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client";
 import { authenticatePasskey, registerPasskey, BrowserPasskeySigner } from "./wallet/passkey";
 import { FeePayerManager, type SecretStore } from "./wallet/fee-payer";
+import { LocalHistoryStore, type HistoryStore } from "./wallet/history";
 
 export { PeridotWallet, type PeridotWalletOptions };
 export type { ActivationView, ActivationStatus } from "./wallet/wallet-client";
 export { authenticatePasskey, BrowserPasskeySigner, registerPasskey };
 export { FeePayerManager, type SecretStore };
+export { LocalHistoryStore, type HistoryStore };
 
 export interface PeridotOptions {
   baseUrl: string;
@@ -27,6 +27,8 @@ export interface PeridotOptions {
   solanaRpcUrl: string | string[];
   /** Fee-payer secure storage (defaults to an in-memory store). */
   feePayerStore?: SecretStore;
+  /** On-chain activity cache (defaults to localStorage-backed). */
+  historyStore?: HistoryStore;
   onUnauthorized?: () => void;
 }
 
@@ -205,7 +207,11 @@ class PeridotClient {
 
 export { PeridotClient };
 export function Peridot(options: PeridotOptions): PeridotClient {
-  return new PeridotClient(options.baseUrl, { solanaRpcUrl: options.solanaRpcUrl, feePayerStore: options.feePayerStore }, options.onUnauthorized);
+  return new PeridotClient(
+    options.baseUrl,
+    { solanaRpcUrl: options.solanaRpcUrl, feePayerStore: options.feePayerStore, historyStore: options.historyStore },
+    options.onUnauthorized,
+  );
 }
 
 export default Peridot;
