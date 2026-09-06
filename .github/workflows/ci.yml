@@ -24,7 +24,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Prisma generate
-        run: pnpm --filter @peridot/api db:generate
+        run: pnpm --filter @peridotvault/pid-api db:generate
 
       - name: Typecheck
         run: pnpm typecheck
