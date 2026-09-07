@@ -4,9 +4,9 @@ import { PublicKey } from "@solana/web3.js";
 import { b64url, b64urlToBytes, buildWithdrawPayload, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import type { ParsedTx, PasskeySigner, TokenBalance, TransactionStatus } from "@peridotvault/pid-solana";
 import type { Account, ApiError, Authority, WalletTransaction } from "@peridotvault/pid-types";
-import { BrowserPasskeySigner } from "./passkey";
-import { FeePayerManager, type SecretStore } from "./fee-payer";
-import { LocalHistoryStore, type HistoryStore } from "./history";
+import { BrowserPasskeySigner } from "./passkey.js";
+import { FeePayerManager, type SecretStore } from "./fee-payer.js";
+import { LocalHistoryStore, type HistoryStore } from "./history.js";
 
 export interface PeridotWalletOptions {
   solanaRpcUrl: string | string[];

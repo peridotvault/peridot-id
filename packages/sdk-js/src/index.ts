@@ -11,13 +11,13 @@ import type {
   RegisterStart,
   Session,
 } from "@peridotvault/pid-types";
-import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client";
-import { authenticatePasskey, registerPasskey, BrowserPasskeySigner } from "./wallet/passkey";
-import { FeePayerManager, type SecretStore } from "./wallet/fee-payer";
-import { LocalHistoryStore, type HistoryStore } from "./wallet/history";
+import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client.js";
+import { authenticatePasskey, registerPasskey, BrowserPasskeySigner } from "./wallet/passkey.js";
+import { FeePayerManager, type SecretStore } from "./wallet/fee-payer.js";
+import { LocalHistoryStore, type HistoryStore } from "./wallet/history.js";
 
 export { PeridotWallet, type PeridotWalletOptions };
-export type { ActivationView, ActivationStatus } from "./wallet/wallet-client";
+export type { ActivationView, ActivationStatus } from "./wallet/wallet-client.js";
 export { authenticatePasskey, BrowserPasskeySigner, registerPasskey };
 export { FeePayerManager, type SecretStore };
 export { LocalHistoryStore, type HistoryStore };
