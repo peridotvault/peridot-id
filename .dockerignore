@@ -3,6 +3,7 @@
 
 # build artifacts
 **/dist
+**/.next
 **/.turbo
 target/
 **/target/

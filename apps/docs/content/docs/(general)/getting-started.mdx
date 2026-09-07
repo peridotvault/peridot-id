@@ -9,7 +9,7 @@ All endpoints are prefixed with `/v1`.
 
 | Environment | Base URL |
 |---|---|
-| Production | `https://api.peridot-id.peridotvault.com/v1` |
+| Production | `https://api.pid.peridotvault.com/v1` |
 | Local development | `http://localhost:3301/v1` |
 
 ## Versioning
@@ -23,11 +23,11 @@ Almost every endpoint requires an authenticated session. The quickest way to ver
 API is reachable is the login endpoint, which returns the Google sign-in URL:
 
 ```bash
-curl -X POST https://api.peridot.id/v1/auth/login
+curl -X POST https://api.pid.peridotvault.com/v1/auth/login
 ```
 
 ```json
-{ "url": "https://api.peridot.id/v1/auth/google" }
+{ "url": "https://api.pid.peridotvault.com/v1/auth/google" }
 ```
 
 Open `url` in a browser and sign in with Google. You are redirected back with the session
@@ -35,7 +35,7 @@ cookies set. From then on, use a cookie jar for all requests:
 
 ```bash
 # Save the session cookies (browser already set them; for non-browser clients use -c)
-curl -b cookies.txt https://api.peridot.id/v1/identity/me
+curl -b cookies.txt https://api.pid.peridotvault.com/v1/identity/me
 ```
 
 ```json

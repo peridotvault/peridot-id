@@ -1,6 +1,7 @@
 # PeridotID VPS deployment
 
-Deploys `api` (NestJS) and `web` (Expo web static export) onto the Antigane infra
+Deploys `api` (NestJS), `docs` (Next.js homepage/marketing), and `app` (Expo web
+static export) onto the Antigane infra
 VPS. Conforms to the infra platform contract (`infra/docs/application.md`): joins
 the external `proxy` network, exposes internal ports only, owns its Traefik
 labels. No infra repo changes are ever required.
@@ -11,9 +12,11 @@ labels. No infra repo changes are ever required.
    `ssh root@VPS && cd /opt/infra && sudo bash bootstrap/bootstrap.sh`
 2. DNS A-records pointing at the VPS IP (`76.13.16.183`):
    - `pid.peridotvault.com`
+   - `app.pid.peridotvault.com`
    - `api.pid.peridotvault.com`
 3. Google OAuth console: create OAuth 2.0 credentials with
-   `https://api.pid.peridotvault.com/v1/auth/google/callback` as the redirect URI.
+   `https://api.pid.peridotvault.com/v1/auth/google/callback` as the redirect URI
+   (redirect lands back on `app.pid.peridotvault.com` via CLIENT_SUCCESS_URL).
 4. Firewall: 80/tcp and 443/tcp open.
 
 ## First deploy
@@ -53,11 +56,12 @@ docker compose -f deploy/compose.yaml --env-file deploy/.env.main logs -f api
 
 ## URLs
 
-| Service | URL |
-|---------|-----|
-| Wallet  | https://pid.peridotvault.com |
-| API     | https://api.pid.peridotvault.com |
-| Docs    | https://api.pid.peridotvault.com/docs |
+| Service   | URL |
+|-----------|-----|
+| Docs/home | https://pid.peridotvault.com |
+| App       | https://app.pid.peridotvault.com |
+| API       | https://api.pid.peridotvault.com |
+| API docs  | https://api.pid.peridotvault.com/docs |
 
 ## Database
 
@@ -67,8 +71,8 @@ the `peridot_id` role + database, then runs `prisma migrate deploy`.
 
 ## Notes
 
-- Images build from source on the VPS (serially via `./deploy/up.sh`); the wallet's
-  `EXPO_PUBLIC_API_URL` is baked in at build via a Docker build arg. Changing it
+- Images build from source on the VPS (serially via `./deploy/up.sh`: api, docs, app); the
+  app's `EXPO_PUBLIC_API_URL` is baked in at build via a Docker build arg. Changing it
   requires a rebuild.
 - Solana is `devnet` for now (relayer funded on devnet). Mainnet later = new
   program deploy + funded relayer + `SOLANA_NETWORK=mainnet-beta`; the compose

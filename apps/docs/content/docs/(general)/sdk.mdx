@@ -18,7 +18,7 @@ npm install @peridotvault/pid-sdk-js
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
-  baseUrl: 'https://api.peridot.id',
+  baseUrl: 'https://api.pid.peridotvault.com',
   onUnauthorized: async () => {
     // Access token expired — try to refresh silently before redirecting to login
     const ok = await peridot.auth.refresh();

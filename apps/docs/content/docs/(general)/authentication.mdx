@@ -85,7 +85,7 @@ Because each refresh token can be used exactly once, a stolen token that is repl
 rotation is rejected.
 
 ```bash
-curl -b cookies.txt -c cookies.txt -X POST https://api.peridot.id/v1/auth/refresh
+curl -b cookies.txt -c cookies.txt -X POST https://api.pid.peridotvault.com/v1/auth/refresh
 # 204 No Content — new cookies set, old refresh token revoked
 ```
 
@@ -98,7 +98,7 @@ user must sign in again.
 idempotent — safe to call when already logged out.
 
 ```bash
-curl -b cookies.txt -c cookies.txt -X POST https://api.peridot.id/v1/auth/logout
+curl -b cookies.txt -c cookies.txt -X POST https://api.pid.peridotvault.com/v1/auth/logout
 ```
 
 ## Security notes
