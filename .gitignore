@@ -8,6 +8,8 @@ coverage/
 .env.*
 !.env.example
 !**/.env.example
+!deploy/.env.main.example
+!deploy/.env.test.example
 *.log
 .DS_Store
 *.rdb
