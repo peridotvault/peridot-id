@@ -68,4 +68,9 @@ export class AuthenticateFinishDto {
 
   @IsObject()
   credential!: AuthenticationResponseDto;
+
+  /** Cross-domain success origin to return to with a pid_code (allowlisted). */
+  @IsOptional()
+  @IsString()
+  returnTo?: string;
 }

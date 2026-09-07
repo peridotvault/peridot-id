@@ -16,8 +16,8 @@ npm install @peridotvault/pid-sdk-js
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
-  baseUrl: 'https://api.peridot-id.peridotvault.com',
-  solanaRpcUrl: 'https://api.mainnet-beta.solana.com', // for smart-account txs
+  baseUrl: 'https://api.pid.peridotvault.com',
+  solanaRpcUrl: 'https://api.devnet.solana.com', // for smart-account txs
   onUnauthorized: async () => {
     const ok = await peridot.auth.refresh();
     if (!ok) await peridot.auth.login();
@@ -33,15 +33,54 @@ await peridot.profile.update({ displayName: 'PeridotPlayer' });
 
 | Domain | Class / namespace | Methods |
 |---|---|---|
-| Auth | `peridot.auth` | `login()`, `logout()`, `refresh()` |
+| Auth | `peridot.auth` | `login()`, `loginWithPasskey()`, `exchange(code)`, `logout()`, `refresh()` |
 | Identity | `peridot.identity` | `me()`, `credentials()`, `unlinkCredential(id)` |
 | Profile | `peridot.profile` | `me()`, `update(input)` |
 | Passkey credentials | `peridot.passkey` | `list()`, `register()`, `revoke(id)` |
-| Wallet | `peridot.wallet` | smart-account balance, deposit, withdraw (see `PeridotWallet`) |
+| Wallet | `peridot.wallet` | smart-account balance, history, deposit, withdraw (see `PeridotWallet`) |
+
+## Auth
+
+### Google (default)
+
+```ts
+await peridot.auth.login(); // redirects to Google, returns to CLIENT_SUCCESS_URL
+```
+
+### Passkey
+
+```ts
+const res = await peridot.auth.loginWithPasskey(); // { ok, pidCode? }
+if (!res.ok) return; // user cancelled the WebAuthn prompt
+// logged in — the session cookie is set
+```
+
+### Cross-origin SSO (for relying parties on a different domain, e.g. Live2Dev)
+
+A relying party that needs to create/link its own user from a PeridotID login can use
+`returnTo` + a one-time exchange code — no cross-site cookie sharing required.
+
+```ts
+// Start login and request to be returned to your own origin with a pid_code.
+await peridot.auth.login({ returnTo: 'https://live2dev.com/auth/callback' });
+// (or) await peridot.auth.loginWithPasskey({ returnTo: 'https://live2dev.com/auth/callback' });
+```
+
+The browser lands on `https://live2dev.com/auth/callback?pid_code=...`. Your page
+(server-side) exchanges the code for the identity:
+
+```ts
+const identity = await peridot.auth.exchange(code);
+// identity = { identityId, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }
+```
+
+`returnTo` must be an origin in the API's `CLIENT_REDIRECT_ALLOWLIST` env, otherwise
+the login request is rejected.
 
 ## Low-level / server-side helpers
 
 - `registerPasskey(...)` — drive a WebAuthn registration ceremony manually
+- `authenticatePasskey(...)` — drive a WebAuthn authentication ceremony manually
 - `BrowserPasskeySigner` — a `PasskeySigner` backed by `navigator.credentials`
 - `FeePayerManager` / `SecretStore` — fee-payer secure storage (defaults to in-memory)
 
@@ -55,6 +94,7 @@ entry point.
 | `baseUrl` | `string` | PeridotID API base URL |
 | `solanaRpcUrl` | `string \| string[]` | Solana RPC for smart-account txs |
 | `feePayerStore` | `SecretStore` | optional; defaults to in-memory |
+| `historyStore` | `HistoryStore` | optional; defaults to localStorage-backed |
 | `onUnauthorized` | `() => void` | called on `401` (except `/v1/auth/*`) |
 
 ## Publish

@@ -141,6 +141,13 @@ export interface Session {
   isCurrent?: boolean;
 }
 
+/** Identity payload returned by `POST /v1/auth/exchange` for cross-origin SSO. */
+export interface ExchangeResult {
+  identityId: string;
+  profile: { displayName: string | null; avatarUrl: string | null };
+  credentials: { provider: string; email: string | null }[];
+}
+
 /** WebAuthn registration ceremony (task 003). */
 export interface RegisterStart {
   registrationId: string;

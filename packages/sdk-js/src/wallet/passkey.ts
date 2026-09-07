@@ -105,8 +105,8 @@ export async function registerPasskey(api: {
 /** Authenticate with a passkey (sign-in) — drives the WebAuthn get via the auth API. */
 export async function authenticatePasskey(api: {
   start(): Promise<{ authenticationId: string; options: Record<string, unknown> } | ApiErrorLike>;
-  finish(input: { authenticationId: string; credential: unknown }): Promise<{ ok: boolean } | ApiErrorLike>;
-}): Promise<{ ok: true }> {
+  finish(input: { authenticationId: string; credential: unknown }): Promise<{ ok: boolean; pidCode?: string } | ApiErrorLike>;
+}): Promise<{ ok: true; pidCode?: string }> {
   if (typeof navigator === "undefined" || !navigator.credentials) {
     throw new Error("WebAuthn is not available on this device");
   }
@@ -127,7 +127,7 @@ export async function authenticatePasskey(api: {
     credential: toAssertionJson(credential),
   });
   if (isApiError(finish)) throw new Error((finish as { message: string }).message);
-  return { ok: true };
+  return { ok: true, pidCode: (finish as { pidCode?: string }).pidCode };
 }
 
 function toAssertionJson(a: PublicKeyCredential): {

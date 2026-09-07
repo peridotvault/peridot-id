@@ -3,21 +3,25 @@ import { ConfigService } from "@nestjs/config";
 import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { CredentialModule } from "../credentials/credential.module";
+import { SecurityModule } from "../security/security-event.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { GoogleGuard } from "./google.guard";
 import { GOOGLE_OAUTH_OPTIONS, googleOAuthOptionsFactory, GoogleStrategy } from "./google.strategy";
 import { JwtStrategy } from "./jwt.strategy";
+import { SsoService } from "./sso.service";
 
 @Module({
   imports: [
     PassportModule.register({ session: false }),
     JwtModule.register({}),
     CredentialModule,
+    SecurityModule,
   ],
   controllers: [AuthController],
   providers: [
     AuthService,
+    SsoService,
     JwtStrategy,
     GoogleGuard,
     {
@@ -31,6 +35,6 @@ import { JwtStrategy } from "./jwt.strategy";
       inject: [GOOGLE_OAUTH_OPTIONS, AuthService],
     },
   ],
-  exports: [AuthService],
+  exports: [AuthService, SsoService],
 })
 export class AuthModule {}

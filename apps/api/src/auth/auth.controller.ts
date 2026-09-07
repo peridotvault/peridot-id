@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { BadRequestException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { Request, Response } from "express";
@@ -10,6 +11,8 @@ import { AuthenticateStartResult, CredentialService } from "../credentials/crede
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { AuthService } from "./auth.service";
 import { GoogleGuard } from "./google.guard";
+import { ExchangeDto, LoginDto } from "./dto/auth.dto";
+import { SsoService } from "./sso.service";
 
 @Controller("v1/auth")
 @UseGuards(ThrottlerGuard)
@@ -17,15 +20,23 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly credentialService: CredentialService,
+    private readonly ssoService: SsoService,
     private readonly config: ConfigService,
   ) {}
 
   @Post("login")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  login(@Req() req: Request): LoginResponse {
+  login(@Req() req: Request, @Body() dto: LoginDto): LoginResponse {
     const base = `${req.protocol}://${req.get("host")}`;
-    return { url: `${base}/v1/auth/google` };
+    let url = `${base}/v1/auth/google`;
+    if (dto.returnTo) {
+      if (!this.ssoService.isAllowedReturnTo(dto.returnTo)) {
+        throw new BadRequestException("returnTo is not an allowed origin");
+      }
+      url += `?returnTo=${encodeURIComponent(dto.returnTo)}`;
+    }
+    return { url };
   }
 
   @Post("passkey/start")
@@ -42,13 +53,32 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body() dto: AuthenticateFinishDto,
-  ): Promise<{ ok: true }> {
+  ): Promise<{ ok: true; pidCode?: string }> {
     const { identityId } = await this.credentialService.loginFinish({
       authenticationId: dto.authenticationId,
       credential: dto.credential as never,
     });
     await this.authService.issueSession(res, identityId, req.headers["user-agent"]);
+    const returnTo = (dto as { returnTo?: string }).returnTo;
+    if (returnTo) {
+      if (!this.ssoService.isAllowedReturnTo(returnTo)) {
+        throw new BadRequestException("returnTo is not an allowed origin");
+      }
+      const pidCode = await this.ssoService.issue(identityId, returnTo);
+      return { ok: true, pidCode };
+    }
     return { ok: true };
+  }
+
+  @Post("exchange")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async exchange(@Body() dto: ExchangeDto) {
+    try {
+      return await this.ssoService.consume(dto.code);
+    } catch {
+      throw new BadRequestException("Code is invalid, expired, or already used");
+    }
   }
 
   @Get("google")
@@ -62,6 +92,13 @@ export class AuthController {
   async googleCallback(@Req() req: Request, @Res() res: Response): Promise<void> {
     const identity = req.user as { id: string };
     await this.authService.issueSession(res, identity.id, req.headers["user-agent"]);
+
+    const returnTo = typeof req.query.state === "string" ? req.query.state : undefined;
+    if (returnTo && this.ssoService.isAllowedReturnTo(returnTo)) {
+      const pidCode = await this.ssoService.issue(identity.id, returnTo);
+      res.redirect(`${returnTo}?pid_code=${encodeURIComponent(pidCode)}`);
+      return;
+    }
     res.redirect(this.config.get<string>("CLIENT_SUCCESS_URL", "/"));
   }
 

@@ -2,6 +2,7 @@ import type {
   ApiError,
   AuthenticateStart,
   Authority,
+  ExchangeResult,
   Identity,
   IdentityCredential,
   LoginResponse,
@@ -35,33 +36,48 @@ export interface PeridotOptions {
 export class PeridotAuth {
   constructor(private client: PeridotClient) {}
 
-  async login(): Promise<void> {
-    const res = await this.client.post<LoginResponse>("/v1/auth/login");
+  /**
+   * Begin Google OAuth. Optional `returnTo` (an allowlisted cross-origin) redirects back
+   * there with a one-time `pid_code` for SSO (see `exchange`).
+   */
+  async login(opts?: { returnTo?: string }): Promise<void> {
+    const res = await this.client.post<LoginResponse>("/v1/auth/login", opts?.returnTo ? { returnTo: opts.returnTo } : undefined);
     if (res.ok) window.location.assign((res.data as LoginResponse).url);
   }
 
   /**
-   * Sign in with a discoverable passkey (WebAuthn get). Resolves false ONLY when the
+   * Sign in with a discoverable passkey (WebAuthn get). With `returnTo`, the server issues
+   * a one-time pid_code for SSO (see `exchange`). Resolves `{ ok: false }` ONLY when the
    * WebAuthn ceremony is cancelled by the user; genuine errors throw.
    */
-  async loginWithPasskey(): Promise<boolean> {
+  async loginWithPasskey(opts?: { returnTo?: string }): Promise<{ ok: boolean; pidCode?: string }> {
     try {
-      await authenticatePasskey({
+      const finish = await authenticatePasskey({
         start: async () => {
           const res = await this.client.post<AuthenticateStart>("/v1/auth/passkey/start");
           if (!res.ok) throw new Error("Failed to start passkey login");
           return res.data as AuthenticateStart;
         },
         finish: async (input) => {
-          const res = await this.client.post<{ ok: boolean }>("/v1/auth/passkey/finish", input);
-          return res.data;
+          const res = await this.client.post<{ ok: boolean; pidCode?: string }>("/v1/auth/passkey/finish", {
+            ...input,
+            ...(opts?.returnTo ? { returnTo: opts.returnTo } : {}),
+          });
+          if (!res.ok) throw new Error("Passkey sign-in failed");
+          return res.data as { ok: boolean; pidCode?: string };
         },
       });
-      return true;
+      return finish;
     } catch (e) {
-      if (e instanceof Error && /cancelled/i.test(e.message)) return false;
+      if (e instanceof Error && /cancelled/i.test(e.message)) return { ok: false };
       throw e;
     }
+  }
+
+  /** Exchange a one-time SSO pid_code for the identity (for cross-origin relying parties). */
+  async exchange(code: string): Promise<ExchangeResult | ApiError> {
+    const res = await this.client.post<ExchangeResult>("/v1/auth/exchange", { code });
+    return res.data;
   }
 
   async logout(): Promise<void> {

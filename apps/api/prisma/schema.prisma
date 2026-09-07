@@ -271,3 +271,21 @@ model SecurityEvent {
   @@index([accountId])
   @@map("security_events")
 }
+
+// One-time, expiring authorization codes for cross-domain SSO (OAuth-like). Issued
+// after a successful Google/passkey login when a relying party (e.g. Live2Dev on a
+// different origin) asked to be returned to. The code rides in the redirect URL and is
+// exchanged server-to-server — no cookie sharing across sites. Single-use, ~5 min TTL.
+model SsoCode {
+  id         String    @id @default(uuid())
+  code       String    @unique
+  identityId String
+  sessionId  String?
+  redirectTo String
+  consumedAt DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+
+  @@index([identityId])
+  @@map("sso_codes")
+}

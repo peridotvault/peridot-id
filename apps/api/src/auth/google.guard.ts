@@ -17,4 +17,17 @@ export class GoogleGuard extends AuthGuard("google") {
     }
     return super.canActivate(context) as boolean;
   }
+
+  /**
+   * Thread the cross-domain success URL through the OAuth `state` param: when the
+   * authorize URL carries `?returnTo=`, it round-trips as `state` and the callback
+   * redirects back there with a one-time pid_code (see SsoService).
+   */
+  getAuthenticateOptions(context: ExecutionContext): Record<string, unknown> {
+    const req = context.switchToHttp().getRequest();
+    const returnTo = typeof req?.query?.returnTo === "string" ? req.query.returnTo : undefined;
+    const options: Record<string, unknown> = { prompt: "select_account" };
+    if (returnTo) options.state = returnTo;
+    return options;
+  }
 }

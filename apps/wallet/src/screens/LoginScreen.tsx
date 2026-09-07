@@ -12,8 +12,8 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const ok = await peridot.auth.loginWithPasskey();
-      if (!ok) {
+      const res = await peridot.auth.loginWithPasskey();
+      if (!res.ok) {
         setError("Sign-in was cancelled — try again.");
         return;
       }
