@@ -11,7 +11,7 @@ import { AuthenticateStartResult, CredentialService } from "../credentials/crede
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { AuthService } from "./auth.service";
 import { GoogleGuard } from "./google.guard";
-import { ExchangeDto, LoginDto } from "./dto/auth.dto";
+import { ExchangeDto, AuthorizeDto, LoginDto } from "./dto/auth.dto";
 import { decodeState, encodeState, SsoService } from "./sso.service";
 
 /** Redirect target with a pid_code appended (keeps any existing query string). */
@@ -88,6 +88,28 @@ export class AuthController {
     } catch {
       throw new BadRequestException("Code is invalid, expired, or already used");
     }
+  }
+
+  /**
+   * Mint a pid_code for the caller's CURRENT session (no re-authentication).
+   * Powers consent screens on PeridotID-hosted pages: the user approves, the page
+   * redirects itself to returnTo with the code. Cookie-authenticated by definition —
+   * only callable same-site, so no CSRF vector beyond the session itself.
+   */
+  @Post("authorize")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async authorize(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: AuthorizeDto,
+  ): Promise<{ pidCode: string }> {
+    const resolved = await this.ssoService.resolveReturnTo(dto.returnTo, dto.clientId);
+    if (!resolved) {
+      throw new BadRequestException("returnTo is not an allowed origin");
+    }
+    const pidCode = await this.ssoService.issue(user.identityId, resolved.redirectTo, { clientId: resolved.clientId });
+    return { pidCode };
   }
 
   @Get("google")

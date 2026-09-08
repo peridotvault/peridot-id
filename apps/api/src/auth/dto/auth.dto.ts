@@ -26,3 +26,16 @@ export class ExchangeDto {
   @IsString()
   clientSecret?: string;
 }
+
+/**
+ * Mint a pid_code for the CURRENT session (cookie-authenticated). Powers consent
+ * screens: an already-logged-in user approves an app without re-authenticating.
+ */
+export class AuthorizeDto {
+  @IsString()
+  returnTo!: string;
+
+  @IsOptional()
+  @IsString()
+  clientId?: string;
+}

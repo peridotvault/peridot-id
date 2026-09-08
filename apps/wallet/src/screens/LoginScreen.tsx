@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, StyleSheet, Text, View } from "react-native";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
@@ -33,6 +33,12 @@ function withPidCode(redirectUri: string, pidCode: string): string {
   return url.toString();
 }
 
+function withDenied(redirectUri: string): string {
+  const url = new URL(redirectUri);
+  url.searchParams.set("error", "access_denied");
+  return url.toString();
+}
+
 function ssoOrigin(redirectUri: string): string {
   try {
     return new URL(redirectUri).origin;
@@ -46,6 +52,35 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sso] = useState(readSsoParams);
+  // Existing wallet session, if any (SSO mode only): offers one-tap Allow instead
+  // of forcing a redundant login. undefined = still checking, null = none.
+  const [session, setSession] = useState<{ label: string } | null | undefined>(sso ? undefined : null);
+  const [showLogin, setShowLogin] = useState(false);
+
+  useEffect(() => {
+    if (!sso || typeof window === "undefined") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await peridot.identity.me();
+        if (cancelled || typeof me !== "object" || me === null || "statusCode" in me) {
+          if (!cancelled) setSession(null);
+          return;
+        }
+        const profile = await peridot.profile.me();
+        const label =
+          typeof profile === "object" && profile !== null && !("statusCode" in profile) && profile.displayName
+            ? profile.displayName
+            : (me as { id: string }).id;
+        if (!cancelled) setSession({ label });
+      } catch {
+        if (!cancelled) setSession(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sso, peridot]);
 
   /** In SSO mode, leave this page: the app exchanges the code for its own session. */
   const finishSso = (pidCode: string | undefined) => {
@@ -90,6 +125,43 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
       setBusy(false);
     }
   };
+
+  const allowApp = async () => {
+    if (!sso) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Mint a code for the CURRENT session — no re-authentication needed.
+      const { pidCode } = await peridot.auth.authorize({ returnTo: sso.redirectUri, clientId: sso.clientId });
+      window.location.assign(withPidCode(sso.redirectUri, pidCode));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const denyApp = () => {
+    if (!sso || typeof window === "undefined") return;
+    window.location.assign(withDenied(sso.redirectUri));
+  };
+
+  // Already logged in + third-party SSO request: one-tap consent, no redundant login.
+  if (sso && session && !showLogin) {
+    return (
+      <View style={s.container}>
+        <View style={styles.hero}>
+          <Text style={styles.title}>PeridotID</Text>
+          <Text style={styles.subtitle}>Allow {ssoOrigin(sso.redirectUri)} to sign in with your PeridotID?</Text>
+          <Text style={styles.hint}>Signed in as {session.label}. The app receives your ID, display name and email — never your passkeys.</Text>
+        </View>
+        {error && <Text style={s.error}>{error}</Text>}
+        <Button title={busy ? "Authorizing…" : "Allow"} onPress={allowApp} disabled={busy} />
+        <Button title="Use a different account" onPress={() => setShowLogin(true)} disabled={busy} />
+        <Button title="Deny" onPress={denyApp} disabled={busy} />
+      </View>
+    );
+  }
 
   return (
     <View style={s.container}>

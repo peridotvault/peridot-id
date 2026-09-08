@@ -282,6 +282,48 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /auth/authorize:
+    post:
+      tags: [auth]
+      summary: Mint a pid_code for the current session
+      description: |
+        Issues a one-time pid_code for the caller's existing session — no
+        re-authentication. Powers consent screens on PeridotID-hosted pages: the
+        user approves, the page redirects itself to returnTo with the code.
+        Cookie-authenticated (same-site pages only). returnTo follows the same
+        rules as login (loopback, registered app origins, global allowlist).
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [returnTo]
+              properties:
+                returnTo:
+                  type: string
+                  format: uri
+                clientId:
+                  type: string
+                  description: Binds the issued code to the app
+      responses:
+        "200":
+          description: The minted code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pidCode]
+                properties:
+                  pidCode:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /apps/{id}:
     patch:
       tags: [apps]

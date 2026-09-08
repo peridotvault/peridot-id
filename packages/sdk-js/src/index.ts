@@ -94,6 +94,20 @@ export class PeridotAuth {
     return res.data;
   }
 
+  /**
+   * Mint a pid_code for the CURRENT session (cookie-authenticated, so same-site pages
+   * only). Powers consent screens: an already-logged-in user approves an app without
+   * re-authenticating. Throws on rejection (unknown app, disallowed returnTo).
+   */
+  async authorize(opts: { returnTo: string; clientId?: string }): Promise<{ pidCode: string }> {
+    const res = await this.client.post<{ pidCode: string }>("/v1/auth/authorize", {
+      returnTo: opts.returnTo,
+      ...(opts.clientId ? { clientId: opts.clientId } : {}),
+    });
+    if (!res.ok) throw new Error("Authorization failed — returnTo is not allowed for this app.");
+    return res.data as { pidCode: string };
+  }
+
   async logout(): Promise<void> {
     await this.client.post("/v1/auth/logout");
   }
