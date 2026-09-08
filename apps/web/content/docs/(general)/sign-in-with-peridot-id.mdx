@@ -67,8 +67,8 @@ After login, PeridotID redirects back to your `redirectUri` with a one-time `pid
 The provider exchanges it automatically and sets `user`
 (`{ identityId, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }`).
 
-Already logged in? The hosted page shows a one-tap consent screen —
-*"Allow {your origin} to sign in with your PeridotID?"* — instead of another login.
+Already logged in? The hosted page shows a one-tap consent screen asking to allow
+your website to sign in with the visitor's PeridotID — instead of another login.
 Denying returns to your `redirectUri` with `?error=access_denied`.
 
 Prefer to mint your own session? Exchange server-side instead:
