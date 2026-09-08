@@ -284,7 +284,8 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   /apps/{id}:
-    patch:      tags: [apps]
+    patch:
+      tags: [apps]
       summary: Update one of my apps
       description: Rename, change redirect URIs, or disable the app. Owners only.
       security:
