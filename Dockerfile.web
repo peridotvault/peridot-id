@@ -25,6 +25,11 @@ ENV NODE_OPTIONS=--max-old-space-size=1536
 COPY . .
 
 RUN mkdir -p apps/web/public
+# Workspace dists for the SDK import (postinstall was --ignore-scripts, so build
+# them explicitly in dependency order before Next needs them).
+RUN pnpm --filter @peridotvault/pid-types build
+RUN pnpm --filter @peridotvault/pid-solana build
+RUN pnpm --filter @peridotvault/pid-sdk-js build
 RUN pnpm --filter @peridotvault/pid-web build
 
 FROM node:22-alpine AS runner
