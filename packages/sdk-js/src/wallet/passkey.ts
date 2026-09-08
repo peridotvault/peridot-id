@@ -102,6 +102,34 @@ export async function registerPasskey(api: {
   return finish as Authority;
 }
 
+/**
+ * Thrown when the WebAuthn ceremony can't run on the current page because the rpId
+ * belongs to another origin. Redirect to a hosted PeridotID page (which carries the
+ * rpId) instead of retrying in place — retrying always fails the same way.
+ */
+export class PasskeyHostedRequiredError extends Error {
+  readonly rpId: string;
+
+  constructor(rpId: string) {
+    super(
+      `Passkey sign-in must run on ${rpId} — this page (${window.location.origin}) can't use that credential store. Redirecting to PeridotID…`,
+    );
+    this.name = "PasskeyHostedRequiredError";
+    this.rpId = rpId;
+  }
+}
+
+/** Throws PasskeyHostedRequiredError when this page can't legally run the ceremony. */
+export function assertCeremonyOrigin(options: Record<string, unknown>): void {
+  const rpId = (options as { rpId?: unknown }).rpId;
+  if (typeof rpId !== "string" || typeof window === "undefined") return;
+  const host = window.location.hostname.toLowerCase();
+  const id = rpId.toLowerCase();
+  if (host !== id && !host.endsWith(`.${id}`)) {
+    throw new PasskeyHostedRequiredError(rpId);
+  }
+}
+
 /** Authenticate with a passkey (sign-in) — drives the WebAuthn get via the auth API. */
 export async function authenticatePasskey(api: {
   start(): Promise<{ authenticationId: string; options: Record<string, unknown> } | ApiErrorLike>;
@@ -113,6 +141,11 @@ export async function authenticatePasskey(api: {
   const start = await api.start();
   if (isApiError(start)) throw new Error((start as { message: string }).message);
 
+  // The ceremony must run on the rpId's own origin (browser law — e.g. a login page
+  // on another domain can never use our rpId). Fail fast with a catchable error so
+  // callers can redirect to a hosted PeridotID page instead of showing a cryptic
+  // SecurityError from the authenticator.
+  assertCeremonyOrigin(start.options);
   const publicKey = toRequestOptions(start.options as Record<string, unknown>);
   let credential: PublicKeyCredential;
   try {
