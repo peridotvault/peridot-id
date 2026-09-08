@@ -39,7 +39,6 @@ jobs:
           username: ${{ secrets.PROD_VPS_USER }}
           key: ${{ secrets.PROD_VPS_SSH_KEY }}
           command_timeout: 60m
-          script_timeout: 60m
           script: |
             cd /opt/apps/peridot-id/peridot-id
             git fetch "https://x-access-token:${{ secrets.GH_PAT }}@github.com/peridotvault/peridot-id.git" main
