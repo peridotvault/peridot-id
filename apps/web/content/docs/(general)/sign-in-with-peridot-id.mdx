@@ -55,8 +55,11 @@ function SignInButton() {
 ```
 
 `openLogin()` opens a small chooser modal (Google / Passkey) on a blurred backdrop at
-maximum z-index — always in front of your UI. No `baseUrl` needed: it defaults to
-production.
+maximum z-index — always in front of your UI. Both buttons navigate to the hosted
+PeridotID login, where every ceremony runs (Google needs the redirect round-trip,
+WebAuthn legally requires a PeridotID origin). No `baseUrl` needed: it defaults to
+production. No API calls happen before login, so there is nothing CORS-related to
+configure.
 
 ## 3. Handle the login
 

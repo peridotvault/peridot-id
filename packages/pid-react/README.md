@@ -67,10 +67,16 @@ const res = await peridot.post('/v1/apps', {
 
 ## How it works
 
+All login ceremonies run on the hosted PeridotID page — Google OAuth needs the
+redirect round-trip and WebAuthn legally requires a PeridotID origin, so no ceremony
+can run inside your page. The modal is a branded chooser; both buttons navigate to
+the hosted page, which returns to `redirectUri?pid_code=...`:
+
 1. User clicks your button → `openLogin()` → modal (Google / Passkey).
-2. Google: full-page redirect to PeridotID → back to `redirectUri?pid_code=...`.
-   Passkey: runs on the PeridotID-hosted page when needed (WebAuthn requires our origin).
+2. Either choice navigates to the hosted login (your `clientId` travels along).
 3. Provider exchanges the code (directly, or via your `onExchange`) → `user` set.
+
+No API calls happen before login, so there is nothing CORS-related to configure.
 
 ## Publish
 

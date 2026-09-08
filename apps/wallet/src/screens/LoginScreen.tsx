@@ -5,17 +5,20 @@ import { theme, styles as s } from "../theme";
 
 /**
  * Third-party SSO mode: when the page is opened as
- * `...?client_id=pidapp_...&redirect_uri=https://app.example/callback`, a successful
+ * `...?redirect_uri=https://app.example/callback&client_id=pidapp_...`, a successful
  * sign-in returns to the app with `?pid_code=...` instead of entering the wallet.
+ * `client_id` is optional (unbound codes then follow the global allowlist), but
+ * `redirect_uri` is required — without it there is nowhere to return to, and the
+ * page behaves as the normal wallet login.
  * (Web only — passkey ceremonies must run on this PeridotID origin.)
  */
-function readSsoParams(): { clientId: string; redirectUri: string } | null {
+function readSsoParams(): { clientId?: string; redirectUri: string } | null {
   if (typeof window === "undefined") return null;
   try {
     const params = new URLSearchParams(window.location.search);
-    const clientId = params.get("client_id") ?? "";
+    const clientId = params.get("client_id") ?? undefined;
     const redirectUri = params.get("redirect_uri") ?? "";
-    if (!clientId || !redirectUri) return null;
+    if (!redirectUri) return null;
     const parsed = new URL(redirectUri);
     if (!["http:", "https:"].includes(parsed.protocol)) return null;
     return { clientId, redirectUri };

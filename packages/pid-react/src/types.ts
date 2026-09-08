@@ -12,6 +12,8 @@ export interface PeridotProviderProps {
   clientId?: string;
   /** Where PeridotID returns with `?pid_code=`. Defaults to the current origin. */
   redirectUri?: string;
+  /** Hosted login page all ceremonies run on. Defaults to the production wallet. */
+  hostedLoginUrl?: string;
   solanaRpcUrl?: string | string[];
   methods?: LoginMethod[];
   /**

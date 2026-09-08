@@ -6,6 +6,7 @@ import { PeridotLoginModal } from "./modal.js";
 import type { LoginMethod, PeridotProviderProps, UsePeridotApi } from "./types.js";
 
 export const PROD_BASE_URL = "https://api.pid.peridotvault.com";
+export const HOSTED_LOGIN_URL = "https://app.pid.peridotvault.com";
 const DEFAULT_SOLANA_RPC = "https://api.devnet.solana.com";
 
 function isApiError(v: ExchangeResult | ApiError): v is ApiError {
@@ -46,6 +47,7 @@ export function PeridotProvider({
   baseUrl,
   clientId,
   redirectUri,
+  hostedLoginUrl,
   solanaRpcUrl,
   methods = ["google", "passkey"],
   onExchange,
@@ -129,17 +131,29 @@ export function PeridotProvider({
     setModalOpen(false);
   }, [busyMethod]);
 
+  /**
+   * All login ceremonies run on the hosted PeridotID page — Google OAuth needs the
+   * redirect round-trip and WebAuthn legally requires a PeridotID origin (rpId), so no
+   * ceremony can run in-page on a third-party site. The hosted page returns to
+   * redirectUri with ?pid_code=, which the mount effect exchanges. Pure navigation:
+   * no API calls, no CORS involved.
+   */
+  const goHosted = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams({ redirect_uri: returnTo || window.location.origin });
+    if (clientId) params.set("client_id", clientId);
+    window.location.assign(`${hostedLoginUrl ?? HOSTED_LOGIN_URL}?${params.toString()}`);
+  }, [returnTo, clientId, hostedLoginUrl]);
+
   const handleGoogle = useCallback(() => {
     setError(null);
-    // Full-page redirect to PeridotID; the modal unmounts with the page.
-    void client.auth.login({ returnTo: returnTo || undefined, clientId });
-  }, [client, returnTo, clientId]);
+    goHosted();
+  }, [goHosted]);
 
-  const handlePasskey = useCallback(async () => {
+  const handlePasskey = useCallback(async (): Promise<void> => {
     setError(null);
-    // WebAuthn needs a secure context AND a PeridotID origin (our rpId). Anything else
-    // (LAN IPs, third-party domains) fails inside the ceremony with a cryptic error —
-    // say plainly where the user is and what to do instead.
+    // WebAuthn needs a secure context; the ceremony itself always runs on the
+    // hosted page (rpId law), so this only guards, then navigates like Google.
     if (typeof window !== "undefined" && (!window.isSecureContext || !navigator.credentials)) {
       const where = window.location.origin;
       const err = new Error(
@@ -150,18 +164,8 @@ export function PeridotProvider({
       onError?.(err);
       return;
     }
-    setBusyMethod("passkey");
-    try {
-      const res = await client.auth.loginWithPasskey({ returnTo: returnTo || undefined, clientId });
-      if (!res.ok) return; // user cancelled the prompt — stay in the modal
-      if (res.pidCode) await doExchange(res.pidCode);
-      setModalOpen(false);
-    } catch (err) {
-      fail(err);
-    } finally {
-      setBusyMethod(null);
-    }
-  }, [client, returnTo, clientId, doExchange, fail]);
+    goHosted();
+  }, [goHosted, onError]);
 
   const logout = useCallback(async () => {
     await client.auth.logout();
