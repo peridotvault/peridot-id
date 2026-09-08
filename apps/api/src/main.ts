@@ -5,6 +5,7 @@ import { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
 import { AppModule } from "./app.module";
+import { APP_ORIGINS_TTL_MS, isOriginAllowed, parseEnvOrigins } from "./common/cors";
 import { PrismaService } from "./prisma/prisma.service";
 
 async function bootstrap(): Promise<void> {
@@ -15,21 +16,27 @@ async function bootstrap(): Promise<void> {
   app.set("trust proxy", 1);
 
   const successUrl = config.get<string>("CLIENT_SUCCESS_URL", "http://localhost:5173");
-  const extraOrigins = (config.get<string>("CORS_ORIGINS", "") ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  // Registered third-party apps may call the API from their own origins (snapshot at
-  // boot; redeploy picks up newly registered apps).
+  const staticOrigins = [successUrl, ...parseEnvOrigins(config.get<string>("CORS_ORIGINS", ""))];
+  // Registered third-party apps may call the API from their own origins. Refreshed on a
+  // short TTL so newly registered apps work without a redeploy.
   let appOrigins: string[] = [];
-  try {
-    const prisma = app.get(PrismaService);
-    const apps = await prisma.pidApp.findMany({ where: { isActive: true }, select: { allowedOrigins: true } });
-    appOrigins = apps.flatMap((a) => a.allowedOrigins);
-  } catch {
-    // DB unreachable at boot (migrations pending) — fall back to env origins only.
-  }
-  app.enableCors({ origin: [successUrl, ...extraOrigins, ...appOrigins], credentials: true });
+  const refreshAppOrigins = async (): Promise<void> => {
+    try {
+      const prisma = app.get(PrismaService);
+      const apps = await prisma.pidApp.findMany({ where: { isActive: true }, select: { allowedOrigins: true } });
+      appOrigins = apps.flatMap((a) => a.allowedOrigins);
+    } catch {
+      // DB unreachable at boot (migrations pending) — env origins only until next refresh.
+    }
+  };
+  await refreshAppOrigins();
+  setInterval(() => {
+    void refreshAppOrigins();
+  }, APP_ORIGINS_TTL_MS);
+  app.enableCors({
+    origin: (origin, cb) => cb(null, isOriginAllowed(origin, staticOrigins, appOrigins)),
+    credentials: true,
+  });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 

@@ -22,6 +22,9 @@ const res = await peridot.post('/v1/apps', {
 // res.data.clientId → "pidapp_..." (list/edit later via GET / PATCH /v1/apps)
 ```
 
+Your redirect URI origins are automatically allowed for browser API calls (within
+~60s of registering, no redeploy needed).
+
 ## 2. Add the provider + login modal
 
 ```bash
