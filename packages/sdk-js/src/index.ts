@@ -38,10 +38,15 @@ export class PeridotAuth {
 
   /**
    * Begin Google OAuth. Optional `returnTo` (an allowlisted cross-origin) redirects back
-   * there with a one-time `pid_code` for SSO (see `exchange`).
+   * there with a one-time `pid_code` for SSO (see `exchange`). Pass `clientId` when
+   * logging in on behalf of a registered third-party app (binds the code to the app).
    */
-  async login(opts?: { returnTo?: string }): Promise<void> {
-    const res = await this.client.post<LoginResponse>("/v1/auth/login", opts?.returnTo ? { returnTo: opts.returnTo } : undefined);
+  async login(opts?: { returnTo?: string; clientId?: string }): Promise<void> {
+    const body =
+      opts?.returnTo || opts?.clientId
+        ? { ...(opts.returnTo ? { returnTo: opts.returnTo } : {}), ...(opts.clientId ? { clientId: opts.clientId } : {}) }
+        : undefined;
+    const res = await this.client.post<LoginResponse>("/v1/auth/login", body);
     if (res.ok) window.location.assign((res.data as LoginResponse).url);
   }
 
@@ -50,7 +55,7 @@ export class PeridotAuth {
    * a one-time pid_code for SSO (see `exchange`). Resolves `{ ok: false }` ONLY when the
    * WebAuthn ceremony is cancelled by the user; genuine errors throw.
    */
-  async loginWithPasskey(opts?: { returnTo?: string }): Promise<{ ok: boolean; pidCode?: string }> {
+  async loginWithPasskey(opts?: { returnTo?: string; clientId?: string }): Promise<{ ok: boolean; pidCode?: string }> {
     try {
       const finish = await authenticatePasskey({
         start: async () => {
@@ -62,6 +67,7 @@ export class PeridotAuth {
           const res = await this.client.post<{ ok: boolean; pidCode?: string }>("/v1/auth/passkey/finish", {
             ...input,
             ...(opts?.returnTo ? { returnTo: opts.returnTo } : {}),
+            ...(opts?.clientId ? { clientId: opts.clientId } : {}),
           });
           if (!res.ok) throw new Error("Passkey sign-in failed");
           return res.data as { ok: boolean; pidCode?: string };
@@ -75,8 +81,11 @@ export class PeridotAuth {
   }
 
   /** Exchange a one-time SSO pid_code for the identity (for cross-origin relying parties). */
-  async exchange(code: string): Promise<ExchangeResult | ApiError> {
-    const res = await this.client.post<ExchangeResult>("/v1/auth/exchange", { code });
+  async exchange(code: string, clientId?: string): Promise<ExchangeResult | ApiError> {
+    const res = await this.client.post<ExchangeResult>(
+      "/v1/auth/exchange",
+      clientId ? { code, clientId } : { code },
+    );
     return res.data;
   }
 
@@ -222,6 +231,7 @@ class PeridotClient {
 }
 
 export { PeridotClient };
+export type { ApiError, ExchangeResult };
 export function Peridot(options: PeridotOptions): PeridotClient {
   return new PeridotClient(
     options.baseUrl,

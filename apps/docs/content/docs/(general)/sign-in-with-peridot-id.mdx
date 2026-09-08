@@ -1,0 +1,91 @@
+---
+title: Sign in with PeridotID
+description: Let users sign into your app with their PeridotID (Google or passkey)
+---
+
+Add "Sign in with PeridotID" to any web app in three steps. Your users authenticate
+against PeridotID production — no local setup, no secrets to manage.
+
+## 1. Register your app
+
+Call `POST /v1/apps` with your PeridotID session (cookie) to get a public `client_id`.
+List every URL PeridotID may return users to — codes are only issued to these:
+
+```ts
+import { Peridot } from '@peridotvault/pid-sdk-js';
+
+const peridot = Peridot({ baseUrl: 'https://api.pid.peridotvault.com' });
+const res = await peridot.post('/v1/apps', {
+  name: 'My Game',
+  redirectUris: ['https://mygame.dev/callback'],
+});
+// res.data.clientId → "pidapp_..." (list/edit later via GET / PATCH /v1/apps)
+```
+
+## 2. Add the provider + login modal
+
+```bash
+npm install @peridotvault/pid-react
+```
+
+```tsx
+import { PeridotProvider, usePeridot } from '@peridotvault/pid-react';
+
+export default function App() {
+  return (
+    <PeridotProvider clientId="pidapp_...">
+      <YourApp />
+    </PeridotProvider>
+  );
+}
+
+function SignInButton() {
+  const { user, openLogin, logout } = usePeridot();
+  if (user) return <button onClick={logout}>Sign out</button>;
+  return <button onClick={openLogin}>Sign in with PeridotID</button>;
+}
+```
+
+`openLogin()` opens a small chooser modal (Google / Passkey) on a blurred backdrop at
+maximum z-index — always in front of your UI. No `baseUrl` needed: it defaults to
+production.
+
+## 3. Handle the login
+
+After login, PeridotID redirects back to your `redirectUri` with a one-time `pid_code`.
+The provider exchanges it automatically and sets `user`
+(`{ identityId, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }`).
+
+Prefer to mint your own session? Exchange server-side instead:
+
+```tsx
+<PeridotProvider
+  clientId="pidapp_..."
+  onExchange={async (code) => {
+    const res = await fetch('/api/auth/peridot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) throw new Error('exchange failed');
+  }}
+>
+```
+
+```ts
+// your backend: verify the code against PeridotID, then create your session
+const r = await fetch('https://api.pid.peridotvault.com/v1/auth/exchange', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ code, clientId: 'pidapp_...' }),
+});
+const identity = await r.json(); // single-use code, 5-minute expiry
+```
+
+## Notes
+
+- Passkey login always runs on a PeridotID-hosted page (browsers bind WebAuthn to our
+  domain) and returns with `pid_code` like Google does.
+- Codes are single-use, expire in ~5 minutes, and are bound to your `client_id`.
+- No framework? Use `@peridotvault/pid-sdk-js` directly: `login({ clientId, returnTo })`,
+  `loginWithPasskey({ clientId, returnTo })`, `exchange(code, clientId)`.

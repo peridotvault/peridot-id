@@ -5,6 +5,7 @@ import { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
 import { AppModule } from "./app.module";
+import { PrismaService } from "./prisma/prisma.service";
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -18,7 +19,17 @@ async function bootstrap(): Promise<void> {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  app.enableCors({ origin: [successUrl, ...extraOrigins], credentials: true });
+  // Registered third-party apps may call the API from their own origins (snapshot at
+  // boot; redeploy picks up newly registered apps).
+  let appOrigins: string[] = [];
+  try {
+    const prisma = app.get(PrismaService);
+    const apps = await prisma.pidApp.findMany({ where: { isActive: true }, select: { allowedOrigins: true } });
+    appOrigins = apps.flatMap((a) => a.allowedOrigins);
+  } catch {
+    // DB unreachable at boot (migrations pending) — fall back to env origins only.
+  }
+  app.enableCors({ origin: [successUrl, ...extraOrigins, ...appOrigins], credentials: true });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 

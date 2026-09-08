@@ -1,6 +1,6 @@
-import { SsoService } from "./sso.service";
+import { decodeState, encodeState, SsoService } from "./sso.service";
 
-function setup() {
+function setup(apps?: { findActive: (clientId: string) => Promise<{ redirectUris: string[] } | null> }) {
   const config = {
     get: jest.fn((key: string, def?: unknown) => {
       const values: Record<string, unknown> = {
@@ -13,10 +13,12 @@ function setup() {
   const rows = new Map<string, Record<string, unknown>>();
   const prisma = {
     ssoCode: {
-      create: jest.fn(async ({ data }: { data: { code: string; identityId: string; redirectTo: string; expiresAt: Date } }) => {
-        rows.set(data.code, { id: data.code, ...data, consumedAt: null });
-        return rows.get(data.code);
-      }),
+      create: jest.fn(
+        async ({ data }: { data: { code: string; identityId: string; redirectTo: string; clientId?: string | null; expiresAt: Date } }) => {
+          rows.set(data.code, { id: data.code, clientId: null, ...data, consumedAt: null });
+          return rows.get(data.code);
+        },
+      ),
       findUnique: jest.fn(async ({ where }: { where: { code: string } }) => rows.get(where.code) ?? null),
       updateMany: jest.fn(async ({ where, data }: { where: { id: string; consumedAt: null }; data: { consumedAt: Date } }) => {
         const row = rows.get(where.id);
@@ -30,9 +32,12 @@ function setup() {
     profile: { findUnique: jest.fn(async () => ({ displayName: "Peridot", avatarUrl: null })) },
     identityCredential: { findMany: jest.fn(async () => [{ provider: "google", email: "a@b.com" }]) },
   };
-  const service = new SsoService(prisma as never, config as never, security as never);
+  const pidApps = apps ?? { findActive: jest.fn(async () => null) };
+  const service = new SsoService(prisma as never, config as never, security as never, pidApps as never);
   return { service, rows, security };
 }
+
+const DEV_APP = { redirectUris: ["https://mygame.dev/callback"] };
 
 describe("SsoService", () => {
   it("only allows configured origins in the returnTo allowlist", () => {
@@ -65,5 +70,42 @@ describe("SsoService", () => {
   it("rejects an unknown or expired code", async () => {
     const { service } = setup();
     await expect(service.consume("missing-code-000000000000")).rejects.toThrow("sso_code_invalid");
+  });
+
+  it("round-trips returnTo (+ clientId) through the opaque Google state", () => {
+    expect(decodeState(encodeState("https://live2dev.com"))).toEqual({ returnTo: "https://live2dev.com" });
+    const withApp = encodeState("https://mygame.dev/callback", "pidapp_abc");
+    expect(decodeState(withApp)).toEqual({ returnTo: "https://mygame.dev/callback", clientId: "pidapp_abc" });
+    // legacy plain returnTo states keep working
+    expect(decodeState("https://live2dev.com")).toEqual({ returnTo: "https://live2dev.com" });
+  });
+
+  it("resolveReturnTo enforces an app's registered redirect URIs", async () => {
+    const { service } = setup({ findActive: async (id) => (id === "pidapp_abc" ? DEV_APP : null) });
+    await expect(service.resolveReturnTo("https://mygame.dev/callback", "pidapp_abc")).resolves.toEqual({
+      redirectTo: "https://mygame.dev/callback",
+      clientId: "pidapp_abc",
+    });
+    await expect(service.resolveReturnTo("https://evil.com/steal", "pidapp_abc")).resolves.toBeNull();
+    await expect(service.resolveReturnTo("https://mygame.dev/callback", "pidapp_nope")).resolves.toBeNull();
+  });
+
+  it("resolveReturnTo falls back to the global allowlist without a clientId", async () => {
+    const { service } = setup();
+    await expect(service.resolveReturnTo("https://live2dev.com")).resolves.toEqual({
+      redirectTo: "https://live2dev.com",
+    });
+    await expect(service.resolveReturnTo("https://evil.com")).resolves.toBeNull();
+    await expect(service.resolveReturnTo(undefined)).resolves.toBeNull();
+  });
+
+  it("binds issued codes to the app: exchange requires the same client_id", async () => {
+    const { service } = setup();
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    await expect(service.consume(code, "pidapp_abc")).resolves.toMatchObject({ identityId: "pid_1" });
+
+    const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    await expect(service.consume(code2, "pidapp_other")).rejects.toThrow("sso_code_invalid");
+    await expect(service.consume(code2)).rejects.toThrow("sso_code_invalid");
   });
 });

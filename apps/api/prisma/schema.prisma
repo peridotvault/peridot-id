@@ -57,6 +57,7 @@ model Identity {
 
   pidAccounts PidAccount[]
   securityEvents  SecurityEvent[]
+  pidApps PidApp[]
 
   @@map("identities")
 }
@@ -282,10 +283,30 @@ model SsoCode {
   identityId String
   sessionId  String?
   redirectTo String
+  clientId   String?
   consumedAt DateTime?
   expiresAt  DateTime
   createdAt  DateTime  @default(now())
 
   @@index([identityId])
   @@map("sso_codes")
+}
+
+// Registered third-party apps ("Sign in with PeridotID"). Any developer registers an
+// app, gets a public client_id, and lists the redirect URIs PeridotID may return
+// pid_codes to. Allowed CORS origins are derived from the redirect URIs.
+model PidApp {
+  id             String   @id @default(uuid())
+  clientId       String   @unique
+  ownerId        String
+  owner          Identity @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name           String
+  redirectUris   String[]
+  allowedOrigins String[]
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([ownerId])
+  @@map("pid_apps")
 }

@@ -46,7 +46,7 @@ Env to set in `apps/api/.env`: `GOOGLE_CLIENT_ID/SECRET`, `PID_PROGRAM_ID=G8tPC.
 
 ## Verification
 
-- API: `pnpm --filter @peridotvault/pid-api exec jest` (119 tests).
+- API: `pnpm --filter @peridotvault/pid-api exec jest` (127 tests).
 - Program: `cargo test` (12) + `tests/integration.mjs` (13 cases) against the local
   validator; devnet E2E `packages/sdk-js/test/devnet.e2e.mjs`.
 - Full: `pnpm typecheck`.

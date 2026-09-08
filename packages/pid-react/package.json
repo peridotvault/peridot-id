@@ -1,7 +1,7 @@
 {
-  "name": "@peridotvault/pid-sdk-js",
-  "version": "0.1.6",
-  "description": "The PeridotID browser SDK — auth (Google + passkey), identity, profile, and the passkey wallet (non-custodial Solana smart account).",
+  "name": "@peridotvault/pid-react",
+  "version": "0.1.0",
+  "description": "React provider + login modal for PeridotID (Sign in with PeridotID). Built on @peridotvault/pid-sdk-js.",
   "license": "MIT",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
@@ -25,11 +25,11 @@
   },
   "keywords": [
     "peridot",
-    "solana",
+    "react",
     "passkey",
     "webauthn",
     "wallet",
-    "smart-account"
+    "auth"
   ],
   "engines": {
     "node": ">=20"
@@ -37,10 +37,12 @@
   "publishConfig": {
     "access": "public"
   },
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19"
+  },
   "dependencies": {
-    "@peridotvault/pid-solana": "workspace:*",
-    "@peridotvault/pid-types": "workspace:*",
-    "@solana/web3.js": "^1.98.4"
+    "@peridotvault/pid-sdk-js": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'}));require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\"",
@@ -48,6 +50,10 @@
     "prepack": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'}));require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\""
   },
   "devDependencies": {
-    "@types/node": "^26.4.0"
+    "@types/node": "^26.4.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }

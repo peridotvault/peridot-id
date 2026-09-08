@@ -73,4 +73,9 @@ export class AuthenticateFinishDto {
   @IsOptional()
   @IsString()
   returnTo?: string;
+
+  /** Registered third-party app this login is for (binds the pid_code to the app). */
+  @IsOptional()
+  @IsString()
+  clientId?: string;
 }

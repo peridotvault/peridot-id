@@ -67,6 +67,30 @@ paths:
         The URL points to `GET /auth/google`, which redirects the browser to Google's
         consent screen. After the user consents, the browser is redirected back through
         `/auth/google/callback` and session cookies are set.
+
+        For cross-origin SSO, pass `returnTo` (must be allowlisted, or registered to
+        your app via `clientId`) — the callback then redirects to
+        `returnTo?pid_code=...` with a one-time exchange code instead of the wallet.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                returnTo:
+                  type: string
+                  format: uri
+                  description: Cross-origin URL to return to with a pid_code
+                clientId:
+                  type: string
+                  description: Registered app id (binds the pid_code to your app)
+            examples:
+              sso:
+                summary: Third-party SSO login
+                value:
+                  returnTo: "https://mygame.dev/callback"
+                  clientId: "pidapp_0123456789abcdef0123456789abcdef"
       responses:
         "200":
           description: Google authorization URL
@@ -76,6 +100,8 @@ paths:
                 $ref: "#/components/schemas/LoginResponse"
               example:
                 url: "http://localhost:3301/v1/auth/google"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -118,6 +144,150 @@ paths:
           description: Redirect to CLIENT_SUCCESS_URL with session cookies set
         "503":
           $ref: "#/components/responses/GoogleNotConfigured"
+
+  /auth/exchange:
+    post:
+      tags: [auth]
+      summary: Exchange a one-time SSO code for the identity
+      description: |
+        Consumes a `pid_code` issued by a Google or passkey login with `returnTo`
+        (optionally bound to a `clientId`) and returns the PeridotID identity.
+        Codes are single-use and expire after ~5 minutes. Call server-to-server;
+        when the code is bound to an app, the same `clientId` must be presented.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  description: One-time pid_code from the redirect URL
+                clientId:
+                  type: string
+                  description: Must match the client_id the code was issued for
+            example:
+              code: "mF8xQ2vT9nR4kL7pZ3wX6yA1bD5eF0gH"
+              clientId: "pidapp_0123456789abcdef0123456789abcdef"
+      responses:
+        "200":
+          description: The PeridotID identity behind the code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExchangeResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /apps:
+    post:
+      tags: [apps]
+      summary: Register a third-party app
+      description: |
+        Registers an app for "Sign in with PeridotID" and returns its public
+        `client_id`. PeridotID only returns pid_codes to the registered redirect
+        URIs (http/https). Authenticated — the caller becomes the app owner.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, redirectUris]
+              properties:
+                name:
+                  type: string
+                  maxLength: 60
+                redirectUris:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: string
+                    format: uri
+            example:
+              name: "My Game"
+              redirectUris: ["https://mygame.dev/callback"]
+      responses:
+        "201":
+          description: The registered app including its client_id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PidApp"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags: [apps]
+      summary: List my registered apps
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Apps owned by the caller
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PidApp"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /apps/{id}:
+    patch:
+      tags: [apps]
+      summary: Update one of my apps
+      description: Rename, change redirect URIs, or disable the app. Owners only.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 60
+                redirectUris:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: string
+                    format: uri
+                isActive:
+                  type: boolean
+      responses:
+        "200":
+          description: The updated app
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PidApp"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /auth/refresh:
     post:
@@ -810,6 +980,68 @@ components:
           description: Navigate here to start Google sign-in
       example:
         url: "http://localhost:3301/v1/auth/google"
+
+    ExchangeResult:
+      type: object
+      required: [identityId, profile, credentials]
+      properties:
+        identityId:
+          type: string
+          description: Stable PID of the signed-in user
+          example: "pid_01K4Y4DWMK7YSH8X4JQY9M4T6P"
+        profile:
+          type: object
+          properties:
+            displayName:
+              type: string
+              nullable: true
+            avatarUrl:
+              type: string
+              nullable: true
+        credentials:
+          type: array
+          items:
+            type: object
+            properties:
+              provider:
+                type: string
+              email:
+                type: string
+                nullable: true
+
+    PidApp:
+      type: object
+      required: [id, clientId, ownerId, name, redirectUris, allowedOrigins, isActive, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+          description: Public app id to pass as clientId in login/exchange calls
+          example: "pidapp_0123456789abcdef0123456789abcdef"
+        ownerId:
+          type: string
+        name:
+          type: string
+        redirectUris:
+          type: array
+          items:
+            type: string
+            format: uri
+        allowedOrigins:
+          type: array
+          description: Derived from redirectUris; allowed CORS origins
+          items:
+            type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
 
     Identity:
       type: object

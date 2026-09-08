@@ -77,6 +77,21 @@ const identity = await peridot.auth.exchange(code);
 `returnTo` must be an origin in the API's `CLIENT_REDIRECT_ALLOWLIST` env, otherwise
 the login request is rejected.
 
+### Third-party apps ("Sign in with PeridotID")
+
+Register your app once (`POST /v1/apps`, authenticated) to get a public `client_id`,
+then pass it on every login — the issued code is bound to your app and only exchanges
+with the same `clientId`:
+
+```ts
+await peridot.auth.login({ clientId: 'pidapp_...', returnTo: 'https://mygame.dev/callback' });
+const res = await peridot.auth.loginWithPasskey({ clientId: 'pidapp_...', returnTo: 'https://mygame.dev/callback' });
+const identity = await peridot.auth.exchange(code, 'pidapp_...');
+```
+
+For React apps, use `@peridotvault/pid-react` (`PeridotProvider` + login modal) instead
+of wiring this manually.
+
 ## Low-level / server-side helpers
 
 - `registerPasskey(...)` — drive a WebAuthn registration ceremony manually

@@ -12,7 +12,14 @@ import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { AuthService } from "./auth.service";
 import { GoogleGuard } from "./google.guard";
 import { ExchangeDto, LoginDto } from "./dto/auth.dto";
-import { SsoService } from "./sso.service";
+import { decodeState, encodeState, SsoService } from "./sso.service";
+
+/** Redirect target with a pid_code appended (keeps any existing query string). */
+function withPidCode(returnTo: string, pidCode: string): string {
+  const url = new URL(returnTo);
+  url.searchParams.set("pid_code", pidCode);
+  return url.toString();
+}
 
 @Controller("v1/auth")
 @UseGuards(ThrottlerGuard)
@@ -27,14 +34,16 @@ export class AuthController {
   @Post("login")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  login(@Req() req: Request, @Body() dto: LoginDto): LoginResponse {
+  async login(@Req() req: Request, @Body() dto: LoginDto): Promise<LoginResponse> {
     const base = `${req.protocol}://${req.get("host")}`;
     let url = `${base}/v1/auth/google`;
     if (dto.returnTo) {
-      if (!this.ssoService.isAllowedReturnTo(dto.returnTo)) {
+      const resolved = await this.ssoService.resolveReturnTo(dto.returnTo, dto.clientId);
+      if (!resolved) {
         throw new BadRequestException("returnTo is not an allowed origin");
       }
-      url += `?returnTo=${encodeURIComponent(dto.returnTo)}`;
+      // state round-trips through Google: carries returnTo (+ clientId when present)
+      url += `?returnTo=${encodeURIComponent(encodeState(resolved.redirectTo, resolved.clientId))}`;
     }
     return { url };
   }
@@ -59,12 +68,12 @@ export class AuthController {
       credential: dto.credential as never,
     });
     await this.authService.issueSession(res, identityId, req.headers["user-agent"]);
-    const returnTo = (dto as { returnTo?: string }).returnTo;
-    if (returnTo) {
-      if (!this.ssoService.isAllowedReturnTo(returnTo)) {
+    if (dto.returnTo) {
+      const resolved = await this.ssoService.resolveReturnTo(dto.returnTo, dto.clientId);
+      if (!resolved) {
         throw new BadRequestException("returnTo is not an allowed origin");
       }
-      const pidCode = await this.ssoService.issue(identityId, returnTo);
+      const pidCode = await this.ssoService.issue(identityId, resolved.redirectTo, { clientId: resolved.clientId });
       return { ok: true, pidCode };
     }
     return { ok: true };
@@ -75,7 +84,7 @@ export class AuthController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async exchange(@Body() dto: ExchangeDto) {
     try {
-      return await this.ssoService.consume(dto.code);
+      return await this.ssoService.consume(dto.code, dto.clientId);
     } catch {
       throw new BadRequestException("Code is invalid, expired, or already used");
     }
@@ -93,11 +102,16 @@ export class AuthController {
     const identity = req.user as { id: string };
     await this.authService.issueSession(res, identity.id, req.headers["user-agent"]);
 
-    const returnTo = typeof req.query.state === "string" ? req.query.state : undefined;
-    if (returnTo && this.ssoService.isAllowedReturnTo(returnTo)) {
-      const pidCode = await this.ssoService.issue(identity.id, returnTo);
-      res.redirect(`${returnTo}?pid_code=${encodeURIComponent(pidCode)}`);
-      return;
+    // state is user-controlled (comes back via Google) — re-validate before trusting it.
+    const rawState = typeof req.query.state === "string" ? req.query.state : undefined;
+    if (rawState) {
+      const { returnTo, clientId } = decodeState(rawState);
+      const resolved = await this.ssoService.resolveReturnTo(returnTo, clientId);
+      if (resolved) {
+        const pidCode = await this.ssoService.issue(identity.id, resolved.redirectTo, { clientId: resolved.clientId });
+        res.redirect(withPidCode(resolved.redirectTo, pidCode));
+        return;
+      }
     }
     res.redirect(this.config.get<string>("CLIENT_SUCCESS_URL", "/"));
   }
