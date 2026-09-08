@@ -192,8 +192,9 @@ paths:
       summary: Register a third-party app
       description: |
         Registers an app for "Sign in with PeridotID" and returns its public
-        `client_id`. PeridotID only returns pid_codes to the registered redirect
-        URIs (http/https). Authenticated — the caller becomes the app owner.
+        `client_id`. Pass just a name — allowed origins are managed after via
+        PATCH (the exact return URL is passed in code at login time).
+        Authenticated — the caller becomes the app owner.
       security:
         - cookieAuth: []
       requestBody:
@@ -202,21 +203,19 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, redirectUris]
+              required: [name]
               properties:
                 name:
                   type: string
                   maxLength: 60
-                redirectUris:
+                allowedOrigins:
                   type: array
-                  minItems: 1
-                  maxItems: 10
+                  maxItems: 20
+                  description: Bare http(s) origins (no paths). Optional — managed after registration too.
                   items:
                     type: string
-                    format: uri
             example:
               name: "My Game"
-              redirectUris: ["https://mygame.dev/callback"]
       responses:
         "201":
           description: The registered app including its client_id
@@ -287,7 +286,7 @@ paths:
     patch:
       tags: [apps]
       summary: Update one of my apps
-      description: Rename, change redirect URIs, or disable the app. Owners only.
+      description: Rename, change allowed origins, or disable the app. Owners only.
       security:
         - cookieAuth: []
       parameters:
@@ -307,13 +306,12 @@ paths:
                 name:
                   type: string
                   maxLength: 60
-                redirectUris:
+                allowedOrigins:
                   type: array
-                  minItems: 1
-                  maxItems: 10
+                  maxItems: 20
+                  description: Bare http(s) origins (no paths) — replaces the whole list
                   items:
                     type: string
-                    format: uri
                 isActive:
                   type: boolean
       responses:
@@ -1052,7 +1050,7 @@ components:
 
     PidApp:
       type: object
-      required: [id, clientId, ownerId, name, redirectUris, allowedOrigins, isActive, createdAt, updatedAt]
+      required: [id, clientId, ownerId, name, allowedOrigins, isActive, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -1065,14 +1063,9 @@ components:
           type: string
         name:
           type: string
-        redirectUris:
-          type: array
-          items:
-            type: string
-            format: uri
         allowedOrigins:
           type: array
-          description: Derived from redirectUris; allowed CORS origins
+          description: Managed list of bare origins — login redirects and CORS
           items:
             type: string
         isActive:

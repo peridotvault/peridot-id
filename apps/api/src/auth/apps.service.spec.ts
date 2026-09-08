@@ -1,4 +1,4 @@
-import { originsOf, PidAppsService } from "./apps.service";
+import { normalizeOrigin, PidAppsService } from "./apps.service";
 
 function setup() {
   const rows = new Map<string, Record<string, unknown>>();
@@ -28,38 +28,61 @@ function setup() {
 }
 
 describe("PidAppsService", () => {
-  it("derives allowed origins from redirect URIs", () => {
-    expect(originsOf(["https://mygame.dev/callback", "https://mygame.dev/other", "http://localhost:3000/x"])).toEqual([
+  it("normalizeOrigin accepts bare origins, normalizes slashes and case", () => {
+    expect(normalizeOrigin("https://mygame.dev")).toBe("https://mygame.dev");
+    expect(normalizeOrigin("https://mygame.dev///")).toBe("https://mygame.dev");
+    expect(normalizeOrigin("https://MyGame.DEV")).toBe("https://mygame.dev");
+    expect(normalizeOrigin("http://localhost:3000")).toBe("http://localhost:3000");
+    expect(normalizeOrigin("https://mygame.dev:8443")).toBe("https://mygame.dev:8443");
+  });
+
+  it("normalizeOrigin rejects paths, queries, fragments, and non-http schemes", () => {
+    for (const bad of [
+      "https://mygame.dev/callback",
+      "https://mygame.dev?x=1",
+      "https://mygame.dev#frag",
+      "ftp://mygame.dev",
+      "javascript:alert(1)",
+      "not a url",
+    ]) {
+      expect(() => normalizeOrigin(bad)).toThrow();
+    }
+  });
+
+  it("creates an app with name only; origins managed after", async () => {
+    const { service } = setup();
+    const app = await service.create("pid_owner", "My Game");
+    expect(app.clientId).toMatch(/^pidapp_[0-9a-f]{32}$/);
+    expect(app).toMatchObject({ ownerId: "pid_owner", allowedOrigins: [], isActive: true });
+  });
+
+  it("creates with initial origins, deduped and normalized", async () => {
+    const { service } = setup();
+    const app = await service.create("pid_owner", "My Game", [
       "https://mygame.dev",
+      "https://mygame.dev/",
       "http://localhost:3000",
     ]);
+    expect(app).toMatchObject({ allowedOrigins: ["https://mygame.dev", "http://localhost:3000"] });
   });
 
-  it("creates an app with a public client_id owned by the caller", async () => {
+  it("only lets owners update their own apps (origins replaced wholesale)", async () => {
     const { service } = setup();
-    const app = await service.create("pid_owner", "My Game", ["https://mygame.dev/callback"]);
-    expect(app.clientId).toMatch(/^pidapp_[0-9a-f]{32}$/);
-    expect(app).toMatchObject({
-      ownerId: "pid_owner",
-      allowedOrigins: ["https://mygame.dev"],
-      isActive: true,
-    });
-  });
-
-  it("only lets owners update their own apps (and re-derives origins)", async () => {
-    const { service } = setup();
-    const app = await service.create("pid_owner", "My Game", ["https://mygame.dev/callback"]);
+    const app = await service.create("pid_owner", "My Game");
     await expect(service.update("pid_stranger", app.id as string, { name: "Hijacked" })).rejects.toThrow("App not found");
     const updated = await service.update("pid_owner", app.id as string, {
-      redirectUris: ["https://mygame.dev/v2/callback"],
+      allowedOrigins: ["https://mygame.dev", "https://staging.mygame.dev"],
       isActive: false,
     });
-    expect(updated).toMatchObject({ allowedOrigins: ["https://mygame.dev"], isActive: false });
+    expect(updated).toMatchObject({
+      allowedOrigins: ["https://mygame.dev", "https://staging.mygame.dev"],
+      isActive: false,
+    });
   });
 
   it("findActive hides unknown and disabled apps", async () => {
     const { prisma, service } = setup();
-    const app = await service.create("pid_owner", "My Game", ["https://mygame.dev/callback"]);
+    const app = await service.create("pid_owner", "My Game");
     expect(await service.findActive(app.clientId as string)).toBeTruthy();
     expect(await service.findActive("pidapp_missing")).toBeNull();
     await prisma.pidApp.update({ where: { id: app.id as string }, data: { isActive: false } });
@@ -68,7 +91,7 @@ describe("PidAppsService", () => {
 
   it("rotates a backend secret, storing only the hash", async () => {
     const { prisma, service } = setup();
-    const app = await service.create("pid_owner", "My Game", ["https://mygame.dev/callback"]);
+    const app = await service.create("pid_owner", "My Game");
     const { secret, prefix } = await service.rotateSecret("pid_owner", app.id as string);
     expect(secret).toMatch(/^pidsk_[0-9a-f]{48}$/);
     expect(prefix).toBe(secret.slice(0, 12));
@@ -82,7 +105,7 @@ describe("PidAppsService", () => {
 
   it("only lets owners rotate their app secret", async () => {
     const { service } = setup();
-    const app = await service.create("pid_owner", "My Game", ["https://mygame.dev/callback"]);
+    const app = await service.create("pid_owner", "My Game");
     await expect(service.rotateSecret("pid_stranger", app.id as string)).rejects.toThrow("App not found");
   });
 });

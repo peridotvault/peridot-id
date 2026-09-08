@@ -293,17 +293,17 @@ model SsoCode {
 }
 
 // Registered third-party apps ("Sign in with PeridotID"). Any developer registers an
-// app, gets a public client_id, and lists the redirect URIs PeridotID may return
-// pid_codes to. Allowed CORS origins are derived from the redirect URIs.
+// app, gets a public client_id, and manages the allowed origins its users may be
+// returned to (the exact return URL is passed in code at login time). The same list
+// gates browser API calls (CORS).
 model PidApp {
-  id             String   @id @default(uuid())
-  clientId       String   @unique
-  ownerId        String
-  owner          Identity @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  name           String
-  redirectUris   String[]
+  id           String   @id @default(uuid())
+  clientId     String   @unique
+  ownerId      String
+  owner        Identity @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name         String
   allowedOrigins String[]
-  isActive       Boolean  @default(true)
+  isActive     Boolean  @default(true)
   // Optional backend secret (confidential clients). SHA-256 hex, never plaintext.
   // When set, code exchange requires the matching secret.
   clientSecretHash      String?

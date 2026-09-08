@@ -40,7 +40,7 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
   return { service, rows, security };
 }
 
-const DEV_APP = { redirectUris: ["https://mygame.dev/callback"] };
+const DEV_APP = { allowedOrigins: ["https://mygame.dev"] };
 
 describe("SsoService", () => {
   it("only allows configured origins in the returnTo allowlist", () => {
@@ -83,13 +83,19 @@ describe("SsoService", () => {
     expect(decodeState("https://live2dev.com")).toEqual({ returnTo: "https://live2dev.com" });
   });
 
-  it("resolveReturnTo enforces an app's registered redirect URIs", async () => {
+  it("resolveReturnTo accepts any path on the app's allowed origins", async () => {
     const { service } = setup({ findActive: async (id) => (id === "pidapp_abc" ? DEV_APP : null) });
     await expect(service.resolveReturnTo("https://mygame.dev/callback", "pidapp_abc")).resolves.toEqual({
       redirectTo: "https://mygame.dev/callback",
       clientId: "pidapp_abc",
     });
+    // exact return URL passed in code — any path on the origin works
+    await expect(service.resolveReturnTo("https://mygame.dev/other/path?x=1", "pidapp_abc")).resolves.toEqual({
+      redirectTo: "https://mygame.dev/other/path?x=1",
+      clientId: "pidapp_abc",
+    });
     await expect(service.resolveReturnTo("https://evil.com/steal", "pidapp_abc")).resolves.toBeNull();
+    await expect(service.resolveReturnTo("https://mygame.dev.evil.com/", "pidapp_abc")).resolves.toBeNull();
     await expect(service.resolveReturnTo("https://mygame.dev/callback", "pidapp_nope")).resolves.toBeNull();
   });
 

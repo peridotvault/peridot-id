@@ -15,12 +15,14 @@ List every URL PeridotID may return users to — codes are only issued to these:
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({ baseUrl: 'https://api.pid.peridotvault.com' });
-const res = await peridot.post('/v1/apps', {
-  name: 'My Game',
-  redirectUris: ['https://mygame.dev/callback'],
-});
-// res.data.clientId → "pidapp_..." (list/edit later via GET / PATCH /v1/apps)
+// Register with just a name — allowed origins are managed after, in the dashboard
+// at pid.peridotvault.com/workspace (or PATCH /v1/apps).
+const res = await peridot.post('/v1/apps', { name: 'My Game' });
+// res.data.clientId → "pidapp_..." — put it in <PeridotProvider clientId="...">
 ```
+
+Then add your websites under **Allowed origins** (bare `https://…` origins, no paths).
+Pass the exact return URL in code — its origin must be listed:
 
 Your redirect URI origins are automatically allowed for browser API calls (within
 ~60s of registering, no redeploy needed). Local development needs nothing at all:

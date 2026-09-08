@@ -1,16 +1,23 @@
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsOptional, IsString, IsUrl, Length } from "class-validator";
+import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, Length, Matches } from "class-validator";
+
+/**
+ * A bare http(s) origin: scheme + host + optional port, no path/query/fragment.
+ * Trailing slashes are tolerated (normalized away) — anything else is rejected so
+ * developers learn the model instead of silently storing something looser.
+ */
+export const ORIGIN_PATTERN = /^https?:\/\/[^/:?#]+(?::\d+)?\/?$/;
 
 export class CreatePidAppDto {
   @IsString()
   @Length(1, 60)
   name!: string;
 
-  /** Redirect URIs PeridotID may return pid_codes to (http/https only). */
+  /** Websites allowed to receive pid_codes and call the API (managed later too). */
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(10)
-  @IsUrl({ require_protocol: true, protocols: ["http", "https"] }, { each: true })
-  redirectUris!: string[];
+  @ArrayMaxSize(20)
+  @Matches(ORIGIN_PATTERN, { each: true, message: "Each entry must be a bare http(s) origin, e.g. https://mygame.dev" })
+  allowedOrigins?: string[];
 }
 
 export class UpdatePidAppDto {
@@ -21,10 +28,9 @@ export class UpdatePidAppDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(10)
-  @IsUrl({ require_protocol: true, protocols: ["http", "https"] }, { each: true })
-  redirectUris?: string[];
+  @ArrayMaxSize(20)
+  @Matches(ORIGIN_PATTERN, { each: true, message: "Each entry must be a bare http(s) origin, e.g. https://mygame.dev" })
+  allowedOrigins?: string[];
 
   @IsOptional()
   @IsBoolean()

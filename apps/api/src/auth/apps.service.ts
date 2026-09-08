@@ -6,26 +6,27 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
-export function originsOf(redirectUris: string[]): string[] {
-  const origins = new Set<string>();
-  for (const uri of redirectUris) {
-    try {
-      origins.add(new URL(uri).origin);
-    } catch {
-      // validated upstream; skip defensively
-    }
-  }
-  return [...origins];
+/**
+ * Normalize a developer-supplied origin: strip trailing slashes, reject anything
+ * that isn't a bare http(s) origin (no path, query, or fragment).
+ */
+export function normalizeOrigin(value: string): string {
+  // Hostnames are case-insensitive; lowercase the whole bare origin (no path allowed).
+  const trimmed = value.trim().replace(/\/+$/, "").toLowerCase();
+  const parsed = new URL(trimmed);
+  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("origin_not_http");
+  if (parsed.origin !== trimmed) throw new Error("origin_not_bare");
+  return parsed.origin;
 }
 
 @Injectable()
 export class PidAppsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(ownerId: string, name: string, redirectUris: string[]) {
+  async create(ownerId: string, name: string, allowedOrigins: string[] = []) {
     const clientId = `pidapp_${randomBytes(16).toString("hex")}`;
     return this.prisma.pidApp.create({
-      data: { clientId, ownerId, name, redirectUris, allowedOrigins: originsOf(redirectUris) },
+      data: { clientId, ownerId, name, allowedOrigins: [...new Set(allowedOrigins.map(normalizeOrigin))] },
     });
   }
 
@@ -33,15 +34,15 @@ export class PidAppsService {
     return this.prisma.pidApp.findMany({ where: { ownerId }, orderBy: { createdAt: "desc" } });
   }
 
-  async update(ownerId: string, id: string, patch: { name?: string; redirectUris?: string[]; isActive?: boolean }) {
+  async update(ownerId: string, id: string, patch: { name?: string; allowedOrigins?: string[]; isActive?: boolean }) {
     const app = await this.prisma.pidApp.findFirst({ where: { id, ownerId } });
     if (!app) throw new NotFoundException("App not found");
     return this.prisma.pidApp.update({
       where: { id },
       data: {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.redirectUris !== undefined
-          ? { redirectUris: patch.redirectUris, allowedOrigins: originsOf(patch.redirectUris) }
+        ...(patch.allowedOrigins !== undefined
+          ? { allowedOrigins: [...new Set(patch.allowedOrigins.map(normalizeOrigin))] }
           : {}),
         ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
       },

@@ -103,11 +103,11 @@ export class SsoService {
 
   /**
    * Validate a cross-domain return target. Loopback URLs are always allowed (no
-   * registration needed — safe by network topology). With a clientId the returnTo must
-   * start with one of the app's registered redirect URIs (prefix match so `?pid_code=`
-   * can append); without one, fall back to the global origin allowlist.
-   * Returns null when rejected. Arbitrary hosts are NEVER allowed (open-redirector
-   * identity theft) — register them via POST /v1/apps instead.
+   * registration needed — safe by network topology). With a clientId the returnTo's
+   * origin must be in the app's managed allowed-origins list (the exact return URL is
+   * passed in code at login time); without one, fall back to the global origin
+   * allowlist. Returns null when rejected. Arbitrary hosts are NEVER allowed
+   * (open-redirector identity theft) — register them via POST /v1/apps instead.
    */
   async resolveReturnTo(returnTo: string | undefined, clientId?: string): Promise<ResolvedReturnTo | null> {
     if (!returnTo || !validHttpUrl(returnTo)) return null;
@@ -118,8 +118,13 @@ export class SsoService {
     if (clientId) {
       const app = await this.apps.findActive(clientId);
       if (!app) return null;
-      const ok = app.redirectUris.some((uri) => returnTo === uri || returnTo.startsWith(`${uri}?`) || returnTo.startsWith(`${uri}#`));
-      if (!ok) return null;
+      let origin: string;
+      try {
+        origin = new URL(returnTo).origin;
+      } catch {
+        return null;
+      }
+      if (!app.allowedOrigins.includes(origin)) return null;
       return { redirectTo: returnTo, clientId };
     }
     return this.isAllowedReturnTo(returnTo) ? { redirectTo: returnTo } : null;

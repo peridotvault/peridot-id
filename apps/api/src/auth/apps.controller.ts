@@ -10,12 +10,12 @@ import { CreatePidAppDto, UpdatePidAppDto } from "./dto/app.dto";
 export class PidAppsController {
   constructor(private readonly apps: PidAppsService) {}
 
-  /** Register a third-party app and get its public client_id. */
+  /** Register a third-party app and get its public client_id. Origins managed after. */
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreatePidAppDto) {
-    return this.apps.create(user.identityId, dto.name, dto.redirectUris);
+    return this.apps.create(user.identityId, dto.name, dto.allowedOrigins ?? []);
   }
 
   /** List my registered apps. */

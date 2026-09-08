@@ -10,7 +10,6 @@ export function AppsManager({ client }: { client: PeridotClient }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [uris, setUris] = useState("");
   const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
@@ -24,27 +23,22 @@ export function AppsManager({ client }: { client: PeridotClient }) {
   }, [load]);
 
   const create = useCallback(async () => {
-    const redirectUris = uris
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!name.trim() || redirectUris.length === 0) {
-      setError("Give the app a name and at least one redirect URI.");
+    if (!name.trim()) {
+      setError("Give the app a name first — allowed origins are managed after.");
       return;
     }
     setCreating(true);
     setError(null);
     try {
-      unwrap(await client.post<PidApp>("/v1/apps", { name: name.trim(), redirectUris }), "App registration");
+      unwrap(await client.post<PidApp>("/v1/apps", { name: name.trim() }), "App registration");
       setName("");
-      setUris("");
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "App registration failed");
     } finally {
       setCreating(false);
     }
-  }, [client, name, uris, load]);
+  }, [client, name, load]);
 
   return (
     <section className="mt-8">
@@ -63,6 +57,9 @@ export function AppsManager({ client }: { client: PeridotClient }) {
 
       <div className="mt-8 rounded-2xl border border-neutral-200 p-6">
         <h3 className="font-semibold">Register a new app</h3>
+        <p className="mt-1 text-sm text-neutral-500">
+          Just a name for now — allowed origins are managed on the app card after.
+        </p>
         <label className="mt-3 block text-sm">
           Name
           <input
@@ -71,16 +68,6 @@ export function AppsManager({ client }: { client: PeridotClient }) {
             placeholder="My Game"
             maxLength={60}
             className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="mt-3 block text-sm">
-          Redirect URIs <span className="text-neutral-500">(one per line — codes only go here)</span>
-          <textarea
-            value={uris}
-            onChange={(e) => setUris(e.target.value)}
-            placeholder={"https://mygame.dev/callback"}
-            rows={3}
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 font-mono text-sm"
           />
         </label>
         <button
