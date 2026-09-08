@@ -89,11 +89,11 @@ services:
       start_period: 20s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.web${NAMESPACE}.rule=Host(`pid.peridotvault.com`)"
-      - "traefik.http.routers.web${NAMESPACE}.entrypoints=websecure"
-      - "traefik.http.routers.web${NAMESPACE}.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.web${NAMESPACE}.middlewares=security-headers@file"
-      - "traefik.http.services.web${NAMESPACE}.loadbalancer.server.port=3300"
+      - "traefik.http.routers.pid-web${NAMESPACE}.rule=Host(`pid.peridotvault.com`)"
+      - "traefik.http.routers.pid-web${NAMESPACE}.entrypoints=websecure"
+      - "traefik.http.routers.pid-web${NAMESPACE}.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.pid-web${NAMESPACE}.middlewares=security-headers@file"
+      - "traefik.http.services.pid-web${NAMESPACE}.loadbalancer.server.port=3300"
 
   app:
     build:
