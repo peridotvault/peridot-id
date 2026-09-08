@@ -25,6 +25,8 @@ for s in api web app; do
   COMPOSE_PROJECT_NAME="$PROJECT" "${COMPOSE[@]}" build "$s"
 done
 
-COMPOSE_PROJECT_NAME="$PROJECT" "${COMPOSE[@]}" up -d
+# --remove-orphans: drops stale containers (renamed services, interrupted recreates)
+# that would otherwise squat on container names and fail the next recreate.
+COMPOSE_PROJECT_NAME="$PROJECT" "${COMPOSE[@]}" up -d --remove-orphans
 
 echo "Done. Check status with: docker compose -f deploy/compose.yaml --env-file deploy/.env.$ENV ps"
