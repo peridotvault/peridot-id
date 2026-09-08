@@ -33,6 +33,23 @@ function validHttpUrl(value: string): boolean {
   }
 }
 
+/**
+ * Loopback return targets are inherently safe and need no registration (same rule as
+ * Google/Auth0: any port, any path). A pid_code redirected to the victim's *own*
+ * machine can only be received there — a remote attacker gains nothing — so this can
+ * never be abused the way an open redirector to arbitrary hosts could.
+ */
+export function isLoopbackReturnTo(returnTo: string): boolean {
+  try {
+    const parsed = new URL(returnTo);
+    if (!["http:", "https:"].includes(parsed.protocol)) return false;
+    const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
 /** Opaque Google `state` carrying returnTo (+ optional clientId). Plain returnTo strings
  *  (pre-client_id clients like Live2Dev) decode via the fallback. */
 export function encodeState(returnTo: string, clientId?: string): string {
@@ -85,13 +102,19 @@ export class SsoService {
   }
 
   /**
-   * Validate a cross-domain return target. With a clientId the returnTo must start with
-   * one of the app's registered redirect URIs (prefix match so `?pid_code=` can append);
-   * without one, fall back to the global origin allowlist (pre-client_id clients).
-   * Returns null when rejected.
+   * Validate a cross-domain return target. Loopback URLs are always allowed (no
+   * registration needed — safe by network topology). With a clientId the returnTo must
+   * start with one of the app's registered redirect URIs (prefix match so `?pid_code=`
+   * can append); without one, fall back to the global origin allowlist.
+   * Returns null when rejected. Arbitrary hosts are NEVER allowed (open-redirector
+   * identity theft) — register them via POST /v1/apps instead.
    */
   async resolveReturnTo(returnTo: string | undefined, clientId?: string): Promise<ResolvedReturnTo | null> {
     if (!returnTo || !validHttpUrl(returnTo)) return null;
+    if (isLoopbackReturnTo(returnTo)) {
+      // Binding still recorded when supplied, so exchange rules stay uniform.
+      return { redirectTo: returnTo, clientId };
+    }
     if (clientId) {
       const app = await this.apps.findActive(clientId);
       if (!app) return null;

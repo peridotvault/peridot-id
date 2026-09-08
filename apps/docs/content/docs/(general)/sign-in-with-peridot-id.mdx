@@ -23,7 +23,10 @@ const res = await peridot.post('/v1/apps', {
 ```
 
 Your redirect URI origins are automatically allowed for browser API calls (within
-~60s of registering, no redeploy needed).
+~60s of registering, no redeploy needed). Local development needs nothing at all:
+`http://localhost`, `http://127.0.0.1` and `http://[::1]` (any port, any path) are
+always allowed — arbitrary production hosts are never accepted without registration
+(an open redirect would let anyone steal users' login codes).
 
 ## 2. Add the provider + login modal
 

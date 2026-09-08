@@ -1,4 +1,4 @@
-import { decodeState, encodeState, SsoService } from "./sso.service";
+import { decodeState, encodeState, isLoopbackReturnTo, SsoService } from "./sso.service";
 
 function setup(apps?: { findActive: (clientId: string) => Promise<{ redirectUris: string[] } | null> }) {
   const config = {
@@ -97,6 +97,35 @@ describe("SsoService", () => {
     });
     await expect(service.resolveReturnTo("https://evil.com")).resolves.toBeNull();
     await expect(service.resolveReturnTo(undefined)).resolves.toBeNull();
+  });
+
+  it("loopback return targets are always allowed (any port/path, ± clientId)", async () => {
+    const { service } = setup({ findActive: async () => null });
+    await expect(service.resolveReturnTo("http://localhost:3000")).resolves.toEqual({
+      redirectTo: "http://localhost:3000",
+      clientId: undefined,
+    });
+    await expect(service.resolveReturnTo("http://localhost:8081/auth/callback?x=1")).resolves.toMatchObject({
+      redirectTo: "http://localhost:8081/auth/callback?x=1",
+    });
+    await expect(service.resolveReturnTo("http://127.0.0.1:4000/")).resolves.toMatchObject({
+      redirectTo: "http://127.0.0.1:4000/",
+    });
+    // clientId recorded but no registry lookup needed on loopback
+    await expect(service.resolveReturnTo("http://localhost:3000", "pidapp_unregistered")).resolves.toEqual({
+      redirectTo: "http://localhost:3000",
+      clientId: "pidapp_unregistered",
+    });
+  });
+
+  it("isLoopbackReturnTo rejects lookalikes and non-http schemes", () => {
+    expect(isLoopbackReturnTo("http://localhost:3000/x")).toBe(true);
+    expect(isLoopbackReturnTo("https://127.0.0.1:8443/")).toBe(true);
+    expect(isLoopbackReturnTo("http://[::1]:3000/")).toBe(true);
+    expect(isLoopbackReturnTo("https://localhost.evil.com/")).toBe(false);
+    expect(isLoopbackReturnTo("https://evillocalhost:3000/")).toBe(false);
+    expect(isLoopbackReturnTo("ftp://localhost/x")).toBe(false);
+    expect(isLoopbackReturnTo("not a url")).toBe(false);
   });
 
   it("binds issued codes to the app: exchange requires the same client_id", async () => {
