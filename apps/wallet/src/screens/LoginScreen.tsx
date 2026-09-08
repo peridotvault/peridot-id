@@ -1,51 +1,8 @@
 import { useEffect, useState } from "react";
 import { Button, StyleSheet, Text, View } from "react-native";
 import { usePeridot } from "../AppContext";
+import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
 import { theme, styles as s } from "../theme";
-
-/**
- * Third-party SSO mode: when the page is opened as
- * `...?redirect_uri=https://app.example/callback&client_id=pidapp_...`, a successful
- * sign-in returns to the app with `?pid_code=...` instead of entering the wallet.
- * `client_id` is optional (unbound codes then follow the global allowlist), but
- * `redirect_uri` is required — without it there is nowhere to return to, and the
- * page behaves as the normal wallet login.
- * (Web only — passkey ceremonies must run on this PeridotID origin.)
- */
-function readSsoParams(): { clientId?: string; redirectUri: string } | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const clientId = params.get("client_id") ?? undefined;
-    const redirectUri = params.get("redirect_uri") ?? "";
-    if (!redirectUri) return null;
-    const parsed = new URL(redirectUri);
-    if (!["http:", "https:"].includes(parsed.protocol)) return null;
-    return { clientId, redirectUri };
-  } catch {
-    return null;
-  }
-}
-
-function withPidCode(redirectUri: string, pidCode: string): string {
-  const url = new URL(redirectUri);
-  url.searchParams.set("pid_code", pidCode);
-  return url.toString();
-}
-
-function withDenied(redirectUri: string): string {
-  const url = new URL(redirectUri);
-  url.searchParams.set("error", "access_denied");
-  return url.toString();
-}
-
-function ssoOrigin(redirectUri: string): string {
-  try {
-    return new URL(redirectUri).origin;
-  } catch {
-    return redirectUri;
-  }
-}
 
 export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const { peridot } = usePeridot();
@@ -62,7 +19,12 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     let cancelled = false;
     (async () => {
       try {
-        const me = await peridot.identity.me();
+        // Access tokens are short-lived; a live refresh cookie revives the session
+        // without forcing a redundant login.
+        let me = await peridot.identity.me();
+        if (typeof me === "object" && me !== null && "statusCode" in me) {
+          if (await peridot.auth.refresh()) me = await peridot.identity.me();
+        }
         if (cancelled || typeof me !== "object" || me === null || "statusCode" in me) {
           if (!cancelled) setSession(null);
           return;

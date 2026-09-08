@@ -7,6 +7,7 @@ import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
 import { AppContext } from "./src/AppContext";
 import { theme } from "./src/theme";
 import { LoginScreen } from "./src/screens/LoginScreen";
+import { readSsoParams } from "./src/sso";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { SendScreen } from "./src/screens/SendScreen";
 import { ReceiveScreen } from "./src/screens/ReceiveScreen";
@@ -45,6 +46,10 @@ type Screen =
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [bootstrapping, setBootstrapping] = useState(true);
+  // Third-party SSO request (?redirect_uri=…): LoginScreen handles it even when logged
+  // in (consent flow) — otherwise a logged-in user landing here would sit on HomeScreen
+  // with the request silently ignored.
+  const [ssoRequest] = useState(readSsoParams);
   const [activityTx, setActivityTx] = useState<WalletTransaction | null>(null);
   const [passkeyReturn, setPasskeyReturn] = useState<Screen>("security");
 
@@ -99,7 +104,7 @@ export default function App() {
   return (
     <AppContext.Provider value={{ peridot }}>
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.colors.background }]}>
-        {screen === "login" && <LoginScreen onLoggedIn={goHome} />}
+        {(screen === "login" || ssoRequest) && <LoginScreen onLoggedIn={goHome} />}
         {screen === "home" && (
           <HomeScreen
             goSend={() => go("send")}
