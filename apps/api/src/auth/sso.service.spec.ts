@@ -1,6 +1,7 @@
 import { decodeState, encodeState, isLoopbackReturnTo, SsoService } from "./sso.service";
+import { PidAppsService } from "./apps.service";
 
-function setup(apps?: { findActive: (clientId: string) => Promise<{ redirectUris: string[] } | null> }) {
+function setup(apps?: { findActive: (clientId: string) => Promise<Record<string, unknown> | null> }) {
   const config = {
     get: jest.fn((key: string, def?: unknown) => {
       const values: Record<string, unknown> = {
@@ -32,7 +33,9 @@ function setup(apps?: { findActive: (clientId: string) => Promise<{ redirectUris
     profile: { findUnique: jest.fn(async () => ({ displayName: "Peridot", avatarUrl: null })) },
     identityCredential: { findMany: jest.fn(async () => [{ provider: "google", email: "a@b.com" }]) },
   };
-  const pidApps = apps ?? { findActive: jest.fn(async () => null) };
+  const pidApps = apps ?? {
+    findActive: jest.fn(async () => ({ redirectUris: ["https://mygame.dev/callback"] })),
+  };
   const service = new SsoService(prisma as never, config as never, security as never, pidApps as never);
   return { service, rows, security };
 }
@@ -136,5 +139,21 @@ describe("SsoService", () => {
     const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
     await expect(service.consume(code2, "pidapp_other")).rejects.toThrow("sso_code_invalid");
     await expect(service.consume(code2)).rejects.toThrow("sso_code_invalid");
+  });
+
+  it("requires the app secret at exchange when one is set (uniform error)", async () => {
+    const secret = "pidsk_testsecret000000000000000000000000000001";
+    const withSecret = {
+      ...DEV_APP,
+      clientSecretHash: PidAppsService.hashSecret(secret),
+    };
+    const { service } = setup({ findActive: async () => withSecret });
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    await expect(service.consume(code, "pidapp_abc", secret)).resolves.toMatchObject({ identityId: "pid_1" });
+
+    const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    await expect(service.consume(code2, "pidapp_abc", "wrong-secret")).rejects.toThrow("sso_code_invalid");
+    // failed attempts don't consume the code — missing secret also rejected, same error
+    await expect(service.consume(code2, "pidapp_abc")).rejects.toThrow("sso_code_invalid");
   });
 });

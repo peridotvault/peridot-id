@@ -20,4 +20,9 @@ export class ExchangeDto {
   @IsOptional()
   @IsString()
   clientId?: string;
+
+  /** Backend secret — required at exchange only when the bound app has one set. */
+  @IsOptional()
+  @IsString()
+  clientSecret?: string;
 }

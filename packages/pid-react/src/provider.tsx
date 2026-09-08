@@ -137,6 +137,19 @@ export function PeridotProvider({
 
   const handlePasskey = useCallback(async () => {
     setError(null);
+    // WebAuthn needs a secure context AND a PeridotID origin (our rpId). Anything else
+    // (LAN IPs, third-party domains) fails inside the ceremony with a cryptic error —
+    // say plainly where the user is and what to do instead.
+    if (typeof window !== "undefined" && (!window.isSecureContext || !navigator.credentials)) {
+      const where = window.location.origin;
+      const err = new Error(
+        `Passkeys need a secure origin — you're on ${where}. Open this page via localhost or https, ` +
+          `or use Continue with Google.`,
+      );
+      setError(err.message);
+      onError?.(err);
+      return;
+    }
     setBusyMethod("passkey");
     try {
       const res = await client.auth.loginWithPasskey({ returnTo: returnTo || undefined, clientId });

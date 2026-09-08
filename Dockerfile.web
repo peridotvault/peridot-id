@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json ./apps/api/
 COPY apps/wallet/package.json ./apps/wallet/
-COPY apps/docs/package.json ./apps/docs/
+COPY apps/web/package.json ./apps/web/
 COPY packages/types/package.json ./packages/types/
 COPY packages/solana/package.json ./packages/solana/
 COPY packages/sdk-js/package.json ./packages/sdk-js/
@@ -24,8 +24,8 @@ ENV NODE_OPTIONS=--max-old-space-size=1536
 
 COPY . .
 
-RUN mkdir -p apps/docs/public
-RUN pnpm --filter @peridotvault/pid-docs build
+RUN mkdir -p apps/web/public
+RUN pnpm --filter @peridotvault/pid-web build
 
 FROM node:22-alpine AS runner
 
@@ -37,9 +37,9 @@ RUN addgroup --system --gid 1001 nodejs \
 
 WORKDIR /app
 
-COPY --from=builder --chown=nextjs:nodejs /app/apps/docs/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/apps/docs/.next/static ./apps/docs/.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/apps/docs/public ./apps/docs/public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
 
 USER nextjs
 
@@ -48,4 +48,4 @@ EXPOSE 3300
 ENV PORT=3300
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "apps/docs/server.js"]
+CMD ["node", "apps/web/server.js"]

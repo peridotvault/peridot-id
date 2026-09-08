@@ -4,12 +4,12 @@ Gaming Identity Platform — Authentication, Identity, and Profile for the Perid
 
 ## Public docs
 
-The developer documentation site lives in `apps/docs` (Fumadocs + Next.js) and renders the
+The developer documentation site lives in `apps/web` (Fumadocs + Next.js) and renders the
 canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 
 - Docs (Vercel): `https://peridot-id.peridotvault.com`
 - API (Vercel): `https://api.peridot-id.peridotvault.com/v1`
-- Run locally: `pnpm --filter @peridotvault/pid-docs dev` → `http://localhost:3300`
+- Run locally: `pnpm --filter @peridotvault/pid-web dev` → `http://localhost:3300`
 - API also serves the raw spec at `GET /v1/openapi.yaml` (Swagger UI at `/docs`)
 
 ## Repository layout
@@ -53,4 +53,4 @@ login flow.
 
 See the public docs' [Self-hosting](https://peridot-id.peridotvault.com/docs/self-hosting)
 guide. In short: Supabase for Postgres (run `prisma migrate deploy` against it), then two
-Vercel projects — `apps/api` (serverless, `vercel.json` included) and `apps/docs`.
+Vercel projects — `apps/api` (serverless, `vercel.json` included) and `apps/web`.

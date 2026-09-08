@@ -65,4 +65,24 @@ describe("PidAppsService", () => {
     await prisma.pidApp.update({ where: { id: app.id as string }, data: { isActive: false } });
     expect(await service.findActive(app.clientId as string)).toBeNull();
   });
+
+  it("rotates a backend secret, storing only the hash", async () => {
+    const { prisma, service } = setup();
+    const app = await service.create("pid_owner", "My Game", ["https://mygame.dev/callback"]);
+    const { secret, prefix } = await service.rotateSecret("pid_owner", app.id as string);
+    expect(secret).toMatch(/^pidsk_[0-9a-f]{48}$/);
+    expect(prefix).toBe(secret.slice(0, 12));
+
+    const stored = await prisma.pidApp.findUnique({ where: { clientId: app.clientId as string } });
+    expect(stored?.clientSecretHash).toBe(PidAppsService.hashSecret(secret));
+    expect(stored?.clientSecretHash).not.toContain(secret);
+    expect(PidAppsService.secretMatches(secret, stored?.clientSecretHash as string)).toBe(true);
+    expect(PidAppsService.secretMatches("wrong", stored?.clientSecretHash as string)).toBe(false);
+  });
+
+  it("only lets owners rotate their app secret", async () => {
+    const { service } = setup();
+    const app = await service.create("pid_owner", "My Game", ["https://mygame.dev/callback"]);
+    await expect(service.rotateSecret("pid_stranger", app.id as string)).rejects.toThrow("App not found");
+  });
 });

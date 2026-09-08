@@ -138,8 +138,63 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
-  apps/docs:
+  apps/wallet:
     dependencies:
+      '@peridotvault/pid-sdk-js':
+        specifier: workspace:*
+        version: link:../../packages/sdk-js
+      '@peridotvault/pid-solana':
+        specifier: workspace:*
+        version: link:../../packages/solana
+      '@peridotvault/pid-types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      buffer:
+        specifier: ^6.0.3
+        version: 6.0.3
+      dijkstrajs:
+        specifier: ^1.0.3
+        version: 1.0.3
+      expo:
+        specifier: ~57.0.18
+        version: 57.0.18(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(bufferutil@4.1.0)(react-dom@19.0.0(react@19.0.0))(react-native-web@0.21.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)(typescript@5.9.3)
+      expo-status-bar:
+        specifier: ~3.0.0
+        version: 3.0.9(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)
+      lucide-react-native:
+        specifier: ^1.39.0
+        version: 1.39.0(react-native-svg@15.15.5(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)
+      react:
+        specifier: 19.0.0
+        version: 19.0.0
+      react-dom:
+        specifier: 19.0.0
+        version: 19.0.0(react@19.0.0)
+      react-native:
+        specifier: 0.81.0
+        version: 0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0)
+      react-native-qrcode-svg:
+        specifier: ^6.3.21
+        version: 6.3.21(react-native-svg@15.15.5(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)
+      react-native-web:
+        specifier: ^0.21.0
+        version: 0.21.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+    devDependencies:
+      '@types/node':
+        specifier: ^26.4.0
+        version: 26.4.0
+      '@types/react':
+        specifier: ~19.0.0
+        version: 19.0.14
+      typescript:
+        specifier: ~5.9.0
+        version: 5.9.3
+
+  apps/web:
+    dependencies:
+      '@peridotvault/pid-sdk-js':
+        specifier: workspace:*
+        version: link:../../packages/sdk-js
       '@react-three/fiber':
         specifier: ^9.7.0
         version: 9.7.0(@types/react@19.2.18)(expo-asset@57.0.15(expo@57.0.18)(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8))(react@19.2.8)(typescript@5.9.3))(expo-file-system@57.0.6(expo@57.0.18)(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8)))(expo@57.0.18)(react-dom@19.2.8(react@19.2.8))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8))(react@19.2.8)(three@0.185.1)
@@ -209,58 +264,6 @@ importers:
         version: 4.3.3
       typescript:
         specifier: ^5.7.3
-        version: 5.9.3
-
-  apps/wallet:
-    dependencies:
-      '@peridotvault/pid-sdk-js':
-        specifier: workspace:*
-        version: link:../../packages/sdk-js
-      '@peridotvault/pid-solana':
-        specifier: workspace:*
-        version: link:../../packages/solana
-      '@peridotvault/pid-types':
-        specifier: workspace:*
-        version: link:../../packages/types
-      buffer:
-        specifier: ^6.0.3
-        version: 6.0.3
-      dijkstrajs:
-        specifier: ^1.0.3
-        version: 1.0.3
-      expo:
-        specifier: ~57.0.18
-        version: 57.0.18(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(bufferutil@4.1.0)(react-dom@19.0.0(react@19.0.0))(react-native-web@0.21.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)(typescript@5.9.3)
-      expo-status-bar:
-        specifier: ~3.0.0
-        version: 3.0.9(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)
-      lucide-react-native:
-        specifier: ^1.39.0
-        version: 1.39.0(react-native-svg@15.15.5(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)
-      react:
-        specifier: 19.0.0
-        version: 19.0.0
-      react-dom:
-        specifier: 19.0.0
-        version: 19.0.0(react@19.0.0)
-      react-native:
-        specifier: 0.81.0
-        version: 0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0)
-      react-native-qrcode-svg:
-        specifier: ^6.3.21
-        version: 6.3.21(react-native-svg@15.15.5(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)
-      react-native-web:
-        specifier: ^0.21.0
-        version: 0.21.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
-    devDependencies:
-      '@types/node':
-        specifier: ^26.4.0
-        version: 26.4.0
-      '@types/react':
-        specifier: ~19.0.0
-        version: 19.0.14
-      typescript:
-        specifier: ~5.9.0
         version: 5.9.3
 
   packages/openapi: {}
@@ -8089,7 +8092,7 @@ snapshots:
       postcss: 8.5.25
       resolve-from: 5.0.0
     optionalDependencies:
-      expo: 57.0.18(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(bufferutil@4.1.0)(react-dom@19.2.8(react@19.2.8))(react-native-web@0.21.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8))(react@19.2.8)(typescript@5.9.3)
+      expo: 57.0.18(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(bufferutil@4.1.0)(react-dom@19.0.0(react@19.0.0))(react-native-web@0.21.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)(typescript@5.9.3)
     transitivePeerDependencies:
       - bufferutil
       - supports-color
@@ -10589,7 +10592,7 @@ snapshots:
       react-refresh: 0.14.2
     optionalDependencies:
       '@babel/runtime': 7.29.7
-      expo: 57.0.18(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(bufferutil@4.1.0)(react-dom@19.2.8(react@19.2.8))(react-native-web@0.21.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.2.18)(bufferutil@4.1.0)(react@19.2.8))(react@19.2.8)(typescript@5.9.3)
+      expo: 57.0.18(@babel/core@7.29.7)(@expo/dom-webview@57.0.1)(bufferutil@4.1.0)(react-dom@19.0.0(react@19.0.0))(react-native-web@0.21.2(react-dom@19.0.0(react@19.0.0))(react@19.0.0))(react-native@0.81.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7)(bufferutil@4.1.0))(@types/react@19.0.14)(bufferutil@4.1.0)(react@19.0.0))(react@19.0.0)(typescript@5.9.3)
     transitivePeerDependencies:
       - '@babel/core'
       - supports-color
@@ -11640,9 +11643,9 @@ snapshots:
     transitivePeerDependencies:
       - encoding
 
-  fdir@6.5.0(picomatch@4.0.4):
+  fdir@6.5.0(picomatch@4.0.5):
     optionalDependencies:
-      picomatch: 4.0.4
+      picomatch: 4.0.5
 
   fetch-nodeshim@0.4.10: {}
 
@@ -15076,8 +15079,8 @@ snapshots:
 
   tinyglobby@0.2.17:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.5)
+      picomatch: 4.0.5
 
   tmpl@1.0.5: {}
 

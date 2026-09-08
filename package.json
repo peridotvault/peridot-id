@@ -24,7 +24,7 @@
   "scripts": {
     "dev": "pnpm -r --parallel dev",
     "dev:api": "pnpm --filter @peridotvault/pid-api dev",
-    "dev:docs": "pnpm --filter @peridotvault/pid-docs dev",
+    "dev:web": "pnpm --filter @peridotvault/pid-web dev",
     "start": "pnpm -r --parallel start",
     "postinstall": "pnpm --filter @peridotvault/pid-types --filter @peridotvault/pid-solana --filter @peridotvault/pid-sdk-js build",
     "build": "pnpm -r build",

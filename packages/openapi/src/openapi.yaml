@@ -168,6 +168,9 @@ paths:
                 clientId:
                   type: string
                   description: Must match the client_id the code was issued for
+                clientSecret:
+                  type: string
+                  description: Required only when the bound app has a secret set (backend-only, never ship in frontend code)
             example:
               code: "mF8xQ2vT9nR4kL7pZ3wX6yA1bD5eF0gH"
               clientId: "pidapp_0123456789abcdef0123456789abcdef"
@@ -242,9 +245,46 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
-  /apps/{id}:
-    patch:
+  /apps/{id}/secret:
+    post:
       tags: [apps]
+      summary: Generate or rotate an app's backend secret
+      description: |
+        Returns a `pidsk_…` secret **once** — only its SHA-256 hash is stored, so an
+        existing secret can never be read back, only replaced. Afterwards, code
+        exchange for this app requires the secret. Backend-only: never ship it in
+        frontend code. Owners only.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The new secret (shown once) plus its identifying prefix
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, prefix]
+                properties:
+                  secret:
+                    type: string
+                    example: "pidsk_9f2c…"
+                  prefix:
+                    type: string
+                    example: "pidsk_9f2c41"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /apps/{id}:
+    patch:      tags: [apps]
       summary: Update one of my apps
       description: Rename, change redirect URIs, or disable the app. Owners only.
       security:
@@ -1036,6 +1076,14 @@ components:
             type: string
         isActive:
           type: boolean
+        clientSecretPrefix:
+          type: string
+          nullable: true
+          description: Identifying prefix of the current backend secret (the secret itself is never returned)
+        clientSecretCreatedAt:
+          type: string
+          format: date-time
+          nullable: true
         createdAt:
           type: string
           format: date-time

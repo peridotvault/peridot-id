@@ -3,7 +3,7 @@
 // the app's registered redirect URIs. CORS origins are derived from those URIs.
 
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
 export function originsOf(redirectUris: string[]): string[] {
@@ -52,5 +52,41 @@ export class PidAppsService {
   async findActive(clientId: string) {
     const app = await this.prisma.pidApp.findUnique({ where: { clientId } });
     return app && app.isActive ? app : null;
+  }
+
+  /** SHA-256 hex of a plaintext secret (what's stored — never the secret itself). */
+  static hashSecret(secret: string): string {
+    return createHash("sha256").update(secret, "utf8").digest("hex");
+  }
+
+  /** Constant-time comparison against a stored hash (both always 32 bytes). */
+  static secretMatches(secret: string, hashHex: string): boolean {
+    try {
+      const a = Buffer.from(PidAppsService.hashSecret(secret), "hex");
+      const b = Buffer.from(hashHex, "hex");
+      return a.length === b.length && timingSafeEqual(a, b);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Generate (or rotate) an app's backend secret. Returns the plaintext ONCE — it is
+   * never stored or shown again. Show `prefix` afterwards for identification.
+   */
+  async rotateSecret(ownerId: string, id: string): Promise<{ secret: string; prefix: string }> {
+    const app = await this.prisma.pidApp.findFirst({ where: { id, ownerId } });
+    if (!app) throw new NotFoundException("App not found");
+    const secret = `pidsk_${randomBytes(24).toString("hex")}`;
+    const prefix = secret.slice(0, 12);
+    await this.prisma.pidApp.update({
+      where: { id },
+      data: {
+        clientSecretHash: PidAppsService.hashSecret(secret),
+        clientSecretPrefix: prefix,
+        clientSecretCreatedAt: new Date(),
+      },
+    });
+    return { secret, prefix };
   }
 }

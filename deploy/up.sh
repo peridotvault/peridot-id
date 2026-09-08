@@ -20,7 +20,7 @@ PROJECT="peridot-id"
 COMPOSE=(docker compose -f "$SCRIPT_DIR/compose.yaml" --env-file "$ENV_FILE")
 
 echo "Deploying PeridotID [$ENV]..."
-for s in api docs app; do
+for s in api web app; do
   echo "==> build $s"
   COMPOSE_PROJECT_NAME="$PROJECT" "${COMPOSE[@]}" build "$s"
 done

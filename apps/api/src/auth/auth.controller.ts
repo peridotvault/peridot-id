@@ -84,7 +84,7 @@ export class AuthController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async exchange(@Body() dto: ExchangeDto) {
     try {
-      return await this.ssoService.consume(dto.code, dto.clientId);
+      return await this.ssoService.consume(dto.code, dto.clientId, dto.clientSecret);
     } catch {
       throw new BadRequestException("Code is invalid, expired, or already used");
     }

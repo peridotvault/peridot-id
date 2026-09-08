@@ -36,4 +36,15 @@ export class PidAppsController {
   ) {
     return this.apps.update(user.identityId, id, dto);
   }
+
+  /**
+   * Generate (or rotate) an app's backend secret for confidential clients.
+   * The plaintext is returned ONCE — store it server-side, never in frontend code.
+   */
+  @Post(":id/secret")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  rotateSecret(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string) {
+    return this.apps.rotateSecret(user.identityId, id);
+  }
 }

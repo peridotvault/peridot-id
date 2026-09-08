@@ -1,5 +1,5 @@
 {
-  "name": "@peridotvault/pid-docs",
+  "name": "@peridotvault/pid-web",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@peridotvault/pid-sdk-js": "workspace:*",
     "@react-three/fiber": "^9.7.0",
     "fumadocs-core": "^16.14.0",
     "fumadocs-mdx": "^15.2.2",

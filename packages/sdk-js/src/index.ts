@@ -80,12 +80,17 @@ export class PeridotAuth {
     }
   }
 
-  /** Exchange a one-time SSO pid_code for the identity (for cross-origin relying parties). */
-  async exchange(code: string, clientId?: string): Promise<ExchangeResult | ApiError> {
-    const res = await this.client.post<ExchangeResult>(
-      "/v1/auth/exchange",
-      clientId ? { code, clientId } : { code },
-    );
+  /**
+   * Exchange a one-time SSO pid_code for the identity (for cross-origin relying parties).
+   * `clientSecret` is backend-only (never ship it in frontend code) and required only
+   * when the bound app has a secret set.
+   */
+  async exchange(code: string, clientId?: string, clientSecret?: string): Promise<ExchangeResult | ApiError> {
+    const res = await this.client.post<ExchangeResult>("/v1/auth/exchange", {
+      code,
+      ...(clientId ? { clientId } : {}),
+      ...(clientSecret ? { clientSecret } : {}),
+    });
     return res.data;
   }
 

@@ -143,14 +143,20 @@ export class SsoService {
   }
 
   /** Consume a code and return the identity payload for the relying party. */
-  async consume(code: string, clientId?: string): Promise<SsoIdentity> {
+  async consume(code: string, clientId?: string, clientSecret?: string): Promise<SsoIdentity> {
     const row = await this.prisma.ssoCode.findUnique({ where: { code } });
     if (!row || row.consumedAt || row.expiresAt < new Date()) {
       throw new Error("sso_code_invalid");
     }
-    // Codes bound to an app only exchange with the same client_id.
-    if (row.clientId && row.clientId !== clientId) {
-      throw new Error("sso_code_invalid");
+    // Codes bound to an app only exchange with the same client_id — and with the
+    // app's secret when one is set (confidential clients). Uniform error, no oracle.
+    if (row.clientId) {
+      if (row.clientId !== clientId) throw new Error("sso_code_invalid");
+      const app = await this.apps.findActive(row.clientId);
+      if (!app) throw new Error("sso_code_invalid");
+      if (app.clientSecretHash && !PidAppsService.secretMatches(clientSecret ?? "", app.clientSecretHash)) {
+        throw new Error("sso_code_invalid");
+      }
     }
 
     // Double-consume guard: mark consumed before returning identity.
