@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ArrowLeft, Monitor, LogOut } from "lucide-react-native";
 import type { Session } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -63,7 +64,7 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
       {error && <Text style={s.error}>{error}</Text>}
 
       {sessions.length > 1 && (
-        <Button title={busy ? "Signing out…" : "Sign out other sessions"} onPress={revokeAllOthers} disabled={busy} />
+        <UIButton title={busy ? "Signing out…" : "Sign out other sessions"} onPress={revokeAllOthers} disabled={busy} />
       )}
 
       {sessions.map((se) => (
@@ -91,7 +92,7 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
 
       {sessions.length === 0 && <Text style={s.hint}>No active sessions.</Text>}
 
-      <Button title="Back" onPress={onDone} />
+      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }
@@ -100,7 +101,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { padding: 24, gap: 14 },
   back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground },
+  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
   head: { flexDirection: "row", alignItems: "center", gap: 12 },
   icon: {
     width: 36,
@@ -111,7 +112,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   meta: { flex: 1, gap: 2 },
-  device: { fontSize: 14, fontWeight: "600", color: theme.colors.foreground },
-  muted: { fontSize: 12, color: theme.colors.mutedForeground },
+  device: { fontSize: 14, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
+  muted: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   signOut: { padding: 8 },
 });

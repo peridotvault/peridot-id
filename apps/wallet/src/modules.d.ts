@@ -20,6 +20,7 @@ declare module "lucide-react-native" {
   export const Copy: LucideIcon;
   export const Info: LucideIcon;
   export const KeyRound: LucideIcon;
+  export const LayoutGrid: LucideIcon;
   export const Link2: LucideIcon;
   export const LogOut: LucideIcon;
   export const Monitor: LucideIcon;

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import {
   ArrowDownLeft,
   ArrowUpRight,
   Coins,
   ChevronRight,
+  LayoutGrid,
   Settings,
-  Shield,
 } from "lucide-react-native";
 import type { Account, Authority, Profile, WalletTransaction } from "@peridotvault/pid-types";
 import type { TokenBalance } from "@peridotvault/pid-solana";
@@ -14,6 +14,7 @@ import type { ActivationView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
 import { SOLANA_NETWORK } from "../config";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -49,6 +50,7 @@ interface HomeScreenProps {
   goSend: () => void;
   goReceive: () => void;
   goSwap: () => void;
+  goItems: () => void;
   goActivity: () => void;
   goActivityDetail: (tx: WalletTransaction) => void;
   goActivation: () => void;
@@ -60,6 +62,7 @@ export function HomeScreen({
   goSend,
   goReceive,
   goSwap,
+  goItems,
   goActivity,
   goActivityDetail,
   goActivation,
@@ -196,6 +199,7 @@ export function HomeScreen({
         <ActionButton icon={ArrowUpRight} label="Send" onPress={goSend} disabled={!activated} />
         <ActionButton icon={ArrowDownLeft} label="Receive" onPress={goReceive} />
         <ActionButton icon={Coins} label="Swap" onPress={goSwap} />
+        <ActionButton icon={LayoutGrid} label="Items" onPress={goItems} />
       </View>
 
       {error && <Text style={s.error}>{error}</Text>}
@@ -207,15 +211,6 @@ export function HomeScreen({
           <Text style={styles.passkeyWarnText}>No passkey — add one in Security to authorize withdrawals.</Text>
         </TouchableOpacity>
       )}
-
-      <View style={styles.securityRow}>
-        <Shield size={16} color={theme.colors.mutedForeground} />
-        <Text style={styles.securityText}>{passkeys.length} passkey{passkeys.length === 1 ? "" : "s"}</Text>
-        <TouchableOpacity onPress={goSettings} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-          <Text style={styles.securityLink}>Manage</Text>
-          <ChevronRight size={14} color={theme.colors.mutedForeground} />
-        </TouchableOpacity>
-      </View>
 
       <Text style={styles.sectionLabel}>Assets</Text>
       {coins.length === 0 && !busy && (
@@ -262,7 +257,7 @@ export function HomeScreen({
       ))}
 
       <View style={styles.footer}>
-        <Button title="Sign Out" onPress={onLogout} />
+        <UIButton title="Sign Out" onPress={onLogout} />
       </View>
     </ScrollView>
   );
@@ -307,12 +302,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  profileInitial: { fontSize: 18, fontWeight: "700", color: theme.colors.foreground, fontFamily: "serif" },
-  profileName: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground },
+  profileInitial: { fontSize: 18, fontWeight: "400", color: theme.colors.foreground, fontFamily: theme.fonts.serif },
+  profileName: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
   network: {
     fontSize: 11,
     color: theme.colors.mutedForeground,
     fontWeight: "500",
+    fontFamily: theme.fonts.sansMedium,
     textTransform: "uppercase",
     letterSpacing: 0.4,
   },
@@ -327,15 +323,15 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   balanceBlock: { gap: 4 },
-  balance: { fontSize: 40, fontWeight: "700", fontFamily: "serif" },
-  balanceLabel: { fontSize: 13, color: theme.colors.mutedForeground },
+  balance: { fontSize: 40, fontWeight: "400", fontFamily: theme.fonts.serif },
+  balanceLabel: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   actions: { flexDirection: "row", gap: 12 },
   actionBtn: {
     flex: 1,
     alignItems: "center",
     gap: 8,
     paddingVertical: 12,
-    borderRadius: 12,
+    borderRadius: 0,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
@@ -350,7 +346,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  actionLabel: { fontSize: 13, color: theme.colors.foreground, fontWeight: "500" },
+  actionLabel: { fontSize: 13, color: theme.colors.foreground, fontWeight: "500", fontFamily: theme.fonts.sansMedium },
   activateBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -369,32 +365,25 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: theme.colors.danger,
   },
-  activateBadgeText: { fontSize: 12, color: theme.colors.mutedForeground, fontWeight: "500" },
+  activateBadgeText: { fontSize: 12, color: theme.colors.mutedForeground, fontWeight: "500", fontFamily: theme.fonts.sansMedium },
   passkeyWarn: {
     backgroundColor: theme.colors.muted,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    borderRadius: 10,
+    borderRadius: 0,
     padding: 12,
   },
-  passkeyWarnText: { color: theme.colors.mutedForeground, fontSize: 13, textAlign: "center" },
-  securityRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 4,
-  },
-  securityText: { fontSize: 13, color: theme.colors.mutedForeground, flex: 1 },
-  securityLink: { fontSize: 13, color: theme.colors.foreground, fontWeight: "500" },
+  passkeyWarnText: { color: theme.colors.mutedForeground, fontSize: 13, textAlign: "center", fontFamily: theme.fonts.sans },
   sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
   sectionLabel: {
     fontSize: 12,
     color: theme.colors.mutedForeground,
     fontWeight: "600",
+    fontFamily: theme.fonts.sansSemiBold,
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
-  viewAll: { fontSize: 13, color: theme.colors.foreground, fontWeight: "500" },
+  viewAll: { fontSize: 13, color: theme.colors.foreground, fontWeight: "500", fontFamily: theme.fonts.sansMedium },
   coinRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -414,9 +403,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   coinMeta: { flex: 1 },
-  coinSymbol: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground },
-  coinMint: { fontSize: 11, color: theme.colors.mutedForeground },
-  coinAmount: { fontSize: 15, fontWeight: "500", color: theme.colors.foreground, fontFamily: "monospace" },
+  coinSymbol: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
+  coinMint: { fontSize: 11, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
+  coinAmount: { fontSize: 15, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
   activityRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -426,8 +415,8 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.colors.border,
   },
   activityMeta: { gap: 2 },
-  activityLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground },
-  activityDate: { fontSize: 11, color: theme.colors.mutedForeground },
-  activityAmount: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: "monospace" },
+  activityLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.sansMedium },
+  activityDate: { fontSize: 11, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
+  activityAmount: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
   footer: { marginTop: 16 },
 });

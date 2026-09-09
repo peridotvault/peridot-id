@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ArrowLeft, ChevronRight, KeyRound, Monitor, Link2 } from "lucide-react-native";
 import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 interface Props {
   goPasskeys: () => void;
@@ -64,7 +65,7 @@ export function SecurityScreen({ goPasskeys, goSessions, goConnected, onDone }: 
       <Row icon={Monitor} label="Sessions / Devices" value={`${sessions.length} active`} onPress={goSessions} />
 
       <Text style={s.label}>Sign out other devices</Text>
-      <Button title={busy ? "Signing out…" : "Sign out other sessions"} onPress={signOutOthers} disabled={busy || sessions.length <= 1} />
+      <UIButton title={busy ? "Signing out…" : "Sign out other sessions"} onPress={signOutOthers} disabled={busy || sessions.length <= 1} />
       {done && <Text style={styles.done}>Other sessions signed out.</Text>}
     </ScrollView>
   );
@@ -97,13 +98,13 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { padding: 24, gap: 14 },
   back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground },
+  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
   row: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     padding: 14,
-    borderRadius: 12,
+    borderRadius: 0,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
@@ -116,7 +117,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  rowLabel: { flex: 1, fontSize: 15, fontWeight: "500", color: theme.colors.foreground },
-  value: { fontSize: 13, color: theme.colors.mutedForeground },
-  done: { color: theme.colors.success, fontSize: 13 },
+  rowLabel: { flex: 1, fontSize: 15, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.sansMedium },
+  value: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
+  done: { color: theme.colors.success, fontSize: 13, fontFamily: theme.fonts.sans },
 });

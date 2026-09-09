@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { KeyRound, Plus, Trash2 } from "lucide-react-native";
 import type { Authority } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "Never";
@@ -104,7 +105,7 @@ export function PasskeyScreen({ onDone }: { onDone: () => void }) {
 
       {authorities.length === 0 && <Text style={s.hint}>No passkeys yet. Add one above.</Text>}
 
-      <Button title="Back" onPress={onDone} />
+      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }
@@ -118,12 +119,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: 0,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
   },
-  addLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground },
+  addLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.sansMedium },
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
   icon: {
     width: 36,
@@ -134,10 +135,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   meta: { flex: 1, gap: 2 },
-  device: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground },
-  muted: { fontSize: 12, color: theme.colors.mutedForeground },
-  short: { fontFamily: "monospace" },
+  device: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
+  muted: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
+  short: { fontFamily: theme.fonts.mono },
   remove: { padding: 8 },
   removeDisabled: { opacity: 0.4 },
-  lastHint: { fontSize: 12, color: theme.colors.mutedForeground },
+  lastHint: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
 });

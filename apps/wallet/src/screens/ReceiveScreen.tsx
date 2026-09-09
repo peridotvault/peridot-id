@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Check } from "lucide-react-native";
 import QRCode from "react-native-qrcode-svg";
 import type { Account } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 export function ReceiveScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -53,7 +54,7 @@ export function ReceiveScreen({ onDone }: { onDone: () => void }) {
       </TouchableOpacity>
       {copied && <Text style={styles.copied}>Copied to clipboard</Text>}
 
-      <Button title="Back" onPress={onDone} />
+      <UIButton title="Back" onPress={onDone} />
     </View>
   );
 }
@@ -63,7 +64,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     padding: 16,
     backgroundColor: theme.colors.foreground,
-    borderRadius: 12,
+    borderRadius: 0,
     marginTop: 16,
   },
   addressBox: {
@@ -75,7 +76,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
-    borderRadius: 10,
+    borderRadius: 0,
   },
-  copied: { color: theme.colors.success, fontSize: 13, textAlign: "center" },
+  copied: { color: theme.colors.success, fontSize: 13, textAlign: "center", fontFamily: theme.fonts.sans },
 });

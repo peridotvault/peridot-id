@@ -1,7 +1,8 @@
-import { Button, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ArrowLeft } from "lucide-react-native";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -51,15 +52,16 @@ export function ActivityDetailScreen({ tx, onDone }: { tx: WalletTransaction; on
       <Field label="Confirmed" value={fmtDate(tx.confirmedAt)} />
 
       {tx.txHash && (
-        <Button
+        <UIButton
           title="View on Explorer"
           onPress={() => {
             const cluster = tx.network === "devnet" ? "?cluster=devnet" : "";
             Linking.openURL(`https://explorer.solana.com/tx/${tx.txHash}${cluster}`).catch(() => undefined);
           }}
+          variant="primary"
         />
       )}
-      <Button title="Back" onPress={onDone} />
+      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }
@@ -82,16 +84,16 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { padding: 24, gap: 12 },
   back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground },
+  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
   bigAmount: {
     fontSize: 32,
-    fontWeight: "700",
+    fontWeight: "400",
     color: theme.colors.foreground,
-    fontFamily: "monospace",
+    fontFamily: theme.fonts.serif,
     marginVertical: 8,
   },
-  desc: { fontSize: 13, color: theme.colors.mutedForeground, lineHeight: 19 },
+  desc: { fontSize: 13, color: theme.colors.mutedForeground, lineHeight: 19, fontFamily: theme.fonts.sans },
   field: { gap: 4 },
-  value: { fontSize: 14, color: theme.colors.foreground },
-  mono: { fontFamily: "monospace", fontSize: 13 },
+  value: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
+  mono: { fontFamily: theme.fonts.mono, fontSize: 13 },
 });

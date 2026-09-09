@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Alert, Button, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { ArrowLeft, TriangleAlert } from "lucide-react-native";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 export function DangerZoneScreen({ onDone, onDeleted }: { onDone: () => void; onDeleted: () => void }) {
   const { peridot } = usePeridot();
@@ -64,8 +65,8 @@ export function DangerZoneScreen({ onDone, onDeleted }: { onDone: () => void; on
       />
 
       {error && <Text style={s.error}>{error}</Text>}
-      <Button title={busy ? "Deleting…" : "Delete Account"} onPress={del} disabled={!confirmed || busy} color={theme.colors.danger} />
-      <Button title="Back" onPress={onDone} />
+      <UIButton title={busy ? "Deleting…" : "Delete Account"} onPress={del} disabled={!confirmed || busy} variant="danger" />
+      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }
@@ -74,16 +75,16 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { padding: 24, gap: 14 },
   back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground },
-  title: { fontSize: 26, fontWeight: "700", color: theme.colors.danger },
+  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
+  title: { fontSize: 26, fontWeight: "700", color: theme.colors.danger, fontFamily: theme.fonts.sansBold },
   warn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    borderRadius: 12,
+    borderRadius: 0,
     borderWidth: 1,
     padding: 14,
     backgroundColor: theme.colors.surface,
   },
-  warnText: { flex: 1, fontSize: 13, color: theme.colors.mutedForeground },
+  warnText: { flex: 1, fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
 });

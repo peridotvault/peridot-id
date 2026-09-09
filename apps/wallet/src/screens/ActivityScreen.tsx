@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ArrowDownLeft, ArrowUpRight, ArrowLeft, Rocket, ChevronRight, RefreshCw } from "lucide-react-native";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -103,7 +104,7 @@ export function ActivityScreen({
         );
       })}
 
-      <Button title="Back" onPress={onDone} />
+      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }
@@ -112,7 +113,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { padding: 24, gap: 12 },
   back: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground },
+  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
   headRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   iconBtn: {
     width: 36,
@@ -127,7 +128,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
   icon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   meta: { flex: 1, gap: 2 },
-  label: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground },
-  muted: { fontSize: 12, color: theme.colors.mutedForeground },
-  amount: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: "monospace" },
+  label: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
+  muted: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
+  amount: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
 });

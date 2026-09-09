@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { Button, Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { FontAwesome } from "@expo/vector-icons";
 import { usePeridot } from "../AppContext";
 import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
 import { theme, styles as s } from "../theme";
 import { AsciiRidges } from "../components/AsciiRidges";
+import { UIButton } from "../components/UIButton";
 
 export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const { peridot } = usePeridot();
@@ -132,9 +134,9 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
             <Text style={styles.hint}>Signed in as {session.label}. The app receives your ID, display name and email — never your passkeys.</Text>
           </View>
           {error && <Text style={s.error}>{error}</Text>}
-          <Button title={busy ? "Authorizing…" : "Allow"} onPress={allowApp} disabled={busy} />
-          <Button title="Use a different account" onPress={() => setShowLogin(true)} disabled={busy} />
-          <Button title="Deny" onPress={denyApp} disabled={busy} />
+          <UIButton title={busy ? "Authorizing…" : "Allow"} onPress={allowApp} disabled={busy} variant="primary" />
+          <UIButton title="Use a different account" onPress={() => setShowLogin(true)} disabled={busy} />
+          <UIButton title="Deny" onPress={denyApp} disabled={busy} variant="danger" />
         </View>
       </View>
     );
@@ -151,59 +153,34 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
           </View>
           {error && <Text style={s.error}>{error}</Text>}
           <View style={styles.stack}>
-            <LoginButton label="Continue with Google" onPress={continueWithGoogle} disabled={busy} />
-            <LoginButton label="Continue with Apple" disabled comingSoon />
+            <UIButton
+              title="Continue with Google"
+              onPress={continueWithGoogle}
+              disabled={busy}
+              icon={<FontAwesome name="google" size={16} color={theme.colors.foreground} />}
+            />
+            <UIButton
+              title="Continue with Apple"
+              note="Coming soon"
+              disabled
+              icon={<FontAwesome name="apple" size={18} color={theme.colors.mutedForeground} />}
+            />
             <View style={styles.orRow}>
               <View style={styles.hairline} />
               <Text style={styles.orText}>or</Text>
               <View style={styles.hairline} />
             </View>
-            <LoginButton
-              label={busy ? "Waiting for passkey…" : "Select a passkey"}
+            <UIButton
+              title={busy ? "Waiting for passkey…" : "Select a passkey"}
               onPress={signInWithPasskey}
               disabled={busy}
-              primary
+              variant="primary"
             />
             <Text style={styles.legal}>By continuing, I agree to PeridotID Terms of Use and Privacy notice</Text>
           </View>
         </View>
       </View>
     </View>
-  );
-}
-
-function LoginButton({
-  label,
-  onPress,
-  disabled,
-  comingSoon,
-  primary,
-}: {
-  label: string;
-  onPress?: () => void;
-  disabled?: boolean;
-  comingSoon?: boolean;
-  primary?: boolean;
-}) {
-  const inactive = disabled || comingSoon;
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={inactive}
-      style={({ pressed }) => [
-        styles.btn,
-        primary && styles.btnPrimary,
-        inactive && styles.btnInactive,
-        pressed && !inactive && styles.btnPressed,
-      ]}
-    >
-      <Text
-        style={[styles.btnLabel, primary && styles.btnLabelPrimary, inactive && !primary && styles.btnLabelInactive]}
-      >
-        {label}
-      </Text>
-      {comingSoon && <Text style={styles.soon}>Coming soon</Text>}
-    </Pressable>
   );
 }
 
@@ -222,32 +199,6 @@ const styles = StyleSheet.create({
   middle: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 20 },
   masthead: { alignItems: "center", gap: 8 },
   stack: { width: "100%", maxWidth: 343, gap: 12 },
-  btn: {
-    backgroundColor: theme.colors.background,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 0,
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    alignItems: "center",
-    gap: 2,
-  },
-  btnPrimary: {
-    backgroundColor: theme.colors.foreground,
-    borderColor: theme.colors.foreground,
-  },
-  btnPressed: { opacity: 0.7 },
-  btnInactive: { opacity: 0.55 },
-  btnLabel: {
-    fontSize: 14,
-    fontWeight: "500",
-    letterSpacing: 0.4,
-    color: theme.colors.foreground,
-    fontFamily: "Geist_500Medium",
-  },
-  btnLabelPrimary: { color: theme.colors.background },
-  btnLabelInactive: { color: theme.colors.mutedForeground },
-  soon: { fontSize: 11, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
   orRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   hairline: { flex: 1, height: 1, backgroundColor: theme.colors.border },
   orText: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },

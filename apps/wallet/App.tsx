@@ -1,8 +1,9 @@
 import "./polyfills";
 import { useCallback, useEffect, useState } from "react";
 import { StatusBar } from "expo-status-bar";
-import { useFonts, Geist_400Regular, Geist_500Medium, Geist_600SemiBold } from "@expo-google-fonts/geist";
+import { useFonts, Geist_400Regular, Geist_500Medium, Geist_600SemiBold, Geist_700Bold } from "@expo-google-fonts/geist";
 import { SourceSerif4_400Regular } from "@expo-google-fonts/source-serif-4";
+import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
 import { Peridot } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
@@ -14,6 +15,7 @@ import { HomeScreen } from "./src/screens/HomeScreen";
 import { SendScreen } from "./src/screens/SendScreen";
 import { ReceiveScreen } from "./src/screens/ReceiveScreen";
 import { SwapScreen } from "./src/screens/SwapScreen";
+import { ItemsScreen } from "./src/screens/ItemsScreen";
 import { PasskeyScreen } from "./src/screens/PasskeyScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
@@ -34,6 +36,7 @@ type Screen =
   | "send"
   | "receive"
   | "swap"
+  | "items"
   | "passkey"
   | "settings"
   | "profile"
@@ -54,7 +57,9 @@ export default function App() {
     Geist_400Regular,
     Geist_500Medium,
     Geist_600SemiBold,
+    Geist_700Bold,
     SourceSerif4_400Regular,
+    JetBrainsMono_400Regular,
   });
   // Third-party SSO request (?redirect_uri=…): LoginScreen handles it even when logged
   // in (consent flow) — otherwise a logged-in user landing here would sit on HomeScreen
@@ -132,6 +137,7 @@ export default function App() {
             goSend={() => go("send")}
             goReceive={() => go("receive")}
             goSwap={() => go("swap")}
+            goItems={() => go("items")}
             goActivity={() => go("activity")}
             goActivityDetail={openActivityDetail}
             goActivation={() => go("activation")}
@@ -142,6 +148,7 @@ export default function App() {
         {screen === "send" && <SendScreen onDone={goHome} />}
         {screen === "receive" && <ReceiveScreen onDone={goHome} />}
         {screen === "swap" && <SwapScreen onDone={goHome} />}
+        {screen === "items" && <ItemsScreen onDone={goHome} />}
         {screen === "passkey" && <PasskeyScreen onDone={() => setScreen(passkeyReturn)} />}
         {screen === "activation" && <ActivationScreen onDone={goHome} goPasskey={() => openPasskey("activation")} />}
         {screen === "settings" && (

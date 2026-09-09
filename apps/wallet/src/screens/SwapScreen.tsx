@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Button, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { ArrowDownUp } from "lucide-react-native";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 export function SwapScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -42,7 +43,7 @@ export function SwapScreen({ onDone }: { onDone: () => void }) {
       <TouchableOpacity style={styles.comingSoon} onPress={swap}>
         <Text style={styles.comingSoonText}>Swap coming soon</Text>
       </TouchableOpacity>
-      <Button title="Back" onPress={onDone} />
+      <UIButton title="Back" onPress={onDone} />
     </View>
   );
 }
@@ -52,7 +53,7 @@ const styles = StyleSheet.create({
   divider: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 8 },
   dividerLine: { flex: 1, height: 1, backgroundColor: theme.colors.border },
   swapIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center" },
-  estimate: { fontSize: 18, fontWeight: "600", color: theme.colors.foreground, fontFamily: "monospace" },
-  comingSoon: { alignItems: "center", padding: 14, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
-  comingSoonText: { color: theme.colors.mutedForeground, fontSize: 13, fontWeight: "500" },
+  estimate: { fontSize: 18, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
+  comingSoon: { alignItems: "center", padding: 14, borderRadius: 0, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
+  comingSoonText: { color: theme.colors.mutedForeground, fontSize: 13, fontWeight: "500", fontFamily: theme.fonts.sansMedium },
 });

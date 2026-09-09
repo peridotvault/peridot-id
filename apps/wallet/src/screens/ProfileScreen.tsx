@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { ArrowLeft } from "lucide-react-native";
 import type { Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 export function ProfileScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -67,19 +68,9 @@ export function ProfileScreen({ onDone }: { onDone: () => void }) {
 
       {error && <Text style={s.error}>{error}</Text>}
       {saved && <Text style={styles.saved}>Saved</Text>}
-      <Button title={busy ? "Saving…" : "Save"} onPress={save} disabled={busy} />
-      <Button title="Back" onPress={onDone} />
+      <UIButton title={busy ? "Saving…" : "Save"} onPress={save} disabled={busy} variant="primary" />
+      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
-  );
-}
-
-function TouchableRow({ onDone }: { onDone: () => void }) {
-  const { ArrowLeft } = require("lucide-react-native") as typeof import("lucide-react-native");
-  return (
-    <View style={styles.back} onTouchEnd={onDone}>
-      <ArrowLeft size={18} color={theme.colors.foreground} />
-      <Text style={styles.backLabel}>Back</Text>
-    </View>
   );
 }
 
@@ -87,7 +78,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { padding: 24, gap: 12 },
   back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground },
+  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
   avatar: {
     alignSelf: "center",
     width: 64,
@@ -98,6 +89,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { fontSize: 28, fontWeight: "700", color: theme.colors.foreground, fontFamily: "serif" },
-  saved: { color: theme.colors.success, fontSize: 13 },
+  avatarText: { fontSize: 28, fontWeight: "400", color: theme.colors.foreground, fontFamily: theme.fonts.serif },
+  saved: { color: theme.colors.success, fontSize: 13, fontFamily: theme.fonts.sans },
 });

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ArrowLeft, Rocket, Info, Copy } from "lucide-react-native";
 import type { Account, Authority } from "@peridotvault/pid-types";
 import type { ActivationView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -168,14 +169,14 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
       )}
 
       {!hasPasskey ? (
-        <Button title="Create a passkey first" onPress={goPasskey} disabled={busy} />
+        <UIButton title="Create a passkey first" onPress={goPasskey} disabled={busy} variant="primary" />
       ) : ready ? (
-        <Button title={busy ? "Activating…" : "Activate Account"} onPress={activate} disabled={busy} />
+        <UIButton title={busy ? "Activating…" : "Activate Account"} onPress={activate} disabled={busy} variant="primary" />
       ) : null}
 
       {error && <Text style={styles.errHint}>Activation failures deduct nothing — your deposit stays in place. Retry if the message suggests so.</Text>}
 
-      <Button title="Back" onPress={onDone} />
+      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }
@@ -184,9 +185,9 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { padding: 24, gap: 14 },
   back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground },
+  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  desc: { fontSize: 13, color: theme.colors.mutedForeground, lineHeight: 19 },
+  desc: { fontSize: 13, color: theme.colors.mutedForeground, lineHeight: 19, fontFamily: theme.fonts.sans },
   statusRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
   addressBox: {
     flexDirection: "row",
@@ -197,19 +198,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.muted,
-    borderRadius: 10,
+    borderRadius: 0,
     marginTop: 4,
   },
   addressText: { flex: 1 },
-  copied: { fontSize: 12, color: theme.colors.success },
-  errHint: { fontSize: 12, color: theme.colors.mutedForeground },
+  copied: { fontSize: 12, color: theme.colors.success, fontFamily: theme.fonts.sans },
+  errHint: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   activeCard: {
     backgroundColor: theme.colors.success + "14",
     borderWidth: 1,
     borderColor: theme.colors.success,
-    borderRadius: 12,
+    borderRadius: 0,
     padding: 14,
     gap: 4,
   },
-  activeTitle: { fontSize: 15, fontWeight: "700", color: theme.colors.success },
+  activeTitle: { fontSize: 15, fontWeight: "700", color: theme.colors.success, fontFamily: theme.fonts.sansBold },
 });

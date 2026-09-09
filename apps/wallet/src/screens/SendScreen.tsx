@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Button, StyleSheet, Text, TextInput, View } from "react-native";
+import { StyleSheet, Text, TextInput, View } from "react-native";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -77,8 +78,8 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
       <Text style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</Text>
       {error && <Text style={s.error}>{error}</Text>}
       {result && <Text selectable style={s.mono}>{result}</Text>}
-      <Button title={busy ? "Sending…" : "Send"} onPress={send} disabled={busy || !to || !amount} />
-      <Button title="Back" onPress={onDone} />
+      <UIButton title={busy ? "Sending…" : "Send"} onPress={send} disabled={busy || !to || !amount} variant="primary" />
+      <UIButton title="Back" onPress={onDone} />
     </View>
   );
 }
