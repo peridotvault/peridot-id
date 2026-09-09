@@ -74,4 +74,7 @@ EXPOSE 3301
 ENV PORT=3301
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "dist/main.js"]
+# Migrate before boot: deploys are triggered by a bare `push`/`up`, so schema
+# changes must apply themselves on container start. migrate deploy is
+# idempotent (only pending migrations run); prisma CLI ships in node_modules.
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/main.js"]
