@@ -375,12 +375,13 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
     let raf = 0;
     let inView = true;
     let last = -1;
+    let lastDraw = -1;
+    const FRAME_MS = 1000 / 30; // 30fps cap: halves paints, flow/churn still advance on real time. Revert: delete this + the two lastDraw lines.
 
     const resize = () => {
-      const dpr = Math.min(
-        Math.max(window.devicePixelRatio || 1, 1),
-        1.5
-      );
+      // Backdrop only: cap at 1.0 — halves pixels vs dpr 1.5+, and the veil +
+      // low opacity hide the softness. Hero and CSS sizing untouched.
+      const dpr = 1;
       const w = Math.max(1, Math.floor(wrap.clientWidth * dpr));
       const h = Math.max(1, Math.floor(wrap.clientHeight * dpr));
       if (canvas.width !== w || canvas.height !== h) {
@@ -456,6 +457,8 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
           churn += dt * (p.churnSpeed ?? 1);
         }
         last = t;
+        if (lastDraw >= 0 && t - lastDraw < FRAME_MS) return;
+        lastDraw = t;
         draw(p);
       };
       raf = requestAnimationFrame(loop);

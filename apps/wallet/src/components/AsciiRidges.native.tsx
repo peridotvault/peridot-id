@@ -104,6 +104,8 @@ type Props = {
   exposure?: number;
   gain?: number;
   elementSize?: number;
+  layers?: number;
+  detail?: number;
 };
 
 export function AsciiRidges({
