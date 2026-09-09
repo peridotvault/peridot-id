@@ -19,11 +19,12 @@ function hash(x: number, y: number, t: number): number {
 export function AsciiPortrait({
   src,
   cols = 100,
-  color = "#2f80ff",
+  color,
   className = "",
 }: AsciiPortraitProps): ReactNode {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDark, setIsDark] = useState(true);
+  const activeColor = color ?? (isDark ? "#87ee83" : "#349b65");
 
   useEffect(() => {
     const root = document.documentElement;
@@ -91,11 +92,11 @@ export function AsciiPortrait({
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.font = `${cellH}px var(--font-mono), monospace`;
-      ctx.fillStyle = color;
+      ctx.fillStyle = activeColor;
 
-      const cr = parseInt(color.slice(1, 3), 16);
-      const cg = parseInt(color.slice(3, 5), 16);
-      const cb = parseInt(color.slice(5, 7), 16);
+      const cr = parseInt(activeColor.slice(1, 3), 16);
+      const cg = parseInt(activeColor.slice(3, 5), 16);
+      const cb = parseInt(activeColor.slice(5, 7), 16);
 
       const base = document.createElement("canvas");
       base.width = w;
@@ -198,7 +199,7 @@ export function AsciiPortrait({
       cancelled = true;
       cancelAnimationFrame(raf);
     };
-  }, [src, cols, color, isDark]);
+  }, [src, cols, activeColor]);
 
   return <canvas ref={canvasRef} aria-hidden className={className} />;
 }

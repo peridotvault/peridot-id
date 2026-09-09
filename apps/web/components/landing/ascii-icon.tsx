@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export type Shape =
   | "scan"
@@ -93,11 +93,23 @@ function buildMask(shape: Shape, cols: number, rows: number): boolean[] {
 
 export function AsciiIcon({
   shape,
-  color = "#2f80ff",
+  color,
   cols = 22,
   className = "",
 }: AsciiIconProps): ReactNode {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const update = () => setIsDark(root.classList.contains("dark"));
+    update();
+    const obs = new MutationObserver(update);
+    obs.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+
+  const activeColor = color ?? (isDark ? "#87ee83" : "#349b65");
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -116,7 +128,7 @@ export function AsciiIcon({
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = `bold ${cell}px var(--font-mono), monospace`;
-    ctx.fillStyle = color;
+    ctx.fillStyle = activeColor;
 
     const mask = buildMask(shape, cols, rows);
 
@@ -181,7 +193,7 @@ export function AsciiIcon({
       observer.disconnect();
       stop();
     };
-  }, [shape, color, cols]);
+  }, [shape, activeColor, cols]);
 
   return <canvas ref={canvasRef} aria-hidden className={className} />;
 }

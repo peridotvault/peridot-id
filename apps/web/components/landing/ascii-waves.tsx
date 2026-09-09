@@ -117,7 +117,9 @@ const fragmentShader = `
         vec2 videoUV = snappedMuv / uResolution;
         vec2 distortedVideoUV = videoUV + (displacement * 0.1);
 
-        col = texture2D(uVideoTexture, distortedVideoUV).rgb;
+        // ponytail: video is a luminance mask only; uColor does the tinting
+        vec3 vid = texture2D(uVideoTexture, distortedVideoUV).rgb;
+        col = vec3(0.3 * vid.r + 0.59 * vid.g + 0.11 * vid.b);
       } else {
         col = vec3(intensity);
       }

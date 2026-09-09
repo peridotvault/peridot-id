@@ -147,7 +147,7 @@ function Toggle({
             >
               {opt.label}
               {opt.value && (
-                <span className="rounded-[3px] bg-[#2f80ff] px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white">
+                <span className="rounded-[3px] bg-brand-1 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white dark:bg-brand-2 dark:text-[#07170f]">
                   -25%
                 </span>
               )}
@@ -193,7 +193,7 @@ export function Pricing(): ReactNode {
           return (
             <div
               key={tier.name}
-              className={`p-px ${tier.highlighted ? "bg-[#2f80ff]" : "bg-border"}`}
+              className={`p-px ${tier.highlighted ? "bg-brand-1 dark:bg-brand-2" : "bg-border"}`}
               style={clip}
             >
               <article
@@ -207,7 +207,7 @@ export function Pricing(): ReactNode {
                         {tier.name}
                       </h3>
                       {tier.highlighted && (
-                        <span className="rounded-[3px] bg-[#2f80ff] px-2 py-0.5 text-[11px] font-semibold leading-none text-white">
+                        <span className="rounded-[3px] bg-brand-1 px-2 py-0.5 text-[11px] font-semibold leading-none text-white dark:bg-brand-2 dark:text-[#07170f]">
                           Most popular
                         </span>
                       )}
@@ -257,7 +257,7 @@ export function Pricing(): ReactNode {
                   {tier.features.map((feature) => (
                     <li key={feature} className="flex items-start gap-2.5">
                       <CircleCheck
-                        className="mt-0.5 h-[18px] w-[18px] shrink-0 text-[#2f80ff]"
+                        className="mt-0.5 h-[18px] w-[18px] shrink-0 text-brand-1 dark:text-brand-2"
                         aria-hidden="true"
                       />
                       <span className="text-sm leading-relaxed text-muted-foreground">

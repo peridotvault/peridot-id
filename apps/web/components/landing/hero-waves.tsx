@@ -22,7 +22,7 @@ export function HeroWaves(): ReactNode {
 
   if (!mounted) return null;
 
-  const color = resolvedTheme === "dark" ? "#ffffff" : "#0a0a0a";
+  const color = resolvedTheme === "dark" ? "#87ee83" : "#349b65";
   const isDark = resolvedTheme === "dark";
   const targetOpacity = isDark ? 1 : 0.85;
   const fade =

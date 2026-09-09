@@ -249,7 +249,7 @@ export interface CurtainImageProps {
   grayscale?: number;
   /** Contrast multiplier around mid-grey. 1 = unchanged. Default 1.45. */
   contrast?: number;
-  /** Accent color along the reveal edge and cursor spotlight. Default blue-500. */
+  /** Accent color along the reveal edge and cursor spotlight. Default brand-1. */
   revealColor?: string;
   /** Enable the cursor-follow pixelation spotlight. Default true. */
   interactive?: boolean;
@@ -265,7 +265,7 @@ export function CurtainImage({
   duration = 1.4,
   grayscale = 1,
   contrast = 1.45,
-  revealColor = "#3b82f6",
+  revealColor = "#349b65",
   interactive = true,
   cursorRadius = 0.32,
 }: CurtainImageProps): ReactNode {

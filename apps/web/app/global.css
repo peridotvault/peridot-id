@@ -37,6 +37,8 @@
 }
 
 @theme inline {
+  --color-brand-1: var(--brand-1);
+  --color-brand-2: var(--brand-2);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);

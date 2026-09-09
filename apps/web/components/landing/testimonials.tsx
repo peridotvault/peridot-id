@@ -128,7 +128,7 @@ export function Testimonials(): ReactNode {
                     aria-current={i === index}
                     className={`h-2 rounded-[2px] transition-all duration-300 focus-ring ${
                       i === index
-                        ? "w-5 bg-[#2f80ff]"
+                        ? "w-5 bg-brand-1 dark:bg-brand-2"
                         : "w-2 bg-border hover:bg-muted-foreground/50"
                     }`}
                   />

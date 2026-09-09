@@ -33,7 +33,7 @@ export function FinalCta(): ReactNode {
   const prefersReducedMotion = useReducedMotion();
 
   const isDark = resolvedTheme === "dark";
-  const color = isDark ? "#ffffff" : "#0a0a0a";
+  const color = isDark ? "#87ee83" : "#349b65";
 
   const hMask =
     "linear-gradient(to right, transparent 0%, black 13%, black 27%, transparent 43%, transparent 57%, black 73%, black 87%, transparent 100%)";
