@@ -99,6 +99,11 @@ type Props = {
   opacity?: number;
   cellSize?: number;
   intervalMs?: number;
+  // web-only knobs (AsciiRidges.web.tsx): accepted so shared call sites
+  // typecheck — tsc resolves through AsciiRidges.tsx — ignored here.
+  exposure?: number;
+  gain?: number;
+  elementSize?: number;
 };
 
 export function AsciiRidges({

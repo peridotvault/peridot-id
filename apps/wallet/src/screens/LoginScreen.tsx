@@ -124,7 +124,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   if (sso && session && !showLogin) {
     return (
       <View style={styles.screen}>
-        <AsciiRidges />
+        <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} />
         <View style={s.container}>
           <View style={styles.hero}>
             <Text style={styles.title}>PeridotID</Text>
@@ -142,7 +142,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return (
     <View style={styles.screen}>
-      <AsciiRidges />
+      <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} />
       <View style={s.container}>
         <View style={styles.hero}>
           <Text style={styles.title}>PeridotID</Text>
