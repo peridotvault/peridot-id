@@ -21,9 +21,9 @@ All configuration is loaded from `.env` in the API package. Copy
 | `DATABASE_URL` | yes | PostgreSQL connection string. For Supabase, use the **transaction pooler** (port `6543`) with `?pgbouncer=true&connection_limit=1` |
 | `JWT_ACCESS_SECRET` | yes | Secret for signing access tokens (32+ chars) |
 | `JWT_REFRESH_SECRET` | yes | Secret for signing refresh tokens (32+ chars) |
-| `GOOGLE_CLIENT_ID` | yes* | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | yes* | Google OAuth client secret |
-| `GOOGLE_CALLBACK_URL` | yes* | Must match the authorized redirect URI |
+| `GOOGLE_CLIENT_ID_DEV` / `_PROD` | yes* | Google OAuth client ID (per-environment) |
+| `GOOGLE_CLIENT_SECRET_DEV` / `_PROD` | yes* | Google OAuth client secret (per-environment) |
+| `GOOGLE_CALLBACK_URL_DEV` / `_PROD` | yes* | Must match the authorized redirect URI |
 | `COOKIE_SECURE` | no | `true` in production (cookies only over HTTPS) |
 | `COOKIE_DOMAIN` | no | Cookie domain; omit for localhost |
 | `COOKIE_SAMESITE` | no | `lax` (default) or `none` (cross-site clients, requires `COOKIE_SECURE=true`) |
@@ -33,9 +33,13 @@ All configuration is loaded from `.env` in the API package. Copy
 | `REFRESH_TOKEN_TTL` | no | Refresh token lifetime (default `30d`) |
 | `PORT` | no | HTTP port (default `3301`) |
 
-`*` Google endpoints return `503` until these are set. Create credentials at the
-[Google Cloud console](https://console.cloud.google.com/apis/credentials) and add
-`GOOGLE_CALLBACK_URL` as an authorized redirect URI.
+`*` Google endpoints return `503` until these are set. Dev and prod run the
+identical OAuth code path — only the client differs (`NODE_ENV=production`
+selects the `_PROD` set, anything else the `_DEV` set; unprefixed names work as
+a fallback). Create a client per environment at the
+[Google Cloud console](https://console.cloud.google.com/apis/credentials):
+register `GOOGLE_CALLBACK_URL_DEV` (e.g. `http://localhost:3301/v1/auth/google/callback`)
+on the dev client and `GOOGLE_CALLBACK_URL_PROD` on the prod client.
 
 ## Local development with Docker
 
@@ -59,8 +63,8 @@ pnpm dev                      # API on http://localhost:3301, docs on http://loc
 2. **Vercel — API** (`apps/api/vercel.json` is already configured for serverless). Add a
    project rooted at `apps/api` and set these env vars:
    `DATABASE_URL` (transaction pooler, port `6543`, `?pgbouncer=true`), `JWT_ACCESS_SECRET`,
-   `JWT_REFRESH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-   `GOOGLE_CALLBACK_URL`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE`, `CLIENT_SUCCESS_URL`,
+   `JWT_REFRESH_SECRET`, `GOOGLE_CLIENT_ID_PROD`, `GOOGLE_CLIENT_SECRET_PROD`,
+   `GOOGLE_CALLBACK_URL_PROD`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE`, `CLIENT_SUCCESS_URL`,
    `CORS_ORIGINS`.
 
 3. **Vercel — docs** (`apps/docs/vercel.json` is already configured). Add a project rooted at

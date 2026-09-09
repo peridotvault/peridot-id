@@ -1,7 +1,8 @@
 # `@peridotvault/pid-solana`
 
-PeridotID Solana adapter — passkey-based smart-account authority. The **only** package
-allowed to import `@solana/web3.js` (ADR 007 §8). Pure functions and adapters for
+PeridotID Solana adapter — passkey-based smart-account authority, built on
+`@peridotvault/pid-core` primitives. Only `pid-core` and `pid-solana` may import
+`@solana/web3.js` (ADR 007 §8). Pure functions and adapters for
 building, signing, and submitting smart-account transactions without a wallet.
 
 ## Install
@@ -41,6 +42,9 @@ const adapter = new SolanaAdapter({ rpcUrl, programId });
 ```
 
 ## API surface
+
+Primitives (`bytes`, payload hashes, WebAuthn ceremonies, key custody) live in
+`@peridotvault/pid-core` and are re-exported here, so existing imports keep working:
 
 - **Core** — `deriveSmartAccountAddress`, `accountIdToSeed32`, `buildAuthorizationPayload`,
   `buildWebAuthnMessage`, `buildWithdrawPayload`, `DOMAIN`, `PID_PROGRAM_ID`,

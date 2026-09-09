@@ -7,15 +7,15 @@ Gaming Identity Platform — Authentication, Identity, and Profile for the Perid
 The developer documentation site lives in `apps/web` (Fumadocs + Next.js) and renders the
 canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 
-- Docs (Vercel): `https://peridot-id.peridotvault.com`
-- API (Vercel): `https://api.peridot-id.peridotvault.com/v1`
+- Docs (Vercel): `https://pid.peridotvault.com`
+- API (Vercel): `https://api.pid.peridotvault.com/v1`
 - Run locally: `pnpm --filter @peridotvault/pid-web dev` → `http://localhost:3300`
 - API also serves the raw spec at `GET /v1/openapi.yaml` (Swagger UI at `/docs`)
 
 ## Repository layout
 
 ```
-apps/api            NestJS API (auth, identity, profile, wallet) — serverless-ready (Vercel)
+apps/api            NestJS API (auth, identity, profile, wallet) — deployed on the VPS via deploy/compose.yaml
 apps/docs           Public docs site (Fumadocs)
 packages/sdk-js     Browser SDK
 packages/types      Shared TypeScript types
@@ -51,6 +51,5 @@ login flow.
 
 ## Deploy
 
-See the public docs' [Self-hosting](https://peridot-id.peridotvault.com/docs/self-hosting)
-guide. In short: Supabase for Postgres (run `prisma migrate deploy` against it), then two
-Vercel projects — `apps/api` (serverless, `vercel.json` included) and `apps/web`.
+See the public docs' [Self-hosting](https://pid.peridotvault.com/docs/self-hosting)
+guide. In short: the API on the VPS (`deploy/compose.yaml`), `apps/web` per the deploy guide.

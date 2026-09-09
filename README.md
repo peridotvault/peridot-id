@@ -7,14 +7,14 @@ One Google sign-in, one stable identity, one profile across every Peridot produc
 
 | Service | URL |
 |---|---|
-| API | `https://api.peridot-id.peridotvault.com/v1` |
-| Docs | `https://peridot-id.peridotvault.com` |
+| API | `https://api.pid.peridotvault.com/v1` |
+| Docs | `https://pid.peridotvault.com` |
 | OpenAPI spec | `GET /v1/openapi.yaml` (Swagger UI at `/docs`) |
 
 ## Repo layout
 
 ```
-apps/api            NestJS API (auth, identity, profile) — serverless-ready for Vercel
+apps/api            NestJS API (auth, identity, profile) — deployed on the VPS via deploy/compose.yaml
 apps/docs           Public docs site (Fumadocs + Next.js)
 packages/sdk-js     Browser SDK
 packages/types      Shared TypeScript types
@@ -45,7 +45,7 @@ Scripts: `pnpm dev`, `pnpm dev:api`, `pnpm dev:docs`, `pnpm build`, `pnpm test`,
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
-  baseUrl: 'https://api.peridot-id.peridotvault.com',
+  baseUrl: 'https://api.pid.peridotvault.com',
   onUnauthorized: async () => {
     const ok = await peridot.auth.refresh();
     if (!ok) await peridot.auth.login();
@@ -59,14 +59,14 @@ await peridot.profile.update({ displayName: 'PeridotPlayer' });
 
 ## Documentation
 
-- [Docs site](https://peridot-id.peridotvault.com) — getting started, authentication flow,
+- [Docs site](https://pid.peridotvault.com) — getting started, authentication flow,
   API reference (generated from the OpenAPI spec), SDK guide, self-hosting/deployment.
 - `docs/` — product docs (PRD, architecture, database, security, roadmap).
 
 ## Deploy
 
-See the [self-hosting guide](https://peridot-id.peridotvault.com/docs/self-hosting). In short:
-Supabase for Postgres, Vercel for the API (serverless) and the docs site.
+See the [self-hosting guide](https://pid.peridotvault.com/docs/self-hosting). In short:
+API + web/app on the VPS via `deploy/compose.yaml`; Postgres per the deploy guide.
 
 ## License
 

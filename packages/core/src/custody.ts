@@ -2,7 +2,7 @@
 // fees. The secret never leaves the device's secure storage. Blast radius = fee SOL only.
 
 import { Keypair } from "@solana/web3.js";
-import { fromHex, toHex } from "@peridotvault/pid-solana";
+import { fromHex, toHex } from "./bytes";
 
 /** Platform secret storage for the fee-payer private key (WebCrypto/keystore/Expo SecureStore). */
 export interface SecretStore {

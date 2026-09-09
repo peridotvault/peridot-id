@@ -13,7 +13,7 @@ export class GoogleGuard extends AuthGuard("google") {
 
   canActivate(context: ExecutionContext) {
     if (!this.configured) {
-      throw new ServiceUnavailableException("Google OAuth is not configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET in .env");
+      throw new ServiceUnavailableException("Google OAuth is not configured. Set GOOGLE_CLIENT_ID_DEV/GOOGLE_CLIENT_SECRET_DEV (local) or _PROD (production) in .env");
     }
     return super.canActivate(context) as boolean;
   }

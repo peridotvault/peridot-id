@@ -136,9 +136,13 @@ rotation procedure are documented in task 013 before mainnet.
 
 - New workspace members: `programs/peridot-smart-account` (Rust/Pinocchio) and
   `packages/solana` (TypeScript). CI gains program build/test and lint steps (task 008).
-- `packages/solana` is the only package allowed to depend on `@solana/web3.js`; it
-  encodes the program's instruction/account layouts directly (no Anchor IDL — §1). The
-  dependency is ADR-justified here per the tasks README convention.
+- `packages/core` owns the reusable primitives (encoding, domain-separated hashes,
+  WebAuthn ceremonies, client key custody) and `packages/solana` the chain
+  adapter/instructions on top. Only these two packages may import
+  `@solana/web3.js` — everything else (SDK, apps, wallet) goes through their
+  surfaces (CI-enforced). It encodes the program's instruction/account layouts
+  directly (no Anchor IDL — §1). The dependency is ADR-justified here per the
+  tasks README convention.
 - Tasks: 007 (program), 008 (tests + devnet deploy), 010 (adapter/RPC), 009 (intent/policy
   consuming the adapter), 011 (SDK over the adapter).
 - Devnet program id and upgrade-authority custody are recorded in task 008/013 outputs.

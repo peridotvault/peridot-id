@@ -1,4 +1,5 @@
-// Peridot Solana adapter — the only package allowed to depend on @solana/web3.js (ADR 007 §8).
+// Peridot Solana adapter — chain adapter and instruction builders on top of
+// @peridotvault/pid-core primitives (ADR 007 §8).
 
 export {
   accountIdToSeed32,
@@ -12,7 +13,7 @@ export {
   PID_PROGRAM_ID,
   SECP256R1_PRECOMPILE,
   sha256,
-} from "./core";
+} from "@peridotvault/pid-core";
 export {
   b64url,
   b64urlToBytes,
@@ -26,8 +27,8 @@ export {
   toHex,
   u16le,
   u64le,
-} from "./bytes";
-export type { Bytes } from "./bytes";
+} from "@peridotvault/pid-core";
+export type { Bytes } from "@peridotvault/pid-core";
 export {
   buildActivateInstruction,
   buildDepositSolInstruction,
@@ -42,6 +43,7 @@ export {
 export { SolanaRpc } from "./rpc";
 export type { ChainRpc, ParsedTx, TokenBalance } from "./rpc";
 export { SolanaAdapter } from "./adapter";
-export type { PasskeyAssertion, PasskeySigner, TransactionStatus } from "./adapter";
+export type { TransactionStatus } from "./adapter";
+export type { PasskeyAssertion, PasskeySigner } from "@peridotvault/pid-core";
 export { Keypair, PublicKey } from "@solana/web3.js";
 export type { Keypair as SolanaKeypair } from "@solana/web3.js";

@@ -38,9 +38,9 @@
     "access": "public"
   },
   "dependencies": {
+    "@peridotvault/pid-core": "workspace:*",
     "@peridotvault/pid-solana": "workspace:*",
-    "@peridotvault/pid-types": "workspace:*",
-    "@solana/web3.js": "^1.98.4"
+    "@peridotvault/pid-types": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'}));require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\"",

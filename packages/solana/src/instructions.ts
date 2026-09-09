@@ -13,9 +13,9 @@ import {
   getAssociatedTokenAddress,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { concat, u16le, u64le, i64le, fromAscii } from "./bytes";
-import type { Bytes } from "./bytes";
-import { IX, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE } from "./core";
+import { concat, u16le, u64le, i64le, fromAscii } from "@peridotvault/pid-core";
+import type { Bytes } from "@peridotvault/pid-core";
+import { IX, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE } from "@peridotvault/pid-core";
 
 /** Build the `initialize(account_id, authority)` instruction (disc 0). */
 export function buildInitializeInstruction(

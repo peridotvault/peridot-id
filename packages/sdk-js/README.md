@@ -4,6 +4,11 @@ The PeridotID browser SDK. A thin, dependency-light `fetch` client that wraps th
 PeridotID API: **auth** (Google + passkey), **identity**, **profile**, and the
 **passkey wallet** (non-custodial Solana smart account).
 
+Layering: primitives (hashes, WebAuthn ceremonies, key custody) live in
+`@peridotvault/pid-core`, the chain adapter in `@peridotvault/pid-solana` — this
+package only calls the API directly (no hosts, no prod defaults; `baseUrl` is
+caller-supplied). The hosted public login UX is `@peridotvault/pid-react`.
+
 ## Install
 
 ```sh

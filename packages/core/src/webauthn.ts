@@ -1,12 +1,26 @@
 // Browser WebAuthn passkey integration (task 009). Provides the PasskeySigner the Solana
 // adapter needs, plus the registration ceremony client for the credentials API (task 003).
 
-import { b64url, b64urlToBytes, derToRawEcdsa } from "@peridotvault/pid-solana";
-import type { PasskeyAssertion, PasskeySigner } from "@peridotvault/pid-solana";
+import { b64url, b64urlToBytes, derToRawEcdsa } from "./bytes";
 import type {
   Authority,
   RegisterStart,
 } from "@peridotvault/pid-types";
+
+/** A WebAuthn assertion as produced by a passkey. */
+export interface PasskeyAssertion {
+  credentialId: string;
+  /** Raw ECDSA r‖s (64 bytes) from the assertion. */
+  signature: Uint8Array;
+  authenticatorData: Uint8Array;
+  clientDataJSON: Uint8Array;
+}
+
+/** Platform-specific passkey signer (WebAuthn in the browser/Expo; injected here). */
+export interface PasskeySigner {
+  /** Sign the given challenge (the authorization payload hash) with an existing passkey. */
+  sign(challenge: Uint8Array, opts?: { allowCredentialId?: string }): Promise<PasskeyAssertion>;
+}
 
 function bytesOf(v: ArrayBuffer | ArrayBufferView): Uint8Array {
   return v instanceof Uint8Array ? v : new Uint8Array(v as ArrayBuffer);

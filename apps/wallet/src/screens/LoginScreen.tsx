@@ -77,9 +77,15 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      // Google always leaves the page (OAuth redirect); the API returns to redirect_uri
-      // with a pid_code when one is requested, else to the wallet via CLIENT_SUCCESS_URL.
-      await peridot.auth.login(sso ? { returnTo: sso.redirectUri, clientId: sso.clientId } : undefined);
+      // Google always leaves the page (OAuth redirect). Always pass returnTo so the
+      // callback returns here with a pid_code instead of CLIENT_SUCCESS_URL —
+      // loopback targets need no registration (SsoService.isLoopbackReturnTo).
+      const returnTo =
+        sso?.redirectUri ?? (typeof window !== "undefined" ? window.location.origin : undefined);
+      await peridot.auth.login({
+        ...(returnTo ? { returnTo } : {}),
+        ...(sso?.clientId ? { clientId: sso.clientId } : {}),
+      });
       onLoggedIn();
     } catch (e) {
       setError(String(e));

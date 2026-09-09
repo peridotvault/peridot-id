@@ -1,13 +1,16 @@
-@import 'tailwindcss';
-@import 'fumadocs-ui/css/solar.css';
-@import 'fumadocs-ui/css/preset.css';
-@import 'fumadocs-openapi/css/preset.css';
+@import "tailwindcss";
+@import "fumadocs-ui/css/solar.css";
+@import "fumadocs-ui/css/preset.css";
+@import "fumadocs-openapi/css/preset.css";
 
 /* Drive the `dark:` variant off the `.dark` class (toggled by next-themes)
    instead of the OS `prefers-color-scheme` media query. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  --brand-1: #349b65;
+  --brand-2: #87ee83;
+
   --background: #ffffff;
   --foreground: #0a0a0a;
   --muted: #f5f5f5;
@@ -18,8 +21,8 @@
   --accent-foreground: #ffffff;
   --font-sans: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
-  --font-serif: var(--font-source-serif), ui-serif, Georgia, 'Times New Roman',
-    serif;
+  --font-serif:
+    var(--font-source-serif), ui-serif, Georgia, "Times New Roman", serif;
 }
 
 .dark {

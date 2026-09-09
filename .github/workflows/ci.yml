@@ -29,6 +29,29 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Login split guard
+        run: |
+          # First-party wallet must never use the public login flow (pid-react / hosted login).
+          # Docs (*.md) may name the package — only code is checked.
+          if rg -n 'pid-react|HOSTED_LOGIN_URL|PROD_BASE_URL' apps/wallet --glob '!*.md'; then
+            echo "::error::apps/wallet must not use the public login flow — see apps/wallet README"
+            exit 1
+          fi
+          # Canonical prod host is api.pid.peridotvault.com (Vercel peridot-id hosts retired).
+          if rg -n 'peridot-id\.peridotvault\.com' --glob '!node_modules/**' .; then
+            echo "::error::retired peridot-id.peridotvault.com host referenced"
+            exit 1
+          fi
+
+      - name: Import boundaries guard
+        run: |
+          # ADR 007 §8: only pid-core (primitives) and pid-solana (chain adapter) may
+          # import @solana/web3.js. Everything else goes through their surfaces.
+          if rg -n "from ['\"]@solana/web3\\.js['\"]" packages apps --glob '!packages/core/**' --glob '!packages/solana/src/**' --glob '!**/*.e2e.mjs' --glob '!node_modules/**'; then
+            echo "::error::@solana/web3.js imported outside pid-core/pid-solana"
+            exit 1
+          fi
+
       - name: Test
         run: pnpm test
 

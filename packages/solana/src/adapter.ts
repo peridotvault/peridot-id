@@ -4,15 +4,15 @@
 
 import { createAssociatedTokenAccountIdempotentInstruction, createTransferInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
 import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { u64le, i64le, normalizeLowS } from "./bytes";
-import type { Bytes } from "./bytes";
+import { u64le, i64le, normalizeLowS } from "@peridotvault/pid-core";
+import type { Bytes } from "@peridotvault/pid-core";
 import {
   accountIdToSeed32,
   buildAuthorizationPayload,
   buildWebAuthnMessage,
   deriveSmartAccountAddress,
   PID_PROGRAM_ID,
-} from "./core";
+} from "@peridotvault/pid-core";
 import {
   buildActivateInstruction,
   buildDepositSolInstruction,
@@ -24,21 +24,7 @@ import {
   buildWithdrawTokenInstruction,
 } from "./instructions";
 import type { ParsedTx, SolanaRpc, TokenBalance } from "./rpc";
-
-/** A WebAuthn assertion as produced by a passkey. */
-export interface PasskeyAssertion {
-  credentialId: string;
-  /** Raw ECDSA r‖s (64 bytes) from the assertion. */
-  signature: Uint8Array;
-  authenticatorData: Uint8Array;
-  clientDataJSON: Uint8Array;
-}
-
-/** Platform-specific passkey signer (WebAuthn in the browser/Expo; injected here). */
-export interface PasskeySigner {
-  /** Sign the given challenge (the authorization payload hash) with an existing passkey. */
-  sign(challenge: Uint8Array, opts?: { allowCredentialId?: string }): Promise<PasskeyAssertion>;
-}
+import type { PasskeyAssertion, PasskeySigner } from "@peridotvault/pid-core";
 
 export interface TransactionStatus {
   signature: string;

@@ -75,6 +75,18 @@ export default function App() {
     } catch {
       // not logged in — stay on login
     } finally {
+      // Drop a spent ?pid_code= so it can't be re-read on re-render (web only).
+      if (typeof window !== "undefined") {
+        try {
+          const url = new URL(window.location.href);
+          if (url.searchParams.has("pid_code")) {
+            url.searchParams.delete("pid_code");
+            window.history.replaceState({}, "", url.toString());
+          }
+        } catch {
+          // non-fatal
+        }
+      }
       setBootstrapping(false);
     }
   }, []);

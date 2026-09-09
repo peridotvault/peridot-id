@@ -1,18 +1,19 @@
 {
-  "name": "@peridotvault/pid-solana",
-  "version": "0.1.2",
+  "name": "@peridotvault/pid-core",
+  "version": "0.1.0",
+  "description": "PeridotID core primitives — encoding, domain-separated hashes, WebAuthn ceremonies, and client key custody. No redirects, no hosts, no app flow.",
+  "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
-    "@peridotvault/pid-core": "workspace:*",
     "@peridotvault/pid-types": "workspace:*",
-    "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.98.0"
   },
   "scripts": {

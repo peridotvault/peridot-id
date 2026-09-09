@@ -10,7 +10,7 @@ info:
 
     | Environment | Base URL |
     |---|---|
-    | Production | `https://api.peridot-id.peridotvault.com/v1` |
+    | Production | `https://api.pid.peridotvault.com/v1` |
     | Local dev | `http://localhost:3301/v1` |
 
     ## Authentication
@@ -30,7 +30,7 @@ info:
     url: https://opensource.org/licenses/MIT
 
 servers:
-  - url: https://api.peridot-id.peridotvault.com/v1
+  - url: https://api.pid.peridotvault.com/v1
     description: Production
   - url: http://localhost:3301/v1
     description: Local development
@@ -1048,7 +1048,7 @@ components:
             $ref: "#/components/schemas/ApiError"
           example:
             statusCode: 503
-            message: "Google OAuth is not configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET in .env"
+            message: "Google OAuth is not configured. Set GOOGLE_CLIENT_ID_DEV/GOOGLE_CLIENT_SECRET_DEV (local) or _PROD (production) in .env"
 
   schemas:
     LoginResponse:
