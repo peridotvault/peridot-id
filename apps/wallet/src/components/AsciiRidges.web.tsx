@@ -508,10 +508,23 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
         right: 0,
         bottom: 0,
         overflow: "hidden",
-        opacity: 0.4,
+        opacity: 0.25,
       }}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: "100%" }} />
+      {/* Black veil: melts the ridges into the app background, soft like the web hero. */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          pointerEvents: "none",
+          background:
+            "linear-gradient(to bottom, #0a0a0a 0%, transparent 25%, transparent 80%, #0a0a0a 100%)",
+        }}
+      />
     </div>
   );
 };
