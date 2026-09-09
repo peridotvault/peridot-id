@@ -78,15 +78,20 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      // Google always leaves the page (OAuth redirect). Always pass returnTo so the
-      // callback returns here with a pid_code instead of CLIENT_SUCCESS_URL —
-      // loopback targets need no registration (SsoService.isLoopbackReturnTo).
-      const returnTo =
-        sso?.redirectUri ?? (typeof window !== "undefined" ? window.location.origin : undefined);
-      await peridot.auth.login({
-        ...(returnTo ? { returnTo } : {}),
-        ...(sso?.clientId ? { clientId: sso.clientId } : {}),
-      });
+      // Google always leaves the page (OAuth redirect). Only cross-origin SSO requests
+      // carry a returnTo (an allowlisted third-party origin). A first-party login omits
+      // it: window.location.origin here (app.pid.peridotvault.com) is NOT in the server's
+      // returnTo allowlist, so sending it 400s (localhost only "worked" because loopback
+      // URLs are exempt). Without returnTo the Google callback lands on CLIENT_SUCCESS_URL
+      // (= this wallet's origin) with the session cookie.
+      await peridot.auth.login(
+        sso
+          ? {
+              ...(sso.redirectUri ? { returnTo: sso.redirectUri } : {}),
+              ...(sso.clientId ? { clientId: sso.clientId } : {}),
+            }
+          : undefined,
+      );
       onLoggedIn();
     } catch (e) {
       setError(String(e));
