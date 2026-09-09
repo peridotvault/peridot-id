@@ -22,11 +22,14 @@
     "react-dom": "19.0.0",
     "react-native": "0.81.0",
     "react-native-qrcode-svg": "^6.3.21",
-    "react-native-web": "^0.21.0"
+    "react-native-web": "^0.21.0",
+    "@react-three/fiber": "^9.7.0",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
     "@types/react": "~19.0.0",
+    "@types/three": "^0.185.4",
     "typescript": "~5.9.0"
   }
 }
