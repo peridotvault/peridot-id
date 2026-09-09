@@ -1,6 +1,8 @@
 import "./polyfills";
 import { useCallback, useEffect, useState } from "react";
 import { StatusBar } from "expo-status-bar";
+import { useFonts, Geist_400Regular, Geist_500Medium, Geist_600SemiBold } from "@expo-google-fonts/geist";
+import { SourceSerif4_400Regular } from "@expo-google-fonts/source-serif-4";
 import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
 import { Peridot } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
@@ -46,6 +48,14 @@ type Screen =
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [bootstrapping, setBootstrapping] = useState(true);
+  // Web type system (Geist + Source Serif 4, same as apps/web). Bundled via
+  // expo-font so it works offline on web + native; splash holds until loaded.
+  const [fontsLoaded] = useFonts({
+    Geist_400Regular,
+    Geist_500Medium,
+    Geist_600SemiBold,
+    SourceSerif4_400Regular,
+  });
   // Third-party SSO request (?redirect_uri=…): LoginScreen handles it even when logged
   // in (consent flow) — otherwise a logged-in user landing here would sit on HomeScreen
   // with the request silently ignored.
@@ -105,7 +115,7 @@ export default function App() {
     }
   }, []);
 
-  if (bootstrapping) {
+  if (bootstrapping || !fontsLoaded) {
     return (
       <SafeAreaView style={[styles.center, { backgroundColor: theme.colors.background }]}>
         <ActivityIndicator color={theme.colors.foreground} />

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, StyleSheet, Text, View } from "react-native";
+import { Button, Pressable, StyleSheet, Text, View } from "react-native";
 import { usePeridot } from "../AppContext";
 import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
 import { theme, styles as s } from "../theme";
@@ -144,28 +144,117 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
     <View style={styles.screen}>
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
       <View style={s.container}>
-        <View style={styles.hero}>
-          <Text style={styles.title}>PeridotID</Text>
-          <Text style={styles.subtitle}>{sso ? `Sign in to continue to ${ssoOrigin(sso.redirectUri)}` : "Gaming identity wallet"}</Text>
-          {!sso && (
-            <Text style={styles.hint}>
-              Sign in with a passkey on this device. Google is a recovery fallback — Google login
-              alone does not create your on-chain wallet.
-            </Text>
-          )}
+        <View style={styles.middle}>
+          <View style={styles.masthead}>
+            <Text style={styles.title}>PeridotID</Text>
+            {sso ? <Text style={styles.subtitle}>Sign in to continue to {ssoOrigin(sso.redirectUri)}</Text> : null}
+          </View>
+          {error && <Text style={s.error}>{error}</Text>}
+          <View style={styles.stack}>
+            <LoginButton label="Continue with Google" onPress={continueWithGoogle} disabled={busy} />
+            <LoginButton label="Continue with Apple" disabled comingSoon />
+            <View style={styles.orRow}>
+              <View style={styles.hairline} />
+              <Text style={styles.orText}>or</Text>
+              <View style={styles.hairline} />
+            </View>
+            <LoginButton
+              label={busy ? "Waiting for passkey…" : "Select a passkey"}
+              onPress={signInWithPasskey}
+              disabled={busy}
+              primary
+            />
+            <Text style={styles.legal}>By continuing, I agree to PeridotID Terms of Use and Privacy notice</Text>
+          </View>
         </View>
-        {error && <Text style={s.error}>{error}</Text>}
-        <Button title={busy ? "Waiting for passkey…" : "Sign in with Passkey"} onPress={signInWithPasskey} disabled={busy} />
-        <Button title="Continue with Google" onPress={continueWithGoogle} disabled={busy} />
       </View>
     </View>
+  );
+}
+
+function LoginButton({
+  label,
+  onPress,
+  disabled,
+  comingSoon,
+  primary,
+}: {
+  label: string;
+  onPress?: () => void;
+  disabled?: boolean;
+  comingSoon?: boolean;
+  primary?: boolean;
+}) {
+  const inactive = disabled || comingSoon;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={inactive}
+      style={({ pressed }) => [
+        styles.btn,
+        primary && styles.btnPrimary,
+        inactive && styles.btnInactive,
+        pressed && !inactive && styles.btnPressed,
+      ]}
+    >
+      <Text
+        style={[styles.btnLabel, primary && styles.btnLabelPrimary, inactive && !primary && styles.btnLabelInactive]}
+      >
+        {label}
+      </Text>
+      {comingSoon && <Text style={styles.soon}>Coming soon</Text>}
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   hero: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
-  title: { fontSize: 36, fontWeight: "700", color: theme.colors.foreground, fontFamily: "serif" },
-  subtitle: { fontSize: 15, color: theme.colors.mutedForeground },
+  title: {
+    fontSize: 40,
+    fontWeight: "400",
+    color: theme.colors.foreground,
+    fontFamily: "SourceSerif4_400Regular",
+    letterSpacing: -0.4,
+  },
+  subtitle: { fontSize: 14, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
   hint: { fontSize: 12, color: theme.colors.mutedForeground, textAlign: "center", maxWidth: 300 },
+  middle: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 20 },
+  masthead: { alignItems: "center", gap: 8 },
+  stack: { width: "100%", maxWidth: 343, gap: 12 },
+  btn: {
+    backgroundColor: theme.colors.background,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 0,
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    alignItems: "center",
+    gap: 2,
+  },
+  btnPrimary: {
+    backgroundColor: theme.colors.foreground,
+    borderColor: theme.colors.foreground,
+  },
+  btnPressed: { opacity: 0.7 },
+  btnInactive: { opacity: 0.55 },
+  btnLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    letterSpacing: 0.4,
+    color: theme.colors.foreground,
+    fontFamily: "Geist_500Medium",
+  },
+  btnLabelPrimary: { color: theme.colors.background },
+  btnLabelInactive: { color: theme.colors.mutedForeground },
+  soon: { fontSize: 11, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
+  orRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  hairline: { flex: 1, height: 1, backgroundColor: theme.colors.border },
+  orText: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
+  legal: {
+    fontSize: 11,
+    color: theme.colors.mutedForeground,
+    textAlign: "center",
+    fontFamily: "Geist_400Regular",
+  },
 });
