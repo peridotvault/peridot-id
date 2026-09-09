@@ -83,7 +83,10 @@ export function HomeScreen({
     try {
       let acc = await peridot.wallet.me();
       if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
-      if ("statusCode" in acc) throw new Error("Failed to create account");
+      if ("statusCode" in acc) {
+        const detail = Array.isArray(acc.message) ? acc.message.join(" ") : acc.message;
+        throw new Error(`Failed to create account (${acc.statusCode}${detail ? `: ${detail}` : ""})`);
+      }
       const acct = acc as Account;
       setAccount(acct);
 

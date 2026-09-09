@@ -1,11 +1,7 @@
 import { RootProvider } from 'fumadocs-ui/provider/next';
 import './global.css';
-import { Geist, Geist_Mono, Inter, JetBrains_Mono, Source_Serif_4 } from 'next/font/google';
+import { Geist, Geist_Mono, JetBrains_Mono, Source_Serif_4 } from 'next/font/google';
 import type { ReactNode } from 'react';
-
-const inter = Inter({
-  subsets: ['latin'],
-});
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -32,7 +28,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
-      className={`${inter.className} ${mono.variable} ${geistSans.variable} ${geistMono.variable} ${sourceSerif.variable}`}
+      className={`${mono.variable} ${geistSans.variable} ${geistMono.variable} ${sourceSerif.variable}`}
       suppressHydrationWarning
     >
       <body className="flex flex-col min-h-screen">

@@ -356,3 +356,5 @@ export function CurtainImage({
     </div>
   );
 }
+
+export default CurtainImage;

@@ -1,4 +1,6 @@
-import { CurtainImage } from "@/components/landing/curtain-image";
+"use client";
+
+import dynamic from "next/dynamic";
 import { Kicker } from "@/components/landing/corner-plus";
 import {
   DUOTONE_BASE,
@@ -6,6 +8,17 @@ import {
   DuotoneOverlay,
 } from "@/components/landing/duotone";
 import type { ReactNode } from "react";
+import type { CurtainImageProps } from "@/components/landing/curtain-image";
+
+// Interactive canvas loads async; section copy never waits on WebGL.
+// Cast: repo resolves two @types/react copies; identical at runtime.
+const CurtainImage = dynamic(
+  () =>
+    import("@/components/landing/curtain-image") as unknown as Promise<{
+      default: React.ComponentType<CurtainImageProps>;
+    }>,
+  { ssr: false }
+);
 
 const PROBLEMS: { title: string; body: string }[] = [
   {

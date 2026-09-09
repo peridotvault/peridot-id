@@ -53,6 +53,16 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    gzip on;
+    gzip_types application/javascript text/css image/svg+xml application/json;
+    gzip_min_length 1024;
+
+    # Expo emits content-hashed filenames: immutable, cache for a year.
+    location /_expo/static/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
     location / {
         try_files $uri $uri/ /index.html;
     }

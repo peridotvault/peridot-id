@@ -1,11 +1,22 @@
 "use client";
 
-import AsciiRidges from "@/components/landing/ascii-ridges";
+import dynamic from "next/dynamic";
 import { softEase, useReducedMotion } from "@/lib/motion";
 import { motion } from "motion/react";
 import { useTheme } from "next-themes";
 import { useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
+import type { AsciiRidgesProps } from "@/components/landing/ascii-ridges";
+
+// three.js rides an async chunk so hero copy paints with zero GL tax.
+// Cast: repo resolves two @types/react copies; identical at runtime.
+const AsciiRidges = dynamic(
+  () =>
+    import("@/components/landing/ascii-ridges") as unknown as Promise<{
+      default: React.ComponentType<AsciiRidgesProps>;
+    }>,
+  { ssr: false }
+);
 
 function useIsMounted(): boolean {
   return useSyncExternalStore(

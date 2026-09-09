@@ -83,6 +83,8 @@ export class AccountService {
 
   /** Find or create the identity's default Peridot account + its smart-account chain row. */
   async createAccount(identityId: string): Promise<AccountView> {
+    // Read env before any DB write so a missing PID_PROGRAM_ID can't orphan rows.
+    const programId = this.programId();
     let account = await this.prisma.pidAccount.findFirst({ where: { identityId, status: "active" } });
     if (!account) {
       account = await this.prisma.pidAccount.create({ data: { identityId } });
@@ -91,7 +93,7 @@ export class AccountService {
 
     // ADR 004 §5: the smart-account address is deterministically resolvable before on-chain
     // initialization — seed the chain_accounts row with the derived PDA address.
-    const derived = deriveSmartAccountAddress(account.id, this.programId()).address;
+    const derived = deriveSmartAccountAddress(account.id, programId).address;
     const existingChain = await this.prisma.chainAccount.findFirst({
       where: { accountId: account.id, accountType: ACCOUNT_TYPE_SMART },
     });
