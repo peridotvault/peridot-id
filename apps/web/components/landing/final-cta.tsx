@@ -1,6 +1,6 @@
 "use client";
 
-import AsciiWaves from "@/components/landing/ascii-waves";
+import AsciiRidges from "@/components/landing/ascii-ridges";
 import { CutButton } from "@/components/landing/cut-button";
 import { softEase, useReducedMotion } from "@/lib/motion";
 import { motion, type Variants } from "motion/react";
@@ -70,12 +70,12 @@ export function FinalCta(): ReactNode {
                 className="h-full w-full"
                 style={{ maskImage: hMask, WebkitMaskImage: hMask }}
               >
-                <AsciiWaves
+                <AsciiRidges
                   color={color}
-                  intensity={0}
                   elementSize={12}
-                  videoUrl="/sample-video-2.mp4"
-                  noiseScale={25}
+                  exposure={0.3}
+                  gain={2}
+                  opacity={0.9}
                   hasCursorInteraction={false}
                 />
               </div>

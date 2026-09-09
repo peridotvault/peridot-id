@@ -1,6 +1,6 @@
 "use client";
 
-import AsciiWaves from "@/components/landing/ascii-waves";
+import AsciiRidges from "@/components/landing/ascii-ridges";
 import { softEase, useReducedMotion } from "@/lib/motion";
 import { motion } from "motion/react";
 import { useTheme } from "next-themes";
@@ -45,14 +45,14 @@ export function HeroWaves(): ReactNode {
         filter: isDark ? undefined : "saturate(2.4) contrast(1.25)",
       }}
     >
-      <AsciiWaves
+      <AsciiRidges
         color={color}
-        intensity={0}
         elementSize={10}
-        videoUrl="/sample-video-2.mp4"
-        noiseScale={25}
+        exposure={0.3}
+        gain={2}
+        opacity={0.9}
         hasCursorInteraction={true}
-        className="opacity-50 dark:opacity-60"
+        className="opacity-80 dark:opacity-90"
       />
     </motion.div>
   );
