@@ -22,8 +22,9 @@ COPY packages/types/package.json ./packages/types/
 COPY packages/solana/package.json ./packages/solana/
 COPY packages/sdk-js/package.json ./packages/sdk-js/
 COPY packages/openapi/package.json ./packages/openapi/
+COPY packages/core/package.json ./packages/core/
 
-# --ignore-scripts: root postinstall builds types/solana/sdk-js but their sources aren't
+# --ignore-scripts: root postinstall builds types/core/solana/sdk-js but their sources aren't
 # copied yet — we build them explicitly in the builder stage after COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
@@ -34,9 +35,10 @@ ENV NODE_OPTIONS=--max-old-space-size=1536
 
 COPY . .
 
-# Workspace build order: types -> solana -> sdk-js -> api (postinstall also builds
-# types/solana/sdk-js, but build explicitly so dist exists for the API import).
+# Workspace build order: types -> core -> solana -> sdk-js -> api (postinstall also builds
+# types/core/solana/sdk-js, but build explicitly so dist exists for the API import).
 RUN pnpm --filter @peridotvault/pid-types build
+RUN pnpm --filter @peridotvault/pid-core build
 RUN pnpm --filter @peridotvault/pid-solana build
 RUN pnpm --filter @peridotvault/pid-sdk-js build
 RUN pnpm --filter @peridotvault/pid-api db:generate

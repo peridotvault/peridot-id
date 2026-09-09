@@ -19,8 +19,9 @@ COPY packages/types/package.json ./packages/types/
 COPY packages/solana/package.json ./packages/solana/
 COPY packages/sdk-js/package.json ./packages/sdk-js/
 COPY packages/openapi/package.json ./packages/openapi/
+COPY packages/core/package.json ./packages/core/
 
-# --ignore-scripts: root postinstall builds types/solana/sdk-js but their sources aren't
+# --ignore-scripts: root postinstall builds types/core/solana/sdk-js but their sources aren't
 # copied yet — we build them explicitly in the builder stage after COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
@@ -35,6 +36,7 @@ ARG EXPO_PUBLIC_API_URL
 ENV EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL:-https://api.pid.peridotvault.com}
 
 RUN pnpm --filter @peridotvault/pid-types build
+RUN pnpm --filter @peridotvault/pid-core build
 RUN pnpm --filter @peridotvault/pid-solana build
 RUN pnpm --filter @peridotvault/pid-sdk-js build
 RUN pnpm --filter @peridotvault/pid-wallet export
