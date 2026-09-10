@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { ArrowDownUp } from "lucide-react-native";
+import { ArrowDownUp } from "../icons";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";

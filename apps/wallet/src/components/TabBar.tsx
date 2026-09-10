@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { Activity, House } from "lucide-react-native";
+import { Activity, House } from "../icons";
 import { usePeridot } from "../AppContext";
 import { theme } from "../theme";
 

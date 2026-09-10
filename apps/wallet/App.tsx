@@ -4,12 +4,13 @@ import { StatusBar } from "expo-status-bar";
 import { useFonts, Geist_400Regular, Geist_500Medium, Geist_600SemiBold, Geist_700Bold } from "@expo-google-fonts/geist";
 import { SourceSerif4_400Regular } from "@expo-google-fonts/source-serif-4";
 import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
-import { ActivityIndicator, SafeAreaView, StyleSheet, View } from "react-native";
+import { SafeAreaView, StyleSheet, View } from "react-native";
 import { Peridot } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
 import { AppContext } from "./src/AppContext";
 import { theme } from "./src/theme";
 import { LoginScreen } from "./src/screens/LoginScreen";
+import { LoadingScreen } from "./src/components/LoadingScreen";
 import { readSsoParams } from "./src/sso";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { SendScreen } from "./src/screens/SendScreen";
@@ -133,12 +134,10 @@ export default function App() {
     }
   }, []);
 
+  // Paint first, complete later: the branded loader shows instantly (system
+  // fallbacks) while fonts download and the session check runs in parallel.
   if (bootstrapping || !fontsLoaded) {
-    return (
-      <SafeAreaView style={[styles.center, { backgroundColor: theme.colors.background }]}>
-        <ActivityIndicator color={theme.colors.foreground} />
-      </SafeAreaView>
-    );
+    return <LoadingScreen fontsReady={fontsLoaded} />;
   }
 
   return (
@@ -202,5 +201,4 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
 });

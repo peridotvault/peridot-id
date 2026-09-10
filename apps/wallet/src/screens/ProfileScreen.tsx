@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ChevronRight, Settings } from "lucide-react-native";
+import { ChevronRight, Settings } from "../icons";
 import type { Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";

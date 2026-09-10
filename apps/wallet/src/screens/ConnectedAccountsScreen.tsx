@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, Alert } from "react-native";
-import { ArrowLeft, Link2 } from "lucide-react-native";
+import { ArrowLeft, Link2 } from "../icons";
 import type { IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";

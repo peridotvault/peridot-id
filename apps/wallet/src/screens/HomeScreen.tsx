@@ -7,7 +7,7 @@ import {
   ChevronRight,
   LayoutGrid,
   Link2,
-} from "lucide-react-native";
+} from "../icons";
 import type { Account, Authority, Profile } from "@peridotvault/pid-types";
 import type { TokenBalance } from "@peridotvault/pid-solana";
 import type { ActivationView } from "@peridotvault/pid-sdk-js";

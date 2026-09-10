@@ -5,6 +5,7 @@ import { usePeridot } from "../AppContext";
 import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
 import { theme, styles as s } from "../theme";
 import { AsciiRidges } from "../components/AsciiRidges";
+import { LoadingScreen } from "../components/LoadingScreen";
 import { SsoConsentModal } from "../components/SsoConsentModal";
 import { UIButton } from "../components/UIButton";
 
@@ -122,6 +123,12 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     if (!sso || typeof window === "undefined") return;
     window.location.assign(withDenied(sso.redirectUri));
   };
+
+  // SSO check in flight: branded loader, so the login form never flashes
+  // before the consent modal resolves.
+  if (sso && session === undefined) {
+    return <LoadingScreen />;
+  }
 
   // Already logged in + third-party SSO request: one-tap consent, no redundant login.
   if (sso && session && !showLogin) {

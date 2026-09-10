@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ArrowLeft, Rocket, Info, Copy } from "lucide-react-native";
+import { ArrowLeft, Rocket, Info, Copy } from "../icons";
 import type { Account, Authority } from "@peridotvault/pid-types";
 import type { ActivationView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";

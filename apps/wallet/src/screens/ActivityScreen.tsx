@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ArrowDownLeft, ArrowUpRight, Rocket, ChevronRight, RefreshCw } from "lucide-react-native";
+import { ArrowDownLeft, ArrowUpRight, Rocket, ChevronRight, RefreshCw } from "../icons";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";

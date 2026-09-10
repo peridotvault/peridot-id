@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Check } from "lucide-react-native";
+import { Check } from "../icons";
 import QRCode from "react-native-qrcode-svg";
 import type { Account } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";

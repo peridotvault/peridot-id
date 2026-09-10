@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ArrowLeft, Monitor, LogOut } from "lucide-react-native";
+import { ArrowLeft, Monitor, LogOut } from "../icons";
 import type { Session } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";

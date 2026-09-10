@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { KeyRound, Plus, Trash2 } from "lucide-react-native";
+import { KeyRound, Plus, Trash2 } from "../icons";
 import type { Authority } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";

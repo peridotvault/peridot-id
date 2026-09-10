@@ -1,5 +1,5 @@
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ArrowLeft } from "lucide-react-native";
+import { ArrowLeft } from "../icons";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";

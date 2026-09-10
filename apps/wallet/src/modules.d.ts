@@ -6,33 +6,6 @@ declare module "react-native-qrcode-svg" {
   const QRCode: ComponentType<Record<string, unknown>>;
   export default QRCode;
 }
-
-declare module "lucide-react-native" {
-  import type { ComponentType } from "react";
-  type LucideIcon = ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
-  export const ArrowDownLeft: LucideIcon;
-  export const ArrowDownUp: LucideIcon;
-  export const ArrowLeft: LucideIcon;
-  export const ArrowUpRight: LucideIcon;
-  export const Activity: LucideIcon;
-  export const Check: LucideIcon;
-  export const ChevronRight: LucideIcon;
-  export const Coins: LucideIcon;
-  export const Copy: LucideIcon;
-  export const House: LucideIcon;
-  export const Info: LucideIcon;
-  export const KeyRound: LucideIcon;
-  export const LayoutGrid: LucideIcon;
-  export const Link2: LucideIcon;
-  export const LogOut: LucideIcon;
-  export const Monitor: LucideIcon;
-  export const Plus: LucideIcon;
-  export const RefreshCw: LucideIcon;
-  export const Rocket: LucideIcon;
-  export const Settings: LucideIcon;
-  export const Shield: LucideIcon;
-  export const Trash2: LucideIcon;
-  export const TriangleAlert: LucideIcon;
-  export const User: LucideIcon;
-  export const X: LucideIcon;
-}
+// NOTE: lucide icons come from per-icon deep imports via src/icons.ts
+// (package's own types) — never from the "lucide-react-native" root, which
+// defeats tree-shaking and ships all ~1500 icons.

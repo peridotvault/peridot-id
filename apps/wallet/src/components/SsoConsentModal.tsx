@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { X } from "lucide-react-native";
+import { X } from "../icons";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "./UIButton";
 
