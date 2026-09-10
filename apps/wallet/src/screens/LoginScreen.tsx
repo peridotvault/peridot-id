@@ -5,6 +5,7 @@ import { usePeridot } from "../AppContext";
 import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
 import { theme, styles as s } from "../theme";
 import { AsciiRidges } from "../components/AsciiRidges";
+import { SsoConsentModal } from "../components/SsoConsentModal";
 import { UIButton } from "../components/UIButton";
 
 export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; stepUp?: boolean }) {
@@ -125,20 +126,15 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
   // Already logged in + third-party SSO request: one-tap consent, no redundant login.
   if (sso && session && !showLogin) {
     return (
-      <View style={styles.screen}>
-        <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-        <View style={s.container}>
-          <View style={styles.hero}>
-            <Text style={styles.title}>PeridotID</Text>
-            <Text style={styles.subtitle}>Allow {ssoOrigin(sso.redirectUri)} to sign in with your PeridotID?</Text>
-            <Text style={styles.hint}>Signed in as {session.label}. The app receives your ID, display name and email — never your passkeys.</Text>
-          </View>
-          {error && <Text style={s.error}>{error}</Text>}
-          <UIButton title={busy ? "Authorizing…" : "Allow"} onPress={allowApp} disabled={busy} variant="primary" />
-          <UIButton title="Use a different account" onPress={() => setShowLogin(true)} disabled={busy} />
-          <UIButton title="Deny" onPress={denyApp} disabled={busy} variant="danger" />
-        </View>
-      </View>
+      <SsoConsentModal
+        origin={ssoOrigin(sso.redirectUri)}
+        sessionLabel={session.label}
+        busy={busy}
+        error={error}
+        onAllow={allowApp}
+        onDifferent={() => setShowLogin(true)}
+        onDeny={denyApp}
+      />
     );
   }
 
@@ -189,7 +185,6 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  hero: { flex: 1, alignItems: "center", justifyContent: "center", gap: 10 },
   title: {
     fontSize: 40,
     fontWeight: "400",

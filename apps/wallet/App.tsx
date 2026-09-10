@@ -191,7 +191,7 @@ export default function App() {
         {screen === "app-connections" && <AppConnectionsScreen onDone={goHome} />}
         {screen === "activity" && <ActivityScreen onSelect={openActivityDetail} />}
         {screen === "activity-detail" && activityTx && <ActivityDetailScreen tx={activityTx} onDone={() => go("activity")} />}
-        {(screen === "home" || screen === "activity" || screen === "profile") && !ssoRequest && (
+        {(screen === "home" || screen === "activity" || screen === "profile") && (
           <TabBar current={screen} go={go} />
         )}
         <StatusBar style="light" />

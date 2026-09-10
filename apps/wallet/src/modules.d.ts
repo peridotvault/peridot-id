@@ -34,4 +34,5 @@ declare module "lucide-react-native" {
   export const Trash2: LucideIcon;
   export const TriangleAlert: LucideIcon;
   export const User: LucideIcon;
+  export const X: LucideIcon;
 }
