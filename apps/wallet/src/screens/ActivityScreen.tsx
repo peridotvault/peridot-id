@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ArrowDownLeft, ArrowUpRight, ArrowLeft, Rocket, ChevronRight, RefreshCw } from "lucide-react-native";
+import { ArrowDownLeft, ArrowUpRight, Rocket, ChevronRight, RefreshCw } from "lucide-react-native";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
@@ -34,10 +34,8 @@ function fmtDate(iso: string): string {
 }
 
 export function ActivityScreen({
-  onDone,
   onSelect,
 }: {
-  onDone: () => void;
   onSelect: (tx: WalletTransaction) => void;
 }) {
   const { peridot } = usePeridot();
@@ -65,11 +63,6 @@ export function ActivityScreen({
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone}>
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
-
       <View style={styles.headRow}>
         <Text style={s.title}>Activity</Text>
         <TouchableOpacity style={styles.iconBtn} onPress={load} disabled={busy}>
@@ -104,7 +97,6 @@ export function ActivityScreen({
         );
       })}
 
-      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }
@@ -112,8 +104,6 @@ export function ActivityScreen({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { padding: 24, gap: 12 },
-  back: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
   headRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   iconBtn: {
     width: 36,

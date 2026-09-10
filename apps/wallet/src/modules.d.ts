@@ -14,10 +14,12 @@ declare module "lucide-react-native" {
   export const ArrowDownUp: LucideIcon;
   export const ArrowLeft: LucideIcon;
   export const ArrowUpRight: LucideIcon;
+  export const Activity: LucideIcon;
   export const Check: LucideIcon;
   export const ChevronRight: LucideIcon;
   export const Coins: LucideIcon;
   export const Copy: LucideIcon;
+  export const House: LucideIcon;
   export const Info: LucideIcon;
   export const KeyRound: LucideIcon;
   export const LayoutGrid: LucideIcon;

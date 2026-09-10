@@ -1,94 +1,101 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { ArrowLeft } from "lucide-react-native";
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ChevronRight, Settings } from "lucide-react-native";
 import type { Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";
 
-export function ProfileScreen({ onDone }: { onDone: () => void }) {
+export function ProfileScreen({
+  onLogout,
+  goSettings,
+  goEditProfile,
+}: {
+  onLogout: () => void;
+  goSettings: () => void;
+  goEditProfile: () => void;
+}) {
   const { peridot } = usePeridot();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [displayName, setDisplayName] = useState("");
-  const [username, setUsername] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
 
   const load = useCallback(async () => {
     const res = await peridot.profile.me();
     if ("statusCode" in res) return;
     setProfile(res as Profile);
-    setDisplayName((res as Profile).displayName ?? "");
-    setUsername((res as Profile).username ?? "");
   }, [peridot]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const save = async () => {
-    setBusy(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const res = await peridot.profile.update({ displayName, username });
-      if ("statusCode" in res) throw new Error((res as { message: string | string[] }).message as string);
-      setSaved(true);
-      setProfile(res as Profile);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone}>
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
-
       <Text style={s.title}>Profile</Text>
 
-      {profile && (
-        <View style={[styles.avatar, { backgroundColor: theme.colors.surface }]}>
-          <Text style={styles.avatarText}>
-            {(profile.displayName ?? profile.username ?? "?").slice(0, 1).toUpperCase()}
-          </Text>
+      <TouchableOpacity style={styles.row} onPress={goEditProfile}>
+        {profile?.avatarUrl ? (
+          <Image source={{ uri: profile.avatarUrl }} style={styles.thumb} />
+        ) : (
+          <View style={[styles.thumb, styles.thumbFallback]}>
+            <Text style={styles.thumbText}>
+              {(profile?.displayName ?? profile?.username ?? "?").slice(0, 1).toUpperCase()}
+            </Text>
+          </View>
+        )}
+        <Text style={styles.rowLabel}>Edit Profile</Text>
+        <ChevronRight size={16} color={theme.colors.mutedForeground} />
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.row} onPress={goSettings}>
+        <View style={styles.rowIcon}>
+          <Settings size={18} color={theme.colors.foreground} />
         </View>
-      )}
+        <Text style={styles.rowLabel}>Settings</Text>
+        <ChevronRight size={16} color={theme.colors.mutedForeground} />
+      </TouchableOpacity>
 
-      <Text style={s.label}>Display Name</Text>
-      <TextInput style={s.input} value={displayName} onChangeText={setDisplayName} placeholder="Display name" placeholderTextColor={theme.colors.mutedForeground} />
-
-      <Text style={s.label}>Username</Text>
-      <TextInput style={s.input} value={username} onChangeText={setUsername} autoCapitalize="none" autoCorrect={false} placeholder="username" placeholderTextColor={theme.colors.mutedForeground} />
-
-      {error && <Text style={s.error}>{error}</Text>}
-      {saved && <Text style={styles.saved}>Saved</Text>}
-      <UIButton title={busy ? "Saving…" : "Save"} onPress={save} disabled={busy} variant="primary" />
-      <UIButton title="Back" onPress={onDone} />
+      <UIButton title="Sign Out" onPress={onLogout} variant="danger" />
     </ScrollView>
   );
 }
 
+const c = theme.colors;
+const f = theme.fonts;
+
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.colors.background },
+  screen: { flex: 1, backgroundColor: c.background },
   container: { padding: 24, gap: 12 },
-  back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-  avatar: {
-    alignSelf: "center",
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderRadius: 0,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: c.border,
+    backgroundColor: c.surface,
+  },
+  thumb: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: c.border,
+  },
+  thumbFallback: {
+    backgroundColor: c.muted,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 0,
+  },
+  thumbText: { fontSize: 15, fontWeight: "400", color: c.foreground, fontFamily: f.serif },
+  rowIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: c.muted,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { fontSize: 28, fontWeight: "400", color: theme.colors.foreground, fontFamily: theme.fonts.serif },
-  saved: { color: theme.colors.success, fontSize: 13, fontFamily: theme.fonts.sans },
+  rowLabel: { flex: 1, fontSize: 15, fontWeight: "500", color: c.foreground, fontFamily: f.sansMedium },
 });

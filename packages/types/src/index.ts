@@ -141,6 +141,17 @@ export interface Session {
   isCurrent?: boolean;
 }
 
+/** Third-party site the identity signed in to ("App connections"). Revoking
+ *  stops future sign-ins there; it cannot end the site's own session. */
+export interface SsoGrant {
+  id: string;
+  origin: string;
+  clientId: string | null;
+  name: string | null;
+  firstSeenAt: string;
+  lastUsedAt: string;
+}
+
 /** Identity payload returned by `POST /v1/auth/exchange` for cross-origin SSO. */
 export interface ExchangeResult {
   identityId: string;
@@ -165,4 +176,6 @@ export interface AuthenticateStart {
 export interface ApiError {
   statusCode: number;
   message: string | string[];
+  /** Machine-readable reason (e.g. "step_up_required") when the server sends one. */
+  code?: string;
 }

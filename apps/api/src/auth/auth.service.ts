@@ -27,6 +27,15 @@ export interface GoogleProfile {
   photos?: { value: string }[];
 }
 
+/**
+ * Absolute session-family caps by login method (rotation preserves the
+ * device, so family age = device.createdAt). Google families expire after 7
+ * days and must re-authenticate (passkey-first UI); passkey families follow
+ * the 30d refresh TTL. Pre-existing rows (authMethod null) count as google.
+ */
+const GOOGLE_FAMILY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const PASSKEY_FAMILY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -86,6 +95,7 @@ export class AuthService {
     identityId: string,
     userAgent: string | undefined,
     rotatedFrom?: string,
+    authMethod?: "google" | "passkey",
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const accessTtl = this.config.get<string>("ACCESS_TOKEN_TTL", "15m");
     const refreshTtl = this.config.get<string>("REFRESH_TOKEN_TTL", "30d");
@@ -107,7 +117,9 @@ export class AuthService {
       deviceId = oldSession.deviceId;
       await this.prisma.device.update({ where: { id: deviceId }, data: { lastSeenAt: new Date() } });
     } else {
-      const device = await this.prisma.device.create({ data: { identityId, userAgent: userAgent ?? null } });
+      const device = await this.prisma.device.create({
+        data: { identityId, userAgent: userAgent ?? null, authMethod: authMethod ?? null },
+      });
       deviceId = device.id;
     }
 
@@ -131,9 +143,21 @@ export class AuthService {
     }
     if (payload.type !== "refresh") throw new UnauthorizedException("Invalid refresh token");
 
-    const session = await this.prisma.session.findUnique({ where: { id: payload.jti } });
+    const session = await this.prisma.session.findUnique({ where: { id: payload.jti }, include: { device: true } });
     if (!session || session.revokedAt || session.expiresAt <= new Date()) {
       throw new UnauthorizedException("Refresh token revoked");
+    }
+
+    // Absolute family cap: past it, only a fresh login (passkey-first UI)
+    // starts a new family. Checked before revoking so a rejected rotation
+    // never burns the still-TTL-valid token.
+    const method = session.device.authMethod ?? "google";
+    const cap = method === "passkey" ? PASSKEY_FAMILY_MAX_AGE_MS : GOOGLE_FAMILY_MAX_AGE_MS;
+    if (Date.now() - session.device.createdAt.getTime() > cap) {
+      throw new UnauthorizedException({
+        code: "step_up_required",
+        message: "Session expired — confirm with your passkey to continue.",
+      });
     }
 
     await this.prisma.session.update({ where: { id: payload.jti }, data: { revokedAt: new Date() } });

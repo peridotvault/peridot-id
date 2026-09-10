@@ -96,6 +96,10 @@ model Device {
   identityId String
   identity   Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
   userAgent  String?
+  // How this session family authenticated ("google" | "passkey"). Null on
+  // pre-existing rows, treated as "google" (shorter cap). Preserved across
+  // refresh rotations, which keep the same device.
+  authMethod String?
   lastSeenAt DateTime @default(now())
   createdAt  DateTime @default(now())
   sessions   Session[]
@@ -290,6 +294,23 @@ model SsoCode {
 
   @@index([identityId])
   @@map("sso_codes")
+}
+
+// Persistent relying-party grants ("App connections"). Written when an SSO
+// pid_code is exchanged; revoking stops future code issuance to that origin.
+// It cannot end the relying party's own session (standard OAuth limitation).
+model SsoGrant {
+  id          String    @id @default(uuid())
+  identityId  String
+  origin      String
+  clientId    String?
+  firstSeenAt DateTime  @default(now())
+  lastUsedAt  DateTime  @default(now())
+  revokedAt   DateTime?
+
+  @@unique([identityId, origin])
+  @@index([identityId])
+  @@map("sso_grants")
 }
 
 // Registered third-party apps ("Sign in with PeridotID"). Any developer registers an

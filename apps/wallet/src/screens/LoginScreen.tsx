@@ -7,7 +7,7 @@ import { theme, styles as s } from "../theme";
 import { AsciiRidges } from "../components/AsciiRidges";
 import { UIButton } from "../components/UIButton";
 
-export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
+export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; stepUp?: boolean }) {
   const { peridot } = usePeridot();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +26,7 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
         // without forcing a redundant login.
         let me = await peridot.identity.me();
         if (typeof me === "object" && me !== null && "statusCode" in me) {
-          if (await peridot.auth.refresh()) me = await peridot.identity.me();
+          if ((await peridot.auth.refresh()) === true) me = await peridot.identity.me();
         }
         if (cancelled || typeof me !== "object" || me === null || "statusCode" in me) {
           if (!cancelled) setSession(null);
@@ -170,6 +170,9 @@ export function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
               <Text style={styles.orText}>or</Text>
               <View style={styles.hairline} />
             </View>
+            {stepUp && (
+              <Text style={styles.stepUp}>Session expired — please confirm it's you with your passkey.</Text>
+            )}
             <UIButton
               title={busy ? "Waiting for passkey…" : "Select a passkey"}
               onPress={signInWithPasskey}
@@ -202,6 +205,12 @@ const styles = StyleSheet.create({
   orRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   hairline: { flex: 1, height: 1, backgroundColor: theme.colors.border },
   orText: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
+  stepUp: {
+    fontSize: 13,
+    color: theme.colors.foreground,
+    textAlign: "center",
+    fontFamily: "Geist_400Regular",
+  },
   legal: {
     fontSize: 11,
     color: theme.colors.mutedForeground,

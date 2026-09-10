@@ -19,12 +19,13 @@ import { ItemsScreen } from "./src/screens/ItemsScreen";
 import { PasskeyScreen } from "./src/screens/PasskeyScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
-import { SecurityScreen } from "./src/screens/SecurityScreen";
+import { EditProfileScreen } from "./src/screens/EditProfileScreen";
 import { SessionsScreen } from "./src/screens/SessionsScreen";
 import { ConnectedAccountsScreen } from "./src/screens/ConnectedAccountsScreen";
-import { DangerZoneScreen } from "./src/screens/DangerZoneScreen";
+import { AppConnectionsScreen } from "./src/screens/AppConnectionsScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { ActivityDetailScreen } from "./src/screens/ActivityDetailScreen";
+import { TabBar } from "./src/components/TabBar";
 import { ActivationScreen } from "./src/screens/ActivationScreen";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 
@@ -40,10 +41,10 @@ type Screen =
   | "passkey"
   | "settings"
   | "profile"
-  | "security"
+  | "edit-profile"
   | "sessions"
   | "connected"
-  | "danger"
+  | "app-connections"
   | "activity"
   | "activity-detail"
   | "activation";
@@ -51,6 +52,9 @@ type Screen =
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [bootstrapping, setBootstrapping] = useState(true);
+  // True when the session family aged out (google families: 7 days) — the
+  // login screen then asks for passkey confirmation instead of silently dying.
+  const [stepUp, setStepUp] = useState(false);
   // Web type system (Geist + Source Serif 4, same as apps/web). Bundled via
   // expo-font so it works offline on web + native; splash holds until loaded.
   const [fontsLoaded] = useFonts({
@@ -66,10 +70,9 @@ export default function App() {
   // with the request silently ignored.
   const [ssoRequest] = useState(readSsoParams);
   const [activityTx, setActivityTx] = useState<WalletTransaction | null>(null);
-  const [passkeyReturn, setPasskeyReturn] = useState<Screen>("security");
+  const [passkeyReturn, setPasskeyReturn] = useState<Screen>("settings");
 
   const goHome = useCallback(() => setScreen("home"), []);
-  const goLogin = useCallback(() => setScreen("login"), []);
   const go = useCallback((s: Screen) => setScreen(s), []);
 
   const openPasskey = useCallback((from: Screen) => {
@@ -83,9 +86,19 @@ export default function App() {
   }, []);
 
   // After a Google OAuth redirect returns, detect the existing session and go straight home.
+  // Short-lived access tokens are revived via the refresh cookie first, so a
+  // valid session survives app restarts instead of bouncing to login.
   const bootstrap = useCallback(async () => {
     try {
-      const me = await peridot.identity.me();
+      let me = await peridot.identity.me();
+      if (typeof me === "object" && me !== null && "statusCode" in me) {
+        const refreshed = await peridot.auth.refresh();
+        if (refreshed === "step-up") {
+          setStepUp(true);
+        } else if (refreshed === true) {
+          me = await peridot.identity.me();
+        }
+      }
       if (me && !("statusCode" in me)) setScreen("home");
     } catch {
       // not logged in — stay on login
@@ -131,18 +144,24 @@ export default function App() {
   return (
     <AppContext.Provider value={{ peridot }}>
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.colors.background }]}>
-        {(screen === "login" || ssoRequest) && <LoginScreen onLoggedIn={goHome} />}
+        {(screen === "login" || ssoRequest) && (
+          <LoginScreen
+            onLoggedIn={() => {
+              setStepUp(false);
+              goHome();
+            }}
+            stepUp={stepUp}
+          />
+        )}
         {screen === "home" && (
           <HomeScreen
             goSend={() => go("send")}
             goReceive={() => go("receive")}
             goSwap={() => go("swap")}
             goItems={() => go("items")}
-            goActivity={() => go("activity")}
-            goActivityDetail={openActivityDetail}
             goActivation={() => go("activation")}
-            goSettings={() => go("settings")}
-            onLogout={logout}
+            goPasskeys={() => openPasskey("settings")}
+            goAppConnections={() => go("app-connections")}
           />
         )}
         {screen === "send" && <SendScreen onDone={goHome} />}
@@ -153,27 +172,28 @@ export default function App() {
         {screen === "activation" && <ActivationScreen onDone={goHome} goPasskey={() => openPasskey("activation")} />}
         {screen === "settings" && (
           <SettingsScreen
-            goProfile={() => go("profile")}
-            goSecurity={() => go("security")}
-            goConnected={() => go("connected")}
-            goDanger={() => go("danger")}
-            onDone={goHome}
-          />
-        )}
-        {screen === "profile" && <ProfileScreen onDone={() => go("settings")} />}
-        {screen === "security" && (
-          <SecurityScreen
-            goPasskeys={() => openPasskey("security")}
+            goPasskeys={() => openPasskey("settings")}
             goSessions={() => go("sessions")}
             goConnected={() => go("connected")}
-            onDone={() => go("settings")}
+            onDone={() => go("profile")}
           />
         )}
-        {screen === "sessions" && <SessionsScreen onDone={() => go("security")} />}
-        {screen === "connected" && <ConnectedAccountsScreen onDone={() => go("security")} />}
-        {screen === "danger" && <DangerZoneScreen onDone={() => go("settings")} onDeleted={goLogin} />}
-        {screen === "activity" && <ActivityScreen onDone={goHome} onSelect={openActivityDetail} />}
+        {screen === "profile" && (
+          <ProfileScreen
+            onLogout={logout}
+            goSettings={() => go("settings")}
+            goEditProfile={() => go("edit-profile")}
+          />
+        )}
+        {screen === "edit-profile" && <EditProfileScreen onDone={() => go("profile")} />}
+        {screen === "sessions" && <SessionsScreen onDone={() => go("settings")} />}
+        {screen === "connected" && <ConnectedAccountsScreen onDone={() => go("settings")} />}
+        {screen === "app-connections" && <AppConnectionsScreen onDone={goHome} />}
+        {screen === "activity" && <ActivityScreen onSelect={openActivityDetail} />}
         {screen === "activity-detail" && activityTx && <ActivityDetailScreen tx={activityTx} onDone={() => go("activity")} />}
+        {(screen === "home" || screen === "activity" || screen === "profile") && !ssoRequest && (
+          <TabBar current={screen} go={go} />
+        )}
         <StatusBar style="light" />
       </SafeAreaView>
     </AppContext.Provider>

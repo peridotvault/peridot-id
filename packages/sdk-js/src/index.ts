@@ -10,6 +10,7 @@ import type {
   ProfileUpdate,
   RegisterStart,
   Session,
+  SsoGrant,
 } from "@peridotvault/pid-types";
 import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client.js";
 import { authenticatePasskey, registerPasskey, BrowserPasskeySigner, PasskeyHostedRequiredError } from "@peridotvault/pid-core";
@@ -112,9 +113,12 @@ export class PeridotAuth {
     await this.client.post("/v1/auth/logout");
   }
 
-  async refresh(): Promise<boolean> {
+  async refresh(): Promise<true | "step-up" | false> {
     const res = await this.client.post("/v1/auth/refresh");
-    return res.ok;
+    if (res.ok) return true;
+    const err = res.data as ApiError;
+    if (err && typeof err === "object" && (err as { code?: unknown }).code === "step_up_required") return "step-up";
+    return false;
   }
 
   async sessions(): Promise<Session[] | ApiError> {
@@ -129,6 +133,19 @@ export class PeridotAuth {
 
   async revokeSession(id: string): Promise<boolean> {
     const res = await this.client.delete(`/v1/auth/sessions/${id}`);
+    return res.ok;
+  }
+
+  /** Third-party sites this identity signed in to (active grants, newest first). */
+  async grants(): Promise<SsoGrant[] | ApiError> {
+    const res = await this.client.get<SsoGrant[]>("/v1/auth/grants");
+    return res.data;
+  }
+
+  /** Disconnect a site: stops future sign-ins there (the site's own session
+   *  must still expire on its side). Idempotent. */
+  async revokeGrant(id: string): Promise<boolean> {
+    const res = await this.client.delete(`/v1/auth/grants/${id}`);
     return res.ok;
   }
 }
@@ -224,7 +241,18 @@ class PeridotClient {
     });
     if (res.status === 401) {
       if (!path.startsWith("/v1/auth/")) this.onUnauthorized?.();
-      return { ok: false, data: { statusCode: 401, message: "Unauthorized" } };
+      // Preserve a machine-readable reason (e.g. step_up_required) when present.
+      let data: ApiError = { statusCode: 401, message: "Unauthorized" };
+      try {
+        const body = (await res.json()) as { message?: unknown; code?: unknown };
+        if (body && typeof body === "object") {
+          if (typeof body.message === "string" || Array.isArray(body.message)) data.message = body.message;
+          if (typeof body.code === "string") data = { ...data, code: body.code };
+        }
+      } catch {
+        // non-JSON 401 (gateway, proxy) — keep the generic shape
+      }
+      return { ok: false, data };
     }
     const data = res.status === 204 || !res.headers.get("content-type")?.includes("application/json")
       ? ({} as T)

@@ -22,6 +22,12 @@ function configMock(overrides: Record<string, unknown> = {}) {
   };
 }
 
+interface StoredDevice {
+  id: string;
+  createdAt: Date;
+  authMethod: string | null;
+}
+
 interface StoredSession {
   deviceId: string;
   revokedAt: Date | null;
@@ -30,6 +36,7 @@ interface StoredSession {
 
 function prismaMock() {
   const sessions = new Map<string, StoredSession>();
+  const devices = new Map<string, StoredDevice>();
     const mocks: Record<string, unknown> = {
       identityCredential: {
         findUnique: jest.fn(async () => null),
@@ -45,10 +52,11 @@ function prismaMock() {
         findUnique: jest.fn(async () => null),
       },
       device: {
-        create: jest.fn(async (args: { data: { identityId: string; userAgent: string | null } }) => ({
-          id: "device-1",
-          ...args.data,
-        })),
+        create: jest.fn(async (args: { data: { identityId: string; userAgent: string | null; authMethod?: string | null } }) => {
+          const device = { id: `device-${devices.size + 1}`, createdAt: new Date(), authMethod: args.data.authMethod ?? null };
+          devices.set(device.id, device);
+          return { ...device, ...args.data };
+        }),
         update: jest.fn(async () => ({})),
       },
       session: {
@@ -62,7 +70,13 @@ function prismaMock() {
             return args.data;
           },
         ),
-        findUnique: jest.fn(async ({ where }: { where: { id: string } }) => sessions.get(where.id) ?? null),
+        findUnique: jest.fn(async ({ where }: { where: { id: string } }) => {
+          const s = sessions.get(where.id);
+          if (!s) return null;
+          // live device reference: tests backdate createdAt to simulate family age
+          const device = devices.get(s.deviceId) ?? { id: s.deviceId, createdAt: new Date(), authMethod: null };
+          return { ...s, device };
+        }),
         update: jest.fn(async ({ where, data }: { where: { id: string }; data: { revokedAt: Date } }) => {
           const s = sessions.get(where.id);
           if (s) s.revokedAt = data.revokedAt;
@@ -268,6 +282,60 @@ describe("AuthService", () => {
     const { service } = setup();
     expect(await service.currentSessionJti(undefined)).toBeNull();
     expect(await service.currentSessionJti("not-a-jwt")).toBeNull();
+  });
+
+  it("records the login method on the device", async () => {
+    const { service, prisma, res } = setup();
+    await service.issueSession(res as never, "identity-1", "test-agent", undefined, "passkey");
+    expect(prisma.device.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ authMethod: "passkey" }) }),
+    );
+  });
+
+  it("rejects rotation past the 7-day google family cap with step_up_required", async () => {
+    const { service, prisma, res } = setup();
+    const first = await service.issueSession(res as never, "identity-1", "test-agent", undefined, "google");
+    const oldJti = jwtPayload(first.refreshToken).jti;
+    const stored = (await prisma.session.findUnique({ where: { id: oldJti } })) as unknown as {
+      device: { createdAt: Date };
+    };
+    stored.device.createdAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+
+    const err = await service.rotateSession(reqWithToken(first.refreshToken), res as never).catch((e) => e);
+    expect(err).toBeInstanceOf(UnauthorizedException);
+    expect(err.getResponse()).toMatchObject({ code: "step_up_required" });
+  });
+
+  it("treats pre-existing (method-less) devices as google families", async () => {
+    const { service, prisma, res } = setup();
+    const first = await service.issueSession(res as never, "identity-1", "test-agent");
+    const oldJti = jwtPayload(first.refreshToken).jti;
+    const stored = (await prisma.session.findUnique({ where: { id: oldJti } })) as unknown as {
+      device: { createdAt: Date };
+    };
+    stored.device.createdAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+
+    await expect(service.rotateSession(reqWithToken(first.refreshToken), res as never)).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it("lets passkey families rotate inside 30 days but not past it", async () => {
+    const { service, prisma, res } = setup();
+    const first = await service.issueSession(res as never, "identity-1", "test-agent", undefined, "passkey");
+    const oldJti = jwtPayload(first.refreshToken).jti;
+    const stored = (await prisma.session.findUnique({ where: { id: oldJti } })) as unknown as {
+      device: { createdAt: Date };
+    };
+    stored.device.createdAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    await service.rotateSession(reqWithToken(first.refreshToken), res as never);
+
+    const refreshCalls = (res.cookie as jest.Mock).mock.calls.filter(([name]) => name === "pid_refresh");
+    const fresh = refreshCalls[refreshCalls.length - 1][1] as string;
+    stored.device.createdAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+    const err = await service.rotateSession(reqWithToken(fresh), res as never).catch((e) => e);
+    expect(err).toBeInstanceOf(UnauthorizedException);
+    expect(err.getResponse()).toMatchObject({ code: "step_up_required" });
   });
 });
 

@@ -12,6 +12,8 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
   };
   const security = { log: jest.fn(async () => undefined) };
   const rows = new Map<string, Record<string, unknown>>();
+  const grants = new Map<string, Record<string, unknown>>();
+  const grantKey = (identityId: string, origin: string) => `${identityId}|${origin}`;
   const prisma = {
     ssoCode: {
       create: jest.fn(
@@ -32,6 +34,57 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
     },
     profile: { findUnique: jest.fn(async () => ({ displayName: "Peridot", avatarUrl: null })) },
     identityCredential: { findMany: jest.fn(async () => [{ provider: "google", email: "a@b.com" }]) },
+    ssoGrant: {
+      upsert: jest.fn(
+        async ({
+          where,
+          create,
+          update,
+        }: {
+          where: { identityId_origin: { identityId: string; origin: string } };
+          create: Record<string, unknown>;
+          update: Record<string, unknown>;
+        }) => {
+          const key = grantKey(where.identityId_origin.identityId, where.identityId_origin.origin);
+          const existing = grants.get(key);
+          if (existing) {
+            Object.assign(existing, update);
+            return existing;
+          }
+          const row = {
+            id: `grant_${grants.size + 1}`,
+            firstSeenAt: new Date(),
+            lastUsedAt: new Date(),
+            revokedAt: null,
+            clientId: null,
+            ...create,
+          };
+          grants.set(key, row);
+          return row;
+        },
+      ),
+      findUnique: jest.fn(
+        async ({ where }: { where: { identityId_origin: { identityId: string; origin: string } } }) =>
+          grants.get(grantKey(where.identityId_origin.identityId, where.identityId_origin.origin)) ?? null,
+      ),
+      findMany: jest.fn(async ({ where }: { where: { identityId: string; revokedAt: null } }) =>
+        [...grants.values()]
+          .filter((g) => g.identityId === where.identityId && (where.revokedAt === null ? g.revokedAt === null : true))
+          .sort((a, b) => (b.lastUsedAt as Date).getTime() - (a.lastUsedAt as Date).getTime()),
+      ),
+      updateMany: jest.fn(
+        async ({ where, data }: { where: { id: string; identityId: string }; data: Record<string, unknown> }) => {
+          let count = 0;
+          for (const g of grants.values()) {
+            if (g.id === where.id && g.identityId === where.identityId) {
+              Object.assign(g, data);
+              count++;
+            }
+          }
+          return { count };
+        },
+      ),
+    },
   };
   const pidApps = apps ?? {
     findActive: jest.fn(async () => ({ redirectUris: ["https://mygame.dev/callback"] })),
@@ -145,6 +198,63 @@ describe("SsoService", () => {
     const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
     await expect(service.consume(code2, "pidapp_other")).rejects.toThrow("sso_code_invalid");
     await expect(service.consume(code2)).rejects.toThrow("sso_code_invalid");
+  });
+
+  it("records an app grant when a code is exchanged", async () => {
+    const { service } = setup();
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    await service.consume(code);
+    await expect(service.listGrants("pid_1")).resolves.toMatchObject([
+      { origin: "https://live2dev.com", clientId: null, name: null },
+    ]);
+    await expect(service.isRevoked("pid_1", "https://live2dev.com/auth/callback")).resolves.toBe(false);
+  });
+
+  it("revoking hides the grant and flags the origin (authorize stays blocked)", async () => {
+    const { service } = setup();
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    await service.consume(code);
+    const [grant] = await service.listGrants("pid_1");
+    await service.revokeGrant("pid_1", grant.id as string);
+    await expect(service.listGrants("pid_1")).resolves.toEqual([]);
+    await expect(service.isRevoked("pid_1", "https://live2dev.com/other/path")).resolves.toBe(true);
+    // unknown origins are not revoked
+    await expect(service.isRevoked("pid_1", "https://evil.com/")).resolves.toBe(false);
+  });
+
+  it("revoke is identity-scoped and idempotent", async () => {
+    const { service } = setup();
+    const code = await service.issue("pid_2", "https://live2dev.com/auth/callback");
+    await service.consume(code);
+    const [grant] = await service.listGrants("pid_2");
+    // another identity's revoke call touches nothing and never throws
+    await service.revokeGrant("pid_1", grant.id as string);
+    await expect(service.listGrants("pid_2")).resolves.toHaveLength(1);
+    await service.revokeGrant("pid_2", "grant_missing");
+    await expect(service.listGrants("pid_2")).resolves.toHaveLength(1);
+  });
+
+  it("a fresh full login heals a revoked grant (explicit re-consent)", async () => {
+    const { service } = setup();
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    await service.consume(code);
+    const [grant] = await service.listGrants("pid_1");
+    await service.revokeGrant("pid_1", grant.id as string);
+    const code2 = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    await service.consume(code2);
+    await expect(service.listGrants("pid_1")).resolves.toHaveLength(1);
+    await expect(service.isRevoked("pid_1", "https://live2dev.com/")).resolves.toBe(false);
+  });
+
+  it("records the clientId and resolves the app name", async () => {
+    const { service } = setup({
+      findActive: async (id) => (id === "pidapp_abc" ? { ...DEV_APP, name: "My Game" } : null),
+    });
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    await service.consume(code, "pidapp_abc");
+    await expect(service.listGrants("pid_1")).resolves.toMatchObject([
+      { origin: "https://mygame.dev", clientId: "pidapp_abc", name: "My Game" },
+    ]);
   });
 
   it("requires the app secret at exchange when one is set (uniform error)", async () => {

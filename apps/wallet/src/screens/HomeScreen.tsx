@@ -6,15 +6,13 @@ import {
   Coins,
   ChevronRight,
   LayoutGrid,
-  Settings,
+  Link2,
 } from "lucide-react-native";
-import type { Account, Authority, Profile, WalletTransaction } from "@peridotvault/pid-types";
+import type { Account, Authority, Profile } from "@peridotvault/pid-types";
 import type { TokenBalance } from "@peridotvault/pid-solana";
 import type { ActivationView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
-import { SOLANA_NETWORK } from "../config";
 import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -32,30 +30,14 @@ function shortMint(mint: string): string {
   return `${mint.slice(0, 4)}…${mint.slice(-4)}`;
 }
 
-function fmtActivityAmount(t: WalletTransaction): string {
-  if (t.amount == null) return "";
-  const value = Number(t.amount) / (t.asset === "SOL" ? LAMPORTS_PER_SOL : 1e6);
-  const sign = t.direction === "in" ? "+" : t.direction === "out" ? "−" : "";
-  return `${sign}${value.toLocaleString("en-US", { maximumFractionDigits: 3 })} ${t.asset === "SOL" ? "SOL" : t.asset}`;
-}
-
-function activityLabel(t: WalletTransaction): string {
-  if (t.type === "DEPOSIT") return "Receive";
-  if (t.type === "WITHDRAW") return "Send";
-  if (t.type === "ACTIVATION") return "Activation";
-  return "Transaction";
-}
-
 interface HomeScreenProps {
   goSend: () => void;
   goReceive: () => void;
   goSwap: () => void;
   goItems: () => void;
-  goActivity: () => void;
-  goActivityDetail: (tx: WalletTransaction) => void;
   goActivation: () => void;
-  goSettings: () => void;
-  onLogout: () => void;
+  goPasskeys: () => void;
+  goAppConnections: () => void;
 }
 
 export function HomeScreen({
@@ -63,11 +45,9 @@ export function HomeScreen({
   goReceive,
   goSwap,
   goItems,
-  goActivity,
-  goActivityDetail,
   goActivation,
-  goSettings,
-  onLogout,
+  goPasskeys,
+  goAppConnections,
 }: HomeScreenProps) {
   const { peridot } = usePeridot();
   const [account, setAccount] = useState<Account | null>(null);
@@ -76,7 +56,6 @@ export function HomeScreen({
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
   const [passkeys, setPasskeys] = useState<Authority[]>([]);
   const [activation, setActivation] = useState<ActivationView | null>(null);
-  const [activity, setActivity] = useState<WalletTransaction[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -121,12 +100,6 @@ export function HomeScreen({
       } catch {
         setActivation(null);
       }
-      try {
-        const txs = await peridot.wallet.history();
-        setActivity((Array.isArray(txs) ? txs : []).slice(0, 5));
-      } catch {
-        setActivity([]);
-      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -155,22 +128,20 @@ export function HomeScreen({
   const st = activation?.status;
   const activated = st === "active";
   const balanceColor = activated ? theme.colors.foreground : theme.colors.danger;
-  const displayName = profile?.displayName ?? profile?.username ?? "Peridot ID";
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <View style={styles.topRow}>
-        <TouchableOpacity style={styles.profileChip} onPress={goSettings}>
-          <View style={styles.profileAvatar}>
-            <Text style={styles.profileInitial}>{displayName.slice(0, 1).toUpperCase()}</Text>
-          </View>
-          <View>
-            <Text style={styles.profileName}>{displayName}</Text>
-            <Text style={styles.network}>Network · {SOLANA_NETWORK}</Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn} onPress={goSettings} accessibilityLabel="Settings">
-          <Settings size={18} color={theme.colors.foreground} />
+        <View style={styles.identity}>
+          <Text style={styles.username}>@{profile?.username ?? profile?.displayName ?? "…"}</Text>
+          {smart && (
+            <Text selectable style={styles.address}>
+              {smart.address.slice(0, 6)}…{smart.address.slice(-6)}
+            </Text>
+          )}
+        </View>
+        <TouchableOpacity style={styles.connBtn} onPress={goAppConnections} accessibilityLabel="App connections">
+          <Link2 size={18} color={theme.colors.foreground} />
         </TouchableOpacity>
       </View>
 
@@ -207,7 +178,7 @@ export function HomeScreen({
       {!activated && !busy && <Text style={s.hint}>Send is available after your account is activated on-chain.</Text>}
 
       {activated && passkeys.length === 0 && !busy && (
-        <TouchableOpacity style={styles.passkeyWarn} onPress={goSettings}>
+        <TouchableOpacity style={styles.passkeyWarn} onPress={goPasskeys}>
           <Text style={styles.passkeyWarnText}>No passkey — add one in Security to authorize withdrawals.</Text>
         </TouchableOpacity>
       )}
@@ -228,37 +199,6 @@ export function HomeScreen({
           <Text style={styles.coinAmount}>{coin.amount}</Text>
         </View>
       ))}
-
-      {smart && (
-        <View style={s.card}>
-          <Text style={s.label}>PeridotID Address</Text>
-          <Text selectable style={s.mono}>
-            {smart.address.slice(0, 4)}…{smart.address.slice(-8)}
-          </Text>
-        </View>
-      )}
-
-      <View style={styles.sectionHead}>
-        <Text style={styles.sectionLabel}>Recent Activity</Text>
-        <TouchableOpacity onPress={goActivity} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-          <Text style={styles.viewAll}>View all</Text>
-          <ChevronRight size={14} color={theme.colors.mutedForeground} />
-        </TouchableOpacity>
-      </View>
-      {activity.length === 0 && !busy && <Text style={s.hint}>No activity yet.</Text>}
-      {activity.map((t) => (
-        <TouchableOpacity key={t.id} style={styles.activityRow} onPress={() => goActivityDetail(t)}>
-          <View style={styles.activityMeta}>
-            <Text style={styles.activityLabel}>{activityLabel(t)}</Text>
-            <Text style={styles.activityDate}>{new Date(t.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</Text>
-          </View>
-          {t.amount != null && <Text style={styles.activityAmount}>{fmtActivityAmount(t)}</Text>}
-        </TouchableOpacity>
-      ))}
-
-      <View style={styles.footer}>
-        <UIButton title="Sign Out" onPress={onLogout} />
-      </View>
     </ScrollView>
   );
 }
@@ -291,36 +231,18 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colors.background },
   container: { padding: 24, gap: 14 },
   topRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  profileChip: { flexDirection: "row", alignItems: "center", gap: 12 },
-  profileAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  profileInitial: { fontSize: 18, fontWeight: "400", color: theme.colors.foreground, fontFamily: theme.fonts.serif },
-  profileName: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  network: {
-    fontSize: 11,
-    color: theme.colors.mutedForeground,
-    fontWeight: "500",
-    fontFamily: theme.fonts.sansMedium,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  },
-  iconBtn: {
+  identity: { flex: 1, gap: 4 },
+  username: { fontSize: 20, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
+  address: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.mono },
+  connBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: theme.colors.surface,
   },
   balanceBlock: { gap: 4 },
   balance: { fontSize: 40, fontWeight: "400", fontFamily: theme.fonts.serif },
@@ -374,7 +296,6 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   passkeyWarnText: { color: theme.colors.mutedForeground, fontSize: 13, textAlign: "center", fontFamily: theme.fonts.sans },
-  sectionHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
   sectionLabel: {
     fontSize: 12,
     color: theme.colors.mutedForeground,
@@ -383,7 +304,6 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
-  viewAll: { fontSize: 13, color: theme.colors.foreground, fontWeight: "500", fontFamily: theme.fonts.sansMedium },
   coinRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -406,17 +326,4 @@ const styles = StyleSheet.create({
   coinSymbol: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
   coinMint: { fontSize: 11, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   coinAmount: { fontSize: 15, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
-  activityRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-  },
-  activityMeta: { gap: 2 },
-  activityLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.sansMedium },
-  activityDate: { fontSize: 11, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  activityAmount: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
-  footer: { marginTop: 16 },
 });

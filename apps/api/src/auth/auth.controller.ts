@@ -67,7 +67,7 @@ export class AuthController {
       authenticationId: dto.authenticationId,
       credential: dto.credential as never,
     });
-    await this.authService.issueSession(res, identityId, req.headers["user-agent"]);
+    await this.authService.issueSession(res, identityId, req.headers["user-agent"], undefined, "passkey");
     if (dto.returnTo) {
       const resolved = await this.ssoService.resolveReturnTo(dto.returnTo, dto.clientId);
       if (!resolved) {
@@ -108,8 +108,32 @@ export class AuthController {
     if (!resolved) {
       throw new BadRequestException("returnTo is not an allowed origin");
     }
+    // One-tap consent is not re-consent: a revoked origin needs a fresh full
+    // login (which heals the grant at exchange). Full-login paths bypass this.
+    if (await this.ssoService.isRevoked(user.identityId, resolved.redirectTo)) {
+      throw new BadRequestException("App connection revoked — sign in again from the site to reconnect.");
+    }
     const pidCode = await this.ssoService.issue(user.identityId, resolved.redirectTo, { clientId: resolved.clientId });
     return { pidCode };
+  }
+
+  @Get("grants")
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async grants(@CurrentUser() user: AuthenticatedUser) {
+    return this.ssoService.listGrants(user.identityId);
+  }
+
+  @Delete("grants/:id")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async revokeGrant(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+  ): Promise<{ ok: true }> {
+    await this.ssoService.revokeGrant(user.identityId, id);
+    return { ok: true };
   }
 
   @Get("google")
@@ -122,7 +146,7 @@ export class AuthController {
   @UseGuards(GoogleGuard)
   async googleCallback(@Req() req: Request, @Res() res: Response): Promise<void> {
     const identity = req.user as { id: string };
-    await this.authService.issueSession(res, identity.id, req.headers["user-agent"]);
+    await this.authService.issueSession(res, identity.id, req.headers["user-agent"], undefined, "google");
 
     // state is user-controlled (comes back via Google) — re-validate before trusting it.
     const rawState = typeof req.query.state === "string" ? req.query.state : undefined;

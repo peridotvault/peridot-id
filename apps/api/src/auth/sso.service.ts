@@ -50,6 +50,20 @@ export function isLoopbackReturnTo(returnTo: string): boolean {
   }
 }
 
+/** Origin key for a grant (revocation granularity). Callers only pass validated http(s) URLs. */
+function grantOrigin(redirectTo: string): string {
+  return new URL(redirectTo).origin;
+}
+
+/** Active app connection as listed to the identity owner. */
+export interface SsoGrantView {
+  id: string;
+  origin: string;
+  clientId: string | null;
+  name: string | null;
+  firstSeenAt: Date;
+  lastUsedAt: Date;
+}
 /** Opaque Google `state` carrying returnTo (+ optional clientId). Plain returnTo strings
  *  (pre-client_id clients like Live2Dev) decode via the fallback. */
 export function encodeState(returnTo: string, clientId?: string): string {
@@ -171,6 +185,20 @@ export class SsoService {
     });
     if (updated.count === 0) throw new Error("sso_code_invalid");
 
+    // A fresh full login records (or heals) the origin's grant: exchanging a code
+    // is explicit re-consent. The one-tap `authorize` path stays blocked while
+    // revoked (see AuthController) — healing only happens here.
+    const origin = grantOrigin(row.redirectTo);
+    await this.prisma.ssoGrant.upsert({
+      where: { identityId_origin: { identityId: row.identityId, origin } },
+      create: { identityId: row.identityId, origin, clientId: row.clientId },
+      update: {
+        lastUsedAt: new Date(),
+        revokedAt: null,
+        ...(row.clientId ? { clientId: row.clientId } : {}),
+      },
+    });
+
     const [profile, credentials] = await Promise.all([
       this.prisma.profile.findUnique({ where: { identityId: row.identityId } }),
       this.prisma.identityCredential.findMany({ where: { identityId: row.identityId }, select: { provider: true, email: true } }),
@@ -183,5 +211,52 @@ export class SsoService {
       profile: { displayName: profile?.displayName ?? null, avatarUrl: profile?.avatarUrl ?? null },
       credentials,
     };
+  }
+
+  /** True when the identity revoked this origin (one-tap authorize stays blocked). */
+  async isRevoked(identityId: string, redirectTo: string): Promise<boolean> {
+    let origin: string;
+    try {
+      origin = grantOrigin(redirectTo);
+    } catch {
+      return false;
+    }
+    const grant = await this.prisma.ssoGrant.findUnique({
+      where: { identityId_origin: { identityId, origin } },
+    });
+    return !!grant?.revokedAt;
+  }
+
+  /** Active (non-revoked) app connections, most-recently-used first. */
+  async listGrants(identityId: string): Promise<SsoGrantView[]> {
+    const grants = await this.prisma.ssoGrant.findMany({
+      where: { identityId, revokedAt: null },
+      orderBy: { lastUsedAt: "desc" },
+    });
+    return Promise.all(
+      grants.map(async (g) => {
+        let name: string | null = null;
+        if (g.clientId) {
+          const app = await this.apps.findActive(g.clientId).catch(() => null);
+          name = app?.name ?? null;
+        }
+        return {
+          id: g.id,
+          origin: g.origin,
+          clientId: g.clientId,
+          name,
+          firstSeenAt: g.firstSeenAt,
+          lastUsedAt: g.lastUsedAt,
+        };
+      }),
+    );
+  }
+
+  /** Disconnect an origin: stops future one-tap issuance (idempotent, identity-scoped). */
+  async revokeGrant(identityId: string, id: string): Promise<void> {
+    await this.prisma.ssoGrant.updateMany({
+      where: { id, identityId },
+      data: { revokedAt: new Date() },
+    });
   }
 }
