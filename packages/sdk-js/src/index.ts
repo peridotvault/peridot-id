@@ -41,14 +41,18 @@ export class PeridotAuth {
    * Begin Google OAuth. Optional `returnTo` (an allowlisted cross-origin) redirects back
    * there with a one-time `pid_code` for SSO (see `exchange`). Pass `clientId` when
    * logging in on behalf of a registered third-party app (binds the code to the app).
+   * Resolves true when the browser leaves for Google, false when the login URL
+   * could not be obtained (caller stays put and shows an error).
    */
-  async login(opts?: { returnTo?: string; clientId?: string }): Promise<void> {
+  async login(opts?: { returnTo?: string; clientId?: string }): Promise<boolean> {
     const body =
       opts?.returnTo || opts?.clientId
         ? { ...(opts.returnTo ? { returnTo: opts.returnTo } : {}), ...(opts.clientId ? { clientId: opts.clientId } : {}) }
         : undefined;
     const res = await this.client.post<LoginResponse>("/v1/auth/login", body);
-    if (res.ok) window.location.assign((res.data as LoginResponse).url);
+    if (!res.ok) return false;
+    window.location.assign((res.data as LoginResponse).url);
+    return true;
   }
 
   /**

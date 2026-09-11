@@ -88,7 +88,9 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
       // returnTo allowlist, so sending it 400s (localhost only "worked" because loopback
       // URLs are exempt). Without returnTo the Google callback lands on CLIENT_SUCCESS_URL
       // (= this wallet's origin) with the session cookie.
-      await peridot.auth.login(
+      // Never navigate on success here: the browser leaves for Google, and the
+      // return bootstrap lands home. On failure (!ok/throw) stay on login.
+      const ok = await peridot.auth.login(
         sso
           ? {
               ...(sso.redirectUri ? { returnTo: sso.redirectUri } : {}),
@@ -96,7 +98,7 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
             }
           : undefined,
       );
-      onLoggedIn();
+      if (!ok) setError("Couldn't reach Google — try again.");
     } catch (e) {
       setError(String(e));
     } finally {

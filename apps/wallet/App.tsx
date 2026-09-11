@@ -30,8 +30,6 @@ import { TabBar } from "./src/components/TabBar";
 import { ActivationScreen } from "./src/screens/ActivationScreen";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 
-const peridot = Peridot({ baseUrl: API_BASE_URL, solanaRpcUrl: SOLANA_RPC_URL });
-
 type Screen =
   | "login"
   | "home"
@@ -51,6 +49,19 @@ type Screen =
   | "activation";
 
 export default function App() {
+  // Built in-state (not module scope): any 401 outside /v1/auth/* kicks back
+  // to login instead of stranding the app on a dead session. Idempotent —
+  // the login screen makes no auto-auth calls outside SSO, so no loops.
+  const [peridot] = useState(() =>
+    Peridot({
+      baseUrl: API_BASE_URL,
+      solanaRpcUrl: SOLANA_RPC_URL,
+      onUnauthorized: () => {
+        setStepUp(false);
+        setScreen("login");
+      },
+    }),
+  );
   const [screen, setScreen] = useState<Screen>("login");
   const [bootstrapping, setBootstrapping] = useState(true);
   // True when the session family aged out (google families: 7 days) — the
