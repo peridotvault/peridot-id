@@ -56,9 +56,12 @@ export default function App() {
   // True when the session family aged out (google families: 7 days) — the
   // login screen then asks for passkey confirmation instead of silently dying.
   const [stepUp, setStepUp] = useState(false);
+  // Failsafe: a hung gate (fonts or network that never settles with no error)
+  // must never trap the app on the loader forever — force it open degraded.
+  const [gateForced, setGateForced] = useState(false);
   // Web type system (Geist + Source Serif 4, same as apps/web). Bundled via
   // expo-font so it works offline on web + native; splash holds until loaded.
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Geist_400Regular,
     Geist_500Medium,
     Geist_600SemiBold,
@@ -66,6 +69,21 @@ export default function App() {
     SourceSerif4_400Regular,
     JetBrainsMono_400Regular,
   });
+
+  useEffect(() => {
+    if (!fontError) return;
+    // eslint-disable-next-line no-console
+    console.warn("[startup] font load failed — continuing with system fallbacks", fontError);
+  }, [fontError]);
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.warn("[startup] gate timed out after 8s — opening degraded");
+      setGateForced(true);
+    }, 8000);
+    return () => clearTimeout(id);
+  }, []);
   // Third-party SSO request (?redirect_uri=…): LoginScreen handles it even when logged
   // in (consent flow) — otherwise a logged-in user landing here would sit on HomeScreen
   // with the request silently ignored.
@@ -89,18 +107,27 @@ export default function App() {
   // After a Google OAuth redirect returns, detect the existing session and go straight home.
   // Short-lived access tokens are revived via the refresh cookie first, so a
   // valid session survives app restarts instead of bouncing to login.
+  // A hung request (no resolve, no reject, no error) must not freeze the
+  // splash: the timer forces the gate open and late resolves are ignored.
   const bootstrap = useCallback(async () => {
+    let alive = true;
+    const timer = setTimeout(() => {
+      alive = false;
+      // eslint-disable-next-line no-console
+      console.warn("[startup] bootstrap timed out after 10s — continuing logged-out");
+      setBootstrapping(false);
+    }, 10000);
     try {
       let me = await peridot.identity.me();
       if (typeof me === "object" && me !== null && "statusCode" in me) {
         const refreshed = await peridot.auth.refresh();
         if (refreshed === "step-up") {
-          setStepUp(true);
+          if (alive) setStepUp(true);
         } else if (refreshed === true) {
           me = await peridot.identity.me();
         }
       }
-      if (me && !("statusCode" in me)) setScreen("home");
+      if (alive && me && !("statusCode" in me)) setScreen("home");
     } catch {
       // not logged in — stay on login
     } finally {
@@ -116,13 +143,19 @@ export default function App() {
           // non-fatal
         }
       }
-      setBootstrapping(false);
+      clearTimeout(timer);
+      if (alive) setBootstrapping(false);
     }
   }, []);
 
   useEffect(() => {
     bootstrap();
   }, [bootstrap]);
+
+  useEffect(() => {
+    // Static pre-JS splash handoff: React mounted, drop the template node.
+    if (typeof document !== "undefined") document.getElementById("splash")?.remove();
+  }, []);
 
   const logout = useCallback(async () => {
     try {
@@ -136,7 +169,8 @@ export default function App() {
 
   // Paint first, complete later: the branded loader shows instantly (system
   // fallbacks) while fonts download and the session check runs in parallel.
-  if (bootstrapping || !fontsLoaded) {
+  // fontError skips the font wait; gateForced opens after 8s no matter what.
+  if ((bootstrapping || (!fontsLoaded && !fontError)) && !gateForced) {
     return <LoadingScreen fontsReady={fontsLoaded} />;
   }
 
