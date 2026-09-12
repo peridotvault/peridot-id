@@ -14,6 +14,11 @@ enum IdentityStatus {
   deleted
 }
 
+enum Role {
+  user
+  admin
+}
+
 enum AuthorityStatus {
   active
   revoked
@@ -47,6 +52,7 @@ enum ChainAccountStatus {
 model Identity {
   id        String         @id
   status    IdentityStatus @default(active)
+  role      Role           @default(user)
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   deletedAt DateTime?
@@ -311,6 +317,47 @@ model SsoGrant {
   @@unique([identityId, origin])
   @@index([identityId])
   @@map("sso_grants")
+}
+
+// Chain registry (admin-managed). Chains and their typed contracts (factory,
+// account implementation, …) live here instead of env files so the wallet and
+// activation flows render whatever is active — adding a chain is a data row.
+// Secrets (relayer keys, RPC API keys) stay in env, never here.
+model Chain {
+  id           String   @id @default(uuid())
+  namespace    String
+  reference    String
+  name         String
+  nativeSymbol String
+  decimals     Int      @default(18)
+  rpcUrls      String[]
+  explorerUrl  String?
+  logoUrl      String?
+  isTestnet    Boolean  @default(true)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contracts ChainContract[]
+
+  @@unique([namespace, reference])
+  @@map("chains")
+}
+
+model ChainContract {
+  id           String   @id @default(uuid())
+  chainId      String
+  chain        Chain    @relation(fields: [chainId], references: [id], onDelete: Cascade)
+  type         String
+  address      String
+  versionLabel String?
+  deployTxHash String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([chainId, type])
+  @@map("chain_contracts")
 }
 
 // Registered third-party apps ("Sign in with PeridotID"). Any developer registers an

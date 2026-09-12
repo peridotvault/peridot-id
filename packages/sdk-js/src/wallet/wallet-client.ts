@@ -87,6 +87,21 @@ export class PeridotWallet {
     return smart.address;
   }
 
+  /**
+   * The EVM counterfactual address for a chain (e.g. `"97"`, `"10143"`,
+   * `"421614"`), as stored by the API. Same funding-before-deploy shape as Solana.
+   */
+  async evmSmartAccountAddress(chainReference: string): Promise<string> {
+    const res = await this.api.get<Account[]>("/v1/accounts");
+    const account = Array.isArray(res.data) ? res.data[0] : undefined;
+    if (!account) throw new Error("Account not found — create an account first");
+    const evm = account.chainAccounts?.find(
+      (c) => c.chainNamespace === "eip155" && c.chainReference === chainReference && c.accountType === "smart_account",
+    );
+    if (!evm) throw new Error(`EVM smart account not created for chain ${chainReference}`);
+    return evm.address;
+  }
+
   private async authorityCompressed(): Promise<Uint8Array> {
     const res = await this.api.get<Authority[]>("/v1/credentials");
     const auth = Array.isArray(res.data) ? res.data[0] : undefined;

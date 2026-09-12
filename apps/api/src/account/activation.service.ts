@@ -136,6 +136,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   async poll(): Promise<void> {
     const pending = await this.prisma.chainAccount.findMany({
       where: {
+        // Solana rows only — eip155 rows are polled by EvmActivationService.
+        chainNamespace: "solana",
         accountType: POLL_ACCOUNT_TYPE,
         status: { in: ["inactivated", "funded", "insufficient", "ready", "activating", "active"] },
       },

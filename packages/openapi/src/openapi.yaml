@@ -1269,15 +1269,15 @@ components:
           format: uuid
         chainNamespace:
           type: string
-          description: "CAIP-2 namespace — `solana` (V1)"
+          description: "CAIP-2 namespace — `solana` (V1) or `eip155` (EVM counterfactuals)"
           example: "solana"
         chainReference:
           type: string
-          description: "CAIP-2 reference — mainnet-beta genesis-hash prefix for Solana"
+          description: "CAIP-2 reference — genesis-hash prefix (Solana) or decimal chain id (EVM: 10143, 97, 421614)"
           example: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z"
         address:
           type: string
-          description: "PDA (smart_account) or user-supplied address (linked_address). Public data only."
+          description: "PDA (Solana smart_account), CREATE2 counterfactual (EVM smart_account), or user-supplied address (linked_address). Public data only."
         accountType:
           type: string
           enum: [smart_account, linked_address]

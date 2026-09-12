@@ -10,7 +10,7 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   `PID_*`). "Peridot ecosystem" refers to the wider Peridot products — a different thing.
 - **NPM packages:** `@peridotvault/pid-*` (npm org: `@peridotvault`; company: PT ANTIGANE LABS INDONESIA) — e.g.
   `@peridotvault/pid-api`, `@peridotvault/pid-types`, `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`,
-  `@peridotvault/pid-openapi`, `@peridotvault/pid-web`, `@peridotvault/pid-wallet`.
+  `@peridotvault/pid-evm`, `@peridotvault/pid-openapi`, `@peridotvault/pid-web`, `@peridotvault/pid-wallet`.
 - **On-chain:** PDA seed `["peridot_id", "account", account_id]`; signed-payload domain
   `PID|SOLANA|SMART_ACCOUNT|v1`; program id `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
 - **Identity:** PID = `pid_<ULID>`; identity credentials key on `(provider, providerUserId)`.
@@ -59,7 +59,7 @@ client with localhost redirect; `_PROD` only in deploy env), `PID_PROGRAM_ID=G8t
 
 ## Verification
 
-- API: `pnpm --filter @peridotvault/pid-api exec jest` (140 tests).
+- API: `pnpm --filter @peridotvault/pid-api exec jest` (178 tests).
 - Program: `cargo test` (12) + `tests/integration.mjs` (13 cases) against the local
   validator; devnet E2E `packages/sdk-js/test/devnet.e2e.mjs`.
 - Full: `pnpm typecheck`.

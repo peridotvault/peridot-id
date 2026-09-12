@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ChainAccountStatus, IdentityStatus, Prisma } from "@prisma/client";
+import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
+import { ChainRegistryService } from "../chain/chain-registry.service";
 import { deriveSmartAccountAddress } from "../common/smart-account";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -75,10 +77,48 @@ export class AccountService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly security: SecurityEventService,
+    private readonly chains: ChainRegistryService,
   ) {}
 
   private programId(): string {
     return this.config.getOrThrow<string>("PID_PROGRAM_ID");
+  }
+
+  /**
+   * EVM counterfactual rows: one CREATE2 address per deployable registry chain,
+   * each from its own factory/implementation contracts (same values everywhere
+   * today = one address everywhere). Skipped until a chain has both contracts.
+   */
+  private async ensureEvmRows(accountId: string): Promise<void> {
+    for (const chain of await this.chains.deployableEvmChains()) {
+      const factory = chain.contracts.find((k) => k.type === "factory")?.address;
+      const implementation = chain.contracts.find((k) => k.type === "account_implementation")?.address;
+      if (!factory || !implementation) continue;
+      const evm = deriveEvmSmartAccountAddress(accountId, factory, implementation);
+      const existing = await this.prisma.chainAccount.findFirst({
+        where: { accountId, chainNamespace: "eip155", chainReference: chain.reference, accountType: ACCOUNT_TYPE_SMART },
+      });
+      if (!existing) {
+        try {
+          await this.prisma.chainAccount.create({
+            data: {
+              accountId,
+              chainNamespace: "eip155",
+              chainReference: chain.reference,
+              address: evm.address,
+              accountType: ACCOUNT_TYPE_SMART,
+            },
+          });
+        } catch (err) {
+          if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) throw err;
+        }
+      } else if (existing.address !== evm.address) {
+        await this.prisma.chainAccount.update({
+          where: { id: existing.id },
+          data: { address: evm.address, status: "inactivated", activationBalance: null, activationRequired: null },
+        });
+      }
+    }
   }
 
   /** Find or create the identity's default Peridot account + its smart-account chain row. */
@@ -121,6 +161,8 @@ export class AccountService {
         data: { address: derived, status: "inactivated", activationBalance: null, activationRequired: null },
       });
     }
+
+    await this.ensureEvmRows(account.id);
 
     return this.getAccount(identityId, account.id);
   }

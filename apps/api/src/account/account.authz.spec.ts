@@ -11,6 +11,8 @@ import { SecurityEventService } from "../security/security-event.service";
 import { ActivationService } from "./activation.service";
 import { AccountController } from "./account.controller";
 import { AccountService } from "./account.service";
+import { ChainRegistryService } from "../chain/chain-registry.service";
+import { EvmActivationService } from "./evm-activation.service";
 
 const SECRET = "authz-test-access-secret-0123456789abcdef";
 const PROGRAM_ID = "9LCZEdXdmLeEyU8Fik2721R28K4xWXTrVd76r4tczNZY";
@@ -85,7 +87,19 @@ describe("Account authorization & abuse cases (routes)", () => {
         },
         { provide: PrismaService, useValue: prisma },
         { provide: SecurityEventService, useValue: { log: jest.fn(async () => undefined) } },
+        {
+          provide: ChainRegistryService,
+          useValue: {
+            activeChains: jest.fn(async () => []),
+            deployableEvmChains: jest.fn(async () => []),
+            deploymentFor: jest.fn(async () => null),
+            chainByReference: jest.fn(async () => undefined),
+            rpcUrlForReference: jest.fn(async () => "http://localhost:8545"),
+            invalidate: jest.fn(),
+          },
+        },
         { provide: ActivationService, useValue: { activate: jest.fn(), viewOf: jest.fn(), poll: jest.fn() } },
+        { provide: EvmActivationService, useValue: { activate: jest.fn(), viewOf: jest.fn(), poll: jest.fn() } },
       ],
     }).compile();
 

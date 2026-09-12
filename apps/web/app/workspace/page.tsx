@@ -1,20 +1,36 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Peridot } from "@peridotvault/pid-sdk-js";
-import type { PeridotClient } from "@peridotvault/pid-sdk-js";
+import type { PeridotClient, Role } from "@peridotvault/pid-sdk-js";
 import { AppsManager } from "./_components/apps-manager";
+import { ChainsManager } from "./_components/chains-manager";
+import { Topbar } from "./_components/topbar";
 
 const API_BASE = process.env.NEXT_PUBLIC_PID_API_URL ?? "https://api.pid.peridotvault.com";
 
 /** Session gate: logged-out visitors get the login section, owners get the dashboard. */
 export default function WorkspacePage() {
+  return (
+    <Suspense fallback={<p className="mx-auto w-full max-w-3xl px-5 py-16 text-sm text-neutral-500">Loading…</p>}>
+      <Workspace />
+    </Suspense>
+  );
+}
+
+function Workspace() {
   const [client] = useState<PeridotClient>(() =>
     Peridot({ baseUrl: API_BASE, solanaRpcUrl: "https://api.devnet.solana.com" }),
   );
   const [status, setStatus] = useState<"checking" | "anonymous" | "owner">("checking");
+  const [role, setRole] = useState<Role>("user");
+  const [identityId, setIdentityId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const cleanReturnTo = useCallback(() => {
     const url = new URL(window.location.href);
@@ -27,7 +43,14 @@ export default function WorkspacePage() {
     client.identity
       .me()
       .then((me) => {
-        if (!cancelled) setStatus("statusCode" in me ? "anonymous" : "owner");
+        if (cancelled) return;
+        if ("statusCode" in me) {
+          setStatus("anonymous");
+        } else {
+          setStatus("owner");
+          setRole(me.role ?? "user");
+          setIdentityId(me.id);
+        }
       })
       .catch(() => {
         if (!cancelled) setStatus("anonymous");
@@ -63,14 +86,38 @@ export default function WorkspacePage() {
     }
   }, [client, cleanReturnTo]);
 
-  return (
-    <main className="mx-auto w-full max-w-3xl px-5 py-16">
-      <p className="text-xs font-medium uppercase tracking-widest text-neutral-500">PeridotID for developers</p>
-      <h1 className="mt-2 text-3xl font-bold">Workspace</h1>
+  const isAdmin = role === "admin";
+  // Unknown/hand-typed tabs (incl. chains for non-admins) fall back to apps —
+  // the admin surface is undiscoverable, not just unclickable.
+  const requested = searchParams.get("tab");
+  const tab = requested === "chains" && isAdmin ? "chains" : "apps";
+  const tabs = isAdmin
+    ? [
+        { key: "apps", label: "Apps" },
+        { key: "chains", label: "Chains" },
+      ]
+    : [{ key: "apps", label: "Apps" }];
 
-      {status === "checking" && <p className="mt-8 text-sm text-neutral-500">Checking session…</p>}
+  const onTab = useCallback(
+    (key: string) => {
+      router.replace(`${pathname}?tab=${key}`, { scroll: false });
+    },
+    [router, pathname],
+  );
 
-      {status === "anonymous" && (
+  if (status === "checking") {
+    return (
+      <main className="mx-auto w-full max-w-3xl px-5 py-16">
+        <p className="mt-8 text-sm text-neutral-500">Checking session…</p>
+      </main>
+    );
+  }
+
+  if (status === "anonymous") {
+    return (
+      <main className="mx-auto w-full max-w-3xl px-5 py-16">
+        <p className="text-xs font-medium uppercase tracking-widest text-neutral-500">PeridotID for developers</p>
+        <h1 className="mt-2 text-3xl font-bold">Workspace</h1>
         <section className="mt-8 rounded-2xl border border-neutral-200 p-6">
           <h2 className="text-lg font-semibold">Sign in to manage your apps</h2>
           <p className="mt-1 text-sm text-neutral-500">
@@ -96,9 +143,16 @@ export default function WorkspacePage() {
             </button>
           </div>
         </section>
-      )}
+      </main>
+    );
+  }
 
-      {status === "owner" && <AppsManager client={client} />}
-    </main>
+  return (
+    <>
+      <Topbar tabs={tabs} active={tab} onTab={onTab} sessionLabel={identityId} isAdmin={isAdmin} />
+      <main className="mx-auto w-full max-w-3xl px-5 pb-16 pt-8">
+        {tab === "chains" ? <ChainsManager client={client} /> : <AppsManager client={client} />}
+      </main>
+    </>
   );
 }

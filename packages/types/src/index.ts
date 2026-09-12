@@ -1,9 +1,72 @@
 export type IdentityStatus = "active" | "suspended" | "deleted";
 
+export type Role = "user" | "admin";
+
 export interface Identity {
   id: string;
   status: IdentityStatus;
+  role?: Role;
   createdAt: string;
+}
+
+export interface ChainContract {
+  id: string;
+  chainId: string;
+  type: string;
+  address: string;
+  versionLabel: string | null;
+  deployTxHash: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Chain {
+  id: string;
+  namespace: string;
+  reference: string;
+  name: string;
+  nativeSymbol: string;
+  decimals: number;
+  rpcUrls: string[];
+  explorerUrl: string | null;
+  logoUrl: string | null;
+  isTestnet: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  contracts?: ChainContract[];
+}
+
+export interface CreateChainInput {
+  namespace: "solana" | "eip155";
+  reference: string;
+  name: string;
+  nativeSymbol: string;
+  decimals?: number;
+  rpcUrls?: string[];
+  explorerUrl?: string;
+  logoUrl?: string;
+  isTestnet?: boolean;
+}
+
+export interface UpdateChainInput {
+  name?: string;
+  nativeSymbol?: string;
+  decimals?: number;
+  rpcUrls?: string[];
+  explorerUrl?: string;
+  logoUrl?: string;
+  isTestnet?: boolean;
+  isActive?: boolean;
+}
+
+export interface UpsertContractInput {
+  type: "factory" | "account_implementation" | "verifier" | "paymaster";
+  address: string;
+  versionLabel?: string;
+  deployTxHash?: string;
+  isActive?: boolean;
 }
 
 export interface Profile {

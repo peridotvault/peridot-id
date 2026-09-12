@@ -6,10 +6,10 @@ import { PrismaService } from "../prisma/prisma.service";
 export class IdentityService {
   constructor(private readonly prisma: PrismaService) {}
 
-  getMe(identityId: string): Promise<Pick<Identity, "id" | "status" | "createdAt">> {
+  getMe(identityId: string): Promise<Pick<Identity, "id" | "status" | "role" | "createdAt">> {
     return this.prisma.identity.findUniqueOrThrow({
       where: { id: identityId },
-      select: { id: true, status: true, createdAt: true },
+      select: { id: true, status: true, role: true, createdAt: true },
     });
   }
 

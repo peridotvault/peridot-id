@@ -89,6 +89,31 @@ class Cbor {
   }
 }
 
+/** Parse a COSE EC2 (ES256) key into its raw 32-byte x/y coordinates. */
+export function coseToRawXy(cose: Buffer): { x: Buffer; y: Buffer } {
+  const c = new Cbor(cose);
+  const pairs = c.readMapLength();
+  let x: Buffer | null = null;
+  let y: Buffer | null = null;
+  for (let i = 0; i < pairs; i++) {
+    const key = c.readInt();
+    if (key === -1) {
+      if (c.readInt() !== P256_CRV) throw new CoseError("cose: not P-256");
+    } else if (key === KEY_X) {
+      x = c.readBytes();
+    } else if (key === KEY_Y) {
+      y = c.readBytes();
+    } else {
+      const { major, value } = c.readHeader();
+      c.skipValue(major, value);
+    }
+  }
+  if (!x || !y || x.length !== 32 || y.length !== 32) {
+    throw new CoseError("cose: missing x/y");
+  }
+  return { x, y };
+}
+
 /**
  * Convert a COSE EC2 (ES256) public key to the 33-byte compressed secp256r1 form
  * `[0x02 | (y&1)] || x`. Throws on malformed input.

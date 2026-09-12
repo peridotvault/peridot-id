@@ -16,7 +16,7 @@ export class IdentityController {
 
   @Get("me")
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: AuthenticatedUser): Promise<Pick<Identity, "id" | "status" | "createdAt">> {
+  me(@CurrentUser() user: AuthenticatedUser): Promise<Pick<Identity, "id" | "status" | "role" | "createdAt">> {
     return this.identityService.getMe(user.identityId);
   }
 

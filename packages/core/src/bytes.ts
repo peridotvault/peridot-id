@@ -14,6 +14,19 @@ export function concat(...parts: (Uint8Array | number[])[]): Uint8Array {
   return out;
 }
 
+/**
+ * The 32-byte seed for a smart account: the zero-padded 16-byte UUID of a
+ * pid_accounts.id (ADR 004 §5). Lives here (not hash.ts) so web3-free consumers
+ * (EVM derivation, API tests) never pull `@solana/web3.js`.
+ */
+export function accountIdToSeed32(accountId: string): Uint8Array {
+  const hex = accountId.replace(/-/g, "");
+  if (hex.length !== 32) throw new Error(`invalid account id: ${accountId}`);
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return concat(new Uint8Array(16), bytes);
+}
+
 export function fromHex(hex: string): Uint8Array {
   const clean = hex.replace(/\s/g, "");
   if (clean.length % 2 !== 0) throw new Error("odd hex length");

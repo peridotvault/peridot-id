@@ -13,6 +13,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@noble/hashes": "1.8.0",
     "@peridotvault/pid-types": "workspace:*",
     "@solana/web3.js": "^1.98.0"
   },

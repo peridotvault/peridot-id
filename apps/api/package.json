@@ -12,7 +12,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -23,6 +24,8 @@
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
     "@nestjs/throttler": "^6.4.0",
+    "@peridotvault/pid-core": "workspace:*",
+    "@peridotvault/pid-evm": "workspace:*",
     "@peridotvault/pid-solana": "workspace:*",
     "@peridotvault/pid-types": "workspace:*",
     "@prisma/client": "^6.2.0",
@@ -36,7 +39,8 @@
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "ulid": "^3.0.2"
+    "ulid": "^3.0.2",
+    "viem": "^2.56.3"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

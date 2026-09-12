@@ -2,6 +2,9 @@ import type {
   ApiError,
   AuthenticateStart,
   Authority,
+  Chain,
+  ChainContract,
+  CreateChainInput,
   ExchangeResult,
   Identity,
   IdentityCredential,
@@ -9,8 +12,11 @@ import type {
   Profile,
   ProfileUpdate,
   RegisterStart,
+  Role,
   Session,
   SsoGrant,
+  UpdateChainInput,
+  UpsertContractInput,
 } from "@peridotvault/pid-types";
 import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client.js";
 import { authenticatePasskey, registerPasskey, BrowserPasskeySigner, PasskeyHostedRequiredError } from "@peridotvault/pid-core";
@@ -222,12 +228,38 @@ export class PeridotPasskey {
   }
 }
 
+/** Admin chain-registry management (role-gated server-side; hidden in UI for users). */
+export class PeridotAdmin {
+  constructor(private client: PeridotClient) {}
+
+  async chains(): Promise<Chain[] | ApiError> {
+    const res = await this.client.get<Chain[]>("/v1/admin/chains");
+    return res.data;
+  }
+
+  async createChain(input: CreateChainInput): Promise<Chain | ApiError> {
+    const res = await this.client.post<Chain>("/v1/admin/chains", input);
+    return res.data;
+  }
+
+  async updateChain(id: string, input: UpdateChainInput): Promise<Chain | ApiError> {
+    const res = await this.client.patch<Chain>(`/v1/admin/chains/${id}`, input);
+    return res.data;
+  }
+
+  async upsertContract(chainId: string, input: UpsertContractInput): Promise<ChainContract | ApiError> {
+    const res = await this.client.post<ChainContract>(`/v1/admin/chains/${chainId}/contracts`, input);
+    return res.data;
+  }
+}
+
 class PeridotClient {
   readonly auth: PeridotAuth;
   readonly identity: PeridotIdentity;
   readonly profile: PeridotProfile;
   readonly passkey: PeridotPasskey;
   readonly wallet: PeridotWallet;
+  readonly admin: PeridotAdmin;
 
   constructor(private baseUrl: string, walletOptions: PeridotWalletOptions, private onUnauthorized?: () => void) {
     this.auth = new PeridotAuth(this);
@@ -235,6 +267,7 @@ class PeridotClient {
     this.profile = new PeridotProfile(this);
     this.passkey = new PeridotPasskey(this);
     this.wallet = new PeridotWallet(this, walletOptions);
+    this.admin = new PeridotAdmin(this);
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<{ ok: boolean; data: T | ApiError }> {
@@ -282,7 +315,16 @@ class PeridotClient {
 }
 
 export { PeridotClient };
-export type { ApiError, ExchangeResult };
+export type {
+  ApiError,
+  Chain,
+  ChainContract,
+  CreateChainInput,
+  ExchangeResult,
+  Role,
+  UpdateChainInput,
+  UpsertContractInput,
+};
 export function Peridot(options: PeridotOptions): PeridotClient {
   return new PeridotClient(
     options.baseUrl,

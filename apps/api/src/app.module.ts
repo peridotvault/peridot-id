@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { ThrottlerModule } from "@nestjs/throttler";
 import { AccountModule } from "./account/account.module";
+import { AdminModule } from "./admin/admin.module";
 import { AuthModule } from "./auth/auth.module";
 import { CredentialModule } from "./credentials/credential.module";
 import { IdentityModule } from "./identity/identity.module";
@@ -24,6 +25,7 @@ import { HealthModule } from "./health/health.module";
     ProfileModule,
     WalletModule,
     AccountModule,
+    AdminModule,
     CredentialModule,
     IntentModule,
     SecurityModule,

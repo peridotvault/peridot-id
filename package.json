@@ -26,7 +26,7 @@
     "dev:api": "pnpm --filter @peridotvault/pid-api dev",
     "dev:web": "pnpm --filter @peridotvault/pid-web dev",
     "start": "pnpm -r --parallel start",
-    "postinstall": "pnpm --filter @peridotvault/pid-types --filter @peridotvault/pid-core --filter @peridotvault/pid-solana --filter @peridotvault/pid-sdk-js build",
+    "postinstall": "pnpm --filter @peridotvault/pid-types --filter @peridotvault/pid-core --filter @peridotvault/pid-solana --filter @peridotvault/pid-evm --filter @peridotvault/pid-sdk-js build",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
@@ -38,5 +38,22 @@
   },
   "devDependencies": {
     "typescript": "~5.9.0"
-  }
+  },
+  "description": "Gaming Identity Platform — Authentication, Identity, and Profile for the Peridot ecosystem. One Google sign-in, one stable identity, one profile across every Peridot product.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peridotvault/peridot-id.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/peridotvault/peridot-id/issues"
+  },
+  "homepage": "https://github.com/peridotvault/peridot-id#readme"
 }

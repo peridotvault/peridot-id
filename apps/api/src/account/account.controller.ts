@@ -4,6 +4,7 @@ import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { ActivationService, ActivationView } from "./activation.service";
 import { AccountService, AccountView, ChainAccountView } from "./account.service";
+import { EvmActivationService, EvmActivationView } from "./evm-activation.service";
 
 @Controller("v1/accounts")
 @UseGuards(ThrottlerGuard)
@@ -11,6 +12,7 @@ export class AccountController {
   constructor(
     private readonly accountService: AccountService,
     private readonly activationService: ActivationService,
+    private readonly evmActivationService: EvmActivationService,
   ) {}
 
   @Post()
@@ -51,5 +53,27 @@ export class AccountController {
   @UseGuards(JwtAuthGuard)
   activate(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<ActivationView> {
     return this.activationService.activate(user, id);
+  }
+
+  @Get(":id/evm/:chainRef/activation")
+  @UseGuards(JwtAuthGuard)
+  evmActivation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("chainRef") chainRef: string,
+  ): Promise<EvmActivationView> {
+    return this.evmActivationService.viewOf(user, id, chainRef);
+  }
+
+  @Post(":id/evm/:chainRef/activate")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  evmActivate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("chainRef") chainRef: string,
+  ): Promise<EvmActivationView> {
+    return this.evmActivationService.activate(user, id, chainRef);
   }
 }

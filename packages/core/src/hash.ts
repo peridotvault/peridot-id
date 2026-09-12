@@ -5,8 +5,10 @@
 // Browser-safe: no Buffer, no node:crypto (WebCrypto for SHA-256).
 
 import { PublicKey } from "@solana/web3.js";
-import { concat, fromAscii, sha256 as hashSha256, u64le, i64le } from "./bytes";
+import { accountIdToSeed32, concat, fromAscii, sha256 as hashSha256, u64le, i64le } from "./bytes";
 import type { Bytes } from "./bytes";
+
+export { accountIdToSeed32 };
 
 export const PID_PROGRAM_ID = new PublicKey("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
 export const SECP256R1_PRECOMPILE = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
@@ -32,18 +34,6 @@ export function sha256(data: Uint8Array): Promise<Uint8Array> {
 export async function base64url(data: Uint8Array): Promise<string> {
   const { b64url } = await import("./bytes");
   return b64url(data);
-}
-
-/**
- * The 32-byte seed for a smart account PDA: the zero-padded 16-byte UUID of a
- * pid_accounts.id (ADR 004 §5 — matches task 002's derivation).
- */
-export function accountIdToSeed32(accountId: string): Uint8Array {
-  const hex = accountId.replace(/-/g, "");
-  if (hex.length !== 32) throw new Error(`invalid account id: ${accountId}`);
-  const bytes = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return concat(new Uint8Array(16), bytes);
 }
 
 /** Derive the smart-account PDA: seeds ["peridot_id", "account", seed32]. */

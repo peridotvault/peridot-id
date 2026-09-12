@@ -49,7 +49,15 @@ function setup() {
     },
     securityEvent: { create: jest.fn(async () => ({})) },
   };
-  const service = new AccountService(prisma as never, config as never, security as never);
+  const chains = {
+    activeChains: jest.fn(async () => []),
+    deployableEvmChains: jest.fn(async () => []),
+    deploymentFor: jest.fn(async () => null),
+    chainByReference: jest.fn(async () => undefined),
+    rpcUrlForReference: jest.fn(async () => "http://localhost:8545"),
+    invalidate: jest.fn(),
+  };
+  const service = new AccountService(prisma as never, config as never, security as never, chains as never);
   return { service, prisma, config, security };
 }
 
@@ -101,6 +109,63 @@ describe("AccountService", () => {
     await service.createAccount("pid_01HASH");
 
     expect(prisma.chainAccount.create).not.toHaveBeenCalled();
+  });
+
+  it("createAccount seeds one identical EVM address per chain when the factory is configured", async () => {
+    const { deriveEvmSmartAccountAddress } = jest.requireActual("@peridotvault/pid-evm") as typeof import("@peridotvault/pid-evm");
+    const factory = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
+    const impl = "0x0000000000000000000000000000000000000001";
+    const config = {
+      getOrThrow: jest.fn(() => PROGRAM_ID),
+      get: jest.fn(() => undefined),
+    };
+    const chains = {
+      deployableEvmChains: jest.fn(async () =>
+        ["10143", "97", "421614", "84532"].map((reference) => ({
+          id: `chain-${reference}`,
+          namespace: "eip155",
+          reference,
+          name: `chain-${reference}`,
+          nativeSymbol: "T",
+          decimals: 18,
+          rpcUrls: [],
+          explorerUrl: null,
+          logoUrl: null,
+          isTestnet: true,
+          contracts: [
+            { type: "factory", address: factory, versionLabel: "v1" },
+            { type: "account_implementation", address: impl, versionLabel: "v1" },
+          ],
+        })),
+      ),
+    };
+    const security = { log: jest.fn(async () => undefined) };
+    const prisma = {
+      pidAccount: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(null as any)
+          .mockResolvedValueOnce(accountRow({ chainAccounts: [chainRow()] })),
+        findMany: jest.fn(async () => [] as any),
+        create: jest.fn(async () => accountRow()),
+      },
+      chainAccount: {
+        findFirst: jest.fn(async () => null as any),
+        create: jest.fn(async (args: { data: { address: string } }) => ({ id: "c", ...args.data })),
+        update: jest.fn(async () => ({})),
+      },
+      securityEvent: { create: jest.fn(async () => ({})) },
+    };
+    const service = new AccountService(prisma as never, config as never, security as never, chains as never);
+
+    await service.createAccount("pid_01HASH");
+
+    const expected = deriveEvmSmartAccountAddress(ACCOUNT_ID, factory, impl).address;
+    const creates = prisma.chainAccount.create.mock.calls.map((c) => (c[0] as { data: Record<string, unknown> }).data);
+    const evmCreates = creates.filter((d) => d.chainNamespace === "eip155");
+    // One row per phase-1 chain, all the same counterfactual address.
+    expect(evmCreates.map((d) => d.chainReference).sort()).toEqual(["10143", "421614", "84532", "97"]);
+    for (const row of evmCreates) expect(row.address).toBe(expected);
   });
 
   it("getAccount throws NotFound for an account that is not the PID's own", async () => {

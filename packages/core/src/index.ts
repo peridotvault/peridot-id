@@ -7,7 +7,6 @@
 // no hosts, no app flow.
 
 export {
-  accountIdToSeed32,
   buildAuthorizationPayload,
   buildWebAuthnMessage,
   buildWithdrawPayload,
@@ -20,6 +19,7 @@ export {
   sha256,
 } from "./hash";
 export {
+  accountIdToSeed32,
   asciiOf,
   b64url,
   b64urlToBytes,
@@ -43,6 +43,21 @@ export {
   registerPasskey,
 } from "./webauthn";
 export type { PasskeyAssertion, PasskeySigner } from "./webauthn";
+export {
+  accountIdToSalt32,
+  addressToBytes,
+  buildEvmAuthorizationPayload,
+  compressedToX,
+  deriveEvmSmartAccountAddress,
+  DOMAIN_EVM,
+  EVM_CHAINS,
+  getCreate2Address,
+  keccak256,
+  minimalProxyInitCode,
+  splitRawXy,
+  toChecksumAddress,
+} from "./evm";
+export type { EvmChain } from "./evm";
 export {
   FeePayerManager,
   InMemorySecretStore,
