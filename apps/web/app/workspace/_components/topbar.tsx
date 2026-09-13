@@ -10,21 +10,21 @@ export interface WorkspaceTab {
 const LOGO_CUT =
   "[clip-path:polygon(6px_0,100%_0,100%_calc(100%-6px),calc(100%-6px)_100%,0_100%,0_6px)]";
 
-/** Single-row topbar: brand left, tabs middle, session + wallet link right. No sidebar. */
+/** Single-row topbar: brand left, tabs middle, session + sign out right. No sidebar. */
 export function Topbar({
   tabs,
   active,
   onTab,
   sessionLabel,
   isAdmin,
-  walletUrl,
+  onSignOut,
 }: {
   tabs: WorkspaceTab[];
   active: string;
   onTab: (key: string) => void;
   sessionLabel: string;
   isAdmin: boolean;
-  walletUrl: string;
+  onSignOut: () => void;
 }) {
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
@@ -59,8 +59,8 @@ export function Topbar({
             )}
             {sessionLabel}
           </span>
-          <CutButton variant="outline" href={walletUrl}>
-            Go to wallet
+          <CutButton type="button" variant="outline" onClick={onSignOut}>
+            Sign Out
           </CutButton>
         </div>
       </div>

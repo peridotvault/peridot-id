@@ -8,7 +8,6 @@ import type { PeridotClient, Role } from "@peridotvault/pid-sdk-js";
 import { Topbar, type WorkspaceTab } from "./topbar";
 
 const API_BASE = process.env.NEXT_PUBLIC_PID_API_URL ?? "https://api.pid.peridotvault.com";
-const WALLET_URL = process.env.NEXT_PUBLIC_PID_WALLET_URL ?? "https://app.pid.peridotvault.com";
 
 export type WorkspaceStatus = "checking" | "anonymous" | "owner";
 
@@ -27,6 +26,7 @@ interface WorkspaceContextValue {
   error: string | null;
   signInWithGoogle: () => void;
   signInWithPasskey: () => void;
+  signOut: () => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -101,6 +101,20 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, [client, cleanReturnTo, refreshSession]);
 
+  const signOut = useCallback(async () => {
+    try {
+      await client.auth.logout();
+    } catch {
+      // Session already invalid server-side — still drop local state.
+    } finally {
+      setStatus("anonymous");
+      setRole("user");
+      setIdentityId("");
+      setError(null);
+      router.push("/workspace");
+    }
+  }, [client, router]);
+
   const isAdmin = role === "admin";
   // Tabs are routes now (?tab= retired): active state follows the pathname.
   const tab =
@@ -123,7 +137,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const onTab = useCallback(
     (key: string) => {
-      router.push(key === "apps" ? "/workspace/apps" : `/workspace/${key}`);
+      router.push(key === "apps" ? "/workspace" : `/workspace/${key}`);
     },
     [router],
   );
@@ -153,8 +167,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       error,
       signInWithGoogle,
       signInWithPasskey,
+      signOut,
     }),
-    [client, status, role, isAdmin, identityId, tabs, tab, onTab, contractChainId, openContracts, busy, error, signInWithGoogle, signInWithPasskey],
+    [client, status, role, isAdmin, identityId, tabs, tab, onTab, contractChainId, openContracts, busy, error, signInWithGoogle, signInWithPasskey, signOut],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
@@ -162,7 +177,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 /** Layout-owned topbar fed from context (hidden until an owner session exists). */
 export function WorkspaceTopbar() {
-  const { status, tabs, tab, onTab, identityId, isAdmin } = useWorkspace();
+  const { status, tabs, tab, onTab, identityId, isAdmin, signOut } = useWorkspace();
   if (status !== "owner") return null;
   return (
     <Topbar
@@ -171,7 +186,7 @@ export function WorkspaceTopbar() {
       onTab={onTab}
       sessionLabel={identityId}
       isAdmin={isAdmin}
-      walletUrl={WALLET_URL}
+      onSignOut={() => void signOut()}
     />
   );
 }
