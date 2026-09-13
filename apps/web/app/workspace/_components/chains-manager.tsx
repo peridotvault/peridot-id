@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Chain, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
+import { Card, DIVIDER, ERROR, FIELD, MUTED, SECTION_TITLE, MiniButton } from "./ui";
+import { CutButton } from "@/components/landing/cut-button";
 
 const CONTRACT_TYPES = ["factory", "account_implementation", "verifier", "paymaster"] as const;
 
@@ -25,13 +27,13 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
 
   return (
     <section className="mt-8">
-      <h2 className="text-lg font-semibold">Chains</h2>
-      <p className="mt-1 text-sm text-neutral-500">
+      <h2 className={SECTION_TITLE}>Chains</h2>
+      <p className={`mt-1 text-sm ${MUTED}`}>
         What the wallet renders and activation uses. Deactivating hides a chain everywhere.
       </p>
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
       {loading ? (
-        <p className="mt-4 text-sm text-neutral-500">Loading…</p>
+        <p className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
       ) : (
         <div className="mt-4 flex flex-col gap-4">
           {chains.map((c) => (
@@ -45,7 +47,7 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
               onError={setError}
             />
           ))}
-          {chains.length === 0 && <p className="text-sm text-neutral-500">No chains registered.</p>}
+          {chains.length === 0 && <p className={`text-sm ${MUTED}`}>No chains registered.</p>}
         </div>
       )}
       <AddChainForm client={client} onChanged={load} onError={setError} />
@@ -84,53 +86,48 @@ function ChainCard({
   };
 
   return (
-    <div className={`rounded-2xl border p-4 ${chain.isActive ? "border-neutral-200" : "border-neutral-200 opacity-60"}`}>
-      <button type="button" onClick={onToggle} className="flex w-full items-center gap-3 text-left">
+    <Card className={chain.isActive ? "" : "opacity-60"}>
+      <button type="button" onClick={onToggle} className="flex w-full items-center gap-3 text-left focus-ring">
         {chain.logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={chain.logoUrl} alt="" className="h-6 w-6 rounded-full" />
         ) : (
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-200 text-[10px] font-bold">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
             {chain.nativeSymbol.slice(0, 3)}
           </span>
         )}
-        <span className="font-semibold">{chain.name}</span>
-        <span className="text-xs text-neutral-500">
+        <span className="font-semibold tracking-tight">{chain.name}</span>
+        <span className={`text-xs ${MUTED}`}>
           {chain.namespace}:{chain.reference} · {chain.nativeSymbol}
         </span>
-        {chain.isTestnet && <span className="text-[11px] text-neutral-400">testnet</span>}
-        {!chain.isActive && <span className="text-[11px] font-semibold text-red-600">disabled</span>}
-        <span className="ml-auto text-xs text-neutral-400">{expanded ? "▾" : "▸"}</span>
+        {chain.isTestnet && <span className={`text-[11px] ${MUTED}`}>testnet</span>}
+        {!chain.isActive && <span className={`text-[11px] font-semibold ${ERROR}`}>disabled</span>}
+        <span className={`ml-auto text-xs ${MUTED}`}>{expanded ? "▾" : "▸"}</span>
       </button>
 
       {expanded && (
-        <div className="mt-3 border-t border-neutral-100 pt-3">
+        <div className={`mt-3 pt-3 ${DIVIDER}`}>
           <div className="flex flex-col gap-2">
             {(chain.contracts ?? []).map((k) => (
               <div key={k.type} className="flex items-center gap-2 font-mono text-xs">
                 <span className="w-44 shrink-0 font-sans font-medium">{k.type}</span>
                 <span className="truncate">{k.address}</span>
-                {!k.isActive && <span className="font-sans text-red-600">disabled</span>}
+                {!k.isActive && <span className={`font-sans ${ERROR}`}>disabled</span>}
               </div>
             ))}
             {(chain.contracts ?? []).length === 0 && (
-              <p className="text-sm text-neutral-500">No contracts yet — set the factory below to enable this chain.</p>
+              <p className={`text-sm ${MUTED}`}>No contracts yet — set the factory below to enable this chain.</p>
             )}
           </div>
           <ContractForm client={client} chainId={chain.id} onChanged={onChanged} onError={onError} />
           <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setActive(!chain.isActive)}
-              className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-60"
-            >
+            <MiniButton size="sm" disabled={busy} onClick={() => setActive(!chain.isActive)}>
               {chain.isActive ? "Disable chain" : "Enable chain"}
-            </button>
+            </MiniButton>
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -170,10 +167,10 @@ function ContractForm({
   };
 
   return (
-    <div className="mt-3 flex flex-col gap-2 rounded-xl bg-neutral-50 p-3 sm:flex-row sm:items-end">
+    <div className="mt-3 flex flex-col gap-2 rounded-xl bg-muted p-3 sm:flex-row sm:items-end">
       <label className="text-sm">
         Type
-        <select value={type} onChange={(e) => setType(e.target.value)} className="mt-1 block rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm">
+        <select value={type} onChange={(e) => setType(e.target.value)} className={`${FIELD} block`}>
           {CONTRACT_TYPES.map((t) => (
             <option key={t} value={t}>
               {t}
@@ -188,17 +185,17 @@ function ContractForm({
           onChange={(e) => setAddress(e.target.value)}
           placeholder="0x…"
           spellCheck={false}
-          className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-1.5 font-mono text-sm"
+          className={`${FIELD} font-mono`}
         />
       </label>
-      <button
+      <CutButton
         type="button"
         onClick={save}
         disabled={busy}
-        className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        className={busy ? "pointer-events-none opacity-60" : ""}
       >
         {busy ? "Saving…" : "Set contract"}
-      </button>
+      </CutButton>
     </div>
   );
 }
@@ -240,31 +237,31 @@ function AddChainForm({
   };
 
   return (
-    <div className="mt-8 rounded-2xl border border-neutral-200 p-6">
-      <h3 className="font-semibold">Register a new EVM chain</h3>
-      <p className="mt-1 text-sm text-neutral-500">Metadata and RPCs are editable after — set its factory contract next.</p>
+    <Card className="mt-8">
+      <h3 className="font-semibold tracking-tight">Register a new EVM chain</h3>
+      <p className={`mt-1 text-sm ${MUTED}`}>Metadata and RPCs are editable after — set its factory contract next.</p>
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
         <label className="text-sm">
           Name
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Base Sepolia" maxLength={64} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Base Sepolia" maxLength={64} className={FIELD} />
         </label>
         <label className="text-sm">
           Chain id
-          <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="84532" maxLength={16} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+          <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="84532" maxLength={16} className={FIELD} />
         </label>
         <label className="text-sm">
           Native symbol
-          <input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="ETH" maxLength={12} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+          <input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="ETH" maxLength={12} className={FIELD} />
         </label>
       </div>
-      <button
+      <CutButton
         type="button"
         onClick={create}
         disabled={busy}
-        className="mt-3 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        className={`mt-3 ${busy ? "pointer-events-none opacity-60" : ""}`}
       >
         {busy ? "Adding…" : "Add chain"}
-      </button>
-    </div>
+      </CutButton>
+    </Card>
   );
 }

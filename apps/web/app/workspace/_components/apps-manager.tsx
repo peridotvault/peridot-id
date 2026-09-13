@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { AppCard, type PidApp } from "./app-card";
 import { unwrap } from "./api";
+import { Card, ERROR, FIELD, MUTED, SECTION_TITLE } from "./ui";
+import { CutButton } from "@/components/landing/cut-button";
 
 export function AppsManager({ client }: { client: PeridotClient }) {
   const [apps, setApps] = useState<PidApp[]>([]);
@@ -42,22 +44,22 @@ export function AppsManager({ client }: { client: PeridotClient }) {
 
   return (
     <section className="mt-8">
-      <h2 className="text-lg font-semibold">Your apps</h2>
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      <h2 className={SECTION_TITLE}>Your apps</h2>
+      {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
       {loading ? (
-        <p className="mt-4 text-sm text-neutral-500">Loading…</p>
+        <p className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
       ) : (
         <div className="mt-4 flex flex-col gap-4">
           {apps.map((app) => (
             <AppCard key={app.id} client={client} app={app} onChanged={load} />
           ))}
-          {apps.length === 0 && <p className="text-sm text-neutral-500">No apps yet — register your first below.</p>}
+          {apps.length === 0 && <p className={`text-sm ${MUTED}`}>No apps yet — register your first below.</p>}
         </div>
       )}
 
-      <div className="mt-8 rounded-2xl border border-neutral-200 p-6">
-        <h3 className="font-semibold">Register a new app</h3>
-        <p className="mt-1 text-sm text-neutral-500">
+      <Card className="mt-8">
+        <h3 className="font-semibold tracking-tight">Register a new app</h3>
+        <p className={`mt-1 text-sm ${MUTED}`}>
           Just a name for now — allowed origins are managed on the app card after.
         </p>
         <label className="mt-3 block text-sm">
@@ -67,18 +69,18 @@ export function AppsManager({ client }: { client: PeridotClient }) {
             onChange={(e) => setName(e.target.value)}
             placeholder="My Game"
             maxLength={60}
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            className={FIELD}
           />
         </label>
-        <button
+        <CutButton
           type="button"
           onClick={create}
           disabled={creating}
-          className="mt-3 rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className={`mt-3 ${creating ? "pointer-events-none opacity-60" : ""}`}
         >
           {creating ? "Registering…" : "Register app"}
-        </button>
-      </div>
+        </CutButton>
+      </Card>
     </section>
   );
 }

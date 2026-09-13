@@ -35,6 +35,7 @@ export function baseOptions(): BaseLayoutProps {
       },
       { url: '/docs', text: 'Docs', active: 'nested-url' },
       { url: '/docs/api', text: 'API Reference', active: 'nested-url' },
+      { type: 'button', url: '/workspace', text: 'Login', secondary: true },
     ],
   };
 }

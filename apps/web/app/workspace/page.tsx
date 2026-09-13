@@ -7,13 +7,16 @@ import type { PeridotClient, Role } from "@peridotvault/pid-sdk-js";
 import { AppsManager } from "./_components/apps-manager";
 import { ChainsManager } from "./_components/chains-manager";
 import { Topbar } from "./_components/topbar";
+import { Card, ERROR, EYEBROW, MUTED } from "./_components/ui";
+import { CutButton } from "@/components/landing/cut-button";
 
 const API_BASE = process.env.NEXT_PUBLIC_PID_API_URL ?? "https://api.pid.peridotvault.com";
+const WALLET_URL = process.env.NEXT_PUBLIC_PID_WALLET_URL ?? "https://app.pid.peridotvault.com";
 
 /** Session gate: logged-out visitors get the login section, owners get the dashboard. */
 export default function WorkspacePage() {
   return (
-    <Suspense fallback={<p className="mx-auto w-full max-w-3xl px-5 py-16 text-sm text-neutral-500">Loading…</p>}>
+    <Suspense fallback={<p className={`mx-auto w-full max-w-7xl px-5 py-16 text-sm sm:px-8 ${MUTED}`}>Loading…</p>}>
       <Workspace />
     </Suspense>
   );
@@ -107,50 +110,53 @@ function Workspace() {
 
   if (status === "checking") {
     return (
-      <main className="mx-auto w-full max-w-3xl px-5 py-16">
-        <p className="mt-8 text-sm text-neutral-500">Checking session…</p>
+      <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+        <p className={`mt-8 text-sm ${MUTED}`}>Checking session…</p>
       </main>
     );
   }
 
   if (status === "anonymous") {
     return (
-      <main className="mx-auto w-full max-w-3xl px-5 py-16">
-        <p className="text-xs font-medium uppercase tracking-widest text-neutral-500">PeridotID for developers</p>
-        <h1 className="mt-2 text-3xl font-bold">Workspace</h1>
-        <section className="mt-8 rounded-2xl border border-neutral-200 p-6">
-          <h2 className="text-lg font-semibold">Sign in to manage your apps</h2>
-          <p className="mt-1 text-sm text-neutral-500">
+      <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+        <p className={EYEBROW}>PeridotID for developers</p>
+        <h1 className="mt-2 font-serif text-4xl font-normal leading-[1.12] tracking-[-0.01em] sm:text-5xl">
+          Workspace
+        </h1>
+        <Card className="mt-8">
+          <h2 className="text-lg font-semibold tracking-tight">Sign in to manage your apps</h2>
+          <p className={`mt-1 text-sm ${MUTED}`}>
             Register <code>client_id</code>s, edit redirect URIs, and generate backend secrets.
           </p>
-          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {error && <p className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <button
+            <CutButton
               type="button"
               onClick={signInWithGoogle}
               disabled={busy}
-              className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              className={busy ? "pointer-events-none opacity-60" : ""}
             >
               Continue with Google
-            </button>
-            <button
+            </CutButton>
+            <CutButton
               type="button"
+              variant="outline"
               onClick={signInWithPasskey}
               disabled={busy}
-              className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-semibold disabled:opacity-60"
+              className={busy ? "pointer-events-none opacity-60" : ""}
             >
               {busy ? "Waiting…" : "Continue with Passkey"}
-            </button>
+            </CutButton>
           </div>
-        </section>
+        </Card>
       </main>
     );
   }
 
   return (
     <>
-      <Topbar tabs={tabs} active={tab} onTab={onTab} sessionLabel={identityId} isAdmin={isAdmin} />
-      <main className="mx-auto w-full max-w-3xl px-5 pb-16 pt-8">
+      <Topbar tabs={tabs} active={tab} onTab={onTab} sessionLabel={identityId} isAdmin={isAdmin} walletUrl={WALLET_URL} />
+      <main className="mx-auto w-full max-w-7xl px-5 pb-16 pt-8 sm:px-8">
         {tab === "chains" ? <ChainsManager client={client} /> : <AppsManager client={client} />}
       </main>
     </>
