@@ -49,8 +49,7 @@ export const FIELD =
   "mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-ring";
 
 /** Section eyebrow + titles, landing hierarchy. */
-export const EYEBROW = "text-sm font-medium text-muted-foreground";
-export const SECTION_TITLE = "text-lg font-semibold tracking-tight";
+export const EYEBROW_UPPER = "text-xs font-medium uppercase tracking-widest text-muted-foreground";
 export const SECTION_LABEL = "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
 
 /** Muted copy + errors, readable on both themes. */

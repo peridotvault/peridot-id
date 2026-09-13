@@ -8,7 +8,7 @@ import { useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import type { AsciiRidgesProps } from "@/components/landing/ascii-ridges";
 
-// three.js rides an async chunk so hero copy paints with zero GL tax.
+// Raw-WebGL ridges ride an async chunk so hero copy paints with zero GL tax.
 // Cast: repo resolves two @types/react copies; identical at runtime.
 const AsciiRidges = dynamic(
   () =>
@@ -20,7 +20,7 @@ const AsciiRidges = dynamic(
 
 function useIsMounted(): boolean {
   return useSyncExternalStore(
-    () => () => {},
+    () => () => { },
     () => true,
     () => false
   );
@@ -35,7 +35,7 @@ export function HeroWaves(): ReactNode {
 
   const color = resolvedTheme === "dark" ? "#87ee83" : "#349b65";
   const isDark = resolvedTheme === "dark";
-  const targetOpacity = isDark ? 1 : 0.85;
+  const targetOpacity = isDark ? 0.3 : 0.4;
   const fade =
     "linear-gradient(to bottom, transparent 0%, black 25%, black 80%, transparent 100%)";
 
@@ -58,9 +58,11 @@ export function HeroWaves(): ReactNode {
     >
       <AsciiRidges
         color={color}
-        elementSize={10}
-        exposure={0.3}
-        gain={2}
+        elementSize={14}
+        layers={8}
+        detail={3}
+        exposure={0.6}
+        gain={3}
         opacity={0.9}
         hasCursorInteraction={true}
         className="opacity-80 dark:opacity-90"

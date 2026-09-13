@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { AppCard, type PidApp } from "./app-card";
 import { unwrap } from "./api";
-import { Card, ERROR, FIELD, MUTED, SECTION_TITLE } from "./ui";
+import { Card, ERROR, FIELD, MUTED } from "./ui";
+import { PageHeader } from "./page-header";
 import { CutButton } from "@/components/landing/cut-button";
 
 export function AppsManager({ client }: { client: PeridotClient }) {
@@ -44,7 +45,11 @@ export function AppsManager({ client }: { client: PeridotClient }) {
 
   return (
     <section className="mt-8">
-      <h2 className={SECTION_TITLE}>Your apps</h2>
+      <PageHeader
+        eyebrow="App management"
+        title="Apps"
+        description="Register client IDs, manage allowed origins, and rotate backend secrets."
+      />
       {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
       {loading ? (
         <p className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
