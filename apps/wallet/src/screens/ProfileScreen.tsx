@@ -37,9 +37,7 @@ export function ProfileScreen({
           <Image source={{ uri: profile.avatarUrl }} style={styles.thumb} />
         ) : (
           <View style={[styles.thumb, styles.thumbFallback]}>
-            <Text style={styles.thumbText}>
-              {(profile?.displayName ?? profile?.username ?? "?").slice(0, 1).toUpperCase()}
-            </Text>
+            <Text style={styles.thumbText}>{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
           </View>
         )}
         <Text style={styles.rowLabel}>Edit Profile</Text>

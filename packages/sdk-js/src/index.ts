@@ -47,13 +47,19 @@ export class PeridotAuth {
    * Begin Google OAuth. Optional `returnTo` (an allowlisted cross-origin) redirects back
    * there with a one-time `pid_code` for SSO (see `exchange`). Pass `clientId` when
    * logging in on behalf of a registered third-party app (binds the code to the app).
+   * First-time users MUST pass `handle`: it becomes the permanent `<handle>@pid`
+   * (never changeable, reused, or reassigned). Ignored on returning logins.
    * Resolves true when the browser leaves for Google, false when the login URL
    * could not be obtained (caller stays put and shows an error).
    */
-  async login(opts?: { returnTo?: string; clientId?: string }): Promise<boolean> {
+  async login(opts?: { returnTo?: string; clientId?: string; handle?: string }): Promise<boolean> {
     const body =
-      opts?.returnTo || opts?.clientId
-        ? { ...(opts.returnTo ? { returnTo: opts.returnTo } : {}), ...(opts.clientId ? { clientId: opts.clientId } : {}) }
+      opts?.returnTo || opts?.clientId || opts?.handle
+        ? {
+            ...(opts.returnTo ? { returnTo: opts.returnTo } : {}),
+            ...(opts.clientId ? { clientId: opts.clientId } : {}),
+            ...(opts.handle ? { handle: opts.handle } : {}),
+          }
         : undefined;
     const res = await this.client.post<LoginResponse>("/v1/auth/login", body);
     if (!res.ok) return false;
@@ -121,6 +127,14 @@ export class PeridotAuth {
 
   async logout(): Promise<void> {
     await this.client.post("/v1/auth/logout");
+  }
+
+  /** Check whether a PID handle is free (`ifal` → `ifal@pid`). */
+  async pidAvailable(handle: string): Promise<{ available: boolean; pid: string | null }> {
+    const res = await this.client.get<{ available: boolean; pid: string | null }>(
+      `/v1/auth/pid/available?handle=${encodeURIComponent(handle)}`,
+    );
+    return res.data as { available: boolean; pid: string | null };
   }
 
   async refresh(): Promise<true | "step-up" | false> {

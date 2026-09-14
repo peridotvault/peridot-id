@@ -71,6 +71,11 @@ paths:
         For cross-origin SSO, pass `returnTo` (must be allowlisted, or registered to
         your app via `clientId`) — the callback then redirects to
         `returnTo?pid_code=...` with a one-time exchange code instead of the wallet.
+
+        First-time users MUST also pass `handle`: it becomes the permanent
+        `<handle>@pid` identity (e.g. `ifal@pid`) — user-chosen, immutable, never
+        reused or reassigned. Check availability first with
+        `GET /auth/pid/available?handle=...`. Returning logins ignore it.
       requestBody:
         required: false
         content:
@@ -85,12 +90,20 @@ paths:
                 clientId:
                   type: string
                   description: Registered app id (binds the pid_code to your app)
+                handle:
+                  type: string
+                  pattern: "^[a-z0-9_]{3,20}$"
+                  description: PID handle for first-time sign-up (becomes <handle>@pid, permanent)
             examples:
               sso:
                 summary: Third-party SSO login
                 value:
                   returnTo: "https://mygame.dev/callback"
                   clientId: "pidapp_0123456789abcdef0123456789abcdef"
+              signup:
+                summary: First-time sign-up with a chosen PID
+                value:
+                  handle: "ifal"
       responses:
         "200":
           description: Google authorization URL
@@ -102,6 +115,44 @@ paths:
                 url: "http://localhost:3301/v1/auth/google"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/pid/available:
+    get:
+      tags: [auth]
+      summary: Check PID handle availability
+      description: |
+        Returns whether `handle` is free (`<handle>@pid`). Used by the onboarding
+        handle picker before starting Google sign-up. Handles are lowercase
+        `^[a-z0-9_]{3,20}$`; the full PID is `<handle>@pid` — permanent, never
+        changeable, reused, or reassigned.
+      parameters:
+        - name: handle
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z0-9_]{3,20}$"
+      responses:
+        "200":
+          description: Availability result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available:
+                    type: boolean
+                  pid:
+                    type: string
+                    nullable: true
+                    description: The full PID when available
+                    example: "ifal@pid"
+              example:
+                available: true
+                pid: "ifal@pid"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -130,8 +181,10 @@ paths:
       description: |
         Handles the redirect back from Google. On success it:
 
-        1. Creates a new identity + profile on first sign-in, or logs into the existing
-           identity when the Google credential `(provider, providerUserId)` is already linked.
+        1. Creates a new identity + profile on first sign-in from the user-chosen
+           `handle` (the permanent `<handle>@pid` — required for new users, ignored
+           for returning ones), or logs into the existing identity when the Google
+           credential `(provider, providerUserId)` is already linked.
         2. Issues `pid_access` and `pid_refresh` cookies.
         3. Redirects to the `CLIENT_SUCCESS_URL` configured on the server.
 
@@ -407,8 +460,9 @@ paths:
       tags: [identity]
       summary: Get the current identity
       description: |
-        Returns the identity of the authenticated user. The identity ID (`pid_...`) is
-        stable forever — it never changes, regardless of which credentials the user links,
+        Returns the identity of the authenticated user. The identity ID (`<handle>@pid`,
+        e.g. `ifal@pid`) is permanent — user-chosen once at onboarding, never changed,
+        reused, or reassigned, regardless of which credentials the user links,
         unlinks, or how the profile is updated.
       security:
         - cookieAuth: []
@@ -420,7 +474,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Identity"
               example:
-                id: "pid_01K4Y4DWMK7YSH8X4JQY9M4T6P"
+                pid: "ifal@pid"
                 status: "active"
                 createdAt: "2026-08-03T13:30:00.000Z"
         "401":
@@ -500,9 +554,10 @@ paths:
       tags: [profile]
       summary: Update the current profile
       description: |
-        Updates one or more profile fields. Only provided fields are changed. Usernames are
-        lowercased and must match `^[a-z0-9_]{3,20}$`; a `409` is returned when the username
-        is already taken.
+        Updates one or more mutable profile fields (display name, avatar, locale).
+        Only provided fields are changed. The PID (`<handle>@pid`) is immutable and
+        is never updated here — there is no endpoint that changes, reuses, or
+        reassigns it.
       security:
         - cookieAuth: []
       requestBody:
@@ -512,10 +567,6 @@ paths:
             schema:
               $ref: "#/components/schemas/ProfileUpdate"
             examples:
-              set-username:
-                summary: Claim a username
-                value:
-                  username: "ranaufal"
               set-display-name:
                 summary: Set a display name and locale
                 value:
@@ -536,15 +587,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "409":
-          description: Username already taken
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-              example:
-                statusCode: 409
-                message: "username sudah dipakai"
 
   /wallet/me:
     get:
@@ -1003,7 +1045,7 @@ components:
             $ref: "#/components/schemas/ApiError"
           example:
             statusCode: 400
-            message: ["username harus 3-20 karakter: huruf kecil, angka, underscore"]
+            message: ["handle must be 3-20 chars: lowercase letters, numbers, underscore"]
     MinOneCredential:
       description: Cannot unlink the identity's only login credential
       content:
@@ -1064,12 +1106,18 @@ components:
 
     ExchangeResult:
       type: object
-      required: [identityId, profile, credentials]
+      required: [pid, identityId, profile, credentials]
       properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+          description: Permanent PID of the signed-in user (treat as opaque)
+          example: "ifal@pid"
         identityId:
           type: string
-          description: Stable PID of the signed-in user
-          example: "pid_01K4Y4DWMK7YSH8X4JQY9M4T6P"
+          deprecated: true
+          description: Shim — identical to pid, removed next release
+          example: "ifal@pid"
         profile:
           type: object
           properties:
@@ -1129,12 +1177,13 @@ components:
 
     Identity:
       type: object
-      required: [id, status, createdAt]
+      required: [pid, status, createdAt]
       properties:
-        id:
+        pid:
           type: string
-          description: "Stable PID for this user across all Peridot products. Never changes."
-          example: "pid_01K4Y4DWMK7YSH8X4JQY9M4T6P"
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+          description: "Permanent PID (`<handle>@pid`) for this user across the Antigane ecosystem. User-chosen once, never changes, never reused or reassigned."
+          example: "ifal@pid"
         status:
           type: string
           enum: [active, suspended, deleted]
@@ -1168,23 +1217,12 @@ components:
 
     Profile:
       type: object
-      required: [id, identityId, createdAt, updatedAt]
+      required: [pid, createdAt, updatedAt]
       properties:
-        id:
+        pid:
           type: string
-          format: uuid
-        identityId:
-          type: string
-          description: "The owning identity PID"
-        username:
-          type: string
-          nullable: true
-          pattern: "^[a-z0-9_]{3,20}$"
-          description: "Lowercase, digits and underscore only"
-        usernameChangedAt:
-          type: string
-          format: date-time
-          nullable: true
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+          description: "Shared PK with Identity — the PID itself (permanent, immutable)"
         displayName:
           type: string
           nullable: true
@@ -1207,10 +1245,6 @@ components:
     ProfileUpdate:
       type: object
       properties:
-        username:
-          type: string
-          pattern: "^[a-z0-9_]{3,20}$"
-          description: "Lowercase, digits and underscore only. Send only to change."
         displayName:
           type: string
           nullable: true

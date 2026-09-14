@@ -15,14 +15,14 @@ export class PidAppsController {
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreatePidAppDto) {
-    return this.apps.create(user.identityId, dto.name, dto.allowedOrigins ?? []);
+    return this.apps.create(user.pid, dto.name, dto.allowedOrigins ?? []);
   }
 
   /** List my registered apps. */
   @Get()
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   list(@CurrentUser() user: AuthenticatedUser) {
-    return this.apps.list(user.identityId);
+    return this.apps.list(user.pid);
   }
 
   /** Rename, change redirect URIs, or disable one of my apps. */
@@ -34,7 +34,7 @@ export class PidAppsController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: UpdatePidAppDto,
   ) {
-    return this.apps.update(user.identityId, id, dto);
+    return this.apps.update(user.pid, id, dto);
   }
 
   /**
@@ -45,6 +45,6 @@ export class PidAppsController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   rotateSecret(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string) {
-    return this.apps.rotateSecret(user.identityId, id);
+    return this.apps.rotateSecret(user.pid, id);
   }
 }

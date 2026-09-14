@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, TextInput, View } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { usePeridot } from "../AppContext";
 import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
@@ -14,6 +14,10 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sso] = useState(readSsoParams);
+  // New-user PID claim: the handle becomes the permanent `<handle>@pid`
+  // identity (never changeable, reused, or reassigned).
+  const [handle, setHandle] = useState("");
+  const [handleStatus, setHandleStatus] = useState<"idle" | "checking" | "free" | "taken" | "invalid">("idle");
   // Existing wallet session, if any (SSO mode only): offers one-tap Allow instead
   // of forcing a redundant login. undefined = still checking, null = none.
   const [session, setSession] = useState<{ label: string } | null | undefined>(sso ? undefined : null);
@@ -38,7 +42,7 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
         const label =
           typeof profile === "object" && profile !== null && !("statusCode" in profile) && profile.displayName
             ? profile.displayName
-            : (me as { id: string }).id;
+            : (me as { pid: string }).pid;
         if (!cancelled) setSession({ label });
       } catch {
         if (!cancelled) setSession(null);
@@ -48,6 +52,35 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
       cancelled = true;
     };
   }, [sso, peridot]);
+
+  /** Live availability check for the PID claim input (server is source of truth). */
+  useEffect(() => {
+    const h = handle.trim().toLowerCase();
+    if (!h) {
+      setHandleStatus("idle");
+      return;
+    }
+    if (!/^[a-z0-9_]{3,20}$/.test(h)) {
+      setHandleStatus("invalid");
+      return;
+    }
+    let cancelled = false;
+    setHandleStatus("checking");
+    const t = setTimeout(() => {
+      peridot.auth
+        .pidAvailable(h)
+        .then((res) => {
+          if (!cancelled) setHandleStatus(res.available ? "free" : "taken");
+        })
+        .catch(() => {
+          if (!cancelled) setHandleStatus("idle");
+        });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [handle, peridot]);
 
   /** In SSO mode, leave this page: the app exchanges the code for its own session. */
   const finishSso = (pidCode: string | undefined) => {
@@ -78,7 +111,7 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     }
   };
 
-  const continueWithGoogle = async () => {
+  const continueWithGoogle = async (claimHandle?: string) => {
     setBusy(true);
     setError(null);
     try {
@@ -95,8 +128,11 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
           ? {
               ...(sso.redirectUri ? { returnTo: sso.redirectUri } : {}),
               ...(sso.clientId ? { clientId: sso.clientId } : {}),
+              ...(claimHandle ? { handle: claimHandle } : {}),
             }
-          : undefined,
+          : claimHandle
+            ? { handle: claimHandle }
+            : undefined,
       );
       if (!ok) setError("Couldn't reach Google — try again.");
     } catch (e) {
@@ -160,10 +196,40 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
           <View style={styles.stack}>
             <UIButton
               title="Continue with Google"
-              onPress={continueWithGoogle}
+              onPress={() => continueWithGoogle()}
               disabled={busy}
               icon={<FontAwesome name="google" size={16} color={theme.colors.foreground} />}
             />
+            <View style={styles.claimBox}>
+              <Text style={styles.claimTitle}>New here? Claim your permanent PID</Text>
+              <View style={styles.handleRow}>
+                <TextInput
+                  style={[s.input, styles.handleInput]}
+                  value={handle}
+                  onChangeText={(t) => setHandle(t.toLowerCase())}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="ifal"
+                  placeholderTextColor={theme.colors.mutedForeground}
+                  editable={!busy}
+                />
+                <Text style={styles.suffix}>@pid</Text>
+              </View>
+              {handleStatus === "free" && <Text style={styles.free}>✓ {handle.trim().toLowerCase()}@pid is available</Text>}
+              {handleStatus === "taken" && <Text style={s.error}>Taken — try another handle.</Text>}
+              {handleStatus === "invalid" && handle.length > 0 && (
+                <Text style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</Text>
+              )}
+              <Text style={styles.warn}>
+                Your PID is permanent — it can never be changed, reused, or reassigned. Choose carefully.
+              </Text>
+              <UIButton
+                title="Claim PID & Continue with Google"
+                onPress={() => continueWithGoogle(handle.trim().toLowerCase())}
+                disabled={busy || handleStatus !== "free"}
+                variant="primary"
+              />
+            </View>
             <UIButton
               title="Continue with Apple"
               note="Coming soon"
@@ -206,6 +272,13 @@ const styles = StyleSheet.create({
   middle: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 20 },
   masthead: { alignItems: "center", gap: 8 },
   stack: { width: "100%", maxWidth: 343, gap: 12 },
+  claimBox: { gap: 8, padding: 12, borderWidth: 1, borderColor: theme.colors.border },
+  claimTitle: { fontSize: 13, color: theme.colors.foreground, fontFamily: "Geist_400Regular" },
+  handleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  handleInput: { flex: 1 },
+  suffix: { fontSize: 15, color: theme.colors.foreground, fontFamily: "Geist_400Regular" },
+  free: { fontSize: 12, color: theme.colors.success ?? theme.colors.foreground, fontFamily: "Geist_400Regular" },
+  warn: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
   orRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   hairline: { flex: 1, height: 1, backgroundColor: theme.colors.border },
   orText: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },

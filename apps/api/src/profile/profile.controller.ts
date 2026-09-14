@@ -12,12 +12,12 @@ export class ProfileController {
   @Get("me")
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthenticatedUser): Promise<Profile> {
-    return this.profileService.getMe(user.identityId);
+    return this.profileService.getMe(user.pid);
   }
 
   @Patch()
   @UseGuards(JwtAuthGuard)
   update(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateProfileDto): Promise<Profile> {
-    return this.profileService.update(user.identityId, dto);
+    return this.profileService.update(user.pid, dto);
   }
 }

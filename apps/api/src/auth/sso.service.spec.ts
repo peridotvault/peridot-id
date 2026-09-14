@@ -1,5 +1,7 @@
 import { decodeState, encodeState, isLoopbackReturnTo, SsoService } from "./sso.service";
 import { PidAppsService } from "./apps.service";
+import { mockSecurity } from "../../test/factories";
+
 
 function setup(apps?: { findActive: (clientId: string) => Promise<Record<string, unknown> | null> }) {
   const config = {
@@ -10,14 +12,14 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
       return values[key] ?? def;
     }),
   };
-  const security = { log: jest.fn(async () => undefined) };
+  const security = mockSecurity();
   const rows = new Map<string, Record<string, unknown>>();
   const grants = new Map<string, Record<string, unknown>>();
-  const grantKey = (identityId: string, origin: string) => `${identityId}|${origin}`;
+  const grantKey = (pid: string, origin: string) => `${pid}|${origin}`;
   const prisma = {
     ssoCode: {
       create: jest.fn(
-        async ({ data }: { data: { code: string; identityId: string; redirectTo: string; clientId?: string | null; expiresAt: Date } }) => {
+        async ({ data }: { data: { code: string; pid: string; redirectTo: string; clientId?: string | null; expiresAt: Date } }) => {
           rows.set(data.code, { id: data.code, clientId: null, ...data, consumedAt: null });
           return rows.get(data.code);
         },
@@ -41,11 +43,11 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
           create,
           update,
         }: {
-          where: { identityId_origin: { identityId: string; origin: string } };
+          where: { pid_origin: { pid: string; origin: string } };
           create: Record<string, unknown>;
           update: Record<string, unknown>;
         }) => {
-          const key = grantKey(where.identityId_origin.identityId, where.identityId_origin.origin);
+          const key = grantKey(where.pid_origin.pid, where.pid_origin.origin);
           const existing = grants.get(key);
           if (existing) {
             Object.assign(existing, update);
@@ -64,19 +66,19 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
         },
       ),
       findUnique: jest.fn(
-        async ({ where }: { where: { identityId_origin: { identityId: string; origin: string } } }) =>
-          grants.get(grantKey(where.identityId_origin.identityId, where.identityId_origin.origin)) ?? null,
+        async ({ where }: { where: { pid_origin: { pid: string; origin: string } } }) =>
+          grants.get(grantKey(where.pid_origin.pid, where.pid_origin.origin)) ?? null,
       ),
-      findMany: jest.fn(async ({ where }: { where: { identityId: string; revokedAt: null } }) =>
+      findMany: jest.fn(async ({ where }: { where: { pid: string; revokedAt: null } }) =>
         [...grants.values()]
-          .filter((g) => g.identityId === where.identityId && (where.revokedAt === null ? g.revokedAt === null : true))
+          .filter((g) => g.pid === where.pid && (where.revokedAt === null ? g.revokedAt === null : true))
           .sort((a, b) => (b.lastUsedAt as Date).getTime() - (a.lastUsedAt as Date).getTime()),
       ),
       updateMany: jest.fn(
-        async ({ where, data }: { where: { id: string; identityId: string }; data: Record<string, unknown> }) => {
+        async ({ where, data }: { where: { id: string; pid: string }; data: Record<string, unknown> }) => {
           let count = 0;
           for (const g of grants.values()) {
-            if (g.id === where.id && g.identityId === where.identityId) {
+            if (g.id === where.id && g.pid === where.pid) {
               Object.assign(g, data);
               count++;
             }
@@ -111,7 +113,7 @@ describe("SsoService", () => {
     expect(code).toMatch(/^[A-Za-z0-9_-]{20,}$/);
 
     const identity = await service.consume(code);
-    expect(identity.identityId).toBe("pid_1");
+    expect(identity.pid).toBe("pid_1");
     expect(identity.profile.displayName).toBe("Peridot");
     expect(identity.credentials[0].email).toBe("a@b.com");
   });
@@ -128,10 +130,12 @@ describe("SsoService", () => {
     await expect(service.consume("missing-code-000000000000")).rejects.toThrow("sso_code_invalid");
   });
 
-  it("round-trips returnTo (+ clientId) through the opaque Google state", () => {
+  it("round-trips returnTo (+ clientId/handle) through the opaque Google state", () => {
     expect(decodeState(encodeState("https://live2dev.com"))).toEqual({ returnTo: "https://live2dev.com" });
     const withApp = encodeState("https://mygame.dev/callback", "pidapp_abc");
     expect(decodeState(withApp)).toEqual({ returnTo: "https://mygame.dev/callback", clientId: "pidapp_abc" });
+    const withHandle = encodeState("https://mygame.dev/callback", undefined, "ifal");
+    expect(decodeState(withHandle)).toEqual({ returnTo: "https://mygame.dev/callback", handle: "ifal" });
     // legacy plain returnTo states keep working
     expect(decodeState("https://live2dev.com")).toEqual({ returnTo: "https://live2dev.com" });
   });
@@ -193,7 +197,7 @@ describe("SsoService", () => {
   it("binds issued codes to the app: exchange requires the same client_id", async () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await expect(service.consume(code, "pidapp_abc")).resolves.toMatchObject({ identityId: "pid_1" });
+    await expect(service.consume(code, "pidapp_abc")).resolves.toMatchObject({ pid: "pid_1" });
 
     const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
     await expect(service.consume(code2, "pidapp_other")).rejects.toThrow("sso_code_invalid");
@@ -265,7 +269,7 @@ describe("SsoService", () => {
     };
     const { service } = setup({ findActive: async () => withSecret });
     const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await expect(service.consume(code, "pidapp_abc", secret)).resolves.toMatchObject({ identityId: "pid_1" });
+    await expect(service.consume(code, "pidapp_abc", secret)).resolves.toMatchObject({ pid: "pid_1" });
 
     const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
     await expect(service.consume(code2, "pidapp_abc", "wrong-secret")).rejects.toThrow("sso_code_invalid");

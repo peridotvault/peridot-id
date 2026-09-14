@@ -24,20 +24,20 @@ function token(sub: string, extra: Record<string, unknown> = {}) {
 describe("Account authorization & abuse cases (routes)", () => {
   let app: INestApplication;
   let storage: ThrottlerStorage;
-  let state: { identities: Map<string, string>; accounts: Map<string, { id: string; identityId: string }> };
+  let state: { identities: Map<string, string>; accounts: Map<string, { id: string; pid: string }> };
 
   beforeAll(async () => {
     state = { identities: new Map(), accounts: new Map() };
     const prisma = {
       identity: {
-        findUnique: jest.fn(async ({ where }: { where: { id: string } }) => {
-          const status = state.identities.get(where.id);
+        findUnique: jest.fn(async ({ where }: { where: { pid: string } }) => {
+          const status = state.identities.get(where.pid);
           return status ? { status } : null;
         }),
       },
       pidAccount: {
-        findFirst: jest.fn(async ({ where, include }: { where: { id?: string; identityId: string; status?: string }; include?: { chainAccounts: object } }) => {
-          const row = [...state.accounts.values()].find((a) => a.identityId === where.identityId && (!where.id || a.id === where.id));
+        findFirst: jest.fn(async ({ where, include }: { where: { id?: string; pid: string; status?: string }; include?: { chainAccounts: object } }) => {
+          const row = [...state.accounts.values()].find((a) => a.pid === where.pid && (!where.id || a.id === where.id));
           if (!row) return null;
           return {
             ...row,
@@ -45,12 +45,12 @@ describe("Account authorization & abuse cases (routes)", () => {
             version: 1,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            ...(include ? { chainAccounts: [{ id: `chain-${row.id}`, accountId: row.id, chainNamespace: "solana", chainReference: "ref", address: `addr-${row.id}`, accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] } : {}),
+            ...(include ? { chainAccounts: [{ id: `chain-${row.id}`, accountId: row.id, chainId: "chain-sol", chain: { namespace: "solana", reference: "ref" }, address: `addr-${row.id}`, accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] } : {}),
           };
         }),
         findMany: jest.fn(async () => []),
-        create: jest.fn(async ({ data }: { data: { identityId: string } }) => {
-          const row = { id: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", identityId: data.identityId };
+        create: jest.fn(async ({ data }: { data: { pid: string } }) => {
+          const row = { id: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", pid: data.pid };
           state.accounts.set(row.id, row);
           return { ...row, status: "active", version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
         }),
@@ -60,14 +60,17 @@ describe("Account authorization & abuse cases (routes)", () => {
         create: jest.fn(async () => ({
           id: "chain-x",
           accountId: "acc-x",
-          chainNamespace: "solana",
-          chainReference: "ref",
+          chainId: "chain-sol",
+          chain: { namespace: "solana", reference: "ref" },
           address: "addr-x",
           accountType: "smart_account",
           status: "active",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         })),
+      },
+      chain: {
+        findUnique: jest.fn(async () => ({ id: "chain-sol" })),
       },
       securityEvent: { create: jest.fn(async () => ({})) },
     };
@@ -95,6 +98,7 @@ describe("Account authorization & abuse cases (routes)", () => {
             deploymentFor: jest.fn(async () => null),
             chainByReference: jest.fn(async () => undefined),
             rpcUrlForReference: jest.fn(async () => "http://localhost:8545"),
+            solanaChainIdOrThrow: jest.fn(async () => "chain-sol"),
             invalidate: jest.fn(),
           },
         },
@@ -138,13 +142,13 @@ describe("Account authorization & abuse cases (routes)", () => {
     expect(res.body.id).toBe("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
     expect(res.body.chainAccounts).toHaveLength(1);
     expect(res.body.chainAccounts[0].accountType).toBe("smart_account");
-    expect(res.body).not.toHaveProperty("identityId");
+    expect(res.body).not.toHaveProperty("pid");
   });
 
   it("GET /v1/accounts/:id never returns another PID's account (no IDOR)", async () => {
     state.identities.set("pid_a", "active");
     state.identities.set("pid_b", "active");
-    state.accounts.set("11111111-1111-4111-8111-111111111111", { id: "11111111-1111-4111-8111-111111111111", identityId: "pid_a" });
+    state.accounts.set("11111111-1111-4111-8111-111111111111", { id: "11111111-1111-4111-8111-111111111111", pid: "pid_a" });
     const tB = await token("pid_b");
 
     await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111").set("Cookie", `pid_access=${tB}`).expect(404);
@@ -166,7 +170,7 @@ describe("Account authorization & abuse cases (routes)", () => {
 
   it("GET /v1/accounts/:id/chains is ownership-checked too", async () => {
     state.identities.set("pid_b", "active");
-    state.accounts.set("11111111-1111-4111-8111-111111111111", { id: "11111111-1111-4111-8111-111111111111", identityId: "pid_a" });
+    state.accounts.set("11111111-1111-4111-8111-111111111111", { id: "11111111-1111-4111-8111-111111111111", pid: "pid_a" });
     const tB = await token("pid_b");
 
     await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111/chains").set("Cookie", `pid_access=${tB}`).expect(404);

@@ -1,13 +1,15 @@
 import { NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { WalletService } from "./wallet.service";
+import { minimalChainsStub } from "../../test/factories";
+
 
 const LINKED = "linked_address";
 
-function accountRow(identityId: string, withLinked: boolean, address: string) {
+function accountRow(pid: string, withLinked: boolean, address: string) {
   return {
-    id: `acc-${identityId}`,
-    identityId,
+    id: `acc-${pid}`,
+    pid,
     status: "active",
     version: 1,
     createdAt: new Date(),
@@ -15,10 +17,10 @@ function accountRow(identityId: string, withLinked: boolean, address: string) {
     chainAccounts: withLinked
       ? [
           {
-            id: `w-${identityId}`,
-            accountId: `acc-${identityId}`,
-            chainNamespace: "solana",
-            chainReference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z",
+            id: `w-${pid}`,
+            accountId: `acc-${pid}`,
+            chainId: "chain-sol",
+            chain: { namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" },
             address,
             accountType: LINKED,
             status: "active",
@@ -35,9 +37,9 @@ function prismaMock() {
     pidAccount: {
       findFirst: jest.fn(async () => null),
       create: jest.fn(
-        async (args: { data: { identityId: string } }) => ({
-          id: `acc-${args.data.identityId}`,
-          identityId: args.data.identityId,
+        async (args: { data: { pid: string } }) => ({
+          id: `acc-${args.data.pid}`,
+          pid: args.data.pid,
           status: "active",
           version: 1,
           createdAt: new Date(),
@@ -49,15 +51,19 @@ function prismaMock() {
       findFirst: jest.fn(async () => null),
       create: jest.fn(
         async (args: {
-          data: { accountId: string; chainNamespace: string; chainReference: string; address: string; accountType: string };
+          data: { accountId: string; chainId: string; address: string; accountType: string };
         }) => ({
           id: "wallet-1",
           ...args.data,
+          chain: { namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" },
           status: "active",
           createdAt: new Date(),
           updatedAt: new Date(),
         }),
       ),
+    },
+    chain: {
+      findUnique: jest.fn(async () => ({ id: "chain-sol" })),
     },
   };
   return mocks as any;
@@ -65,8 +71,9 @@ function prismaMock() {
 
 function setup() {
   const prisma = prismaMock();
-  const service = new WalletService(prisma as never);
-  return { service, prisma };
+  const chains = minimalChainsStub();
+  const service = new WalletService(prisma as never, chains as never);
+  return { service, prisma, chains };
 }
 
 describe("WalletService", () => {
@@ -85,7 +92,7 @@ describe("WalletService", () => {
     });
     expect(prisma.pidAccount.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { identityId: "pid_01HASH", status: "active" },
+        where: { pid: "pid_01HASH", status: "active" },
       }),
     );
   });
@@ -102,14 +109,13 @@ describe("WalletService", () => {
     const wallet = await service.create("pid_01HASH", "addr-solana");
 
     expect(prisma.pidAccount.create).toHaveBeenCalledWith({
-      data: { identityId: "pid_01HASH" },
+      data: { pid: "pid_01HASH" },
     });
     expect(prisma.chainAccount.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
           accountId: "acc-pid_01HASH",
-          chainNamespace: "solana",
-          chainReference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z",
+          chainId: "chain-sol",
           address: "addr-solana",
           accountType: LINKED,
         },

@@ -6,8 +6,8 @@ function setup(identity: { role: string; status: string } | null) {
   return new AdminGuard(prisma as never);
 }
 
-function ctx(identityId?: string) {
-  return { switchToHttp: () => ({ getRequest: () => ({ user: identityId ? { identityId } : undefined }) }) } as never;
+function ctx(pid?: string) {
+  return { switchToHttp: () => ({ getRequest: () => ({ user: pid ? { pid } : undefined }) }) } as never;
 }
 
 describe("AdminGuard", () => {

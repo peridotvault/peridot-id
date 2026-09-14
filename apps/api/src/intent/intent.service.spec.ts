@@ -1,5 +1,7 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { IntentService } from "./intent.service";
+import { mockSecurity } from "../../test/factories";
+
 
 const ACCOUNT_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
 const SMART_ADDR = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
@@ -7,13 +9,13 @@ const SMART_ADDR = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
 function accountRow() {
   return {
     id: ACCOUNT_ID,
-    identityId: "pid_01HASH",
+    pid: "pid_01HASH",
     status: "active",
     version: 1,
     createdAt: new Date(),
     updatedAt: new Date(),
     chainAccounts: [
-      { id: "chain-1", accountId: ACCOUNT_ID, chainNamespace: "solana", chainReference: "ref", address: SMART_ADDR, accountType: "smart_account", status: "active", createdAt: new Date(), updatedAt: new Date() },
+      { id: "chain-1", accountId: ACCOUNT_ID, chainId: "chain-sol", chain: { namespace: "solana", reference: "ref" }, address: SMART_ADDR, accountType: "smart_account", status: "active", createdAt: new Date(), updatedAt: new Date() },
     ],
   };
 }
@@ -48,7 +50,7 @@ function txRow(overrides: Partial<Record<string, unknown>> = {}) {
 
 function setup() {
   const config = { get: jest.fn((key: string) => (key === "SOLANA_NETWORK" ? "devnet" : undefined)) };
-  const security = { log: jest.fn(async () => undefined) };
+  const security = mockSecurity();
   const prisma = {
     pidAccount: { findFirst: jest.fn(async () => null as any) },
     authority: { count: jest.fn(async () => 1) },
@@ -211,7 +213,7 @@ describe("IntentService", () => {
     expect(views).toHaveLength(1);
     expect(prisma.transaction.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { account: { identityId: "pid_01HASH" } },
+        where: { account: { pid: "pid_01HASH" } },
         orderBy: { createdAt: "desc" },
       }),
     );

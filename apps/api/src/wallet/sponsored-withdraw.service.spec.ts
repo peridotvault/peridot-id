@@ -1,14 +1,13 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { SponsoredWithdrawService } from "./sponsored-withdraw.service";
+import { mockSecurity, solanaRelayerConfig, COSE_HEX, TREASURY } from "../../test/factories";
+
 
 const ACCOUNT_ID = "50997bcf-f3e3-406b-bc77-7108593ef5cb";
 const IDENTITY_ID = "pid_01HASH";
 const SMART_ADDR = "CNostmskLqp9bRX2StVVQ7cTJymAgNRweH1UxMsJQib7";
 const RELAYER = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
-const TREASURY = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
 const DEST = "DeSt1111111111111111111111111111111111111";
-const COSE_HEX =
-  "a5010203262001215820c728cac553ac9c7e6741694959adfbc1b5466df7071c8ea40fa05782c9628b8422582074d2fa89ce2b706497759bb98da015280bb379675f3476a378a6ce8a220ba639";
 
 class MockPublicKey {
   constructor(public readonly addr: string) {}
@@ -44,23 +43,13 @@ jest.mock("@peridotvault/pid-solana", () => ({
 }));
 
 function setup() {
-  const config = {
-    get: jest.fn((key: string, def?: unknown) => {
-      const values: Record<string, unknown> = { PID_SOLANA_RPC_URL: "https://api.devnet.solana.com", PID_ACTIVATION_MARGIN_RATE: "0.5" };
-      return values[key] ?? def;
-    }),
-    getOrThrow: jest.fn((key: string) => {
-      if (key === "PID_RELAYER_SECRET") return "11".repeat(32);
-      if (key === "PID_TREASURY_PUBKEY") return TREASURY;
-      throw new Error(`Missing config: ${key}`);
-    }),
-  };
-  const security = { log: jest.fn(async () => undefined) };
+  const config = solanaRelayerConfig();
+  const security = mockSecurity();
   const prisma = {
     pidAccount: {
       findFirst: jest.fn(async () => ({
         id: ACCOUNT_ID,
-        identityId: IDENTITY_ID,
+        pid: IDENTITY_ID,
         status: "active",
         chainAccounts: [
           { id: "chain-1", accountId: ACCOUNT_ID, accountType: "smart_account", address: SMART_ADDR, ...{} },

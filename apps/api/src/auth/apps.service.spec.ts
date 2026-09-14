@@ -10,9 +10,9 @@ function setup() {
         return row;
       }),
       findMany: jest.fn(async () => [...rows.values()]),
-      findFirst: jest.fn(async ({ where }: { where: { id: string; ownerId: string } }) => {
+      findFirst: jest.fn(async ({ where }: { where: { id: string; ownerPid: string } }) => {
         const row = rows.get(where.id);
-        return row && row.ownerId === where.ownerId ? row : null;
+        return row && row.ownerPid === where.ownerPid ? row : null;
       }),
       findUnique: jest.fn(async ({ where }: { where: { clientId: string } }) =>
         [...rows.values()].find((r) => r.clientId === where.clientId) ?? null,
@@ -53,7 +53,7 @@ describe("PidAppsService", () => {
     const { service } = setup();
     const app = await service.create("pid_owner", "My Game");
     expect(app.clientId).toMatch(/^pidapp_[0-9a-f]{32}$/);
-    expect(app).toMatchObject({ ownerId: "pid_owner", allowedOrigins: [], isActive: true });
+    expect(app).toMatchObject({ ownerPid: "pid_owner", allowedOrigins: [], isActive: true });
   });
 
   it("creates with initial origins, deduped and normalized", async () => {

@@ -1,12 +1,11 @@
-import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { randomUUID } from "crypto";
 import { Request, Response } from "express";
 import ms from "ms";
 import { clearAuthCookies, REFRESH_COOKIE, setAuthCookies } from "../common/cookies";
-import { newPid } from "../common/pid";
-import { generateUsername } from "../common/username";
+import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface AccessTokenPayload {
@@ -44,7 +43,13 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {}
 
-  async upsertGoogleIdentity(googleProfile: GoogleProfile) {
+  /**
+   * Google sign-in. Existing credential → reuse its identity (handle ignored).
+   * New credential → the caller MUST supply a user-chosen `handle`; it becomes
+   * the permanent `<handle>@pid` identity. Never auto-generated, never changed,
+   * never reused after delete (deleted rows keep their PK reserved).
+   */
+  async upsertGoogleIdentity(googleProfile: GoogleProfile, handle?: string) {
     const providerId = googleProfile.id;
     const existing = await this.prisma.identityCredential.findUnique({
       where: { provider_providerUserId: { provider: "google", providerUserId: providerId } },
@@ -65,14 +70,21 @@ export class AuthService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const username = await generateUsername(tx, googleProfile.displayName);
+      const normalized = normalizePidHandle(handle ?? "");
+      if (!isPidHandle(normalized)) {
+        throw new BadRequestException(
+          "Choose your permanent PID handle: 3-20 chars, lowercase letters, numbers, underscore. It can never be changed.",
+        );
+      }
+      const pid = toPid(normalized);
+      const taken = await tx.identity.findUnique({ where: { pid }, select: { pid: true } });
+      if (taken) throw new ConflictException("PID already taken");
       const identity = await tx.identity.create({
-        data: { id: newPid(), status: "active" },
+        data: { pid, status: "active" },
       });
       await tx.profile.create({
         data: {
-          identityId: identity.id,
-          username,
+          pid: identity.pid,
           displayName: googleProfile.displayName ?? null,
           avatarUrl: googleProfile.photos?.[0]?.value ?? null,
         },
@@ -82,7 +94,7 @@ export class AuthService {
           provider: "google",
           providerUserId: providerId,
           email,
-          identityId: identity.id,
+          pid: identity.pid,
           lastLoginAt: new Date(),
         },
       });
@@ -90,9 +102,18 @@ export class AuthService {
     });
   }
 
+  /** Public availability check for the onboarding handle picker. */
+  async isPidAvailable(handle: string): Promise<{ available: boolean; pid: string | null }> {
+    const normalized = normalizePidHandle(handle ?? "");
+    if (!isPidHandle(normalized)) return { available: false, pid: null };
+    const pid = toPid(normalized);
+    const taken = await this.prisma.identity.findUnique({ where: { pid }, select: { pid: true } });
+    return taken ? { available: false, pid: null } : { available: true, pid };
+  }
+
   async issueSession(
     res: Response,
-    identityId: string,
+    pid: string,
     userAgent: string | undefined,
     rotatedFrom?: string,
     authMethod?: "google" | "passkey",
@@ -101,12 +122,12 @@ export class AuthService {
     const refreshTtl = this.config.get<string>("REFRESH_TOKEN_TTL", "30d");
 
     const accessToken = await this.jwt.signAsync(
-      { sub: identityId, type: "access" },
+      { sub: pid, type: "access" },
       { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: accessTtl },
     );
     const jti = randomUUID();
     const refreshToken = await this.jwt.signAsync(
-      { sub: identityId, jti, type: "refresh" },
+      { sub: pid, jti, type: "refresh" },
       { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"), expiresIn: refreshTtl },
     );
 
@@ -118,7 +139,7 @@ export class AuthService {
       await this.prisma.device.update({ where: { id: deviceId }, data: { lastSeenAt: new Date() } });
     } else {
       const device = await this.prisma.device.create({
-        data: { identityId, userAgent: userAgent ?? null, authMethod: authMethod ?? null },
+        data: { pid, userAgent: userAgent ?? null, authMethod: authMethod ?? null },
       });
       deviceId = device.id;
     }
@@ -190,11 +211,11 @@ export class AuthService {
   }
 
   /** Active sessions for an identity, joined to their device (newest first). */
-  async listSessions(identityId: string, currentJti: string | null): Promise<
+  async listSessions(pid: string, currentJti: string | null): Promise<
     { id: string; userAgent: string | null; lastSeenAt: Date; createdAt: Date; expiresAt: Date; isCurrent: boolean }[]
   > {
     const sessions = await this.prisma.session.findMany({
-      where: { device: { identityId }, revokedAt: null, expiresAt: { gt: new Date() } },
+      where: { device: { pid }, revokedAt: null, expiresAt: { gt: new Date() } },
       include: { device: true },
       orderBy: { createdAt: "desc" },
     });
@@ -209,17 +230,17 @@ export class AuthService {
   }
 
   /** Revoke every other active session (current refresh jti kept). */
-  async revokeOtherSessions(identityId: string, currentJti: string | null): Promise<void> {
+  async revokeOtherSessions(pid: string, currentJti: string | null): Promise<void> {
     await this.prisma.session.updateMany({
-      where: { device: { identityId }, revokedAt: null, ...(currentJti ? { id: { not: currentJti } } : {}) },
+      where: { device: { pid }, revokedAt: null, ...(currentJti ? { id: { not: currentJti } } : {}) },
       data: { revokedAt: new Date() },
     });
   }
 
   /** Revoke a single session owned by the identity. */
-  async revokeSession(identityId: string, sessionId: string): Promise<void> {
+  async revokeSession(pid: string, sessionId: string): Promise<void> {
     await this.prisma.session.updateMany({
-      where: { id: sessionId, device: { identityId } },
+      where: { id: sessionId, device: { pid } },
       data: { revokedAt: new Date() },
     });
   }

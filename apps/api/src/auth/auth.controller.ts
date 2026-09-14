@@ -37,15 +37,27 @@ export class AuthController {
   async login(@Req() req: Request, @Body() dto: LoginDto): Promise<LoginResponse> {
     const base = `${req.protocol}://${req.get("host")}`;
     let url = `${base}/v1/auth/google`;
+    const params = new URLSearchParams();
     if (dto.returnTo) {
       const resolved = await this.ssoService.resolveReturnTo(dto.returnTo, dto.clientId);
       if (!resolved) {
         throw new BadRequestException("returnTo is not an allowed origin");
       }
-      // state round-trips through Google: carries returnTo (+ clientId when present)
-      url += `?returnTo=${encodeURIComponent(encodeState(resolved.redirectTo, resolved.clientId))}`;
+      // state round-trips through Google: carries returnTo (+ clientId/handle when present)
+      params.set("returnTo", encodeState(resolved.redirectTo, resolved.clientId, dto.handle));
+    } else if (dto.handle) {
+      params.set("handle", dto.handle);
     }
+    const qs = params.toString();
+    if (qs) url += `?${qs}`;
     return { url };
+  }
+
+  @Get("pid/available")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async pidAvailable(@Req() req: Request): Promise<{ available: boolean; pid: string | null }> {
+    const handle = typeof req.query.handle === "string" ? req.query.handle : "";
+    return this.authService.isPidAvailable(handle);
   }
 
   @Post("passkey/start")
@@ -63,17 +75,17 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
     @Body() dto: AuthenticateFinishDto,
   ): Promise<{ ok: true; pidCode?: string }> {
-    const { identityId } = await this.credentialService.loginFinish({
+    const { pid } = await this.credentialService.loginFinish({
       authenticationId: dto.authenticationId,
       credential: dto.credential as never,
     });
-    await this.authService.issueSession(res, identityId, req.headers["user-agent"], undefined, "passkey");
+    await this.authService.issueSession(res, pid, req.headers["user-agent"], undefined, "passkey");
     if (dto.returnTo) {
       const resolved = await this.ssoService.resolveReturnTo(dto.returnTo, dto.clientId);
       if (!resolved) {
         throw new BadRequestException("returnTo is not an allowed origin");
       }
-      const pidCode = await this.ssoService.issue(identityId, resolved.redirectTo, { clientId: resolved.clientId });
+      const pidCode = await this.ssoService.issue(pid, resolved.redirectTo, { clientId: resolved.clientId });
       return { ok: true, pidCode };
     }
     return { ok: true };
@@ -110,10 +122,10 @@ export class AuthController {
     }
     // One-tap consent is not re-consent: a revoked origin needs a fresh full
     // login (which heals the grant at exchange). Full-login paths bypass this.
-    if (await this.ssoService.isRevoked(user.identityId, resolved.redirectTo)) {
+    if (await this.ssoService.isRevoked(user.pid, resolved.redirectTo)) {
       throw new BadRequestException("App connection revoked — sign in again from the site to reconnect.");
     }
-    const pidCode = await this.ssoService.issue(user.identityId, resolved.redirectTo, { clientId: resolved.clientId });
+    const pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, { clientId: resolved.clientId });
     return { pidCode };
   }
 
@@ -121,7 +133,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async grants(@CurrentUser() user: AuthenticatedUser) {
-    return this.ssoService.listGrants(user.identityId);
+    return this.ssoService.listGrants(user.pid);
   }
 
   @Delete("grants/:id")
@@ -132,7 +144,7 @@ export class AuthController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("id", ParseUUIDPipe) id: string,
   ): Promise<{ ok: true }> {
-    await this.ssoService.revokeGrant(user.identityId, id);
+    await this.ssoService.revokeGrant(user.pid, id);
     return { ok: true };
   }
 
@@ -145,8 +157,8 @@ export class AuthController {
   @Get("google/callback")
   @UseGuards(GoogleGuard)
   async googleCallback(@Req() req: Request, @Res() res: Response): Promise<void> {
-    const identity = req.user as { id: string };
-    await this.authService.issueSession(res, identity.id, req.headers["user-agent"], undefined, "google");
+    const identity = req.user as { pid: string };
+    await this.authService.issueSession(res, identity.pid, req.headers["user-agent"], undefined, "google");
 
     // state is user-controlled (comes back via Google) — re-validate before trusting it.
     const rawState = typeof req.query.state === "string" ? req.query.state : undefined;
@@ -154,7 +166,7 @@ export class AuthController {
       const { returnTo, clientId } = decodeState(rawState);
       const resolved = await this.ssoService.resolveReturnTo(returnTo, clientId);
       if (resolved) {
-        const pidCode = await this.ssoService.issue(identity.id, resolved.redirectTo, { clientId: resolved.clientId });
+        const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, { clientId: resolved.clientId });
         res.redirect(withPidCode(resolved.redirectTo, pidCode));
         return;
       }
@@ -185,7 +197,7 @@ export class AuthController {
   ): Promise<unknown[]> {
     const token = (req as Request & { cookies?: Record<string, string> }).cookies?.[REFRESH_COOKIE];
     const currentJti = await this.authService.currentSessionJti(token);
-    return this.authService.listSessions(user.identityId, currentJti);
+    return this.authService.listSessions(user.pid, currentJti);
   }
 
   @Delete("sessions/revoke-others")
@@ -198,7 +210,7 @@ export class AuthController {
   ): Promise<{ ok: true }> {
     const token = (req as Request & { cookies?: Record<string, string> }).cookies?.[REFRESH_COOKIE];
     const currentJti = await this.authService.currentSessionJti(token);
-    await this.authService.revokeOtherSessions(user.identityId, currentJti);
+    await this.authService.revokeOtherSessions(user.pid, currentJti);
     return { ok: true };
   }
 
@@ -210,7 +222,7 @@ export class AuthController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("id", ParseUUIDPipe) id: string,
   ): Promise<{ ok: true }> {
-    await this.authService.revokeSession(user.identityId, id);
+    await this.authService.revokeSession(user.pid, id);
     return { ok: true };
   }
 }

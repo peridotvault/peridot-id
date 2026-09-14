@@ -15,13 +15,13 @@ export class IntentController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   createIntent(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateIntentDto): Promise<IntentView> {
-    return this.intentService.createIntent(user.identityId, { type: dto.type, payload: dto.payload as never });
+    return this.intentService.createIntent(user.pid, { type: dto.type, payload: dto.payload as never });
   }
 
   @Get("intents/:id")
   @UseGuards(JwtAuthGuard)
   getIntent(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<IntentView> {
-    return this.intentService.getIntent(user.identityId, id);
+    return this.intentService.getIntent(user.pid, id);
   }
 
   @Post("transactions/submit")
@@ -29,7 +29,7 @@ export class IntentController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   recordTransaction(@CurrentUser() user: AuthenticatedUser, @Body() dto: RecordTransactionDto): Promise<TransactionView> {
-    return this.intentService.recordTransaction(user.identityId, dto);
+    return this.intentService.recordTransaction(user.pid, dto);
   }
 
   @Post("transactions")
@@ -37,7 +37,7 @@ export class IntentController {
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   recordActivity(@CurrentUser() user: AuthenticatedUser, @Body() dto: RecordActivityDto): Promise<TransactionView> {
-    return this.intentService.recordActivity(user.identityId, {
+    return this.intentService.recordActivity(user.pid, {
       type: dto.type,
       amount: dto.amount,
       asset: dto.asset,
@@ -50,12 +50,12 @@ export class IntentController {
   @Get("transactions/:id")
   @UseGuards(JwtAuthGuard)
   getTransaction(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<TransactionView> {
-    return this.intentService.getTransaction(user.identityId, id);
+    return this.intentService.getTransaction(user.pid, id);
   }
 
   @Get("transactions")
   @UseGuards(JwtAuthGuard)
   listTransactions(@CurrentUser() user: AuthenticatedUser): Promise<TransactionView[]> {
-    return this.intentService.listTransactions(user.identityId);
+    return this.intentService.listTransactions(user.pid);
   }
 }

@@ -21,7 +21,7 @@ export class AdminController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, AdminGuard)
   createChain(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateChainDto) {
-    return this.adminService.createChain(user.identityId, dto);
+    return this.adminService.createChain(user.pid, dto);
   }
 
   @Patch("chains/:id")
@@ -32,7 +32,7 @@ export class AdminController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: UpdateChainDto,
   ) {
-    return this.adminService.updateChain(user.identityId, id, dto);
+    return this.adminService.updateChain(user.pid, id, dto);
   }
 
   @Post("chains/:id/contracts")
@@ -43,6 +43,6 @@ export class AdminController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: UpsertContractDto,
   ) {
-    return this.adminService.upsertContract(user.identityId, id, dto);
+    return this.adminService.upsertContract(user.pid, id, dto);
   }
 }

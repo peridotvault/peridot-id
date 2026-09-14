@@ -16,6 +16,8 @@ import { ConfigService } from "@nestjs/config";
 import { ChainAccount } from "@prisma/client";
 import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
+import { ACCOUNT_TYPE_SMART } from "../common/chains";
+import { activationMarginRate, relayerKeypair, solanaAdapter, solanaRpcUrl, treasuryPubkey } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -30,9 +32,6 @@ export interface SponsoredWithdrawResult {
   status: "confirmed" | "pending";
 }
 
-const ACCOUNT_TYPE_SMART = "smart_account";
-const DEFAULT_MARGIN = "0.5";
-
 @Injectable()
 export class SponsoredWithdrawService {
   private readonly logger = new Logger(SponsoredWithdrawService.name);
@@ -44,12 +43,11 @@ export class SponsoredWithdrawService {
   ) {}
 
   private rpcUrl(): string {
-    return this.config.get<string>("PID_SOLANA_RPC_URL", "https://api.devnet.solana.com");
+    return solanaRpcUrl(this.config);
   }
 
   private marginRate(): number {
-    const n = Number(this.config.get<string>("PID_ACTIVATION_MARGIN_RATE", DEFAULT_MARGIN));
-    return Number.isFinite(n) && n >= 0 ? n : Number(DEFAULT_MARGIN);
+    return activationMarginRate(this.config);
   }
 
   /** Lazy pid-solana module (keeps @solana/web3.js out of Jest's transform graph). */
@@ -59,26 +57,21 @@ export class SponsoredWithdrawService {
   }
 
   private relayer(): Keypair {
-    const { Keypair, fromHex } = this.pidSolana;
-    const secret = this.config.getOrThrow<string>("PID_RELAYER_SECRET");
-    return Keypair.fromSecretKey(fromHex(secret));
+    return relayerKeypair(this.pidSolana, this.config);
   }
 
   private treasury(): PublicKey {
-    const { PublicKey } = this.pidSolana;
-    const override = this.config.get<string>("PID_TREASURY_PUBKEY");
-    return override ? new PublicKey(override) : this.relayer().publicKey;
+    return treasuryPubkey(this.pidSolana, this.config);
   }
 
   private adapter(): SolanaAdapter {
-    const { SolanaAdapter, SolanaRpc } = this.pidSolana;
-    return new SolanaAdapter(new SolanaRpc(this.rpcUrl()));
+    return solanaAdapter(this.pidSolana, this.config);
   }
 
   /** The identity's default account + its smart-account chain row (ownership from token). */
-  private async resolveSmart(identityId: string): Promise<{ accountId: string; chain: ChainAccount }> {
+  private async resolveSmart(pid: string): Promise<{ accountId: string; chain: ChainAccount }> {
     const account = await this.prisma.pidAccount.findFirst({
-      where: { identityId, status: "active" },
+      where: { pid, status: "active" },
       include: { chainAccounts: true },
     });
     if (!account) throw new NotFoundException("Account not found");
@@ -106,9 +99,9 @@ export class SponsoredWithdrawService {
   }
 
   /** Compute the fair relay fee and share the chain time so the client signs the same expiry. */
-  async quote(identityId: string): Promise<WithdrawQuote> {
+  async quote(pid: string): Promise<WithdrawQuote> {
     const adapter = this.adapter();
-    const { chain } = await this.resolveSmart(identityId);
+    const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
     const relayFeeLamports = await this.relayFeeLamports(adapter);
     const chainTime = await adapter.chainTime();
@@ -116,7 +109,7 @@ export class SponsoredWithdrawService {
   }
 
   async withdraw(
-    identityId: string,
+    pid: string,
     dto: {
       asset: string;
       to: string;
@@ -128,7 +121,7 @@ export class SponsoredWithdrawService {
     },
   ): Promise<SponsoredWithdrawResult> {
     const adapter = this.adapter();
-    const { accountId, chain } = await this.resolveSmart(identityId);
+    const { accountId, chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
 
     // The asserting credential must be one of this account's active passkeys.
@@ -167,7 +160,7 @@ export class SponsoredWithdrawService {
     const relayerBal = await adapter.getBalanceOf(this.relayer().publicKey.toBase58());
     const feeForTx = await adapter.estimateWithdrawFee().catch(() => 5000n);
     if (relayerBal < Number(feeForTx)) {
-      await this.security.log(identityId, "withdraw.relayer_unfunded", {}, accountId);
+      await this.security.log(pid, "withdraw.relayer_unfunded", {}, accountId);
       throw new ServiceUnavailableException(
         "Peridot's fee service is briefly unavailable. No SOL was deducted from your wallet — please try again in a moment.",
       );
@@ -222,7 +215,7 @@ export class SponsoredWithdrawService {
     }
 
     const status = (await adapter.waitForConfirmation(signature, 8, 1000)) === "confirmed" ? "confirmed" : "pending";
-    await this.security.log(identityId, "withdraw.submitted", { signature, amount: amount.toString(), asset: dto.asset }, accountId);
+    await this.security.log(pid, "withdraw.submitted", { signature, amount: amount.toString(), asset: dto.asset }, accountId);
     return { signature, relayFeeLamports: relayFee.toString(), status };
   }
 }

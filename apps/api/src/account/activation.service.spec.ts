@@ -1,16 +1,13 @@
 import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { ActivationService } from "./activation.service";
+import { mockSecurity, solanaRelayerConfig, COSE_HEX, TREASURY } from "../../test/factories";
+
 
 const ACCOUNT_ID = "50997bcf-f3e3-406b-bc77-7108593ef5cb";
 const IDENTITY_ID = "pid_01HASH";
 const SMART_ADDR = "CNostmskLqp9bRX2StVVQ7cTJymAgNRweH1UxMsJQib7";
 const RELAYER = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
-const TREASURY = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
 const COST = 1592460;
-
-// A valid ES256 COSE_Key so the authority → compressed-pubkey conversion succeeds.
-const COSE_HEX =
-  "a5010203262001215820c728cac553ac9c7e6741694959adfbc1b5466df7071c8ea40fa05782c9628b8422582074d2fa89ce2b706497759bb98da015280bb379675f3476a378a6ce8a220ba639";
 
 class MockPublicKey {
   constructor(public readonly addr: string) {}
@@ -54,35 +51,24 @@ function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "chain-1",
     accountId: ACCOUNT_ID,
-    chainNamespace: "solana",
-    chainReference: "ref",
+    chainId: "chain-sol",
+    chain: { namespace: "solana", reference: "ref" },
     address: SMART_ADDR,
     accountType: "smart_account",
     status: "ready",
     createdAt: new Date(),
     updatedAt: new Date(),
-    account: { id: ACCOUNT_ID, identityId: IDENTITY_ID, status: "active" },
+    account: { id: ACCOUNT_ID, pid: IDENTITY_ID, status: "active" },
     ...overrides,
   };
 }
 
 function setup() {
-  const config = {
-    get: jest.fn((key: string, def?: unknown) => {
-      const values: Record<string, unknown> = {
-        PID_SOLANA_RPC_URL: "https://api.devnet.solana.com",
-        PID_ACTIVATION_CONFIRM_ATTEMPTS: "2",
-        PID_ACTIVATION_CONFIRM_INTERVAL_MS: "5",
-      };
-      return values[key] ?? def;
-    }),
-    getOrThrow: jest.fn((key: string) => {
-      if (key === "PID_RELAYER_SECRET") return "11".repeat(32);
-      if (key === "PID_TREASURY_PUBKEY") return TREASURY;
-      throw new Error(`Missing config: ${key}`);
-    }),
-  };
-  const security = { log: jest.fn(async () => undefined) };
+  const config = solanaRelayerConfig({
+    PID_ACTIVATION_CONFIRM_ATTEMPTS: "2",
+    PID_ACTIVATION_CONFIRM_INTERVAL_MS: "5",
+  });
+  const security = mockSecurity();
   const prisma = {
     chainAccount: {
       findFirst: jest.fn(async () => chainRow() as never),
@@ -114,7 +100,7 @@ describe("ActivationService", () => {
     // PDA becomes program-owned — flip the response so viewOf reports active.
     adapterMock.isActivated.mockImplementation(async () => adapterMock.activate.mock.calls.length > 0);
 
-    const view = await service.activate({ identityId: IDENTITY_ID }, ACCOUNT_ID);
+    const view = await service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID);
 
     expect(view.status).toBe("active");
     expect(prisma.transaction.create).toHaveBeenCalledWith(
@@ -139,7 +125,7 @@ describe("ActivationService", () => {
     const { service, prisma, security } = setup();
     relayerBalance = 0; // Peridot's float account is empty
 
-    await expect(service.activate({ identityId: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ServiceUnavailableException);
 
     expect(adapterMock.activate).not.toHaveBeenCalled();
     expect(prisma.transaction.create).not.toHaveBeenCalled();
@@ -155,7 +141,7 @@ describe("ActivationService", () => {
       const { service, prisma, security } = setup();
       adapterMock.getStatus.mockResolvedValue({ confirmed: false, signature: "sig1" } as never); // never lands
 
-      await expect(service.activate({ identityId: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ServiceUnavailableException);
+      await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ServiceUnavailableException);
 
       expect(adapterMock.activate).toHaveBeenCalled();
       expect(prisma.transaction.create).not.toHaveBeenCalled();
@@ -171,7 +157,7 @@ describe("ActivationService", () => {
     const { service, prisma, security } = setup();
     adapterMock.getStatus.mockResolvedValue({ confirmed: true, error: '{"InstructionError":0}', signature: "sig1" });
 
-    await expect(service.activate({ identityId: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ServiceUnavailableException);
 
     expect(prisma.transaction.create).not.toHaveBeenCalled();
     expect(prisma.chainAccount.update).toHaveBeenCalledWith(
@@ -184,7 +170,7 @@ describe("ActivationService", () => {
     const { service } = setup();
     userBalance = 0; // user address not funded → inactivated
 
-    await expect(service.activate({ identityId: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ConflictException);
+    await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ConflictException);
     expect(adapterMock.activate).not.toHaveBeenCalled();
   });
 
@@ -221,7 +207,7 @@ describe("ActivationService", () => {
       return isActivatedCalls >= 3; // loop(2) + final check
     });
 
-    const view = await service.activate({ identityId: IDENTITY_ID }, ACCOUNT_ID);
+    const view = await service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID);
 
     expect(view.status).toBe("active");
     expect(prisma.transaction.create).toHaveBeenCalledWith(

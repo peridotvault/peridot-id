@@ -16,7 +16,7 @@ interface WorkspaceContextValue {
   status: WorkspaceStatus;
   role: Role;
   isAdmin: boolean;
-  identityId: string;
+  pid: string;
   tabs: WorkspaceTab[];
   tab: string;
   onTab: (key: string) => void;
@@ -43,7 +43,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
   const [status, setStatus] = useState<WorkspaceStatus>("checking");
   const [role, setRole] = useState<Role>("user");
-  const [identityId, setIdentityId] = useState("");
+  const [pid, setIdentityId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -63,7 +63,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       } else {
         setStatus("owner");
         setRole(me.role ?? "user");
-        setIdentityId(me.id);
+        setIdentityId(me.pid);
       }
     } catch {
       setStatus("anonymous");
@@ -157,7 +157,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       status,
       role,
       isAdmin,
-      identityId,
+      pid,
       tabs,
       tab,
       onTab,
@@ -169,7 +169,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       signInWithPasskey,
       signOut,
     }),
-    [client, status, role, isAdmin, identityId, tabs, tab, onTab, contractChainId, openContracts, busy, error, signInWithGoogle, signInWithPasskey, signOut],
+    [client, status, role, isAdmin, pid, tabs, tab, onTab, contractChainId, openContracts, busy, error, signInWithGoogle, signInWithPasskey, signOut],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
@@ -177,14 +177,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 /** Layout-owned topbar fed from context (hidden until an owner session exists). */
 export function WorkspaceTopbar() {
-  const { status, tabs, tab, onTab, identityId, isAdmin, signOut } = useWorkspace();
+  const { status, tabs, tab, onTab, pid, isAdmin, signOut } = useWorkspace();
   if (status !== "owner") return null;
   return (
     <Topbar
       tabs={tabs}
       active={tab}
       onTab={onTab}
-      sessionLabel={identityId}
+      sessionLabel={pid}
       isAdmin={isAdmin}
       onSignOut={() => void signOut()}
     />

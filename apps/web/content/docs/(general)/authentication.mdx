@@ -31,15 +31,18 @@ Browser                    PeridotID                 Google
 ```
 
 1. Call `POST /v1/auth/login` (or use the SDK) to get the Google authorization URL.
+   First-time users pass a `handle` (check `GET /v1/auth/pid/available?handle=...`
+   first) — it becomes the permanent `<handle>@pid`. Returning users omit it.
 2. Navigate the browser to that URL. The user consents on Google.
 3. Google redirects to `GET /v1/auth/google/callback?code=...`. The API exchanges the
    code, resolves or creates the identity, and issues both session cookies.
 4. The browser lands on `CLIENT_SUCCESS_URL` with a logged-in session.
 
-On a first-time sign-in the API creates a new identity (`pid_<ULID>`), a profile
+On a first-time sign-in the API creates a new identity (`<handle>@pid`), a profile
 (pre-filled from the Google account), and a linked Google credential. On every later
 sign-in the same Google credential is found and you land back on the **same identity** —
-the PID never changes, no matter which providers you link or unlink later.
+the PID never changes, is never reused, and cannot be reassigned, no matter which
+providers you link or unlink later. **Choose the handle carefully: it is permanent.**
 
 > **Note:** `GET /v1/auth/google` and `/v1/auth/google/callback` are **browser-navigation only**.
 > They respond with `302` redirects that a `fetch()`/Swagger "Send" call cannot follow

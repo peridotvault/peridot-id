@@ -16,14 +16,14 @@ export class IdentityController {
 
   @Get("me")
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: AuthenticatedUser): Promise<Pick<Identity, "id" | "status" | "role" | "createdAt">> {
-    return this.identityService.getMe(user.identityId);
+  me(@CurrentUser() user: AuthenticatedUser): Promise<Pick<Identity, "pid" | "status" | "role" | "createdAt">> {
+    return this.identityService.getMe(user.pid);
   }
 
   @Get("credentials")
   @UseGuards(JwtAuthGuard)
   listCredentials(@CurrentUser() user: AuthenticatedUser) {
-    return this.identityService.listCredentials(user.identityId);
+    return this.identityService.listCredentials(user.pid);
   }
 
   @Delete("credentials/:id")
@@ -33,7 +33,7 @@ export class IdentityController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("id", ParseUUIDPipe) id: string,
   ): Promise<void> {
-    await this.identityService.unlinkCredential(user.identityId, id);
+    await this.identityService.unlinkCredential(user.pid, id);
   }
 
   @Delete("me")
@@ -43,7 +43,7 @@ export class IdentityController {
     @CurrentUser() user: AuthenticatedUser,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    await this.identityService.deleteAccount(user.identityId);
+    await this.identityService.deleteAccount(user.pid);
     clearAuthCookies(res, this.config);
   }
 }

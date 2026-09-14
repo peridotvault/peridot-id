@@ -1,6 +1,8 @@
 import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { AdminGuard } from "../common/admin.guard";
 import { AdminService } from "./admin.service";
+import { mockSecurity } from "../../test/factories";
+
 
 const FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
 
@@ -18,7 +20,7 @@ function setup() {
     identity: { findUnique: jest.fn(async () => ({ role: "admin", status: "active" })) },
   };
   const chains = { invalidate: jest.fn() };
-  const security = { log: jest.fn(async () => undefined) };
+  const security = mockSecurity();
   const service = new AdminService(prisma as never, chains as never, security as never);
   const guard = new AdminGuard(prisma as never);
   return { service, prisma, chains, security, guard };
@@ -73,7 +75,7 @@ describe("AdminService", () => {
   it("guards the admin surface end to end (user denied, admin allowed)", async () => {
     const { guard, prisma } = setup();
     const ctx = (id?: string) =>
-      ({ switchToHttp: () => ({ getRequest: () => ({ user: id ? { identityId: id } : undefined }) }) }) as never;
+      ({ switchToHttp: () => ({ getRequest: () => ({ user: id ? { pid: id } : undefined }) }) }) as never;
     prisma.identity.findUnique.mockResolvedValue({ role: "user", status: "active" });
     await expect(guard.canActivate(ctx("pid_user"))).rejects.toThrow(ForbiddenException);
     prisma.identity.findUnique.mockResolvedValue({ role: "admin", status: "active" });

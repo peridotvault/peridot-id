@@ -53,19 +53,19 @@ describe("IdentityService", () => {
 
   it("unlink-then-relogin: removing Google (with another credential present) keeps the wallet (PRD §3)", async () => {
     const creds = new Map([
-      ["cred-google", { id: "cred-google", identityId: "pid_01HASH", provider: "google" }],
-      ["cred-other", { id: "cred-other", identityId: "pid_01HASH", provider: "discord" }],
+      ["cred-google", { id: "cred-google", pid: "pid_01HASH", provider: "google" }],
+      ["cred-other", { id: "cred-other", pid: "pid_01HASH", provider: "discord" }],
     ]);
     const wallets = new Map([
       ["pid_01HASH", { id: "wallet-1", chain: "solana", address: "addr-1", status: "active" }],
     ]);
     const prisma = {
       identityCredential: {
-        findFirst: jest.fn(async ({ where }: { where: { id: string; identityId: string } }) =>
-          [...creds.values()].find((c) => c.id === where.id && c.identityId === where.identityId) ?? null,
+        findFirst: jest.fn(async ({ where }: { where: { id: string; pid: string } }) =>
+          [...creds.values()].find((c) => c.id === where.id && c.pid === where.pid) ?? null,
         ),
-        count: jest.fn(async ({ where }: { where: { identityId: string } }) =>
-          [...creds.values()].filter((c) => c.identityId === where.identityId).length,
+        count: jest.fn(async ({ where }: { where: { pid: string } }) =>
+          [...creds.values()].filter((c) => c.pid === where.pid).length,
         ),
         delete: jest.fn(async ({ where }: { where: { id: string } }) => {
           creds.delete(where.id);
@@ -73,7 +73,7 @@ describe("IdentityService", () => {
         }),
       },
       wallet: {
-        findUnique: jest.fn(async ({ where }: { where: { identityId: string } }) => wallets.get(where.identityId) ?? null),
+        findUnique: jest.fn(async ({ where }: { where: { pid: string } }) => wallets.get(where.pid) ?? null),
         create: jest.fn(async () => ({})),
       },
     };
@@ -83,7 +83,7 @@ describe("IdentityService", () => {
 
     expect(creds.has("cred-google")).toBe(false);
     expect(creds.has("cred-other")).toBe(true);
-    expect(await prisma.wallet.findUnique({ where: { identityId: "pid_01HASH" } })).toEqual({
+    expect(await prisma.wallet.findUnique({ where: { pid: "pid_01HASH" } })).toEqual({
       id: "wallet-1",
       chain: "solana",
       address: "addr-1",
@@ -104,7 +104,7 @@ describe("IdentityService", () => {
       identity: {
         update: jest.fn(async ({ where, data }: { where: unknown; data: unknown }) => {
           updated.push({ op: "identity.update", where, data });
-          return { id: "pid_01HASH", ...(data as Record<string, unknown>) };
+          return { pid: "pid_01HASH", ...(data as Record<string, unknown>) };
         }),
       },
     };
@@ -114,12 +114,12 @@ describe("IdentityService", () => {
 
     expect(updated).toHaveLength(2);
     expect(updated[0]).toEqual(
-      expect.objectContaining({ op: "session.updateMany", where: { device: { identityId: "pid_01HASH" } }, data: { revokedAt: expect.any(Date) } }),
+      expect.objectContaining({ op: "session.updateMany", where: { device: { pid: "pid_01HASH" } }, data: { revokedAt: expect.any(Date) } }),
     );
     expect(updated[1]).toEqual(
       expect.objectContaining({
         op: "identity.update",
-        where: { id: "pid_01HASH" },
+        where: { pid: "pid_01HASH" },
         data: expect.objectContaining({ status: "deleted", deletedAt: expect.any(Date) }),
       }),
     );

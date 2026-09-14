@@ -4,9 +4,10 @@
 // old unit-test doubles) falls back to the compiled-in chain list + env, so EVM
 // stays off until a factory is configured exactly like before.
 
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { EVM_CHAINS } from "@peridotvault/pid-core/dist/evm";
+import { SOLANA_MAINNET_REFERENCE, SOLANA_NAMESPACE } from "../common/chains";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface RegistryContract {
@@ -80,6 +81,20 @@ export class ChainRegistryService {
   async chainByReference(chainReference: string): Promise<RegistryChain | undefined> {
     const chains = await this.activeChains();
     return chains.find((c) => c.reference === chainReference);
+  }
+
+  /**
+   * Solana chain id or clean 404 — chain_accounts has a hard FK to it, so
+   * writers fail fast here (not P2003) when the registry row is missing.
+   * Fresh DBs must run db:seed first.
+   */
+  async solanaChainIdOrThrow(): Promise<string> {
+    const row = await this.prisma.chain.findUnique({
+      where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_MAINNET_REFERENCE } },
+      select: { id: true },
+    });
+    if (!row) throw new NotFoundException("Solana chain is not registered — run db:seed");
+    return row.id;
   }
 
   /** RPC URL for a reference (row URL, else shared env fallback). */

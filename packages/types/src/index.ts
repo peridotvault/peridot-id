@@ -3,7 +3,8 @@ export type IdentityStatus = "active" | "suspended" | "deleted";
 export type Role = "user" | "admin";
 
 export interface Identity {
-  id: string;
+  /** Permanent PID: `<handle>@pid`. Immutable, never reused. */
+  pid: string;
   status: IdentityStatus;
   role?: Role;
   createdAt: string;
@@ -69,11 +70,13 @@ export interface UpsertContractInput {
   isActive?: boolean;
 }
 
+/** Permanent ecosystem identity: `<handle>@pid` (e.g. `ifal@pid`).
+ *  User-chosen once, immutable, never reused or reassigned. */
+export type Pid = `${string}@pid`;
+
 export interface Profile {
-  id: string;
-  identityId: string;
-  username: string | null;
-  usernameChangedAt: string | null;
+  /** Shared PK with Identity — strict 1:1, the value IS the PID. */
+  pid: string;
   displayName: string | null;
   avatarUrl: string | null;
   locale: string | null;
@@ -82,7 +85,6 @@ export interface Profile {
 }
 
 export interface ProfileUpdate {
-  username?: string;
   displayName?: string | null;
   avatarUrl?: string | null;
   locale?: string | null;
@@ -217,6 +219,9 @@ export interface SsoGrant {
 
 /** Identity payload returned by `POST /v1/auth/exchange` for cross-origin SSO. */
 export interface ExchangeResult {
+  /** Permanent PID (`<handle>@pid`) — treat as opaque, render as-is. */
+  pid: string;
+  /** @deprecated one-release shim — identical to `pid`, removed next release. */
   identityId: string;
   profile: { displayName: string | null; avatarUrl: string | null };
   credentials: { provider: string; email: string | null }[];

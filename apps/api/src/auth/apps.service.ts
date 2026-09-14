@@ -23,20 +23,19 @@ export function normalizeOrigin(value: string): string {
 export class PidAppsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(ownerId: string, name: string, allowedOrigins: string[] = []) {
+  async create(ownerPid: string, name: string, allowedOrigins: string[] = []) {
     const clientId = `pidapp_${randomBytes(16).toString("hex")}`;
     return this.prisma.pidApp.create({
-      data: { clientId, ownerId, name, allowedOrigins: [...new Set(allowedOrigins.map(normalizeOrigin))] },
+      data: { clientId, ownerPid, name, allowedOrigins: [...new Set(allowedOrigins.map(normalizeOrigin))] },
     });
   }
 
-  async list(ownerId: string) {
-    return this.prisma.pidApp.findMany({ where: { ownerId }, orderBy: { createdAt: "desc" } });
+  async list(ownerPid: string) {
+    return this.prisma.pidApp.findMany({ where: { ownerPid }, orderBy: { createdAt: "desc" } });
   }
 
-  async update(ownerId: string, id: string, patch: { name?: string; allowedOrigins?: string[]; isActive?: boolean }) {
-    const app = await this.prisma.pidApp.findFirst({ where: { id, ownerId } });
-    if (!app) throw new NotFoundException("App not found");
+  async update(ownerPid: string, id: string, patch: { name?: string; allowedOrigins?: string[]; isActive?: boolean }) {
+    const app = await this.ownedApp(ownerPid, id);
     return this.prisma.pidApp.update({
       where: { id },
       data: {
@@ -71,13 +70,19 @@ export class PidAppsService {
     }
   }
 
+  /** Ownership strictly from the token — never a client-supplied identity. */
+  private async ownedApp(ownerPid: string, id: string) {
+    const app = await this.prisma.pidApp.findFirst({ where: { id, ownerPid } });
+    if (!app) throw new NotFoundException("App not found");
+    return app;
+  }
+
   /**
    * Generate (or rotate) an app's backend secret. Returns the plaintext ONCE — it is
    * never stored or shown again. Show `prefix` afterwards for identification.
    */
-  async rotateSecret(ownerId: string, id: string): Promise<{ secret: string; prefix: string }> {
-    const app = await this.prisma.pidApp.findFirst({ where: { id, ownerId } });
-    if (!app) throw new NotFoundException("App not found");
+  async rotateSecret(ownerPid: string, id: string): Promise<{ secret: string; prefix: string }> {
+    await this.ownedApp(ownerPid, id);
     const secret = `pidsk_${randomBytes(24).toString("hex")}`;
     const prefix = secret.slice(0, 12);
     await this.prisma.pidApp.update({

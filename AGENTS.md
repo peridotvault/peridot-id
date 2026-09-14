@@ -13,7 +13,11 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   `@peridotvault/pid-evm`, `@peridotvault/pid-openapi`, `@peridotvault/pid-web`, `@peridotvault/pid-wallet`.
 - **On-chain:** PDA seed `["peridot_id", "account", account_id]`; signed-payload domain
   `PID|SOLANA|SMART_ACCOUNT|v1`; program id `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
-- **Identity:** PID = `pid_<ULID>`; identity credentials key on `(provider, providerUserId)`.
+- **Identity:** PID = `<handle>@pid` (e.g. `ifal@pid`) — permanent Antigane-ecosystem
+  identity, user-chosen once at onboarding; immutable, never reused or reassigned.
+  Identity credentials key on `(provider, providerUserId)`. `pid` (not `peridot`) is
+  the ecosystem namespace in identifiers (cookies `pid_access`/`pid_refresh`, table
+  `pid_accounts`, env `PID_*`, codes `pid_code`/`pidapp_`/`pidsk_`).
 
 ## Environment
 

@@ -13,6 +13,8 @@ import { PidAppsService } from "./apps.service";
 const CODE_TTL_MS = 5 * 60 * 1000;
 
 export interface SsoIdentity {
+  pid: string;
+  /** @deprecated one-release shim for relying parties — identical to `pid`, removed next release. */
   identityId: string;
   profile: { displayName: string | null; avatarUrl: string | null };
   credentials: { provider: string; email: string | null }[];
@@ -64,18 +66,29 @@ export interface SsoGrantView {
   firstSeenAt: Date;
   lastUsedAt: Date;
 }
-/** Opaque Google `state` carrying returnTo (+ optional clientId). Plain returnTo strings
+/** Opaque Google `state` carrying returnTo (+ optional clientId/handle). Plain returnTo strings
  *  (pre-client_id clients like Live2Dev) decode via the fallback. */
-export function encodeState(returnTo: string, clientId?: string): string {
-  if (!clientId) return returnTo;
-  return Buffer.from(JSON.stringify({ r: returnTo, c: clientId }), "utf8").toString("base64url");
+export function encodeState(returnTo: string, clientId?: string, handle?: string): string {
+  if (!clientId && !handle) return returnTo;
+  return Buffer.from(
+    JSON.stringify({
+      r: returnTo,
+      ...(clientId ? { c: clientId } : {}),
+      ...(handle ? { h: handle } : {}),
+    }),
+    "utf8",
+  ).toString("base64url");
 }
 
-export function decodeState(state: string): { returnTo: string; clientId?: string } {
+export function decodeState(state: string): { returnTo: string; clientId?: string; handle?: string } {
   try {
-    const parsed = JSON.parse(Buffer.from(state, "base64url").toString("utf8")) as { r?: unknown; c?: unknown };
+    const parsed = JSON.parse(Buffer.from(state, "base64url").toString("utf8")) as { r?: unknown; c?: unknown; h?: unknown };
     if (typeof parsed?.r === "string") {
-      return { returnTo: parsed.r, clientId: typeof parsed.c === "string" ? parsed.c : undefined };
+      return {
+        returnTo: parsed.r,
+        clientId: typeof parsed.c === "string" ? parsed.c : undefined,
+        handle: typeof parsed.h === "string" ? parsed.h : undefined,
+      };
     }
   } catch {
     // not encoded — fall through to the legacy plain-returnTo form
@@ -145,19 +158,19 @@ export class SsoService {
   }
 
   /** Issue a single-use code bound to an identity (called right after login). */
-  async issue(identityId: string, redirectTo: string, opts?: { clientId?: string; sessionId?: string }): Promise<string> {
+  async issue(pid: string, redirectTo: string, opts?: { clientId?: string; sessionId?: string }): Promise<string> {
     const code = randomBytes(24).toString("base64url");
     await this.prisma.ssoCode.create({
       data: {
         code,
-        identityId,
+        pid,
         sessionId: opts?.sessionId ?? null,
         redirectTo,
         clientId: opts?.clientId ?? null,
         expiresAt: new Date(Date.now() + CODE_TTL_MS),
       },
     });
-    await this.security.log(identityId, "sso.code.issued", { redirectTo }, undefined);
+    await this.security.log(pid, "sso.code.issued", { redirectTo }, undefined);
     return code;
   }
 
@@ -190,8 +203,8 @@ export class SsoService {
     // revoked (see AuthController) — healing only happens here.
     const origin = grantOrigin(row.redirectTo);
     await this.prisma.ssoGrant.upsert({
-      where: { identityId_origin: { identityId: row.identityId, origin } },
-      create: { identityId: row.identityId, origin, clientId: row.clientId },
+      where: { pid_origin: { pid: row.pid, origin } },
+      create: { pid: row.pid, origin, clientId: row.clientId },
       update: {
         lastUsedAt: new Date(),
         revokedAt: null,
@@ -200,21 +213,22 @@ export class SsoService {
     });
 
     const [profile, credentials] = await Promise.all([
-      this.prisma.profile.findUnique({ where: { identityId: row.identityId } }),
-      this.prisma.identityCredential.findMany({ where: { identityId: row.identityId }, select: { provider: true, email: true } }),
+      this.prisma.profile.findUnique({ where: { pid: row.pid } }),
+      this.prisma.identityCredential.findMany({ where: { pid: row.pid }, select: { provider: true, email: true } }),
     ]);
 
-    await this.security.log(row.identityId, "sso.code.consumed", {}, undefined);
+    await this.security.log(row.pid, "sso.code.consumed", {}, undefined);
 
     return {
-      identityId: row.identityId,
+      pid: row.pid,
+      identityId: row.pid,
       profile: { displayName: profile?.displayName ?? null, avatarUrl: profile?.avatarUrl ?? null },
       credentials,
     };
   }
 
   /** True when the identity revoked this origin (one-tap authorize stays blocked). */
-  async isRevoked(identityId: string, redirectTo: string): Promise<boolean> {
+  async isRevoked(pid: string, redirectTo: string): Promise<boolean> {
     let origin: string;
     try {
       origin = grantOrigin(redirectTo);
@@ -222,15 +236,15 @@ export class SsoService {
       return false;
     }
     const grant = await this.prisma.ssoGrant.findUnique({
-      where: { identityId_origin: { identityId, origin } },
+      where: { pid_origin: { pid, origin } },
     });
     return !!grant?.revokedAt;
   }
 
   /** Active (non-revoked) app connections, most-recently-used first. */
-  async listGrants(identityId: string): Promise<SsoGrantView[]> {
+  async listGrants(pid: string): Promise<SsoGrantView[]> {
     const grants = await this.prisma.ssoGrant.findMany({
-      where: { identityId, revokedAt: null },
+      where: { pid, revokedAt: null },
       orderBy: { lastUsedAt: "desc" },
     });
     return Promise.all(
@@ -253,9 +267,9 @@ export class SsoService {
   }
 
   /** Disconnect an origin: stops future one-tap issuance (idempotent, identity-scoped). */
-  async revokeGrant(identityId: string, id: string): Promise<void> {
+  async revokeGrant(pid: string, id: string): Promise<void> {
     await this.prisma.ssoGrant.updateMany({
-      where: { id, identityId },
+      where: { id, pid },
       data: { revokedAt: new Date() },
     });
   }

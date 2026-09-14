@@ -1,6 +1,7 @@
 // One-time chain-registry bootstrap from current env/code. Safe to re-run
 // (upserts by natural key). Run: `pnpm --filter @peridotvault/pid-api db:seed`
 import { PrismaClient } from "@prisma/client";
+import { SOLANA_MAINNET_REFERENCE, SOLANA_NAMESPACE } from "../src/common/chains";
 
 const prisma = new PrismaClient();
 
@@ -12,12 +13,14 @@ const EVM = [
 ];
 
 async function main(): Promise<void> {
-  const solanaRef = process.env.SOLANA_CHAIN_REFERENCE ?? "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
+  // Same constants the account-creation path writes (common/chains.ts) — the
+  // chain_accounts FK requires these rows to exist. Env override preserved.
+  const solanaRef = process.env.SOLANA_CHAIN_REFERENCE ?? SOLANA_MAINNET_REFERENCE;
   await prisma.chain.upsert({
-    where: { namespace_reference: { namespace: "solana", reference: solanaRef } },
+    where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: solanaRef } },
     update: {},
     create: {
-      namespace: "solana",
+      namespace: SOLANA_NAMESPACE,
       reference: solanaRef,
       name: process.env.SOLANA_NETWORK === "mainnet-beta" ? "solana-mainnet" : "solana-devnet",
       nativeSymbol: "SOL",
@@ -28,6 +31,24 @@ async function main(): Promise<void> {
       isActive: true,
     },
   });
+  // The creation path always writes SOLANA_MAINNET_REFERENCE — if the env
+  // override points elsewhere, the const row must still exist for the FK.
+  if (solanaRef !== SOLANA_MAINNET_REFERENCE) {
+    await prisma.chain.upsert({
+      where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_MAINNET_REFERENCE } },
+      update: {},
+      create: {
+        namespace: SOLANA_NAMESPACE,
+        reference: SOLANA_MAINNET_REFERENCE,
+        name: "solana",
+        nativeSymbol: "SOL",
+        decimals: 9,
+        rpcUrls: [process.env.PID_SOLANA_RPC_URL ?? "https://api.devnet.solana.com"],
+        isTestnet: true,
+        isActive: true,
+      },
+    });
+  }
 
   const factory = process.env.EVM_FACTORY_ADDRESS;
   const implementation = process.env.EVM_IMPLEMENTATION_ADDRESS;

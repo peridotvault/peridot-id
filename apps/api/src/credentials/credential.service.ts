@@ -75,6 +75,10 @@ function toWebAuthnCredential(a: Authority): WebAuthnCredential {
   return { id: a.credentialId!, publicKey: new Uint8Array(a.publicKey), counter: 0 };
 }
 
+function toAllowCredential(a: { credentialId: string | null }) {
+  return { id: a.credentialId!, type: "public-key" as const };
+}
+
 @Injectable()
 export class CredentialService {
   private readonly logger = new Logger(CredentialService.name);
@@ -98,8 +102,8 @@ export class CredentialService {
     return this.config.get<string>("WEBAUTHN_RP_NAME") ?? "PeridotID";
   }
 
-  private async resolveAccount(identityId: string): Promise<PidAccount> {
-    const account = await this.prisma.pidAccount.findFirst({ where: { identityId, status: "active" } });
+  private async resolveAccount(pid: string): Promise<PidAccount> {
+    const account = await this.prisma.pidAccount.findFirst({ where: { pid, status: "active" } });
     if (!account) throw new NotFoundException("Account not found");
     return account;
   }
@@ -108,12 +112,12 @@ export class CredentialService {
     return this.prisma.authority.findMany({ where: { accountId, status: "active" } });
   }
 
-  private async consumeChallenge(id: string, identityId: string): Promise<{ challenge: string; approvalChallenge: string | null; isAdditional: boolean }> {
+  private async consumeChallenge(id: string, pid: string): Promise<{ challenge: string; approvalChallenge: string | null; isAdditional: boolean }> {
     const pending = await this.prisma.credentialChallenge.findFirst({ where: { id, consumedAt: null } });
     if (!pending || !pending.accountId) throw new BadRequestException("Challenge not found or already used");
     if (pending.expiresAt < new Date()) throw new BadRequestException("Tantangan sudah kedaluwarsa");
 
-    const account = await this.prisma.pidAccount.findFirst({ where: { id: pending.accountId, identityId, status: "active" } });
+    const account = await this.prisma.pidAccount.findFirst({ where: { id: pending.accountId, pid, status: "active" } });
     if (!account) throw new NotFoundException("Account not found");
 
     await this.prisma.credentialChallenge.update({ where: { id }, data: { consumedAt: new Date() } });
@@ -129,22 +133,26 @@ export class CredentialService {
     return { challenge: pending.challenge };
   }
 
-  async list(identityId: string): Promise<AuthorityView[]> {
-    const account = await this.resolveAccount(identityId);
+  async list(pid: string): Promise<AuthorityView[]> {
+    const account = await this.resolveAccount(pid);
     return (await this.activeAuthorities(account.id)).map(toView);
   }
 
-  async registerStart(identityId: string): Promise<RegisterStartResult> {
-    const account = await this.resolveAccount(identityId);
+  async registerStart(pid: string): Promise<RegisterStartResult> {
+    const account = await this.resolveAccount(pid);
     const authorities = await this.activeAuthorities(account.id);
     const isAdditional = authorities.length > 0;
+    // Passkey labels: the OS account sheet lists by user.name/displayName, so
+    // show the permanent PID (plus mutable displayName when set) — never an
+    // opaque ID. Multiple PIDs on one device stay distinguishable.
+    const profile = await this.prisma.profile.findUnique({ where: { pid } });
 
     const options = await generateRegistrationOptions({
       rpName: this.rpName(),
       rpID: this.rpId(),
-      userID: createHash("sha256").update(identityId).digest(),
-      userName: identityId,
-      userDisplayName: identityId,
+      userID: createHash("sha256").update(pid).digest(),
+      userName: pid,
+      userDisplayName: profile?.displayName ?? pid,
       attestationType: "none",
       supportedAlgorithmIDs: [SECP256R1_ALG],
       authenticatorSelection: {
@@ -155,7 +163,7 @@ export class CredentialService {
         // recovery without hitting the device's one-passkey-per-site limit (InvalidStateError).
         ...(isAdditional ? {} : { authenticatorAttachment: "platform" }),
       },
-      excludeCredentials: authorities.map((a) => ({ id: a.credentialId!, type: "public-key" })),
+      excludeCredentials: authorities.map(toAllowCredential),
     });
 
     let approval = null;
@@ -165,7 +173,7 @@ export class CredentialService {
         rpID: this.rpId(),
         challenge: randomBytes(32),
         userVerification: "required",
-        allowCredentials: authorities.map((a) => ({ id: a.credentialId!, type: "public-key" })),
+        allowCredentials: authorities.map(toAllowCredential),
       });
     }
 
@@ -183,25 +191,25 @@ export class CredentialService {
     return { registrationId: pending.id, options, isAdditional, approval };
   }
 
-  async registerFinish(identityId: string, dto: {
+  async registerFinish(pid: string, dto: {
     registrationId: string;
     credential: RegistrationInput;
     approval?: AuthenticationInput;
   }): Promise<AuthorityView> {
-    const account = await this.resolveAccount(identityId);
-    const pending = await this.consumeChallenge(dto.registrationId, identityId);
+    const account = await this.resolveAccount(pid);
+    const pending = await this.consumeChallenge(dto.registrationId, pid);
 
     const existing = await this.prisma.authority.findFirst({
       where: { credentialId: dto.credential.id },
     });
     if (existing) {
-      await this.security.log(identityId, "credential.register.rejected", { reason: "credential_id_exists" }, account.id);
+      await this.security.log(pid, "credential.register.rejected", { reason: "credential_id_exists" }, account.id);
       throw new BadRequestException("Credential already registered");
     }
 
     if (pending.isAdditional) {
       if (!dto.approval || !pending.approvalChallenge) {
-        await this.security.log(identityId, "credential.register.rejected", { reason: "missing_approval" }, account.id);
+        await this.security.log(pid, "credential.register.rejected", { reason: "missing_approval" }, account.id);
         throw new BadRequestException("Existing credential approval required");
       }
       // The approving credential must be one of this account's active authorities.
@@ -209,7 +217,7 @@ export class CredentialService {
         where: { accountId: account.id, credentialId: dto.approval.id, status: "active" },
       });
       if (!approver) {
-        await this.security.log(identityId, "credential.register.rejected", { reason: "unknown_approver" }, account.id);
+        await this.security.log(pid, "credential.register.rejected", { reason: "unknown_approver" }, account.id);
         throw new BadRequestException("Approval credential is invalid");
       }
       try {
@@ -222,7 +230,7 @@ export class CredentialService {
         });
       } catch (err) {
         const reason = (err as Error).message;
-        await this.security.log(identityId, "credential.register.rejected", { reason: "approval_verification_failed", detail: reason }, account.id);
+        await this.security.log(pid, "credential.register.rejected", { reason: "approval_verification_failed", detail: reason }, account.id);
         this.logger.warn(`passkey approval verification failed: ${reason}`);
         throw new BadRequestException("Credential approval failed verification");
       }
@@ -240,12 +248,12 @@ export class CredentialService {
       });
     } catch (err) {
       const reason = (err as Error).message;
-      await this.security.log(identityId, "credential.register.rejected", { reason: "registration_verification_failed", detail: reason }, account.id);
+      await this.security.log(pid, "credential.register.rejected", { reason: "registration_verification_failed", detail: reason }, account.id);
       this.logger.warn(`passkey registration verification failed: ${reason}`);
       throw new BadRequestException("Registration failed verification");
     }
     if (!verification.verified || !verification.registrationInfo) {
-      await this.security.log(identityId, "credential.register.rejected", { reason: "not_verified" }, account.id);
+      await this.security.log(pid, "credential.register.rejected", { reason: "not_verified" }, account.id);
       throw new BadRequestException("Registration not verified");
     }
 
@@ -258,19 +266,19 @@ export class CredentialService {
       },
     });
 
-    await this.security.log(identityId, "credential.registered", { credentialId: authority.credentialId }, account.id);
+    await this.security.log(pid, "credential.registered", { credentialId: authority.credentialId }, account.id);
     return toView(authority);
   }
 
-  async authenticateStart(identityId: string): Promise<AuthenticateStartResult> {
-    const account = await this.resolveAccount(identityId);
+  async authenticateStart(pid: string): Promise<AuthenticateStartResult> {
+    const account = await this.resolveAccount(pid);
     const authorities = await this.activeAuthorities(account.id);
     if (authorities.length === 0) throw new BadRequestException("No registered credentials");
 
     const options = await generateAuthenticationOptions({
       rpID: this.rpId(),
       userVerification: "required",
-      allowCredentials: authorities.map((a) => ({ id: a.credentialId!, type: "public-key" })),
+      allowCredentials: authorities.map(toAllowCredential),
     });
 
     const pending = await this.prisma.credentialChallenge.create({
@@ -285,18 +293,18 @@ export class CredentialService {
     return { authenticationId: pending.id, options };
   }
 
-  async authenticateFinish(identityId: string, dto: {
+  async authenticateFinish(pid: string, dto: {
     authenticationId: string;
     credential: AuthenticationInput;
   }): Promise<{ ok: true }> {
-    const account = await this.resolveAccount(identityId);
-    const pending = await this.consumeChallenge(dto.authenticationId, identityId);
+    const account = await this.resolveAccount(pid);
+    const pending = await this.consumeChallenge(dto.authenticationId, pid);
 
     const authority = await this.prisma.authority.findFirst({
       where: { accountId: account.id, credentialId: dto.credential.id, status: "active" },
     });
     if (!authority) {
-      await this.security.log(identityId, "credential.authenticate.rejected", { reason: "unknown_credential" }, account.id);
+      await this.security.log(pid, "credential.authenticate.rejected", { reason: "unknown_credential" }, account.id);
       throw new BadRequestException("Unknown credential");
     }
 
@@ -310,13 +318,13 @@ export class CredentialService {
       });
     } catch (err) {
       const reason = (err as Error).message;
-      await this.security.log(identityId, "credential.authenticate.rejected", { reason: "verification_failed", detail: reason }, account.id);
+      await this.security.log(pid, "credential.authenticate.rejected", { reason: "verification_failed", detail: reason }, account.id);
       this.logger.warn(`passkey authentication verification failed: ${reason}`);
       throw new BadRequestException("Authentication failed verification");
     }
 
     await this.prisma.authority.update({ where: { id: authority.id }, data: { lastUsedAt: new Date() } });
-    await this.security.log(identityId, "credential.authenticated", { credentialId: authority.credentialId }, account.id);
+    await this.security.log(pid, "credential.authenticated", { credentialId: authority.credentialId }, account.id);
     return { ok: true };
   }
 
@@ -340,21 +348,21 @@ export class CredentialService {
   }
 
   /** Verify a passkey-login assertion and return the identity it belongs to. */
-  async loginFinish(dto: { authenticationId: string; credential: AuthenticationInput }): Promise<{ identityId: string }> {
+  async loginFinish(dto: { authenticationId: string; credential: AuthenticationInput }): Promise<{ pid: string }> {
     const pending = await this.consumeLoginChallenge(dto.authenticationId);
 
     const authority = await this.prisma.authority.findFirst({
       where: { credentialId: dto.credential.id, status: "active" },
-      include: { account: { select: { identityId: true } } },
+      include: { account: { select: { pid: true } } },
     });
     if (!authority) {
       throw new BadRequestException("Unknown credential");
     }
 
     const userHandle = dto.credential.response.userHandle;
-    const expectedHandle = Buffer.from(createHash("sha256").update(authority.account.identityId).digest()).toString("base64url");
+    const expectedHandle = Buffer.from(createHash("sha256").update(authority.account.pid).digest()).toString("base64url");
     if (userHandle && userHandle !== expectedHandle) {
-      await this.security.log(authority.account.identityId, "credential.login.rejected", { reason: "user_handle_mismatch" }, authority.accountId);
+      await this.security.log(authority.account.pid, "credential.login.rejected", { reason: "user_handle_mismatch" }, authority.accountId);
       throw new BadRequestException("Credential does not match this account");
     }
 
@@ -367,17 +375,17 @@ export class CredentialService {
         credential: toWebAuthnCredential(authority),
       });
     } catch {
-      await this.security.log(authority.account.identityId, "credential.login.rejected", { reason: "verification_failed" }, authority.accountId);
+      await this.security.log(authority.account.pid, "credential.login.rejected", { reason: "verification_failed" }, authority.accountId);
       throw new BadRequestException("Authentication failed verification");
     }
 
     await this.prisma.authority.update({ where: { id: authority.id }, data: { lastUsedAt: new Date() } });
-    await this.security.log(authority.account.identityId, "credential.login.succeeded", { credentialId: authority.credentialId }, authority.accountId);
-    return { identityId: authority.account.identityId };
+    await this.security.log(authority.account.pid, "credential.login.succeeded", { credentialId: authority.credentialId }, authority.accountId);
+    return { pid: authority.account.pid };
   }
 
-  async revoke(identityId: string, authorityId: string): Promise<AuthorityView> {
-    const account = await this.resolveAccount(identityId);
+  async revoke(pid: string, authorityId: string): Promise<AuthorityView> {
+    const account = await this.resolveAccount(pid);
     const authority = await this.prisma.authority.findFirst({
       where: { id: authorityId, accountId: account.id },
     });
@@ -391,7 +399,7 @@ export class CredentialService {
       where: { id: authority.id },
       data: { status: "revoked" as AuthorityStatus },
     });
-    await this.security.log(identityId, "credential.revoked", { credentialId: authority.credentialId }, account.id);
+    await this.security.log(pid, "credential.revoked", { credentialId: authority.credentialId }, account.id);
     return toView(updated);
   }
 }

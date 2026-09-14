@@ -18,7 +18,7 @@ export class WalletController {
   @Get("me")
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthenticatedUser): Promise<WalletView> {
-    return this.walletService.getMe(user.identityId);
+    return this.walletService.getMe(user.pid);
   }
 
   @Post()
@@ -26,7 +26,7 @@ export class WalletController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateWalletDto): Promise<WalletView> {
-    return this.walletService.create(user.identityId, dto.address);
+    return this.walletService.create(user.pid, dto.address);
   }
 
   /** Fair relay fee (network fee × (1 + margin)) + chain time for the client to sign. */
@@ -36,7 +36,7 @@ export class WalletController {
   @UseGuards(JwtAuthGuard)
   quote(@CurrentUser() user: AuthenticatedUser, @Body() dto: WithdrawQuoteDto): Promise<WithdrawQuote> {
     void dto;
-    return this.sponsoredWithdrawService.quote(user.identityId);
+    return this.sponsoredWithdrawService.quote(user.pid);
   }
 
   /** Relayer-sponsored withdraw: the SDK signs a passkey assertion; Peridot's relayer pays the fee. */
@@ -45,7 +45,7 @@ export class WalletController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   withdraw(@CurrentUser() user: AuthenticatedUser, @Body() dto: SponsoredWithdrawDto): Promise<SponsoredWithdrawResult> {
-    return this.sponsoredWithdrawService.withdraw(user.identityId, {
+    return this.sponsoredWithdrawService.withdraw(user.pid, {
       asset: dto.asset,
       to: dto.to,
       amount: dto.amount,

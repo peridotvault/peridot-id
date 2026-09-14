@@ -22,7 +22,7 @@ export function TabBar({ current, go }: { current: TabKey; go: (s: TabKey) => vo
       .then((res) => {
         if (!alive || typeof res !== "object" || res === null || "statusCode" in res) return;
         setAvatarUrl(res.avatarUrl ?? null);
-        setInitial(((res.displayName ?? res.username ?? "?") as string).slice(0, 1).toUpperCase());
+        setInitial(((res.displayName ?? "?") as string).slice(0, 1).toUpperCase());
       })
       .catch(() => {
         // logged out or offline — keep the fallback

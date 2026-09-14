@@ -8,7 +8,7 @@ import {
   LayoutGrid,
   Link2,
 } from "../icons";
-import type { Account, Authority, Profile } from "@peridotvault/pid-types";
+import type { Account, Authority, Identity, Profile } from "@peridotvault/pid-types";
 import type { TokenBalance } from "@peridotvault/pid-solana";
 import type { ActivationView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
@@ -52,6 +52,7 @@ export function HomeScreen({
   const { peridot } = usePeridot();
   const [account, setAccount] = useState<Account | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [pid, setPid] = useState<string | null>(null);
   const [solLamports, setSolLamports] = useState<number>(0);
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
   const [passkeys, setPasskeys] = useState<Authority[]>([]);
@@ -77,6 +78,12 @@ export function HomeScreen({
         if (!("statusCode" in p)) setProfile(p as Profile);
       } catch {
         /* no profile */
+      }
+      try {
+        const me = await peridot.identity.me();
+        if (!("statusCode" in me)) setPid((me as Identity).pid);
+      } catch {
+        /* no identity */
       }
       try {
         setSolLamports(await peridot.wallet.getBalance());
@@ -133,7 +140,8 @@ export function HomeScreen({
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <View style={styles.topRow}>
         <View style={styles.identity}>
-          <Text style={styles.username}>@{profile?.username ?? profile?.displayName ?? "…"}</Text>
+          <Text style={styles.pid}>@{pid ?? "…"}</Text>
+          {profile?.displayName ? <Text style={styles.displayName}>{profile.displayName}</Text> : null}
           {smart && (
             <Text selectable style={styles.address}>
               {smart.address.slice(0, 6)}…{smart.address.slice(-6)}
@@ -232,7 +240,8 @@ const styles = StyleSheet.create({
   container: { padding: 24, gap: 14 },
   topRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   identity: { flex: 1, gap: 4 },
-  username: { fontSize: 20, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
+  pid: { fontSize: 20, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
+  displayName: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   address: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.mono },
   connBtn: {
     width: 40,

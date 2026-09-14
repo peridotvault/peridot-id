@@ -17,6 +17,9 @@ import { ConfigService } from "@nestjs/config";
 import { ChainAccount, ChainAccountStatus, TransactionStatus } from "@prisma/client";
 import type { Keypair, PublicKey, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
+import { classifyActivation, requireActiveAuthority } from "../common/activation";
+import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE } from "../common/chains";
+import { activationMarginRate, relayerKeypair, solanaAdapter, solanaRpcUrl, treasuryPubkey } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -30,7 +33,7 @@ export interface ActivationView {
   requiredLamports: number;
 }
 
-const POLL_ACCOUNT_TYPE = "smart_account";
+const POLL_ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
 
 @Injectable()
 export class ActivationService implements OnModuleInit, OnModuleDestroy {
@@ -56,12 +59,11 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private rpcUrl(): string {
-    return this.config.get<string>("PID_SOLANA_RPC_URL", "https://api.devnet.solana.com");
+    return solanaRpcUrl(this.config);
   }
 
   private marginRate(): number {
-    const n = Number(this.config.get<string>("PID_ACTIVATION_MARGIN_RATE", "0.5"));
-    return Number.isFinite(n) && n >= 0 ? n : 0.5;
+    return activationMarginRate(this.config);
   }
 
   /** Lazy pid-solana module (keeps @solana/web3.js out of Jest's transform graph). */
@@ -71,20 +73,15 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private relayer(): Keypair {
-    const { Keypair, fromHex } = this.pidSolana;
-    const secret = this.config.getOrThrow<string>("PID_RELAYER_SECRET");
-    return Keypair.fromSecretKey(fromHex(secret));
+    return relayerKeypair(this.pidSolana, this.config);
   }
 
   private treasury(): PublicKey {
-    const { PublicKey } = this.pidSolana;
-    const override = this.config.get<string>("PID_TREASURY_PUBKEY");
-    return override ? new PublicKey(override) : this.relayer().publicKey;
+    return treasuryPubkey(this.pidSolana, this.config);
   }
 
   private adapter(): SolanaAdapter {
-    const { SolanaAdapter, SolanaRpc } = this.pidSolana;
-    return new SolanaAdapter(new SolanaRpc(this.rpcUrl()));
+    return solanaAdapter(this.pidSolana, this.config);
   }
 
   /** Active lamports held by the Peridot relayer (the float that funds fee + rent). */
@@ -137,11 +134,11 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     const pending = await this.prisma.chainAccount.findMany({
       where: {
         // Solana rows only — eip155 rows are polled by EvmActivationService.
-        chainNamespace: "solana",
+        chain: { namespace: SOLANA_NAMESPACE },
         accountType: POLL_ACCOUNT_TYPE,
         status: { in: ["inactivated", "funded", "insufficient", "ready", "activating", "active"] },
       },
-      include: { account: { select: { identityId: true } } },
+      include: { account: { select: { pid: true } } },
     });
     if (pending.length === 0) return;
 
@@ -158,7 +155,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
             where: { id: ca.id },
             data: { status: "active" },
           });
-          await this.security.log(ca.account.identityId, "account.activation.promoted", { from: ca.status, to: "active" }, ca.accountId);
+          await this.security.log(ca.account.pid, "account.activation.promoted", { from: ca.status, to: "active" }, ca.accountId);
           continue;
         }
         if (ca.status === "active") {
@@ -168,7 +165,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
             where: { id: ca.id },
             data: { status: "inactivated", activationBalance: null, activationRequired: null },
           });
-          await this.security.log(ca.account.identityId, "account.activation.healed", { from: "active", to: "inactivated" }, ca.accountId);
+          await this.security.log(ca.account.pid, "account.activation.healed", { from: "active", to: "inactivated" }, ca.accountId);
           continue;
         }
 
@@ -179,7 +176,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
           where: { id: ca.id },
           data: { status: next, activationBalance: BigInt(balance), activationRequired: BigInt(required) },
         });
-        await this.security.log(ca.account.identityId, "account.activation.polled", { status: next, balance }, ca.accountId);
+        await this.security.log(ca.account.pid, "account.activation.polled", { status: next, balance }, ca.accountId);
       } catch (err) {
         this.logger.warn(`activation poll failed for ${ca.address}: ${(err as Error).message}`);
       }
@@ -196,21 +193,12 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private classify(balance: number, required: number, current: ChainAccountStatus): ChainAccountStatus {
-    if (balance === 0) return "inactivated";
-    if (balance < required) return "insufficient";
-    if (current === "activating") return "activating";
-    return "ready";
+    return classifyActivation(balance, required, current);
   }
 
   /** Activate a READY account (idempotent once ACTIVE). */
-  async activate(user: { identityId: string }, accountId: string): Promise<ActivationView> {
-    const chain = await this.prisma.chainAccount.findFirst({
-      where: { chainNamespace: "solana", accountType: POLL_ACCOUNT_TYPE, accountId },
-      include: { account: true },
-    });
-    if (!chain || chain.account.identityId !== user.identityId) {
-      throw new NotFoundException("Account not found");
-    }
+  async activate(user: { pid: string }, accountId: string): Promise<ActivationView> {
+    const chain = await this.ownedSolanaRow(user.pid, accountId);
 
     if (chain.status === "active") return this.viewOf(user, accountId);
 
@@ -234,11 +222,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException(`Wallet must be READY to activate (currently ${live})`);
     }
 
-    const authority = await this.prisma.authority.findFirst({
-      where: { accountId, status: "active" },
-      orderBy: { createdAt: "asc" },
-    });
-    if (!authority) throw new ConflictException("No passkey registered — register one first");
+    const authority = await requireActiveAuthority(this.prisma, accountId);
 
     await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "activating" } });
     try {
@@ -252,7 +236,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       }
       if (relayerBalance < required) {
         await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
-        await this.security.log(user.identityId, "account.activation.relayer_unfunded", { relayer: this.relayer().publicKey.toBase58() }, accountId);
+        await this.security.log(user.pid, "account.activation.relayer_unfunded", { relayer: this.relayer().publicKey.toBase58() }, accountId);
         throw new ServiceUnavailableException(
           "Peridot's activation service is temporarily out of funds. No SOL was deducted from your wallet — please try again in a moment.",
         );
@@ -270,7 +254,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       if (outcome !== "confirmed") {
         // Revert — the transaction never landed (or errored); the user's deposit is untouched.
         await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
-        await this.security.log(user.identityId, "account.activation.unconfirmed", { signature, outcome, reason }, accountId);
+        await this.security.log(user.pid, "account.activation.unconfirmed", { signature, outcome, reason }, accountId);
         throw new ServiceUnavailableException(
           outcome === "failed"
             ? `Activation was submitted but failed on-chain${reason ? ` (${shortReason(reason)})` : ""}. No SOL was deducted from your wallet — please try again.`
@@ -299,7 +283,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
           },
         })
         .catch((err) => this.logger.warn(`activation activity record failed: ${(err as Error).message}`));
-      await this.security.log(user.identityId, "account.activated", { signature }, accountId);
+      await this.security.log(user.pid, "account.activated", { signature }, accountId);
     } catch (err) {
       await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
       throw err;
@@ -309,14 +293,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Activation view derived live from on-chain state (ownership-checked). */
-  async viewOf(user: { identityId: string }, accountId: string): Promise<ActivationView> {
-    const chain = await this.prisma.chainAccount.findFirst({
-      where: { chainNamespace: "solana", accountType: POLL_ACCOUNT_TYPE, accountId },
-      include: { account: true },
-    });
-    if (!chain || chain.account.identityId !== user.identityId) {
-      throw new NotFoundException("Account not found");
-    }
+  async viewOf(user: { pid: string }, accountId: string): Promise<ActivationView> {
+    const chain = await this.ownedSolanaRow(user.pid, accountId);
     const adapter = this.adapter();
     let balance = 0;
     let activated = false;
@@ -341,6 +319,18 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       balanceLamports: balance,
       requiredLamports: required,
     };
+  }
+
+  /** Solana smart row owned by the token identity — never a client-supplied one. */
+  private async ownedSolanaRow(pid: string, accountId: string) {
+    const chain = await this.prisma.chainAccount.findFirst({
+      where: { chain: { namespace: "solana" }, accountType: POLL_ACCOUNT_TYPE, accountId },
+      include: { account: true },
+    });
+    if (!chain || chain.account.pid !== pid) {
+      throw new NotFoundException("Account not found");
+    }
+    return chain;
   }
 }
 

@@ -8,11 +8,11 @@ export class AdminGuard implements CanActivate {
   constructor(private readonly prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest() as { user?: { identityId?: string } };
-    const identityId = req.user?.identityId;
-    if (!identityId) throw new ForbiddenException("Admin access required");
+    const req = context.switchToHttp().getRequest() as { user?: { pid?: string } };
+    const pid = req.user?.pid;
+    if (!pid) throw new ForbiddenException("Admin access required");
     const identity = await this.prisma.identity.findUnique({
-      where: { id: identityId },
+      where: { pid },
       select: { role: true, status: true },
     });
     if (!identity || identity.status !== "active" || identity.role !== "admin") {

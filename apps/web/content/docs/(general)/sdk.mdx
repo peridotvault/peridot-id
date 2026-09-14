@@ -32,17 +32,22 @@ const peridot = Peridot({
 ## Sign in
 
 `auth.login()` redirects the browser to Google. The user signs in and is sent back to
-`CLIENT_SUCCESS_URL` with the session cookies already set.
+`CLIENT_SUCCESS_URL` with the session cookies already set. First-time users pass a
+`handle` — it becomes the permanent `<handle>@pid` (check
+`auth.pidAvailable(handle)` first; the handle can never be changed, reused, or reassigned).
 
 ```ts
 await peridot.auth.login();
+await peridot.auth.login({ handle: "ifal" }); // first-time sign-up
+const { available, pid } = await peridot.auth.pidAvailable("ifal");
+// { available: true, pid: "ifal@pid" }
 ```
 
 ## Identity
 
 ```ts
 const me = await peridot.identity.me();
-// { id: "pid_01K4Y4DWMK7YSH8X4JQY9M4T6P", status: "active", createdAt: "2026-08-03T13:30:00.000Z" }
+// { id: "ifal@pid", status: "active", createdAt: "2026-08-03T13:30:00.000Z" }
 ```
 
 ### Login credentials
@@ -61,17 +66,16 @@ keep at least one way to log in.
 
 ```ts
 const profile = await peridot.profile.me();
-// { id, identityId, username, usernameChangedAt, displayName, avatarUrl, locale, createdAt, updatedAt }
+// { id, identityId, displayName, avatarUrl, locale, createdAt, updatedAt }
 
 const updated = await peridot.profile.update({
-  username: 'peridotplayer',
   displayName: 'PeridotPlayer',
   locale: 'en-US',
 });
 ```
 
-Usernames are lowercase `[a-z0-9_]`, 3–20 characters. `update` returns the API error
-object if the username is already taken.
+The PID (`identityId`, e.g. `ifal@pid`) is permanent and immutable — only the mutable
+labels above can be updated. There is no endpoint that changes, reuses, or reassigns it.
 
 ## Wallet
 

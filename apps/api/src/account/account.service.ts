@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { ChainAccountStatus, IdentityStatus, Prisma } from "@prisma/client";
+import { ChainAccountStatus, IdentityStatus } from "@prisma/client";
 import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
 import { ChainRegistryService } from "../chain/chain-registry.service";
+import { ACCOUNT_TYPE_SMART } from "../common/chains";
 import { deriveSmartAccountAddress } from "../common/smart-account";
+import { isP2002 } from "../prisma/prisma-error";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -27,14 +29,9 @@ export interface AccountView {
   chainAccounts: ChainAccountView[];
 }
 
-const SOLANA_NAMESPACE = "solana";
-const SOLANA_MAINNET_REFERENCE = "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
-const ACCOUNT_TYPE_SMART = "smart_account";
-
-function toChainView(ca: {
+export function toChainView(ca: {
   id: string;
-  chainNamespace: string;
-  chainReference: string;
+  chain: { namespace: string; reference: string };
   address: string;
   accountType: string;
   status: ChainAccountStatus;
@@ -44,8 +41,8 @@ function toChainView(ca: {
 }): ChainAccountView {
   return {
     id: ca.id,
-    chainNamespace: ca.chainNamespace,
-    chainReference: ca.chainReference,
+    chainNamespace: ca.chain.namespace,
+    chainReference: ca.chain.reference,
     address: ca.address,
     accountType: ca.accountType,
     status: ca.status,
@@ -60,7 +57,7 @@ function toView(account: {
   status: IdentityStatus;
   version: number;
   createdAt: Date;
-  chainAccounts: { id: string; chainNamespace: string; chainReference: string; address: string; accountType: string; status: ChainAccountStatus; activationBalance: bigint | null; activationRequired: bigint | null; createdAt: Date }[];
+  chainAccounts: { id: string; chain: { namespace: string; reference: string }; address: string; accountType: string; status: ChainAccountStatus; activationBalance: bigint | null; activationRequired: bigint | null; createdAt: Date }[];
 }): AccountView {
   return {
     id: account.id,
@@ -96,21 +93,20 @@ export class AccountService {
       if (!factory || !implementation) continue;
       const evm = deriveEvmSmartAccountAddress(accountId, factory, implementation);
       const existing = await this.prisma.chainAccount.findFirst({
-        where: { accountId, chainNamespace: "eip155", chainReference: chain.reference, accountType: ACCOUNT_TYPE_SMART },
+        where: { accountId, chainId: chain.id, accountType: ACCOUNT_TYPE_SMART },
       });
       if (!existing) {
         try {
           await this.prisma.chainAccount.create({
             data: {
               accountId,
-              chainNamespace: "eip155",
-              chainReference: chain.reference,
+              chainId: chain.id,
               address: evm.address,
               accountType: ACCOUNT_TYPE_SMART,
             },
           });
         } catch (err) {
-          if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) throw err;
+          if (!isP2002(err)) throw err;
         }
       } else if (existing.address !== evm.address) {
         await this.prisma.chainAccount.update({
@@ -122,13 +118,13 @@ export class AccountService {
   }
 
   /** Find or create the identity's default Peridot account + its smart-account chain row. */
-  async createAccount(identityId: string): Promise<AccountView> {
+  async createAccount(pid: string): Promise<AccountView> {
     // Read env before any DB write so a missing PID_PROGRAM_ID can't orphan rows.
     const programId = this.programId();
-    let account = await this.prisma.pidAccount.findFirst({ where: { identityId, status: "active" } });
+    let account = await this.prisma.pidAccount.findFirst({ where: { pid, status: "active" } });
     if (!account) {
-      account = await this.prisma.pidAccount.create({ data: { identityId } });
-      await this.security.log(identityId, "account.created", {}, account.id);
+      account = await this.prisma.pidAccount.create({ data: { pid } });
+      await this.security.log(pid, "account.created", {}, account.id);
     }
 
     // ADR 004 §5: the smart-account address is deterministically resolvable before on-chain
@@ -138,19 +134,19 @@ export class AccountService {
       where: { accountId: account.id, accountType: ACCOUNT_TYPE_SMART },
     });
     if (!existingChain) {
+      const chainId = await this.chains.solanaChainIdOrThrow();
       try {
         await this.prisma.chainAccount.create({
           data: {
             accountId: account.id,
-            chainNamespace: SOLANA_NAMESPACE,
-            chainReference: SOLANA_MAINNET_REFERENCE,
+            chainId,
             address: derived,
             accountType: ACCOUNT_TYPE_SMART,
           },
         });
       } catch (err) {
         // concurrent create → already present; P2002 is fine.
-        if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002")) throw err;
+        if (!isP2002(err)) throw err;
       }
     } else if (existingChain.address !== derived) {
       // Re-point the stored address to the current program id's PDA (e.g. after an on-chain
@@ -164,34 +160,34 @@ export class AccountService {
 
     await this.ensureEvmRows(account.id);
 
-    return this.getAccount(identityId, account.id);
+    return this.getAccount(pid, account.id);
   }
 
-  async getAccounts(identityId: string): Promise<AccountView[]> {
+  async getAccounts(pid: string): Promise<AccountView[]> {
     const accounts = await this.prisma.pidAccount.findMany({
-      where: { identityId, status: "active" },
-      include: { chainAccounts: true },
+      where: { pid, status: "active" },
+      include: { chainAccounts: { include: { chain: true } } },
       orderBy: { createdAt: "asc" },
     });
     return accounts.map(toView);
   }
 
   /** Ownership strictly from the token — never a client-supplied identity. */
-  async getAccount(identityId: string, accountId: string): Promise<AccountView> {
-    const account = await this.prisma.pidAccount.findFirst({
-      where: { id: accountId, identityId, status: "active" },
-      include: { chainAccounts: true },
-    });
-    if (!account) throw new NotFoundException("Account not found");
-    return toView(account);
+  async getAccount(pid: string, accountId: string): Promise<AccountView> {
+    return toView(await this.ownedAccount(pid, accountId));
   }
 
-  async getAccountChains(identityId: string, accountId: string): Promise<ChainAccountView[]> {
+  async getAccountChains(pid: string, accountId: string): Promise<ChainAccountView[]> {
+    const account = await this.ownedAccount(pid, accountId);
+    return account.chainAccounts.map(toChainView);
+  }
+
+  private async ownedAccount(pid: string, accountId: string) {
     const account = await this.prisma.pidAccount.findFirst({
-      where: { id: accountId, identityId, status: "active" },
-      include: { chainAccounts: true },
+      where: { id: accountId, pid, status: "active" },
+      include: { chainAccounts: { include: { chain: true } } },
     });
     if (!account) throw new NotFoundException("Account not found");
-    return account.chainAccounts.map(toChainView);
+    return account;
   }
 }

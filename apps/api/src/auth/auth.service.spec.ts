@@ -45,14 +45,15 @@ function prismaMock() {
         create: jest.fn(async (args: { data: unknown }) => args.data),
       },
       identity: {
-        create: jest.fn(async (args: { data: { id: string; status: string } }) => args.data),
+        create: jest.fn(async (args: { data: { pid: string; status: string } }) => args.data),
+        findUnique: jest.fn(async () => null),
       },
       profile: {
         create: jest.fn(async (args: { data: unknown }) => args.data),
         findUnique: jest.fn(async () => null),
       },
       device: {
-        create: jest.fn(async (args: { data: { identityId: string; userAgent: string | null; authMethod?: string | null } }) => {
+        create: jest.fn(async (args: { data: { pid: string; userAgent: string | null; authMethod?: string | null } }) => {
           const device = { id: `device-${devices.size + 1}`, createdAt: new Date(), authMethod: args.data.authMethod ?? null };
           devices.set(device.id, device);
           return { ...device, ...args.data };
@@ -87,7 +88,7 @@ function prismaMock() {
           if (s) s.revokedAt = data.revokedAt;
           return { count: s ? 1 : 0 };
         }),
-        findMany: jest.fn(async ({ where }: { where: { device: { identityId: string } } }) =>
+        findMany: jest.fn(async ({ where }: { where: { device: { pid: string } } }) =>
           [...sessions.entries()]
             .filter(([, s]) => s.revokedAt === null && s.expiresAt > new Date())
             .map(([id, s]) => ({
@@ -98,7 +99,7 @@ function prismaMock() {
               createdAt: new Date(),
               device: {
                 id: s.deviceId,
-                identityId: where.device.identityId,
+                pid: where.device.pid,
                 userAgent: "test-agent",
                 lastSeenAt: new Date(),
                 createdAt: new Date(),
@@ -128,29 +129,64 @@ function reqWithToken(token: string) {
 }
 
 describe("AuthService", () => {
-  it("signup creates identity with pid_ ULID, profile and credential", async () => {
+  it("signup creates the permanent handle@pid identity with profile and credential", async () => {
     const { service, prisma } = setup();
-    const identity = await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal Muha" });
+    const identity = await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal Muha" }, "ifal");
 
-    expect(identity.id).toMatch(/^pid_[0-9A-HJKMNP-TV-Z]+$/);
-    expect(prisma.identity.create).toHaveBeenCalledWith({ data: { id: identity.id, status: "active" } });
+    expect(identity.pid).toBe("ifal@pid");
+    expect(prisma.identity.create).toHaveBeenCalledWith({ data: { pid: "ifal@pid", status: "active" } });
     expect(prisma.profile.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ username: "ranaufal" }) }),
+      expect.objectContaining({ data: expect.objectContaining({ displayName: "Ranaufal Muha" }) }),
     );
     expect(prisma.identityCredential.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ provider: "google", providerUserId: "google-1" }),
     });
   });
 
+  it("normalizes the handle to lowercase", async () => {
+    const { service } = setup();
+    const identity = await service.upsertGoogleIdentity({ id: "google-1" }, "IFAL");
+    expect(identity.pid).toBe("ifal@pid");
+  });
+
+  it("rejects signup without a chosen handle", async () => {
+    const { service, prisma } = setup();
+    await expect(service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal" })).rejects.toThrow(
+      "permanent PID handle",
+    );
+    expect(prisma.identity.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid handle", async () => {
+    const { service, prisma } = setup();
+    await expect(service.upsertGoogleIdentity({ id: "google-1" }, "ab")).rejects.toThrow("permanent PID handle");
+    expect(prisma.identity.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an already-taken PID (never reused or reassigned)", async () => {
+    const { service, prisma } = setup();
+    (prisma.identity.findUnique as jest.Mock).mockResolvedValue({ pid: "ifal@pid" });
+    await expect(service.upsertGoogleIdentity({ id: "google-9" }, "ifal")).rejects.toThrow(ConflictException);
+    await expect(service.upsertGoogleIdentity({ id: "google-9" }, "ifal")).rejects.toThrow("PID already taken");
+  });
+
+  it("reports PID availability", async () => {
+    const { service, prisma } = setup();
+    await expect(service.isPidAvailable("ifal")).resolves.toEqual({ available: true, pid: "ifal@pid" });
+    (prisma.identity.findUnique as jest.Mock).mockResolvedValue({ pid: "ifal@pid" });
+    await expect(service.isPidAvailable("ifal")).resolves.toEqual({ available: false, pid: null });
+    await expect(service.isPidAvailable("ab")).resolves.toEqual({ available: false, pid: null });
+  });
+
   it("login with existing credential reuses the identity and bumps lastLoginAt", async () => {
     const { service, prisma } = setup();
     prisma.identityCredential.findUnique.mockResolvedValue({
-      identity: { id: "pid_01HASH", status: "active" },
+      identity: { pid: "ifal@pid", status: "active" },
     });
 
     const identity = await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal" });
 
-    expect(identity.id).toBe("pid_01HASH");
+    expect(identity.pid).toBe("ifal@pid");
     expect(prisma.identityCredential.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ lastLoginAt: expect.any(Date) }) }),
     );
@@ -161,11 +197,14 @@ describe("AuthService", () => {
     const { service, prisma } = setup();
     prisma.identityCredential.findFirst.mockResolvedValue({ id: "cred-other" });
 
-    const promise = service.upsertGoogleIdentity({
-      id: "google-new",
-      displayName: "Ranaufal",
-      emails: [{ value: "taken@example.com" }],
-    });
+    const promise = service.upsertGoogleIdentity(
+      {
+        id: "google-new",
+        displayName: "Ranaufal",
+        emails: [{ value: "taken@example.com" }],
+      },
+      "taken",
+    );
     await expect(promise).rejects.toThrow(ConflictException);
     await expect(promise).rejects.toThrow("Email is already linked to another account");
     expect(prisma.identity.create).not.toHaveBeenCalled();
@@ -175,7 +214,7 @@ describe("AuthService", () => {
   it("returns the existing identity without an email-collision check on returning login", async () => {
     const { service, prisma } = setup();
     prisma.identityCredential.findUnique.mockResolvedValue({
-      identity: { id: "pid_01HASH", status: "active" },
+      identity: { pid: "ifal@pid", status: "active" },
     });
 
     await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal", emails: [{ value: "mine@example.com" }] });
@@ -186,7 +225,7 @@ describe("AuthService", () => {
   it("skips the email-collision check when the Google profile has no email", async () => {
     const { service, prisma } = setup();
 
-    await service.upsertGoogleIdentity({ id: "google-2", displayName: "Ranaufal" });
+    await service.upsertGoogleIdentity({ id: "google-2", displayName: "Ranaufal" }, "fresh");
 
     expect(prisma.identityCredential.findFirst).not.toHaveBeenCalled();
     expect(prisma.identityCredential.create).toHaveBeenCalledWith({
@@ -197,13 +236,16 @@ describe("AuthService", () => {
   it("signup with a free email stores the email and skips rejection", async () => {
     const { service, prisma } = setup();
 
-    const identity = await service.upsertGoogleIdentity({
-      id: "google-3",
-      displayName: "Ranaufal",
-      emails: [{ value: "free@example.com" }],
-    });
+    const identity = await service.upsertGoogleIdentity(
+      {
+        id: "google-3",
+        displayName: "Ranaufal",
+        emails: [{ value: "free@example.com" }],
+      },
+      "freeuser",
+    );
 
-    expect(identity.id).toMatch(/^pid_[0-9A-HJKMNP-TV-Z]+$/);
+    expect(identity.pid).toBe("freeuser@pid");
     expect(prisma.identityCredential.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ email: "free@example.com" }),
     });
@@ -272,7 +314,7 @@ describe("AuthService", () => {
 
     expect(prisma.session.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ device: { identityId: "identity-1" }, id: { not: currentJti } }),
+        where: expect.objectContaining({ device: { pid: "identity-1" }, id: { not: currentJti } }),
         data: { revokedAt: expect.any(Date) },
       }),
     );

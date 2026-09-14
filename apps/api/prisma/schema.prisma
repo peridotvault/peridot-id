@@ -50,7 +50,11 @@ enum ChainAccountStatus {
 }
 
 model Identity {
-  id        String         @id
+  // Permanent ecosystem PID: `<handle>@pid` (e.g. `ifal@pid`). App-supplied,
+  // user-chosen once at onboarding. Immutable (PK), never reused or reassigned
+  // — deleted rows keep their PK reserved. Case-insensitive uniqueness holds by
+  // storing the lowercased form (see common/pid.ts).
+  pid       String         @id
   status    IdentityStatus @default(active)
   role      Role           @default(user)
   createdAt DateTime       @default(now())
@@ -69,11 +73,9 @@ model Identity {
 }
 
 model Profile {
-  id                String   @id @default(uuid())
-  identityId        String   @unique
-  identity          Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
-  username          String?  @unique
-  usernameChangedAt DateTime?
+  // Strict 1:1 with Identity — shared primary key, no surrogate UUID.
+  pid               String   @id
+  identity          Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
   displayName       String?
   avatarUrl         String?
   locale            String?
@@ -85,8 +87,8 @@ model Profile {
 
 model IdentityCredential {
   id             String   @id @default(uuid())
-  identityId     String
-  identity       Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  pid            String
+  identity       Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
   provider       String
   providerUserId String
   email          String?
@@ -94,13 +96,14 @@ model IdentityCredential {
   lastLoginAt    DateTime?
 
   @@unique([provider, providerUserId])
+  @@index([pid])
   @@map("identity_credentials")
 }
 
 model Device {
   id         String   @id @default(uuid())
-  identityId String
-  identity   Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  pid        String
+  identity   Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
   userAgent  String?
   // How this session family authenticated ("google" | "passkey"). Null on
   // pre-existing rows, treated as "google" (shorter cap). Preserved across
@@ -110,6 +113,7 @@ model Device {
   createdAt  DateTime @default(now())
   sessions   Session[]
 
+  @@index([pid])
   @@map("devices")
 }
 
@@ -120,8 +124,9 @@ model Session {
   rotatedFrom String?
   revokedAt   DateTime?
   expiresAt   DateTime
-  createdAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
 
+  @@index([deviceId])
   @@map("sessions")
 }
 
@@ -130,8 +135,8 @@ model Session {
 // product needs no migration.
 model PidAccount {
   id         String         @id @default(uuid())
-  identityId String
-  identity   Identity       @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  pid        String
+  identity   Identity       @relation(fields: [pid], references: [pid], onDelete: Cascade)
   status     IdentityStatus @default(active)
   version    Int            @default(1)
   createdAt  DateTime       @default(now())
@@ -144,6 +149,7 @@ model PidAccount {
   securityEvents SecurityEvent[]
   challenges     CredentialChallenge[]
 
+  @@index([pid])
   @@map("pid_accounts")
 }
 
@@ -169,13 +175,15 @@ model CredentialChallenge {
 // ADR 004: one row per chain account. `account_type` = smart_account (program PDA) or
 // linked_address (migrated V3 record-only). The unique constraint encodes one smart
 // account per chain per account in V1 while letting a migrated linked_address coexist.
+// The chain is a single `chainId` FK — namespace/reference live once on `chains` and
+// are read back through the join (never duplicated here).
 // No key-material columns, ever (ADR 003 rule carried).
 model ChainAccount {
   id                 String            @id @default(uuid())
   accountId          String
   account            PidAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  chainNamespace     String
-  chainReference     String
+  chainId            String
+  chain              Chain             @relation(fields: [chainId], references: [id], onDelete: Restrict)
   address            String
   accountType        String
   status             ChainAccountStatus @default(inactivated)
@@ -187,7 +195,8 @@ model ChainAccount {
   feePayers    WalletFeePayer[]
   transactions Transaction[]
 
-  @@unique([accountId, chainNamespace, chainReference, accountType])
+  @@unique([accountId, chainId, accountType])
+  @@index([chainId])
   @@map("chain_accounts")
 }
 
@@ -263,6 +272,7 @@ model Transaction {
 
   @@index([accountId])
   @@index([chainAccountId])
+  @@index([intentId])
   @@map("transactions")
 }
 
@@ -270,15 +280,15 @@ model Transaction {
 // flows. Metadata is JSONB; never contains secrets.
 model SecurityEvent {
   id         String           @id @default(uuid())
-  identityId String
-  identity   Identity         @relation(fields: [identityId], references: [id], onDelete: Cascade)
+  pid        String
+  identity   Identity         @relation(fields: [pid], references: [pid], onDelete: Cascade)
   accountId  String?
   account    PidAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
   eventType  String
   metadata   Json
   createdAt  DateTime         @default(now())
 
-  @@index([identityId])
+  @@index([pid])
   @@index([accountId])
   @@map("security_events")
 }
@@ -290,7 +300,7 @@ model SecurityEvent {
 model SsoCode {
   id         String    @id @default(uuid())
   code       String    @unique
-  identityId String
+  pid        String
   sessionId  String?
   redirectTo String
   clientId   String?
@@ -298,7 +308,7 @@ model SsoCode {
   expiresAt  DateTime
   createdAt  DateTime  @default(now())
 
-  @@index([identityId])
+  @@index([pid])
   @@map("sso_codes")
 }
 
@@ -306,16 +316,15 @@ model SsoCode {
 // pid_code is exchanged; revoking stops future code issuance to that origin.
 // It cannot end the relying party's own session (standard OAuth limitation).
 model SsoGrant {
-  id          String    @id @default(uuid())
-  identityId  String
+  id          String   @id @default(uuid())
+  pid         String
   origin      String
   clientId    String?
-  firstSeenAt DateTime  @default(now())
-  lastUsedAt  DateTime  @default(now())
+  firstSeenAt DateTime @default(now())
+  lastUsedAt  DateTime @default(now())
   revokedAt   DateTime?
 
-  @@unique([identityId, origin])
-  @@index([identityId])
+  @@unique([pid, origin])
   @@map("sso_grants")
 }
 
@@ -339,6 +348,7 @@ model Chain {
   updatedAt    DateTime @updatedAt
 
   contracts ChainContract[]
+  accounts  ChainAccount[]
 
   @@unique([namespace, reference])
   @@map("chains")
@@ -367,8 +377,8 @@ model ChainContract {
 model PidApp {
   id           String   @id @default(uuid())
   clientId     String   @unique
-  ownerId      String
-  owner        Identity @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  ownerPid     String
+  owner        Identity @relation(fields: [ownerPid], references: [pid], onDelete: Cascade)
   name         String
   allowedOrigins String[]
   isActive     Boolean  @default(true)
@@ -380,6 +390,6 @@ model PidApp {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  @@index([ownerId])
+  @@index([ownerPid])
   @@map("pid_apps")
 }

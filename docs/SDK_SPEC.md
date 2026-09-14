@@ -21,7 +21,7 @@ await peridot.identity.credentials();         // list login credentials
 await peridot.identity.unlinkCredential(id);  // boolean; false if it's the last one
 
 await peridot.profile.me();
-await peridot.profile.update({ username: "peridotplayer", displayName: "PeridotPlayer" });
+await peridot.profile.update({ displayName: "PeridotPlayer" });
 
 await peridot.wallet.me();                    // wallet or ApiError (404 when none)
 await peridot.wallet.create(address);         // wallet; second call returns the existing one

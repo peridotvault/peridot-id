@@ -18,6 +18,9 @@ import { ConfigService } from "@nestjs/config";
 import type { ChainAccountStatus } from "@prisma/client";
 import { EvmAdapter, EvmRpc } from "@peridotvault/pid-evm";
 import { ChainRegistryService, type RegistryChain } from "../chain/chain-registry.service";
+import { classifyActivation, requireActiveAuthority } from "../common/activation";
+import { ACCOUNT_TYPE_SMART, EIP155_NAMESPACE } from "../common/chains";
+import { activationMarginRate } from "../common/solana-relay";
 import { coseToRawXy } from "../credentials/cose";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -32,7 +35,7 @@ export interface EvmActivationView {
   requiredWei: string;
 }
 
-const ACCOUNT_TYPE = "smart_account";
+const ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
 // `initialize` selector + deploy estimate headroom (measured ~250k, margin via rate).
 const DEPLOY_GAS_ESTIMATE = 350_000n;
 
@@ -63,7 +66,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   /** Registry chain or 404 (unknown/deactivated references are not addressable). */
   private async chainOrThrow(chainReference: string): Promise<RegistryChain> {
     const chain = await this.chains.chainByReference(chainReference);
-    if (!chain || chain.namespace !== "eip155") throw new NotFoundException("Unsupported EVM chain");
+    if (!chain || chain.namespace !== EIP155_NAMESPACE) throw new NotFoundException("Unsupported EVM chain");
     return chain;
   }
 
@@ -78,8 +81,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private marginRate(): number {
-    const n = Number(this.config.get<string>("PID_ACTIVATION_MARGIN_RATE", "0.5"));
-    return Number.isFinite(n) && n >= 0 ? n : 0.5;
+    return activationMarginRate(this.config);
   }
 
   /** Live deploy cost: static gas estimate × live gas price × (1 + margin). */
@@ -92,33 +94,30 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private classify(balance: bigint, required: bigint, current: string): ChainAccountStatus {
-    if (balance === 0n) return "inactivated";
-    if (balance < required) return "insufficient";
-    if (current === "activating") return "activating";
-    return "ready";
+    return classifyActivation(balance, required, current);
   }
 
   /** Refresh statuses for EVM rows (heal to active once code is deployed). */
   async poll(): Promise<void> {
     const pending = await this.prisma.chainAccount.findMany({
-      where: { chainNamespace: "eip155", accountType: ACCOUNT_TYPE },
-      include: { account: { select: { identityId: true } } },
+      where: { chain: { namespace: EIP155_NAMESPACE }, accountType: ACCOUNT_TYPE },
+      include: { account: { select: { pid: true } }, chain: true },
     });
     for (const ca of pending) {
       try {
         // Rows for deactivated/unknown chains are left alone (admin kill-switch).
-        if (!(await this.chains.chainByReference(ca.chainReference))) continue;
-        const rpc = await this.rpcFor(ca.chainReference);
+        if (!(await this.chains.chainByReference(ca.chain.reference))) continue;
+        const rpc = await this.rpcFor(ca.chain.reference);
         const code = await rpc.getCode(ca.address);
         const deployed = code !== "0x" && code.length > 2;
         if (deployed && ca.status !== "active") {
           await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: "active" } });
-          await this.security.log(ca.account.identityId, "account.evm.promoted", { to: "active" }, ca.accountId);
+          await this.security.log(ca.account.pid, "account.evm.promoted", { to: "active" }, ca.accountId);
           continue;
         }
         if (ca.status === "active") continue;
         const balance = await rpc.getBalance(ca.address);
-        const required = await this.requiredWei(ca.chainReference).catch(() => 0n);
+        const required = await this.requiredWei(ca.chain.reference).catch(() => 0n);
         const next = this.classify(balance, required, ca.status);
         if (next !== ca.status) {
           await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: next } });
@@ -129,9 +128,9 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async viewOf(user: { identityId: string }, accountId: string, chainReference: string): Promise<EvmActivationView> {
-    await this.chainOrThrow(chainReference);
-    const row = await this.ownedRow(user.identityId, accountId, chainReference);
+  async viewOf(user: { pid: string }, accountId: string, chainReference: string): Promise<EvmActivationView> {
+    const chain = await this.chainOrThrow(chainReference);
+    const row = await this.ownedRow(user.pid, accountId, chain);
     const rpc = await this.rpcFor(chainReference);
     let balance = 0n;
     let deployed = false;
@@ -160,9 +159,9 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
    * Deploy the counterfactual via the Peridot relayer (`deployAndInit` with the
    * registered passkey as authority). Idempotent once ACTIVE.
    */
-  async activate(user: { identityId: string }, accountId: string, chainReference: string): Promise<EvmActivationView> {
+  async activate(user: { pid: string }, accountId: string, chainReference: string): Promise<EvmActivationView> {
     const chain = await this.chainOrThrow(chainReference);
-    const row = await this.ownedRow(user.identityId, accountId, chainReference);
+    const row = await this.ownedRow(user.pid, accountId, chain);
     const adapter = await this.adapterFor(chainReference);
 
     const live = await this.viewOf(user, accountId, chainReference);
@@ -171,11 +170,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException(`Wallet must be READY to activate (currently ${live.status})`);
     }
 
-    const authority = await this.prisma.authority.findFirst({
-      where: { accountId, status: "active" },
-      orderBy: { createdAt: "asc" },
-    });
-    if (!authority) throw new ConflictException("No passkey registered — register one first");
+    const authority = await requireActiveAuthority(this.prisma, accountId);
 
     const secret = this.config.get<string>("EVM_RELAYER_SECRET");
     if (!secret || !/^0x[0-9a-fA-F]{64}$/.test(secret)) {
@@ -216,7 +211,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
           },
         })
         .catch((err) => this.logger.warn(`evm activation activity record failed: ${(err as Error).message}`));
-      await this.security.log(user.identityId, "account.evm.activated", { txHash: receipt.hash }, accountId);
+      await this.security.log(user.pid, "account.evm.activated", { txHash: receipt.hash }, accountId);
     } catch (err) {
       await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "ready" } }).catch(() => undefined);
       throw err;
@@ -224,12 +219,12 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     return this.viewOf(user, accountId, chainReference);
   }
 
-  private async ownedRow(identityId: string, accountId: string, chainReference: string) {
+  private async ownedRow(pid: string, accountId: string, chain: Pick<RegistryChain, "id" | "reference">) {
     const row = await this.prisma.chainAccount.findFirst({
-      where: { chainNamespace: "eip155", chainReference, accountType: ACCOUNT_TYPE, accountId },
+      where: { chainId: chain.id, accountType: ACCOUNT_TYPE, accountId },
       include: { account: true },
     });
-    if (!row || row.account.identityId !== identityId) throw new NotFoundException("Account not found");
+    if (!row || row.account.pid !== pid) throw new NotFoundException("Account not found");
     return row;
   }
 

@@ -20,25 +20,25 @@ export class AccountController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   create(@CurrentUser() user: AuthenticatedUser): Promise<AccountView> {
-    return this.accountService.createAccount(user.identityId);
+    return this.accountService.createAccount(user.pid);
   }
 
   @Get()
   @UseGuards(JwtAuthGuard)
   list(@CurrentUser() user: AuthenticatedUser): Promise<AccountView[]> {
-    return this.accountService.getAccounts(user.identityId);
+    return this.accountService.getAccounts(user.pid);
   }
 
   @Get(":id")
   @UseGuards(JwtAuthGuard)
   get(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<AccountView> {
-    return this.accountService.getAccount(user.identityId, id);
+    return this.accountService.getAccount(user.pid, id);
   }
 
   @Get(":id/chains")
   @UseGuards(JwtAuthGuard)
   chains(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<ChainAccountView[]> {
-    return this.accountService.getAccountChains(user.identityId, id);
+    return this.accountService.getAccountChains(user.pid, id);
   }
 
   @Get(":id/activation")

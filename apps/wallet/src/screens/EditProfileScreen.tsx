@@ -8,8 +8,8 @@ import { UIButton } from "../components/UIButton";
 export function EditProfileScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [pid, setPid] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
-  const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -19,7 +19,8 @@ export function EditProfileScreen({ onDone }: { onDone: () => void }) {
     if ("statusCode" in res) return;
     setProfile(res as Profile);
     setDisplayName((res as Profile).displayName ?? "");
-    setUsername((res as Profile).username ?? "");
+    const me = await peridot.identity.me();
+    if (!("statusCode" in me)) setPid((me as { pid: string }).pid);
   }, [peridot]);
 
   useEffect(() => {
@@ -31,7 +32,7 @@ export function EditProfileScreen({ onDone }: { onDone: () => void }) {
     setError(null);
     setSaved(false);
     try {
-      const res = await peridot.profile.update({ displayName, username });
+      const res = await peridot.profile.update({ displayName });
       if ("statusCode" in res) throw new Error((res as { message: string | string[] }).message as string);
       setSaved(true);
       setProfile(res as Profile);
@@ -50,17 +51,14 @@ export function EditProfileScreen({ onDone }: { onDone: () => void }) {
         <Image source={{ uri: profile.avatarUrl }} style={styles.photo} />
       ) : (
         <View style={[styles.photo, styles.photoFallback]}>
-          <Text style={styles.avatarText}>
-            {(profile?.displayName ?? profile?.username ?? "?").slice(0, 1).toUpperCase()}
-          </Text>
+          <Text style={styles.avatarText}>{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
         </View>
       )}
 
+      {pid ? <Text style={styles.pid}>@{pid} · permanent, cannot be changed</Text> : null}
+
       <Text style={s.label}>Display Name</Text>
       <TextInput style={s.input} value={displayName} onChangeText={setDisplayName} placeholder="Display name" placeholderTextColor={theme.colors.mutedForeground} />
-
-      <Text style={s.label}>Username</Text>
-      <TextInput style={s.input} value={username} onChangeText={setUsername} autoCapitalize="none" autoCorrect={false} placeholder="username" placeholderTextColor={theme.colors.mutedForeground} />
 
       {error && <Text style={s.error}>{error}</Text>}
       {saved && <Text style={styles.saved}>Saved</Text>}
@@ -90,5 +88,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarText: { fontSize: 28, fontWeight: "400", color: c.foreground, fontFamily: f.serif },
+  pid: { fontSize: 13, color: c.mutedForeground, fontFamily: f.sans, textAlign: "center" },
   saved: { color: c.success, fontSize: 13, fontFamily: f.sans },
 });

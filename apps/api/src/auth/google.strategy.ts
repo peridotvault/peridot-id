@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { PassportStrategy } from "@nestjs/passport";
 import { Strategy, VerifyCallback } from "passport-google-oauth20";
 import { AuthService, GoogleProfile } from "./auth.service";
+import { decodeState } from "./sso.service";
 
 export interface GoogleOAuthOptions {
   clientID: string;
@@ -18,6 +19,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, "google") {
       clientSecret: options.clientSecret,
       callbackURL: options.callbackURL,
       scope: ["profile", "email"],
+      passReqToCallback: true,
     });
   }
 
@@ -27,9 +29,17 @@ export class GoogleStrategy extends PassportStrategy(Strategy, "google") {
     return { prompt: "select_account" };
   }
 
-  async validate(accessToken: string, refreshToken: string, profile: GoogleProfile, done: VerifyCallback): Promise<void> {
+  async validate(req: unknown, accessToken: string, refreshToken: string, profile: GoogleProfile, done: VerifyCallback): Promise<void> {
     try {
-      const identity = await this.authService.upsertGoogleIdentity(profile);
+      // The user-chosen PID handle round-trips through OAuth `state` (see GoogleGuard).
+      let handle: string | undefined;
+      try {
+        const state = (req as { query?: { state?: unknown } })?.query?.state;
+        if (typeof state === "string") handle = decodeState(state).handle;
+      } catch {
+        handle = undefined;
+      }
+      const identity = await this.authService.upsertGoogleIdentity(profile, handle);
       done(null, identity);
     } catch (err) {
       done(err as Error);

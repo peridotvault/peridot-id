@@ -1,6 +1,8 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { CredentialService } from "./credential.service";
+import { mockSecurity } from "../../test/factories";
+
 
 jest.mock("@simplewebauthn/server", () => {
   const actual = jest.requireActual("@simplewebauthn/server") as object;
@@ -37,10 +39,10 @@ function setup() {
   const config = {
     get: jest.fn((key: string) => (key === "WEBAUTHN_RP_ID" ? "localhost" : key === "WEBAUTHN_RP_NAME" ? "PeridotID" : key === "WEBAUTHN_ORIGINS" ? "http://localhost:3301" : undefined)),
   };
-  const security = { log: jest.fn(async () => undefined) };
+  const security = mockSecurity();
   const prisma = {
     pidAccount: {
-      findFirst: jest.fn(async () => ({ id: ACCOUNT_ID, identityId: "pid_01HASH", status: "active" })),
+      findFirst: jest.fn(async () => ({ id: ACCOUNT_ID, pid: "pid_01HASH", status: "active" })),
     },
     authority: {
       findMany: jest.fn(async () => [] as any),
@@ -56,6 +58,9 @@ function setup() {
         ...args.data,
       })),
       update: jest.fn(async () => ({})),
+    },
+    profile: {
+      findUnique: jest.fn(async () => ({ displayName: "Peridot" })),
     },
   };
   const service = new CredentialService(prisma as never, config as never, security as never);
@@ -129,6 +134,26 @@ describe("CredentialService", () => {
         data: expect.objectContaining({ isAdditional: true, approvalChallenge: expect.any(String) }),
       }),
     );
+  });
+
+  it("registerStart labels the passkey with the PID and displayName", async () => {
+    const { service, prisma } = setup();
+    prisma.authority.findMany.mockResolvedValue([]);
+
+    const result = await service.registerStart("ifal@pid");
+
+    expect(result.options.user.name).toBe("ifal@pid");
+    expect(result.options.user.displayName).toBe("Peridot");
+  });
+
+  it("registerStart falls back to the PID when no displayName is set", async () => {
+    const { service, prisma } = setup();
+    prisma.authority.findMany.mockResolvedValue([]);
+    prisma.profile.findUnique.mockResolvedValue({ displayName: null } as never);
+
+    const result = await service.registerStart("ifal@pid");
+
+    expect(result.options.user.displayName).toBe("ifal@pid");
   });
 
   it("registerFinish rejects a replayed (consumed) challenge", async () => {
@@ -270,7 +295,7 @@ describe("CredentialService", () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
     prisma.authority.findFirst.mockResolvedValue(
-      authority({ id: "auth-1", credentialId: "cred-1", account: { identityId: "pid_01HASH" } }),
+      authority({ id: "auth-1", credentialId: "cred-1", account: { pid: "pid_01HASH" } }),
     );
     const verify = (await import("@simplewebauthn/server")).verifyAuthenticationResponse as jest.Mock;
     verify.mockResolvedValue({ verified: true });
@@ -289,7 +314,7 @@ describe("CredentialService", () => {
       },
     });
 
-    expect(result.identityId).toBe("pid_01HASH");
+    expect(result.pid).toBe("pid_01HASH");
     expect(prisma.authority.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "auth-1" }, data: { lastUsedAt: expect.any(Date) } }),
     );
@@ -305,7 +330,7 @@ describe("CredentialService", () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
     prisma.authority.findFirst.mockResolvedValue(
-      authority({ id: "auth-1", credentialId: "cred-1", account: { identityId: "pid_01HASH" } }),
+      authority({ id: "auth-1", credentialId: "cred-1", account: { pid: "pid_01HASH" } }),
     );
 
     await expect(

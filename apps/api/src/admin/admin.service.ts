@@ -22,7 +22,7 @@ export class AdminService {
     });
   }
 
-  async createChain(identityId: string, dto: CreateChainDto) {
+  async createChain(pid: string, dto: CreateChainDto) {
     const existing = await this.prisma.chain.findUnique({
       where: { namespace_reference: { namespace: dto.namespace, reference: dto.reference } },
     });
@@ -42,21 +42,21 @@ export class AdminService {
       include: { contracts: true },
     });
     this.chains.invalidate();
-    await this.security.log(identityId, "admin.chain.created", { chainId: chain.id, reference: dto.reference }, undefined);
+    await this.security.log(pid, "admin.chain.created", { chainId: chain.id, reference: dto.reference }, undefined);
     return chain;
   }
 
-  async updateChain(identityId: string, id: string, dto: UpdateChainDto) {
+  async updateChain(pid: string, id: string, dto: UpdateChainDto) {
     const chain = await this.prisma.chain.findUnique({ where: { id } });
     if (!chain) throw new NotFoundException("Chain not found");
     const updated = await this.prisma.chain.update({ where: { id }, data: { ...dto }, include: { contracts: true } });
     this.chains.invalidate();
-    await this.security.log(identityId, "admin.chain.updated", { chainId: id }, undefined);
+    await this.security.log(pid, "admin.chain.updated", { chainId: id }, undefined);
     return updated;
   }
 
   /** Set the current address for one contract type on a chain (upsert by type). */
-  async upsertContract(identityId: string, chainId: string, dto: UpsertContractDto) {
+  async upsertContract(pid: string, chainId: string, dto: UpsertContractDto) {
     const chain = await this.prisma.chain.findUnique({ where: { id: chainId } });
     if (!chain) throw new NotFoundException("Chain not found");
     if (chain.namespace === "solana" && (dto.type === "factory" || dto.type === "account_implementation")) {
@@ -80,7 +80,7 @@ export class AdminService {
       },
     });
     this.chains.invalidate();
-    await this.security.log(identityId, "admin.contract.upserted", { chainId, type: dto.type }, undefined);
+    await this.security.log(pid, "admin.contract.upserted", { chainId, type: dto.type }, undefined);
     return contract;
   }
 }

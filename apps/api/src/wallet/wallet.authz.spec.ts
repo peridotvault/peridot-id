@@ -6,6 +6,7 @@ import { ThrottlerModule, ThrottlerStorage } from "@nestjs/throttler";
 import cookieParser from "cookie-parser";
 import request from "supertest";
 import { JwtStrategy } from "../auth/jwt.strategy";
+import { ChainRegistryService } from "../chain/chain-registry.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { SponsoredWithdrawService } from "./sponsored-withdraw.service";
@@ -44,28 +45,28 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     state = { identities: new Map(), wallets: new Map() };
     const prisma = {
       identity: {
-        findUnique: jest.fn(async ({ where }: { where: { id: string } }) => {
-          const status = state.identities.get(where.id);
+        findUnique: jest.fn(async ({ where }: { where: { pid: string } }) => {
+          const status = state.identities.get(where.pid);
           return status ? { status } : null;
         }),
       },
       pidAccount: {
-        findFirst: jest.fn(async ({ where }: { where: { identityId: string; status?: string } }) => {
-          const row = state.wallets.get(where.identityId);
+        findFirst: jest.fn(async ({ where }: { where: { pid: string; status?: string } }) => {
+          const row = state.wallets.get(where.pid);
           if (!row) return null;
           return {
-            id: `acc-${where.identityId}`,
-            identityId: where.identityId,
+            id: `acc-${where.pid}`,
+            pid: where.pid,
             status: "active",
             version: 1,
             createdAt: new Date(),
             updatedAt: new Date(),
-            chainAccounts: [{ ...row, id: row.id, accountId: `acc-${where.identityId}`, chainNamespace: row.chain }],
+            chainAccounts: [{ ...row, id: row.id, accountId: `acc-${where.pid}`, chain: row.chain }],
           };
         }),
-        create: jest.fn(async ({ data }: { data: { identityId: string } }) => ({
-          id: `acc-${data.identityId}`,
-          identityId: data.identityId,
+        create: jest.fn(async ({ data }: { data: { pid: string } }) => ({
+          id: `acc-${data.pid}`,
+          pid: data.pid,
           status: "active",
           version: 1,
           createdAt: new Date(),
@@ -74,27 +75,29 @@ describe("Wallet authorization & abuse cases (routes)", () => {
       },
       chainAccount: {
         findFirst: jest.fn(async ({ where }: { where: { accountId: string; accountType: string } }) => {
-          const identityId = where.accountId.replace(/^acc-/, "");
-          const row = state.wallets.get(identityId);
+          const pid = where.accountId.replace(/^acc-/, "");
+          const row = state.wallets.get(pid);
           return row || null;
         }),
         create: jest.fn(
-          async ({ data, select }: { data: { accountId: string; chainNamespace: string; chainReference: string; address: string; accountType: string }; select: Record<string, boolean> }) => {
-            const identityId = data.accountId.replace(/^acc-/, "");
+          async ({ data, select }: { data: { accountId: string; chainId: string; address: string; accountType: string }; select: Record<string, boolean> }) => {
+            const pid = data.accountId.replace(/^acc-/, "");
             const row: WalletRow = {
-              id: `w-${identityId}`,
-              identityId,
-              chain: data.chainNamespace,
-              chainNamespace: data.chainNamespace,
+              id: `w-${pid}`,
+              pid,
+              chain: { namespace: "solana" },
               address: data.address,
               status: "active",
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
-            state.wallets.set(identityId, row);
+            state.wallets.set(pid, row);
             return pick(row, select);
           },
         ),
+      },
+      chain: {
+        findUnique: jest.fn(async () => ({ id: "chain-sol" })),
       },
     };
 
@@ -105,6 +108,10 @@ describe("Wallet authorization & abuse cases (routes)", () => {
         WalletService,
         SponsoredWithdrawService,
         JwtStrategy,
+        {
+          provide: ChainRegistryService,
+          useValue: { solanaChainIdOrThrow: jest.fn(async () => "chain-sol") },
+        },
         {
           provide: ConfigService,
           useValue: { get: jest.fn(), getOrThrow: jest.fn(() => SECRET) },
@@ -181,9 +188,8 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     state.identities.set("pid_a", "active");
     state.wallets.set("pid_a", {
       id: "w1",
-      identityId: "pid_a",
-      chain: "solana",
-      address: "addr-1",
+      pid: "pid_a",
+      chain: { namespace: "solana" },      address: "addr-1",
       status: "active",
       createdAt: "2026-08-10T12:00:00.000Z",
       updatedAt: "2026-08-10T12:00:00.000Z",
@@ -201,8 +207,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     state.identities.set("pid_b", "active");
     state.wallets.set("pid_a", {
       id: "w1",
-      chain: "solana",
-      address: "addr-1",
+      chain: { namespace: "solana" },      address: "addr-1",
       status: "active",
       createdAt: "2026-08-10T12:00:00.000Z",
     });
@@ -223,7 +228,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
 
     expect(res.body.chain).toBe("solana");
     expect(res.body.address).toBe("addr-new");
-    expect(res.body).not.toHaveProperty("identityId");
+    expect(res.body).not.toHaveProperty("pid");
     expect(state.wallets.get("pid_a")?.address).toBe("addr-new");
   });
 
@@ -231,8 +236,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     state.identities.set("pid_a", "active");
     state.wallets.set("pid_a", {
       id: "w1",
-      chain: "solana",
-      address: "addr-1",
+      chain: { namespace: "solana" },      address: "addr-1",
       status: "active",
       createdAt: "2026-08-10T12:00:00.000Z",
     });

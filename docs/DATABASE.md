@@ -2,14 +2,21 @@
 
 Tables:
 
-- `identities` — the PID. `id` is `pid_<ULID>`; `status` is `active | suspended | deleted`
-  (default `active`); `deletedAt` is set on soft delete. **The PID never changes.**
+- `identities` — the PID. `pid` is `<handle>@pid` (e.g. `ifal@pid`), user-chosen once at
+  onboarding; `status` is `active | suspended | deleted` (default `active`); `deletedAt`
+  is set on soft delete. **The PID never changes, is never reused, and cannot be
+  reassigned** — deleted rows keep their PK reserved. IDs are stored lowercase, so
+  uniqueness is case-insensitive by construction. Every FK to an identity is a plain
+  `pid` column (`pid_apps` uses `ownerPid`); the JWT `sub` claim carries it opaquely.
 - `identity_credentials` — one row per way to log in (Google, Discord, Apple, email+password,
   passkey, ...). `(provider, providerUserId)` is unique — the source of truth. A non-null
   `email` is unique across all credentials (one email = one PID); see
   `docs/adr/002-email-uniqueness.md`.
-- `profiles` — `username` (unique, lowercase, `^[a-z0-9_]{3,20}$`), `usernameChangedAt`,
-  `displayName`, `avatarUrl`, `locale`.
+- `profiles` — mutable labels only: `displayName`, `avatarUrl`, `locale`.
+  Strict 1:1 with `identities` via shared primary key (`profiles.pid`).
+  (The old surrogate `id` and `username`/`usernameChangedAt` columns were removed when
+  the PID became the user-chosen handle; see migrations `20260913000000_*` and
+  `20260913120000_pid_columns_and_chain_fk`.)
 - `pid_accounts` — the wallet-owning entity (ADR 004). `identityId` FK → `identities.id`;
   `status` (soft-delete convention), `version`. V1 creates exactly one default account per
   identity; schema permits many (future multi-account).
@@ -17,8 +24,10 @@ Tables:
   CAIP-2 `chainNamespace`/`chainReference` (Solana V1); `address` (PDA for `smart_account`,
   user-supplied for `linked_address`); `accountType ∈ {smart_account, linked_address}`.
   `@@unique([accountId, chainNamespace, chainReference, accountType])` — one smart account
-  per chain per account, while a migrated `linked_address` may coexist. **No key-material
-  columns, ever.**
+  per chain per account, while a migrated `linked_address` may coexist. Compound FK
+  `(chainNamespace, chainReference)` → `chains(namespace, reference)`: every row must
+  reference a registered chain (fresh DBs must run `db:seed` first — account creation
+  fails cleanly otherwise). **No key-material columns, ever.**
 - `authorities` — signing authorities for an account (ADR 004/005). `type`
   (`secp256r1` passkey for V1), `publicKey` (bytea), `credentialId` (WebAuthn), `status`.
   **Public material only** — the secret never leaves the client authenticator.
@@ -55,7 +64,7 @@ Invariants:
 - V1: one default `pid_accounts` per identity (app-level; schema permits many).
 - At most one `smart_account` chain account per account per chain (unique constraint);
   `linked_address` rows may coexist (legacy V3 records).
-- The PID is the only source of truth — changing email, username, avatar, or linking/unlinking
+- The PID is the only source of truth — changing email, displayName, avatar, or linking/unlinking
   providers never changes the PID or the account/wallet.
 
 ## Wallet lifecycle (ADR 003/004)

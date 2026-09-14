@@ -1,14 +1,11 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { CredentialService } from "../credentials/credential.service";
+import { mockSecurity, coseKey } from "../../test/factories";
+
 
 const ACCOUNT_ID = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
-// Correct ES256 COSE_Key: map(5) = kty, alg, crv, x, y (matches real simplewebauthn output).
-const COSE = Buffer.concat([
-  Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
-  Buffer.alloc(32, 0x11),
-  Buffer.from([0x22, 0x58, 0x20]),
-  Buffer.alloc(32, 0x22),
-]);
+// Opaque ES256 key (verification is mocked — exact bytes don't matter here).
+const COSE = coseKey();
 
 function authority(id: string, status = "active") {
   return {
@@ -40,9 +37,9 @@ function setup() {
   const config = {
     get: jest.fn((key: string) => (key === "WEBAUTHN_RP_ID" ? "localhost" : key === "WEBAUTHN_RP_NAME" ? "PeridotID" : key === "WEBAUTHN_ORIGINS" ? "http://localhost:3301" : undefined)),
   };
-  const security = { log: jest.fn(async () => undefined) };
+  const security = mockSecurity();
   const prisma = {
-    pidAccount: { findFirst: jest.fn(async () => ({ id: ACCOUNT_ID, identityId: "pid_01HASH", status: "active" }) as any) },
+    pidAccount: { findFirst: jest.fn(async () => ({ id: ACCOUNT_ID, pid: "pid_01HASH", status: "active" }) as any) },
     authority: {
       findMany: jest.fn(async () => [] as any),
       findFirst: jest.fn(async () => null as any),
@@ -54,6 +51,9 @@ function setup() {
       findFirst: jest.fn(async () => null as any),
       create: jest.fn(async (args: { data: { accountId: string; kind: string; challenge: string } }) => ({ id: "c1", ...args.data })),
       update: jest.fn(async () => ({})),
+    },
+    profile: {
+      findUnique: jest.fn(async () => ({ displayName: "Peridot" })),
     },
   };
   const service = new CredentialService(prisma as never, config as never, security as never);
