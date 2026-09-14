@@ -231,7 +231,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body() dto: ClaimDto,
-  ): Promise<{ ok: true; pid: string; pidCode?: string }> {
+  ): Promise<{ ok: true; pid: string; pidCode?: string; redirectTo?: string }> {
     const ticketId = (req as Request & { cookies?: Record<string, string> }).cookies?.[CLAIM_COOKIE];
     if (!ticketId) throw new BadRequestException("No pending claim — sign in again to get a fresh one.");
     const { pid, redirectTo, clientId } = await this.claimService.claim(ticketId, dto.handle);
@@ -242,10 +242,23 @@ export class AuthController {
       const resolved = await this.ssoService.resolveReturnTo(redirectTo, clientId);
       if (resolved) {
         const pidCode = await this.ssoService.issue(pid, resolved.redirectTo, { clientId: resolved.clientId });
-        return { ok: true, pid, pidCode };
+        return { ok: true, pid, pidCode, redirectTo: resolved.redirectTo };
       }
     }
     return { ok: true, pid };
+  }
+
+  @Delete("claim")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async abandonClaim(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ ok: true }> {
+    const ticketId = (req as Request & { cookies?: Record<string, string> }).cookies?.[CLAIM_COOKIE];
+    await this.claimService.abandon(ticketId);
+    clearClaimCookie(res, this.config);
+    return { ok: true };
   }
 
   @Post("refresh")

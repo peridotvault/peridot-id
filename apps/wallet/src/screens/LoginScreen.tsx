@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { usePeridot } from "../AppContext";
 import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
@@ -14,10 +14,12 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sso] = useState(readSsoParams);
-  // New-user PID claim: the handle becomes the permanent `<handle>@pid`
-  // identity (never changeable, reused, or reassigned).
+  // Post-auth PID creation: the handle becomes the permanent `<handle>@pid`
+  // identity (never changeable, reused, or reassigned). The user must tick the
+  // permanence acknowledgement before continuing.
   const [handle, setHandle] = useState("");
   const [handleStatus, setHandleStatus] = useState<"idle" | "checking" | "free" | "taken" | "invalid">("idle");
+  const [ackPermanent, setAckPermanent] = useState(false);
   // Post-auth pending claim (verified credential, no identity yet). undefined =
   // still checking, null = none. The claim screen takes over when set.
   const [claim, setClaim] = useState<{ email: string | null; displayName: string | null } | null | undefined>(undefined);
@@ -125,6 +127,21 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     return false;
   };
 
+  const claimSignOut = async () => {
+    setBusy(true);
+    try {
+      await peridot.auth.cancelClaim();
+    } catch {
+      // cancel must never trap the user — the ticket expires on its own
+    } finally {
+      setClaim(null);
+      setHandle("");
+      setAckPermanent(false);
+      setError(null);
+      setBusy(false);
+    }
+  };
+
   const claimPid = async () => {
     const h = handle.trim().toLowerCase();
     setBusy(true);
@@ -135,6 +152,12 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
         const url = new URL(window.location.href);
         url.searchParams.delete("claim");
         window.history.replaceState(null, "", url.toString());
+      }
+      // SSO claim: the ticket (server-validated) knows where to go back to.
+      // Legacy fallback: SSO params on our own URL. Otherwise stay home.
+      if (res.pidCode && res.redirectTo && typeof window !== "undefined") {
+        window.location.assign(withPidCode(res.redirectTo, res.pidCode));
+        return;
       }
       if (finishSso(res.pidCode)) return;
       onLoggedIn();
@@ -231,40 +254,59 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
       <View style={styles.screen}>
         <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
         <View style={s.container}>
+          <View style={styles.claimHeader}>
+            <Pressable onPress={claimSignOut} disabled={busy} accessibilityLabel="Sign out and cancel PID creation">
+              <Text style={styles.signOut}>Sign Out</Text>
+            </Pressable>
+          </View>
           <View style={styles.middle}>
             <View style={styles.masthead}>
-              <Text style={styles.title}>Claim your PID</Text>
+              <Text style={styles.title}>Create your PID</Text>
               {(claim.email || claim.displayName) && (
                 <Text style={styles.subtitle}>Continuing as {claim.displayName ?? claim.email}</Text>
               )}
             </View>
             {error && <Text style={s.error}>{error}</Text>}
             <View style={styles.stack}>
-              <View style={styles.handleRow}>
+              <View style={styles.handleWrap}>
                 <TextInput
                   style={[s.input, styles.handleInput]}
                   value={handle}
-                  onChangeText={(t) => setHandle(t.toLowerCase())}
+                  onChangeText={(t) => {
+                    setHandle(t.toLowerCase());
+                    setAckPermanent(false);
+                  }}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  placeholder="ifal"
+                  placeholder="username"
                   placeholderTextColor={theme.colors.mutedForeground}
                   editable={!busy}
                 />
-                <Text style={styles.suffix}>@pid</Text>
+                <Text style={styles.suffixInside} pointerEvents="none">@pid</Text>
               </View>
               {handleStatus === "free" && <Text style={styles.free}>✓ {handle.trim().toLowerCase()}@pid is available</Text>}
               {handleStatus === "taken" && <Text style={s.error}>Taken — try another handle.</Text>}
               {handleStatus === "invalid" && handle.length > 0 && (
                 <Text style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</Text>
               )}
-              <Text style={styles.warn}>
-                Your PID is permanent — it can never be changed, reused, or reassigned. Choose carefully.
-              </Text>
+              <Pressable
+                style={styles.ackRow}
+                onPress={() => setAckPermanent((v) => !v)}
+                disabled={busy}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: ackPermanent }}
+              >
+                <View style={[styles.ackBox, ackPermanent && styles.ackBoxChecked]}>
+                  {ackPermanent && <Text style={styles.ackTick}>✓</Text>}
+                </View>
+                <Text style={styles.warn}>
+                  Your PID is permanent — it can never be changed, reused, or reassigned. Choose carefully.
+                </Text>
+              </Pressable>
               <UIButton
-                title={busy ? "Claiming…" : "Claim my PID"}
+                title={busy ? "Creating…" : "Create & Continue"}
                 onPress={claimPid}
-                disabled={busy || handleStatus !== "free"}
+                disabled={busy || handleStatus !== "free" || !ackPermanent}
                 variant="primary"
               />
             </View>
@@ -348,11 +390,30 @@ const styles = StyleSheet.create({
   middle: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 20 },
   masthead: { alignItems: "center", gap: 8 },
   stack: { width: "100%", maxWidth: 343, gap: 12 },
-  handleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  handleInput: { flex: 1 },
-  suffix: { fontSize: 15, color: theme.colors.foreground, fontFamily: "Geist_400Regular" },
+  claimHeader: { width: "100%", flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: 8 },
+  signOut: { fontSize: 14, color: theme.colors.danger ?? theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
+  handleWrap: { position: "relative", flex: 1, justifyContent: "center" },
+  handleInput: { flex: 1, paddingRight: 64 },
+  suffixInside: {
+    position: "absolute",
+    right: 12,
+    fontSize: 15,
+    color: theme.colors.mutedForeground,
+    fontFamily: "Geist_400Regular",
+  },
   free: { fontSize: 12, color: theme.colors.success ?? theme.colors.foreground, fontFamily: "Geist_400Regular" },
-  warn: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
+  warn: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular", flex: 1 },
+  ackRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  ackBox: {
+    width: 22,
+    height: 22,
+    borderWidth: 1,
+    borderColor: theme.colors.mutedForeground,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ackBoxChecked: { borderColor: theme.colors.foreground },
+  ackTick: { fontSize: 14, color: theme.colors.foreground, fontFamily: "Geist_400Regular" },
   orRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   hairline: { flex: 1, height: 1, backgroundColor: theme.colors.border },
   orText: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },

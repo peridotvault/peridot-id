@@ -236,8 +236,9 @@ paths:
       description: |
         One transaction creates the identity (`<handle>@pid`, permanent) + profile
         + credential and consumes the single-use claim ticket. Issues the session
-        cookies and returns an SSO `pidCode` too when the claim came from a
-        relying-party login. Expired tickets answer `410` — sign in again.
+        cookies. When the claim came from a relying-party login, the response also
+        carries the SSO `pidCode` plus the validated `redirectTo` — the hosted page
+        navigates there itself. Expired tickets answer `410` — sign in again.
       requestBody:
         required: true
         content:
@@ -254,7 +255,7 @@ paths:
               handle: "ifal"
       responses:
         "200":
-          description: Claimed identity (+ SSO code when applicable)
+          description: Claimed identity (+ SSO code and return target when applicable)
           content:
             application/json:
               schema:
@@ -270,6 +271,10 @@ paths:
                   pidCode:
                     type: string
                     description: One-time SSO code when the claim came from a relying-party login
+                  redirectTo:
+                    type: string
+                    format: uri
+                    description: Validated return target for the pidCode (navigate with ?pid_code=)
               example:
                 ok: true
                 pid: "ifal@pid"

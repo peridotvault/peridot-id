@@ -49,6 +49,16 @@ export class ClaimService {
     return id;
   }
 
+  /** Abandon a pending claim: consume the ticket so it can never be picked up
+   *  later. Idempotent — missing/consumed/expired tickets are still OK. */
+  async abandon(ticketId: string | undefined): Promise<void> {
+    if (!ticketId) return;
+    await this.prisma.claimTicket.updateMany({
+      where: { id: ticketId, consumedAt: null, expiresAt: { gt: new Date() } },
+      data: { consumedAt: new Date() },
+    });
+  }
+
   /** Live ticket for the claim UI (null when none/expired/consumed). */
   async status(ticketId: string | undefined): Promise<ClaimTicketView | null> {
     if (!ticketId) return null;

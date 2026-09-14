@@ -128,4 +128,17 @@ describe("ClaimService", () => {
     const res = await service.claim("ct_x", "ifal");
     expect(res).toMatchObject({ pid: "ifal@pid", redirectTo: "https://live2dev.com/auth/callback", clientId: "pidapp_abc" });
   });
+
+  it("abandon consumes a live ticket and ignores the rest", async () => {
+    const { service, prisma } = setup();
+    prisma.claimTicket.updateMany = jest.fn(async () => ({ count: 1 }));
+
+    await expect(service.abandon("ct_x")).resolves.toBeUndefined();
+    expect(prisma.claimTicket.updateMany).toHaveBeenCalledWith({
+      where: { id: "ct_x", consumedAt: null, expiresAt: { gt: expect.any(Date) } },
+      data: { consumedAt: expect.any(Date) },
+    });
+
+    await expect(service.abandon(undefined)).resolves.toBeUndefined();
+  });
 });

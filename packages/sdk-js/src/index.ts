@@ -150,16 +150,29 @@ export class PeridotAuth {
 
   /**
    * Claim the pending credential under a fresh permanent handle. Issues the
-   * session on success (returns an SSO `pidCode` too when the claim came from a
-   * relying-party login).
+   * session on success. When the claim came from a relying-party login, the
+   * result also carries the SSO `pidCode` plus the validated `redirectTo` —
+   * the caller (a hosted page) navigates there itself.
    */
-  async claim(handle: string): Promise<{ ok: boolean; pid: string; pidCode?: string }> {
-    const res = await this.client.post<{ ok: boolean; pid: string; pidCode?: string }>("/v1/auth/claim", { handle });
+  async claim(handle: string): Promise<{ ok: boolean; pid: string; pidCode?: string; redirectTo?: string }> {
+    const res = await this.client.post<{ ok: boolean; pid: string; pidCode?: string; redirectTo?: string }>(
+      "/v1/auth/claim",
+      { handle },
+    );
     if (!res.ok) {
       const msg = (res.data as ApiError)?.message;
       throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Claim failed"));
     }
-    return res.data as { ok: boolean; pid: string; pidCode?: string };
+    return res.data as { ok: boolean; pid: string; pidCode?: string; redirectTo?: string };
+  }
+
+  /**
+   * Abandon a pending PID claim (back to the login screen). Consumes the ticket
+   * so it can never be picked up later; always succeeds, even with no ticket.
+   */
+  async cancelClaim(): Promise<boolean> {
+    const res = await this.client.delete("/v1/auth/claim");
+    return res.ok;
   }
 
   async refresh(): Promise<true | "step-up" | false> {
