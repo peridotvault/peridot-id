@@ -56,18 +56,17 @@ export class GoogleStrategy extends PassportStrategy(Strategy, "google") {
 export const GOOGLE_OAUTH_OPTIONS = Symbol("GOOGLE_OAUTH_OPTIONS");
 
 export function googleOAuthOptionsFactory(config: ConfigService): GoogleOAuthOptions | null {
-  // Per-environment credentials: dev and prod run the IDENTICAL OAuth code path —
-  // only the client (id/secret/redirect URI) differs. Unprefixed names are the legacy
-  // fallback, used when the suffixed set is absent.
-  const suffix = config.get<string>("NODE_ENV") === "production" ? "PROD" : "DEV";
-  const pick = (base: string, fallback = ""): string =>
-    config.get<string>(`${base}_${suffix}`, "") || config.get<string>(base, fallback);
-  const clientID = pick("GOOGLE_CLIENT_ID");
-  const clientSecret = pick("GOOGLE_CLIENT_SECRET");
+  // One identical key set in every environment (local/test/prod) — only the
+  // values differ per env. No _DEV/_PROD suffix variants.
+  const clientID = config.get<string>("GOOGLE_CLIENT_ID", "");
+  const clientSecret = config.get<string>("GOOGLE_CLIENT_SECRET", "");
   if (!clientID || !clientSecret) return null;
   return {
     clientID,
     clientSecret,
-    callbackURL: pick("GOOGLE_CALLBACK_URL", "http://localhost:3301/v1/auth/google/callback"),
+    callbackURL: config.get<string>(
+      "GOOGLE_CALLBACK_URL",
+      "http://localhost:3301/v1/auth/google/callback",
+    ),
   };
 }

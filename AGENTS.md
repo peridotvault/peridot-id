@@ -46,8 +46,9 @@ pnpm --filter @peridotvault/pid-api dev        # API on :3301
 cd apps/wallet && pnpm dev:web         # Expo web on :8081
 ```
 
-Env to set in `apps/api/.env`: `GOOGLE_CLIENT_ID_DEV`/`_SECRET_DEV` (dev Google
-client with localhost redirect; `_PROD` only in deploy env), `PID_PROGRAM_ID=G8tPC...`,
+Env to set in `apps/api/.env`: `GOOGLE_CLIENT_ID`/`_SECRET` (dev Google
+client with localhost redirect; same key names in every env, values differ —
+prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
 `WEBAUTHN_ORIGINS` includes `http://localhost:8081`, `CLIENT_SUCCESS_URL=http://localhost:8081`,
 `CORS_ORIGINS=http://localhost:8081`. Restart the API after `.env` changes (`nest --watch` does not reload env).
 
@@ -56,8 +57,8 @@ client with localhost redirect; `_PROD` only in deploy env), `PID_PROGRAM_ID=G8t
 - Wallet (`apps/wallet`) uses `sdk-js` direct calls + `pid-core`/`pid-solana`
   primitives only — never `pid-react` / hosted login (CI guard in `ci.yml` fails
   the build otherwise).
-- Dev and prod run the identical OAuth code path; only credentials differ
-  (`NODE_ENV=production` selects `GOOGLE_*_PROD`, otherwise `GOOGLE_*_DEV`).
+- Dev and prod run the identical OAuth code path with identical key names; only
+  values differ per env.
   Never point local dev at the prod callback and never add localhost URIs to the
   prod Google client — create a dev client instead.
 - Only `pid-core` (primitives) and `pid-solana` (chain adapter) may import

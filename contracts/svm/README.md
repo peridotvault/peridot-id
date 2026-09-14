@@ -67,21 +67,34 @@ node tests/integration.mjs <program-id>
 ```
 
 Current devnet program id: `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
+
+## One wallet on every cluster (same program id)
+
+The PDA is `find_program_address(["peridot_id","account",sha256(pid)], program_id)` —
+a pure function, so **reusing one program keypair on every cluster gives one pid
+one address on localnet, devnet, testnet and mainnet** (balances stay per-chain;
+only the address unifies — the EVM equivalent of the shared factory).
+
+Rule: `target/deploy/peridot-smart-account-keypair.json` is canonical. Deploy
+testnet and mainnet with `--program-id` pointing at that same file. Never
+`solana-keygen new` per env — a fresh id moves every wallet. Guard the file like
+a secret until the upgrade authority is on the multisig.
 Point the API at it (`PID_PROGRAM_ID`, `PID_SOLANA_RPC_URL=https://api.devnet.solana.com`)
 and exercise `packages/sdk-js/test/devnet.e2e.mjs`.
 
 ## Mainnet
 
-No mainnet program id exists yet — procedure, not values:
+Deploy with the **same** program keypair (see above) — new id = new addresses
+everywhere (the id is part of the PDA derivation). Procedure, not values:
 
-1. Generate a **fresh** program keypair. Never reuse the devnet id.
+1. Reuse the canonical program keypair. Never generate a fresh one per env.
 2. Fund a deployer, deploy, verify the id on-chain.
 3. Transfer the upgrade authority to a **stakeholder-held hardware/multisig key**
    before launch (see `docs/tasks/012-production-hardening.md` for the full checklist).
 4. Set `SOLANA_NETWORK=mainnet-beta` + 2+ production RPCs in deploy env.
 
-One-way door: a new program id means **new addresses everywhere** (the id is part of
-the PDA derivation). Funds on old-program PDAs stay there — nothing migrates them.
+One keypair everywhere = one blast radius: the multisig is the single guard.
+Funds on old-program PDAs stay there — nothing migrates them.
 
 ## Notes
 

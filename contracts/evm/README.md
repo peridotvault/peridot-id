@@ -9,9 +9,12 @@ smart-account program. Salt = `sha256(pid)`, so one identity owns one address pe
 - `src/PeridotAccount.sol` — passkey-owned account (`secp256r1` authority set on
   `initialize`; `execute` / `updateAuthority` verify a WebAuthn assertion whose
   challenge is the domain-separated payload — the `auth.rs` binding in Solidity).
+  `execute` mirrors SVM `withdraw_sol`: `relayFee` is inside the signed payload
+  and paid to `treasury` from the account balance; `initialize` pulls an
+  `activationFee` to `treasury` (SVM `activate` parity, pre-funded counterfactual).
 - `src/PeridotFactory.sol` — EIP-1167 proxy factory (`deploy` / `deployAndInit`
   / `predict`). Salt = `bytes32(pidToSeed32(pid))`, so rotation
-  never moves the address.
+  never moves the address. `deployAndInit` takes `(activationFee, treasury)`.
 - `src/Base64Url.sol` — tiny base64url decoder for the challenge field.
 - `lib/openzeppelin-contracts/` — vendored sources used (MIT): `proxy/Clones.sol`
   for deterministic proxies, `utils/cryptography/P256.sol` for signature
@@ -60,7 +63,8 @@ EVM_IMPLEMENTATION_ADDRESS=<implementation>
 
 Without the relayer key, `POST /v1/account/evm/:chainRef/activate` only confirms
 an out-of-band deployment to ACTIVE (`EVM_RELAYER_SECRET` enables API-driven
-`deployAndInit`).
+`deployAndInit`). Revenue hooks: `EVM_TREASURY_ADDRESS` + `EVM_ACTIVATION_FEE_WEI`
+(zero/unset = skip; `requiredWei` covers gas + fee so READY means fully funded).
 
 ## Testnet
 

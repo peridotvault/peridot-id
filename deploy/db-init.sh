@@ -32,16 +32,14 @@ rm -f "$PASSFILE"
 
 if [ -n "$GEN_PASS" ] && ! grep -q "^DATABASE_URL=" "$ENV_FILE"; then
   echo "generated role password: $GEN_PASS"
-  echo "add these to $ENV_FILE:"
+  echo "add this to $ENV_FILE:"
   echo "  DATABASE_URL=postgresql://$ROLE:$GEN_PASS@postgres:5432/$DB"
-  echo "  DIRECT_URL=postgresql://$ROLE:$GEN_PASS@postgres:5432/$DB"
   exit 0
 fi
 
 # Run migrations from the app repo using the env's DATABASE_URL.
-export DATABASE_URL DIR_URL
+export DATABASE_URL
 DATABASE_URL="$(grep '^DATABASE_URL=' "$ENV_FILE" | cut -d= -f2-)"
-DIRECT_URL="$(grep '^DIRECT_URL=' "$ENV_FILE" | cut -d= -f2-)"
 
 cd "$SCRIPT_DIR/.."
 echo "running prisma migrate deploy..."

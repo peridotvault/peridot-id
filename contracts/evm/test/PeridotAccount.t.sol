@@ -17,18 +17,20 @@ contract PeridotAccountTest is Test {
     PeridotFactory factory;
     PeridotAccount account;
     bytes32 rpIdHash;
+    address constant TREASURY = address(0xBEEF);
+    uint256 constant RELAY_FEE = 0.001 ether;
 
     // Happy-path vector (filled from test_LogVector output, signed externally).
     // To regenerate: run test_LogVector, sign `h` with privkey 1, paste r/s.
-    bytes32 constant VEC_R = 0x481faf362101090d443ac8fa0d8463771fd1c119e0345aedc79426fae3171283;
-    bytes32 constant VEC_S = 0x175a33e15040aee80f26550b77ed9c15d75554cdf8bf6dda1b2c3da08bc5c3e9;
+    bytes32 constant VEC_R = 0x4f7b758dbdbb8868e1d91660ada040161d1d28bf3b3f153fa1b34482fb452f47;
+    bytes32 constant VEC_S = 0x62d6037bec54a3ef145fa73225b9cf96e0463535a069896c2873e84645ba8aa4;
     bool constant VEC_READY = true;
 
     function setUp() public {
         vm.warp(1_000_000);
         rpIdHash = sha256("localhost");
         factory = new PeridotFactory(address(new PeridotAccount()));
-        account = PeridotAccount(payable(factory.deployAndInit(SALT, GX, GY, rpIdHash)));
+        account = PeridotAccount(payable(factory.deployAndInit(SALT, GX, GY, rpIdHash, 0, address(0))));
     }
 
     function _authData() internal view returns (bytes memory) {
@@ -49,7 +51,18 @@ contract PeridotAccountTest is Test {
         returns (bytes32)
     {
         return keccak256(
-            abi.encodePacked(account.DOMAIN(), block.chainid, address(account), nonce, to, value, keccak256(data), deadline)
+            abi.encodePacked(
+                account.DOMAIN(),
+                block.chainid,
+                address(account),
+                nonce,
+                to,
+                value,
+                keccak256(data),
+                deadline,
+                RELAY_FEE,
+                TREASURY
+            )
         );
     }
 
@@ -78,17 +91,20 @@ contract PeridotAccountTest is Test {
 
     function test_DoubleInitReverts() public {
         vm.expectRevert(PeridotAccount.AlreadyInitialized.selector);
-        account.initialize(GX, GY, rpIdHash);
+        account.initialize(GX, GY, rpIdHash, 0, address(0));
     }
 
     function test_ExecuteHappyPath() public {
         if (!VEC_READY) return; // vector not pasted yet — see test_LogVector
+        vm.deal(address(account), RELAY_FEE);
         address to = address(0x1234);
         uint64 deadline = 1_000_300;
         bytes memory authData = _authData();
         bytes memory clientData = _clientData(_payload(to, 0, "", deadline, 0));
-        account.execute(to, 0, "", deadline, authData, clientData, VEC_R, VEC_S);
+        account.execute(to, 0, "", deadline, RELAY_FEE, TREASURY, authData, clientData, VEC_R, VEC_S);
         assertEq(account.nonce(), 1);
+        assertEq(TREASURY.balance, RELAY_FEE);
+        assertEq(address(account).balance, 0);
     }
 
     function test_ExecuteRejectsExpired() public {
@@ -96,7 +112,7 @@ contract PeridotAccountTest is Test {
         bytes memory authData = _authData();
         bytes memory clientData = _clientData(_payload(to, 0, "", 999_999, 0));
         vm.expectRevert(PeridotAccount.Expired.selector);
-        account.execute(to, 0, "", 999_999, authData, clientData, bytes32(0), bytes32(0));
+        account.execute(to, 0, "", 999_999, RELAY_FEE, TREASURY, authData, clientData, bytes32(0), bytes32(0));
     }
 
     function test_ExecuteRejectsBadChallenge() public {
@@ -105,7 +121,7 @@ contract PeridotAccountTest is Test {
         bytes memory authData = _authData();
         bytes memory clientData = _clientData(bytes32(uint256(1234))); // wrong challenge
         vm.expectRevert(PeridotAccount.InvalidChallenge.selector);
-        account.execute(to, 0, "", deadline, authData, clientData, bytes32(uint256(1)), bytes32(uint256(2)));
+        account.execute(to, 0, "", deadline, RELAY_FEE, TREASURY, authData, clientData, bytes32(uint256(1)), bytes32(uint256(2)));
     }
 
     function test_ExecuteRejectsWrongRpId() public {
@@ -114,7 +130,7 @@ contract PeridotAccountTest is Test {
         bytes memory authData = bytes.concat(sha256("evil.example"), bytes1(0x05), bytes4(uint32(1)));
         bytes memory clientData = _clientData(_payload(to, 0, "", deadline, 0));
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
-        account.execute(to, 0, "", deadline, authData, clientData, bytes32(uint256(1)), bytes32(uint256(2)));
+        account.execute(to, 0, "", deadline, RELAY_FEE, TREASURY, authData, clientData, bytes32(uint256(1)), bytes32(uint256(2)));
     }
 
     function test_ExecuteRejectsNoUserVerification() public {
@@ -123,7 +139,7 @@ contract PeridotAccountTest is Test {
         bytes memory authData = bytes.concat(rpIdHash, bytes1(0x01), bytes4(uint32(1))); // UP only
         bytes memory clientData = _clientData(_payload(to, 0, "", deadline, 0));
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
-        account.execute(to, 0, "", deadline, authData, clientData, bytes32(uint256(1)), bytes32(uint256(2)));
+        account.execute(to, 0, "", deadline, RELAY_FEE, TREASURY, authData, clientData, bytes32(uint256(1)), bytes32(uint256(2)));
     }
 
     function test_ExecuteRejectsHighS() public {
@@ -135,13 +151,52 @@ contract PeridotAccountTest is Test {
         uint256 n = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
         bytes32 highS = bytes32(n - uint256(VEC_S));
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
-        account.execute(to, 0, "", deadline, authData, clientData, VEC_R, highS);
+        account.execute(to, 0, "", deadline, RELAY_FEE, TREASURY, authData, clientData, VEC_R, highS);
     }
 
     function test_UpdateAuthorityRejectsBadChallenge() public {
         // Challenge check fires before signature verification (mirrors auth.rs order).
         vm.expectRevert(PeridotAccount.InvalidChallenge.selector);
         account.updateAuthority(bytes32(uint256(9)), bytes32(uint256(9)), 1_000_300, _authData(), _clientData(bytes32(uint256(1))), bytes32(uint256(1)), bytes32(uint256(2)));
+    }
+
+    function test_ExecuteRejectsOvercharge() public {
+        // Fee is inside the signed payload: swapping it invalidates the challenge.
+        vm.deal(address(account), RELAY_FEE + 1);
+        address to = address(0x1234);
+        uint64 deadline = 1_000_300;
+        bytes memory clientData = _clientData(_payload(to, 0, "", deadline, 0));
+        vm.expectRevert(PeridotAccount.InvalidChallenge.selector);
+        account.execute(to, 0, "", deadline, RELAY_FEE + 1, TREASURY, _authData(), clientData, VEC_R, VEC_S);
+    }
+
+    function test_ExecuteRejectsInsufficientFunds() public {
+        // Unfunded account cannot cover value + relay fee (mirrors SVM InsufficientFunds).
+        address to = address(0x1234);
+        uint64 deadline = 1_000_300;
+        bytes memory clientData = _clientData(_payload(to, 0, "", deadline, 0));
+        vm.expectRevert(PeridotAccount.InsufficientFunds.selector);
+        account.execute(to, 0, "", deadline, RELAY_FEE, TREASURY, _authData(), clientData, VEC_R, VEC_S);
+    }
+
+    function test_DeployAndInitPullsActivationFee() public {
+        // Mirrors SVM `activate`: pre-funded counterfactual, fee pulled to treasury on init.
+        bytes32 salt = keccak256("activation-fee");
+        address predicted = factory.predict(salt);
+        uint256 fee = 0.01 ether;
+        vm.deal(predicted, fee);
+        address deployed =
+            factory.deployAndInit(salt, GX, GY, rpIdHash, fee, TREASURY);
+        assertEq(deployed, predicted);
+        assertEq(TREASURY.balance, fee);
+        assertEq(predicted.balance, 0);
+        assertEq(PeridotAccount(payable(deployed)).nonce(), 0);
+    }
+
+    function test_DeployAndInitSkipsZeroFee() public {
+        bytes32 salt = keccak256("no-fee");
+        address deployed = factory.deployAndInit(salt, GX, GY, rpIdHash, 0, address(0));
+        assertEq(deployed, factory.predict(salt));
     }
 
     /// @dev base64url (no padding) encoder for building clientDataJSON challenges.
@@ -185,7 +240,18 @@ contract PayloadParityTest is Test {
         PeridotAccount a = PeridotAccount(payable(f.deploy(bytes32(uint256(7)))));
         address to = address(0x1234);
         bytes32 payload = keccak256(
-            abi.encodePacked(a.DOMAIN(), block.chainid, address(a), uint64(0), to, uint256(0), keccak256(""), uint64(1_000_300))
+            abi.encodePacked(
+                a.DOMAIN(),
+                block.chainid,
+                address(a),
+                uint64(0),
+                to,
+                uint256(0),
+                keccak256(""),
+                uint64(1_000_300),
+                uint256(0),
+                address(0)
+            )
         );
         console.log("PAYLOAD_ACCOUNT=%s", address(a));
         console.logBytes32(payload);

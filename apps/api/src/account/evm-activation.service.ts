@@ -84,13 +84,29 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     return activationMarginRate(this.config);
   }
 
-  /** Live deploy cost: static gas estimate × live gas price × (1 + margin). */
+  /** Live deploy cost: static gas estimate × live gas price × (1 + margin), plus the activation fee. */
   private async requiredWei(chainReference: string): Promise<bigint> {
     const rpc = await this.rpcFor(chainReference);
     // 1 gwei fallback when the node hides the price.
     const gasPrice = await rpc.gasPrice().catch(() => 1_000_000_000n);
     const margin = BigInt(Math.round(this.marginRate() * 100));
-    return (DEPLOY_GAS_ESTIMATE * gasPrice * (100n + margin)) / 100n;
+    return ((DEPLOY_GAS_ESTIMATE * gasPrice * (100n + margin)) / 100n) + this.activationFeeWei();
+  }
+
+  /** On-chain revenue hook (mirrors SVM `activation_fee`): pulled to treasury on init. Zero disables. */
+  private activationFeeWei(): bigint {
+    try {
+      const fee = BigInt(this.config.get<string>("EVM_ACTIVATION_FEE_WEI", "0") ?? "0");
+      return fee < 0n ? 0n : fee;
+    } catch {
+      return 0n;
+    }
+  }
+
+  /** Zero address disables the fee (matches the contract's skip path). */
+  private treasury(): string {
+    const raw = this.config.get<string>("EVM_TREASURY_ADDRESS", "") ?? "";
+    return /^0x[0-9a-fA-F]{40}$/.test(raw) ? raw : "0x0000000000000000000000000000000000000000";
   }
 
   private classify(balance: bigint, required: bigint, current: string): ChainAccountStatus {
@@ -190,6 +206,8 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         new Uint8Array(x),
         new Uint8Array(y),
         rpIdHash,
+        this.activationFeeWei(),
+        this.treasury(),
       );
       const receipt = await this.sendDeployTx(chainReference, secret as `0x${string}`, data);
       await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "active" } });

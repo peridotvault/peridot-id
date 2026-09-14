@@ -30,31 +30,49 @@ contract PeridotAccount {
     error Expired();
     error CallFailed();
     error ZeroAuthority();
+    error InsufficientFunds();
+    error ZeroTreasury();
 
-    event Initialized(bytes32 x, bytes32 y);
-    event Executed(address indexed to, uint256 value, uint64 nonce);
+    event Initialized(bytes32 x, bytes32 y, uint256 activationFee);
+    event Executed(address indexed to, uint256 value, uint256 relayFee, uint64 nonce);
     event AuthorityUpdated(bytes32 x, bytes32 y, uint64 nonce);
 
     /// @dev No constructor args so the implementation is redeployable at one
     /// address on every chain (keyless CREATE2 deploy) — the factory embeds it.
-    function initialize(bytes32 x, bytes32 y, bytes32 _rpIdHash) external {
+    /// @notice One-time setup (called atomically by `PeridotFactory.deployAndInit`).
+    /// The account is pre-funded at its counterfactual address (first-top-up, like
+    /// SVM `activate`); `activationFee` is pulled to `treasury` here — pass 0 to skip.
+    function initialize(bytes32 x, bytes32 y, bytes32 _rpIdHash, uint256 activationFee, address treasury)
+        external
+    {
         if (initialized) revert AlreadyInitialized();
         if (x == 0 && y == 0) revert ZeroAuthority();
         authorityX = x;
         authorityY = y;
         rpIdHash = _rpIdHash;
         initialized = true;
-        emit Initialized(x, y);
+        if (activationFee > 0) {
+            if (treasury == address(0)) revert ZeroTreasury();
+            if (address(this).balance < activationFee) revert InsufficientFunds();
+            (bool feeOk, ) = treasury.call{value: activationFee}("");
+            if (!feeOk) revert CallFailed();
+        }
+        emit Initialized(x, y, activationFee);
     }
 
     receive() external payable {}
 
     /// @notice Execute a call authorized by the passkey.
+    /// @dev Mirrors SVM `withdraw_sol`: the relayer submits the tx and floats gas;
+    /// `relayFee` is reimbursed to `treasury` from this account's balance. The fee is
+    /// part of the signed payload so the relayer cannot overcharge.
     function execute(
         address to,
         uint256 value,
         bytes calldata data,
         uint64 deadline,
+        uint256 relayFee,
+        address treasury,
         bytes calldata authenticatorData,
         bytes calldata clientDataJSON,
         bytes32 r,
@@ -62,14 +80,43 @@ contract PeridotAccount {
     ) external {
         if (!initialized) revert NotInitialized();
         if (block.timestamp > deadline) revert Expired();
-        bytes32 expected = keccak256(
-            abi.encodePacked(DOMAIN, block.chainid, address(this), nonce, to, value, keccak256(data), deadline)
-        );
+        if (relayFee > 0 && treasury == address(0)) revert ZeroTreasury();
+        bytes32 expected = _executePayload(to, value, data, deadline, relayFee, treasury);
         _verify(expected, authenticatorData, clientDataJSON, r, s);
-        uint64 n = nonce++;
+        if (address(this).balance < value + relayFee) revert InsufficientFunds();
+        nonce++;
         (bool ok, ) = to.call{value: value}(data);
         if (!ok) revert CallFailed();
-        emit Executed(to, value, n);
+        if (relayFee > 0) {
+            (ok, ) = treasury.call{value: relayFee}("");
+            if (!ok) revert CallFailed();
+        }
+        emit Executed(to, value, relayFee, nonce - 1);
+    }
+
+    /// @dev Payload for `execute` (own frame — keeps `execute` under the stack limit).
+    function _executePayload(
+        address to,
+        uint256 value,
+        bytes calldata data,
+        uint64 deadline,
+        uint256 relayFee,
+        address treasury
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                DOMAIN,
+                block.chainid,
+                address(this),
+                nonce,
+                to,
+                value,
+                keccak256(data),
+                deadline,
+                relayFee,
+                treasury
+            )
+        );
     }
 
     /// @notice Rotate the passkey authority. Requires a signature from the current key.

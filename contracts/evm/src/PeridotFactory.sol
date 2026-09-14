@@ -28,12 +28,19 @@ contract PeridotFactory {
     }
 
     /// @notice Deploy + initialize atomically (no front-run window on the authority).
-    function deployAndInit(bytes32 salt, bytes32 x, bytes32 y, bytes32 rpIdHash)
-        external
-        returns (address account)
-    {
+    /// Mirrors SVM `activate`: the account is pre-funded at its counterfactual address
+    /// and `activationFee` is pulled to `treasury` on init — pass 0 to skip the fee.
+    function deployAndInit(
+        bytes32 salt,
+        bytes32 x,
+        bytes32 y,
+        bytes32 rpIdHash,
+        uint256 activationFee,
+        address treasury
+    ) external returns (address account) {
         account = Clones.cloneDeterministic(implementation, salt);
-        (bool ok, ) = account.call(abi.encodeCall(PeridotAccount.initialize, (x, y, rpIdHash)));
+        (bool ok, ) =
+            account.call(abi.encodeCall(PeridotAccount.initialize, (x, y, rpIdHash, activationFee, treasury)));
         if (!ok) revert InitFailed();
         emit Deployed(account, salt);
     }

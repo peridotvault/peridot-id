@@ -69,11 +69,25 @@ export class EvmAdapter {
     return this.rpc.getBalance(this.getAddress(pid));
   }
 
-  /** `deployAndInit(bytes32,bytes32,bytes32,bytes32)` calldata for the relayer/forge script. */
-  buildDeployAndInitData(salt: Bytes | string, x: Bytes, y: Bytes, rpIdHash: Bytes): string {
+  /** `deployAndInit(bytes32,bytes32,bytes32,bytes32,uint256,address)` calldata for the relayer/forge script. */
+  buildDeployAndInitData(
+    salt: Bytes | string,
+    x: Bytes,
+    y: Bytes,
+    rpIdHash: Bytes,
+    activationFee: bigint | number,
+    treasury: string,
+  ): string {
     const saltHex = typeof salt === "string" ? salt : "0x" + toHex(salt);
-    const parts = [pad32(saltHex), pad32("0x" + toHex(x)), pad32("0x" + toHex(y)), pad32("0x" + toHex(rpIdHash))];
-    return "0x" + toHex(selector("deployAndInit(bytes32,bytes32,bytes32,bytes32)")) + parts.join("");
+    const parts = [
+      pad32(saltHex),
+      pad32("0x" + toHex(x)),
+      pad32("0x" + toHex(y)),
+      pad32("0x" + toHex(rpIdHash)),
+      pad32("0x" + toHex(ube(activationFee, 32))),
+      encodeAddress(treasury),
+    ];
+    return "0x" + toHex(selector("deployAndInit(bytes32,bytes32,bytes32,bytes32,uint256,address)")) + parts.join("");
   }
 
   /** EVM authorization payload (what the passkey signs as the WebAuthn challenge). */
@@ -85,9 +99,11 @@ export class EvmAdapter {
     value: bigint | number;
     dataHash: Bytes;
     deadline: bigint | number;
+    relayFee: bigint | number;
+    treasury: string;
   }): Uint8Array {
     // Field-for-field match of the contract's
-    // `abi.encodePacked(DOMAIN, chainid, account, nonce:uint64, to, value, dataHash, deadline:uint64)`.
+    // `abi.encodePacked(DOMAIN, chainid, account, nonce:uint64, to, value, dataHash, deadline:uint64, relayFee, treasury)`.
     return buildEvmAuthorizationPayload([
       ube(args.chainId, 32),
       hexBytes(args.account, 20),
@@ -96,6 +112,8 @@ export class EvmAdapter {
       ube(args.value, 32),
       args.dataHash,
       ube(args.deadline, 8),
+      ube(args.relayFee, 32),
+      hexBytes(args.treasury, 20),
     ]);
   }
 }
