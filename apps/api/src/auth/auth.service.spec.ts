@@ -129,45 +129,12 @@ function reqWithToken(token: string) {
 }
 
 describe("AuthService", () => {
-  it("signup creates the permanent handle@pid identity with profile and credential", async () => {
+  it("findGoogleIdentity returns null for an unknown credential (claim flow takes over)", async () => {
     const { service, prisma } = setup();
-    const identity = await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal Muha" }, "ifal");
 
-    expect(identity.pid).toBe("ifal@pid");
-    expect(prisma.identity.create).toHaveBeenCalledWith({ data: { pid: "ifal@pid", status: "active" } });
-    expect(prisma.profile.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ displayName: "Ranaufal Muha" }) }),
-    );
-    expect(prisma.identityCredential.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ provider: "google", providerUserId: "google-1" }),
-    });
-  });
-
-  it("normalizes the handle to lowercase", async () => {
-    const { service } = setup();
-    const identity = await service.upsertGoogleIdentity({ id: "google-1" }, "IFAL");
-    expect(identity.pid).toBe("ifal@pid");
-  });
-
-  it("rejects signup without a chosen handle", async () => {
-    const { service, prisma } = setup();
-    await expect(service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal" })).rejects.toThrow(
-      "permanent PID handle",
-    );
+    await expect(service.findGoogleIdentity("google-new")).resolves.toBeNull();
     expect(prisma.identity.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects an invalid handle", async () => {
-    const { service, prisma } = setup();
-    await expect(service.upsertGoogleIdentity({ id: "google-1" }, "ab")).rejects.toThrow("permanent PID handle");
-    expect(prisma.identity.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects an already-taken PID (never reused or reassigned)", async () => {
-    const { service, prisma } = setup();
-    (prisma.identity.findUnique as jest.Mock).mockResolvedValue({ pid: "ifal@pid" });
-    await expect(service.upsertGoogleIdentity({ id: "google-9" }, "ifal")).rejects.toThrow(ConflictException);
-    await expect(service.upsertGoogleIdentity({ id: "google-9" }, "ifal")).rejects.toThrow("PID already taken");
+    expect(prisma.identityCredential.create).not.toHaveBeenCalled();
   });
 
   it("reports PID availability", async () => {
@@ -184,31 +151,13 @@ describe("AuthService", () => {
       identity: { pid: "ifal@pid", status: "active" },
     });
 
-    const identity = await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal" });
+    const identity = await service.findGoogleIdentity("google-1");
 
-    expect(identity.pid).toBe("ifal@pid");
+    expect(identity).toMatchObject({ pid: "ifal@pid" });
     expect(prisma.identityCredential.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ lastLoginAt: expect.any(Date) }) }),
     );
     expect(prisma.identity.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects a new Google credential whose email belongs to another PID", async () => {
-    const { service, prisma } = setup();
-    prisma.identityCredential.findFirst.mockResolvedValue({ id: "cred-other" });
-
-    const promise = service.upsertGoogleIdentity(
-      {
-        id: "google-new",
-        displayName: "Ranaufal",
-        emails: [{ value: "taken@example.com" }],
-      },
-      "taken",
-    );
-    await expect(promise).rejects.toThrow(ConflictException);
-    await expect(promise).rejects.toThrow("Email is already linked to another account");
-    expect(prisma.identity.create).not.toHaveBeenCalled();
-    expect(prisma.identityCredential.create).not.toHaveBeenCalled();
   });
 
   it("returns the existing identity without an email-collision check on returning login", async () => {
@@ -217,38 +166,9 @@ describe("AuthService", () => {
       identity: { pid: "ifal@pid", status: "active" },
     });
 
-    await service.upsertGoogleIdentity({ id: "google-1", displayName: "Ranaufal", emails: [{ value: "mine@example.com" }] });
+    await service.findGoogleIdentity("google-1");
 
     expect(prisma.identityCredential.findFirst).not.toHaveBeenCalled();
-  });
-
-  it("skips the email-collision check when the Google profile has no email", async () => {
-    const { service, prisma } = setup();
-
-    await service.upsertGoogleIdentity({ id: "google-2", displayName: "Ranaufal" }, "fresh");
-
-    expect(prisma.identityCredential.findFirst).not.toHaveBeenCalled();
-    expect(prisma.identityCredential.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ provider: "google", providerUserId: "google-2", email: null }),
-    });
-  });
-
-  it("signup with a free email stores the email and skips rejection", async () => {
-    const { service, prisma } = setup();
-
-    const identity = await service.upsertGoogleIdentity(
-      {
-        id: "google-3",
-        displayName: "Ranaufal",
-        emails: [{ value: "free@example.com" }],
-      },
-      "freeuser",
-    );
-
-    expect(identity.pid).toBe("freeuser@pid");
-    expect(prisma.identityCredential.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ email: "free@example.com" }),
-    });
   });
 
   it("issueSession creates a session row and sets both cookies", async () => {

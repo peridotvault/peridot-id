@@ -20,7 +20,7 @@ Modules:
 - wallet (deprecated V3 record-only surface)
 
 Non-custodial wallet model (ADR 004–007):
-- Smart Account = a program PDA seeded `["peridot_id","account",account_id]`; authority is the
+- Smart Account = a program PDA seeded `["peridot_id","account",sha256(pid)]`; authority is the
   user's secp256r1 passkey, verified on-chain via the Secp256r1 precompile + instruction
   introspection (ADR 005 Option B).
 - Fee payer = client-held Ed25519 keypair (ADR 006). The server holds no key material.
@@ -28,7 +28,7 @@ Non-custodial wallet model (ADR 004–007):
 Repo:
 ```
 apps/api      NestJS (auth, identity, profile, account, credentials, intent, wallet)
-apps/docs     Fumadocs
+apps/web      Fumadocs docs site
 apps/wallet   Expo wallet client (web + iOS + Android, PRD_v5 §9)
 contracts/svm/smart-account   Pinocchio smart-account program
 packages/openapi / types / sdk-js / solana

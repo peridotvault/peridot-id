@@ -29,9 +29,10 @@ const peridot = Peridot({
   },
 });
 
-await peridot.auth.login();                    // redirect to Google
-const me = await peridot.identity.me();        // Identity
+await peridot.auth.login();                    // redirect to Google (new users land on the PID picker)
+const me = await peridot.identity.me();        // Identity { pid, ... }
 await peridot.profile.update({ displayName: 'PeridotPlayer' });
+const available = await peridot.auth.pidAvailable('ifal'); // { available, pid }
 ```
 
 ## Domains
@@ -76,7 +77,7 @@ The browser lands on `https://live2dev.com/auth/callback?pid_code=...`. Your pag
 
 ```ts
 const identity = await peridot.auth.exchange(code);
-// identity = { identityId, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }
+// identity = { pid, identityId (deprecated shim), profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }
 ```
 
 `returnTo` must be an origin in the API's `CLIENT_REDIRECT_ALLOWLIST` env, otherwise

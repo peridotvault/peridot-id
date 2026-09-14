@@ -1,6 +1,9 @@
 # ADR 004 — V4 Account Model: Identity → Peridot Account → Chain Account
 
-Status: accepted
+Status: accepted — **partially superseded by [ADR-008](008-remove-pid-account.md)**:
+the `PidAccount` hub is removed (1 identity = 1 personal wallet, rows reference
+`Identity.pid` directly) and PDA seeds are `sha256(pid)`. The PDA/authority design,
+layering rationale, and the rejected-alternatives record below remain accurate history.
 
 This ADR is the **ACCOUNT_MODEL.md** deliverable of PRD_v4 Phase 0 (§29). It supersedes the
 record-only custody of ADR 003 for V4 and resolves ADR 003's documented escalation ("once a

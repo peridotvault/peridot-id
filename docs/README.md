@@ -1,6 +1,8 @@
 # PeridotID
 
 Gaming Identity Platform — Authentication, Identity, and Profile for the Peridot ecosystem.
+One Google sign-in, one permanent identity (`<handle>@pid`), one personal wallet across
+every Peridot product.
 
 ## Public docs
 
@@ -15,39 +17,46 @@ canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 ## Repository layout
 
 ```
-apps/api            NestJS API (auth, identity, profile, wallet) — deployed on the VPS via deploy/compose.yaml
-apps/docs           Public docs site (Fumadocs)
+apps/api            NestJS API (auth, identity, profile, wallet) — VPS via deploy/compose.yaml
+apps/wallet         Expo wallet client (web + iOS + Android)
+apps/web            Public docs site (Fumadocs)
+contracts/svm       Pinocchio smart-account program (Rust)
+contracts/evm       Counterfactual smart accounts (Solidity/Foundry)
 packages/sdk-js     Browser SDK
 packages/types      Shared TypeScript types
 packages/openapi    OpenAPI 3.0 specification (source of truth)
+packages/solana     Solana chain adapter (@solana/web3.js lives here only)
+packages/evm        EVM adapter
+packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
+packages/pid-react  Hosted "Sign in with PeridotID" React flow
 ```
 
 ## Core docs
 
-- [PRD.md](PRD.md) — scope v1 (Google login, JWT + refresh, identity, profile, JS SDK)
-- [prds/PRD_v3.md](prds/PRD_v3.md) — V3 (identity + wallet association) — implemented
-- [prds/PRD_v4.md](prds/PRD_v4.md) — V4 (non-custodial Solana smart wallet) — current; tasks
-  001–013 and ADRs 004–007 in [tasks/](tasks/README.md) / [adr/](adr/)
+- [prds/PRD_v5.md](prds/PRD_v5.md) — current product spec (smart wallet)
+- [prds/PRD_v4.md](prds/PRD_v4.md) — architecture base (note: its `PidAccount` model is
+  superseded by [adr/008-remove-pid-account.md](adr/008-remove-pid-account.md))
 - [ARCHITECTURE.md](ARCHITECTURE.md) — modules and repo layout
 - [TECH_STACK.md](TECH_STACK.md) — NestJS, PostgreSQL, Prisma, JWT, Passport
-- [DATABASE.md](DATABASE.md) — ERD (identities, identity_credentials, profiles, wallets, devices, sessions)
+- [DATABASE.md](DATABASE.md) — tables, ERD, invariants
 - [API_SPEC.md](API_SPEC.md) — endpoint list
-- [SECURITY.md](SECURITY.md) — cookies, token rotation, rate limiting, wallet §9 dispositions
+- [SECURITY.md](SECURITY.md) — auth, sessions, wallet threat model
 - [ROADMAP.md](ROADMAP.md) — Foundation → Social → Gaming → Ecosystem
+- [adr/](adr/) — accepted decisions 002–008 · [tasks/](tasks/README.md) — pre-mainnet hardening
 
 ## Quick start
 
 ```bash
 docker compose up -d        # Postgres (refresh-token state lives in Postgres — no Redis)
 pnpm install
-pnpm db:migrate             # apply Prisma migrations
-pnpm dev                    # API on http://localhost:3301, docs on http://localhost:3300
+pnpm --filter @peridotvault/pid-api db:deploy  # apply Prisma migrations
+pnpm --filter @peridotvault/pid-api dev        # API on http://localhost:3301
+pnpm --filter @peridotvault/pid-web dev        # docs on http://localhost:3300
+pnpm --filter @peridotvault/pid-wallet dev:web # wallet on http://localhost:8081
 ```
 
-Run each individually with `pnpm dev:api` / `pnpm dev:docs`.
-
 Copy `apps/api/.env.example` to `apps/api/.env` and add Google OAuth credentials to test the
-login flow.
+login flow. Local chain: run `solana-test-validator` from `contracts/svm` (see AGENTS.md).
 
 ## Deploy
 

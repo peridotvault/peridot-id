@@ -72,10 +72,10 @@ paths:
         your app via `clientId`) — the callback then redirects to
         `returnTo?pid_code=...` with a one-time exchange code instead of the wallet.
 
-        First-time users MUST also pass `handle`: it becomes the permanent
-        `<handle>@pid` identity (e.g. `ifal@pid`) — user-chosen, immutable, never
-        reused or reassigned. Check availability first with
-        `GET /auth/pid/available?handle=...`. Returning logins ignore it.
+        First-time users always land on the PID picker after authenticating
+        (`POST /v1/auth/claim` creates the permanent `<handle>@pid` identity) —
+        handles are only ever chosen there, never up front. Returning logins
+        continue straight to a session.
       requestBody:
         required: false
         content:
@@ -90,20 +90,12 @@ paths:
                 clientId:
                   type: string
                   description: Registered app id (binds the pid_code to your app)
-                handle:
-                  type: string
-                  pattern: "^[a-z0-9_]{3,20}$"
-                  description: PID handle for first-time sign-up (becomes <handle>@pid, permanent)
             examples:
               sso:
                 summary: Third-party SSO login
                 value:
                   returnTo: "https://mygame.dev/callback"
                   clientId: "pidapp_0123456789abcdef0123456789abcdef"
-              signup:
-                summary: First-time sign-up with a chosen PID
-                value:
-                  handle: "ifal"
       responses:
         "200":
           description: Google authorization URL
@@ -181,22 +173,121 @@ paths:
       description: |
         Handles the redirect back from Google. On success it:
 
-        1. Creates a new identity + profile on first sign-in from the user-chosen
-           `handle` (the permanent `<handle>@pid` — required for new users, ignored
-           for returning ones), or logs into the existing identity when the Google
-           credential `(provider, providerUserId)` is already linked.
-        2. Issues `pid_access` and `pid_refresh` cookies.
-        3. Redirects to the `CLIENT_SUCCESS_URL` configured on the server.
+        1. Returning credential (`provider, providerUserId` already linked) → issues
+           `pid_access` and `pid_refresh` cookies and redirects (with `pid_code`
+           when the login carried an allowlisted `returnTo`).
+        2. New credential → mints a single-use claim ticket, sets the
+           `pid_claim` cookie, and redirects to `CLIENT_SUCCESS_URL?claim=1` for
+           the PID picker. Nothing is created until `POST /auth/claim`.
 
         Both cookies are `HttpOnly; SameSite=Lax`. In production the `Secure` flag is set.
+
+        Strategy/transport failures (stale code, exchange error) redirect to
+        `CLIENT_SUCCESS_URL?error=oauth_failed` instead of an error page — the
+        wallet shows an inline retry. Cause stays in server logs only.
 
         **Browser-navigation only.** Google redirects the browser here; do not call it
         directly via `fetch()`.
       responses:
         "302":
-          description: Redirect to CLIENT_SUCCESS_URL with session cookies set
+          description: Redirect to CLIENT_SUCCESS_URL (or returnTo with pid_code) with session cookies set
         "503":
           $ref: "#/components/responses/GoogleNotConfigured"
+
+  /auth/claim/status:
+    get:
+      tags: [auth]
+      summary: Pending PID claim, if any
+      description: |
+        Returns the pending post-auth claim from the `pid_claim` cookie
+        (verified credential, no identity yet) for the claim picker UI.
+      responses:
+        "200":
+          description: Claim status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending]
+                properties:
+                  pending:
+                    type: boolean
+                  email:
+                    type: string
+                    nullable: true
+                  displayName:
+                    type: string
+                    nullable: true
+                  avatarUrl:
+                    type: string
+                    nullable: true
+              example:
+                pending: true
+                email: "new@example.com"
+                displayName: "New User"
+                avatarUrl: null
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/claim:
+    post:
+      tags: [auth]
+      summary: Claim a pending credential under a fresh PID handle
+      description: |
+        One transaction creates the identity (`<handle>@pid`, permanent) + profile
+        + credential and consumes the single-use claim ticket. Issues the session
+        cookies and returns an SSO `pidCode` too when the claim came from a
+        relying-party login. Expired tickets answer `410` — sign in again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle]
+              properties:
+                handle:
+                  type: string
+                  pattern: "^[a-z0-9_]{3,20}$"
+                  description: Permanent handle for `<handle>@pid`
+            example:
+              handle: "ifal"
+      responses:
+        "200":
+          description: Claimed identity (+ SSO code when applicable)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, pid]
+                properties:
+                  ok:
+                    type: boolean
+                  pid:
+                    type: string
+                    pattern: "^[a-z0-9_]{3,20}@pid$"
+                    example: "ifal@pid"
+                  pidCode:
+                    type: string
+                    description: One-time SSO code when the claim came from a relying-party login
+              example:
+                ok: true
+                pid: "ifal@pid"
+        "400":
+          description: Bad handle, or no pending claim (stale page or already claimed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                statusCode: 400
+                message: "No pending claim — sign in again to get a fresh one."
+        "409":
+          description: Handle taken or credential/email already linked
+        "410":
+          description: Claim ticket expired — sign in again for a fresh one
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /auth/exchange:
     post:

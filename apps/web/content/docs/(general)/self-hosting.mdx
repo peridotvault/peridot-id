@@ -29,6 +29,10 @@ All configuration is loaded from `.env` in the API package. Copy
 | `COOKIE_SAMESITE` | no | `lax` (default) or `none` (cross-site clients, requires `COOKIE_SECURE=true`) |
 | `CLIENT_SUCCESS_URL` | no | Where users land after Google sign-in |
 | `CORS_ORIGINS` | no | Comma-separated extra client origins allowed by CORS |
+| `PID_PROGRAM_ID` | yes | Solana program id the wallet derives PDAs against |
+| `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGINS` | yes | Passkey relying-party config |
+| `CLIENT_REDIRECT_ALLOWLIST` | no | Comma-separated origins allowed for cross-origin SSO |
+| `SOLANA_NETWORK` | no | `devnet` (default) or `mainnet-beta` |
 | `ACCESS_TOKEN_TTL` | no | Access token lifetime (default `15m`) |
 | `REFRESH_TOKEN_TTL` | no | Refresh token lifetime (default `30d`) |
 | `PORT` | no | HTTP port (default `3301`) |
@@ -67,8 +71,8 @@ pnpm dev                      # API on http://localhost:3301, docs on http://loc
    `GOOGLE_CALLBACK_URL_PROD`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE`, `CLIENT_SUCCESS_URL`,
    `CORS_ORIGINS`.
 
-3. **Vercel — docs** (`apps/docs/vercel.json` is already configured). Add a project rooted at
-   `apps/docs`; no env vars needed.
+  3. **Vercel — docs** (`apps/web/vercel.json` is already configured). Add a project rooted at
+  `apps/web`; no env vars needed.
 
 4. Attach your custom domains and point DNS at Vercel.
 
@@ -80,28 +84,26 @@ pnpm --filter @peridotvault/pid-api db:deploy
 pnpm --filter @peridotvault/pid-api start
 ```
 
-## V2 → V3 migration notes
+## Legacy-database migration notes
 
-V3 adds the `wallets` table and an email-uniqueness index. The migration is **additive**:
-existing `identities`, `identity_credentials`, `profiles`, `devices`, and `sessions` rows are
-untouched.
+Migrations are **additive** where possible, but the PID renames (`identityId` → `pid`,
+`PidAccount` removal per ADR-008) rewrite identity-linked tables. For a **fresh**
+database just run `db:deploy` + seed. For a database with existing rows from older
+releases:
 
-1. **Before deploying to a database with existing rows**, run the email-duplicate audit and
-   resolve any collisions (a non-null email is unique — one email = one PID):
+1. **Email-duplicate audit** — a non-null email is unique (one email = one PID).
+   Resolve collisions before migrating (the uniqueness index fails otherwise):
 
-   ```sql
-   SELECT lower(email) AS email, count(*), array_agg("identityId")
-   FROM identity_credentials
-   WHERE email IS NOT NULL
-   GROUP BY lower(email)
-   HAVING count(*) > 1;
-   ```
-
-   Collisions must be resolved per case before deploy; the email-uniqueness index fails the
-   migration if duplicates remain.
+    ```sql
+    SELECT lower(email) AS email, count(*), array_agg("pid")
+    FROM identity_credentials
+    WHERE email IS NOT NULL
+    GROUP BY lower(email)
+    HAVING count(*) > 1;
+    ```
 
 2. Deploy with `pnpm --filter @peridotvault/pid-api db:deploy` (same flow as the Supabase steps above).
 
-3. **No backfill.** Existing users get **no wallet** — wallets are created only by explicit
-   user action (`POST /v1/wallet`), so nothing is silently created for existing accounts
-   (PRD §12).
+  3. **No backfill.** Existing users get **no wallet rows** — they are created only by
+  explicit user action (`POST /v1/account`), so nothing is silently created for
+  existing accounts.

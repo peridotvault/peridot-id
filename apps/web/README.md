@@ -1,4 +1,4 @@
-# `@peridotvault/pid-docs`
+# `@peridotvault/pid-web`
 
 The public PeridotID documentation site — **Next.js + Fumadocs** (with `fumadocs-mdx`,
 `fumadocs-openapi`, and Shiki). Serves getting-started, auth-flow, SDK, API-reference,

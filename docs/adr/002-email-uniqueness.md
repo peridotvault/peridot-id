@@ -101,7 +101,7 @@ is enforced both in the login path and by the database constraint.
 - `docs/DATABASE.md` is updated (email is no longer "metadata only"; a non-null email is unique
   across credentials).
 - The docs-site statement "The **email is metadata only**"
-  (`apps/docs/content/docs/(general)/authentication.mdx`) is corrected in task 009.
+  (`apps/web/content/docs/(general)/authentication.mdx`) is corrected in task 009.
 
 ## Security considerations
 

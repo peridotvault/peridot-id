@@ -18,6 +18,9 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
   // identity (never changeable, reused, or reassigned).
   const [handle, setHandle] = useState("");
   const [handleStatus, setHandleStatus] = useState<"idle" | "checking" | "free" | "taken" | "invalid">("idle");
+  // Post-auth pending claim (verified credential, no identity yet). undefined =
+  // still checking, null = none. The claim screen takes over when set.
+  const [claim, setClaim] = useState<{ email: string | null; displayName: string | null } | null | undefined>(undefined);
   // Existing wallet session, if any (SSO mode only): offers one-tap Allow instead
   // of forcing a redundant login. undefined = still checking, null = none.
   const [session, setSession] = useState<{ label: string } | null | undefined>(sso ? undefined : null);
@@ -52,6 +55,37 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
       cancelled = true;
     };
   }, [sso, peridot]);
+
+  /** Pending post-auth claim check (server is source of truth). */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const st = await peridot.auth.claimStatus();
+        if (!cancelled) setClaim(st.pending ? { email: st.email ?? null, displayName: st.displayName ?? null } : null);
+      } catch {
+        if (!cancelled) setClaim(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [peridot]);
+
+  /** Retryable OAuth failure from the callback (?error=) — show inline, then strip. */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const code = new URL(window.location.href).searchParams.get("error");
+    if (!code) return;
+    setError(
+      code === "oauth_not_configured"
+        ? "Sign-in is not available right now — please try again later."
+        : "Google sign-in failed — please try again.",
+    );
+    const url = new URL(window.location.href);
+    url.searchParams.delete("error");
+    window.history.replaceState(null, "", url.toString());
+  }, []);
 
   /** Live availability check for the PID claim input (server is source of truth). */
   useEffect(() => {
@@ -91,6 +125,26 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     return false;
   };
 
+  const claimPid = async () => {
+    const h = handle.trim().toLowerCase();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await peridot.auth.claim(h);
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("claim");
+        window.history.replaceState(null, "", url.toString());
+      }
+      if (finishSso(res.pidCode)) return;
+      onLoggedIn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const signInWithPasskey = async () => {
     setBusy(true);
     setError(null);
@@ -111,7 +165,7 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     }
   };
 
-  const continueWithGoogle = async (claimHandle?: string) => {
+  const continueWithGoogle = async () => {
     setBusy(true);
     setError(null);
     try {
@@ -120,7 +174,8 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
       // it: window.location.origin here (app.pid.peridotvault.com) is NOT in the server's
       // returnTo allowlist, so sending it 400s (localhost only "worked" because loopback
       // URLs are exempt). Without returnTo the Google callback lands on CLIENT_SUCCESS_URL
-      // (= this wallet's origin) with the session cookie.
+      // (= this wallet's origin) with the session cookie — or, for a new credential,
+      // on the PID claim screen (the only place handles are chosen).
       // Never navigate on success here: the browser leaves for Google, and the
       // return bootstrap lands home. On failure (!ok/throw) stay on login.
       const ok = await peridot.auth.login(
@@ -128,11 +183,8 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
           ? {
               ...(sso.redirectUri ? { returnTo: sso.redirectUri } : {}),
               ...(sso.clientId ? { clientId: sso.clientId } : {}),
-              ...(claimHandle ? { handle: claimHandle } : {}),
             }
-          : claimHandle
-            ? { handle: claimHandle }
-            : undefined,
+          : undefined,
       );
       if (!ok) setError("Couldn't reach Google — try again.");
     } catch (e) {
@@ -168,6 +220,60 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     return <LoadingScreen />;
   }
 
+  // Pending post-auth claim: the credential is verified but no identity exists
+  // yet. Claiming creates it — this screen is the only way forward.
+  if (claim === undefined) {
+    return <LoadingScreen />;
+  }
+
+  if (claim) {
+    return (
+      <View style={styles.screen}>
+        <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
+        <View style={s.container}>
+          <View style={styles.middle}>
+            <View style={styles.masthead}>
+              <Text style={styles.title}>Claim your PID</Text>
+              {(claim.email || claim.displayName) && (
+                <Text style={styles.subtitle}>Continuing as {claim.displayName ?? claim.email}</Text>
+              )}
+            </View>
+            {error && <Text style={s.error}>{error}</Text>}
+            <View style={styles.stack}>
+              <View style={styles.handleRow}>
+                <TextInput
+                  style={[s.input, styles.handleInput]}
+                  value={handle}
+                  onChangeText={(t) => setHandle(t.toLowerCase())}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder="ifal"
+                  placeholderTextColor={theme.colors.mutedForeground}
+                  editable={!busy}
+                />
+                <Text style={styles.suffix}>@pid</Text>
+              </View>
+              {handleStatus === "free" && <Text style={styles.free}>✓ {handle.trim().toLowerCase()}@pid is available</Text>}
+              {handleStatus === "taken" && <Text style={s.error}>Taken — try another handle.</Text>}
+              {handleStatus === "invalid" && handle.length > 0 && (
+                <Text style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</Text>
+              )}
+              <Text style={styles.warn}>
+                Your PID is permanent — it can never be changed, reused, or reassigned. Choose carefully.
+              </Text>
+              <UIButton
+                title={busy ? "Claiming…" : "Claim my PID"}
+                onPress={claimPid}
+                disabled={busy || handleStatus !== "free"}
+                variant="primary"
+              />
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   // Already logged in + third-party SSO request: one-tap consent, no redundant login.
   if (sso && session && !showLogin) {
     return (
@@ -200,36 +306,6 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
               disabled={busy}
               icon={<FontAwesome name="google" size={16} color={theme.colors.foreground} />}
             />
-            <View style={styles.claimBox}>
-              <Text style={styles.claimTitle}>New here? Claim your permanent PID</Text>
-              <View style={styles.handleRow}>
-                <TextInput
-                  style={[s.input, styles.handleInput]}
-                  value={handle}
-                  onChangeText={(t) => setHandle(t.toLowerCase())}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder="ifal"
-                  placeholderTextColor={theme.colors.mutedForeground}
-                  editable={!busy}
-                />
-                <Text style={styles.suffix}>@pid</Text>
-              </View>
-              {handleStatus === "free" && <Text style={styles.free}>✓ {handle.trim().toLowerCase()}@pid is available</Text>}
-              {handleStatus === "taken" && <Text style={s.error}>Taken — try another handle.</Text>}
-              {handleStatus === "invalid" && handle.length > 0 && (
-                <Text style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</Text>
-              )}
-              <Text style={styles.warn}>
-                Your PID is permanent — it can never be changed, reused, or reassigned. Choose carefully.
-              </Text>
-              <UIButton
-                title="Claim PID & Continue with Google"
-                onPress={() => continueWithGoogle(handle.trim().toLowerCase())}
-                disabled={busy || handleStatus !== "free"}
-                variant="primary"
-              />
-            </View>
             <UIButton
               title="Continue with Apple"
               note="Coming soon"
@@ -272,8 +348,6 @@ const styles = StyleSheet.create({
   middle: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 20 },
   masthead: { alignItems: "center", gap: 8 },
   stack: { width: "100%", maxWidth: 343, gap: 12 },
-  claimBox: { gap: 8, padding: 12, borderWidth: 1, borderColor: theme.colors.border },
-  claimTitle: { fontSize: 13, color: theme.colors.foreground, fontFamily: "Geist_400Regular" },
   handleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   handleInput: { flex: 1 },
   suffix: { fontSize: 15, color: theme.colors.foreground, fontFamily: "Geist_400Regular" },

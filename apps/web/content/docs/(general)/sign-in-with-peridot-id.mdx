@@ -65,7 +65,8 @@ configure.
 
 After login, PeridotID redirects back to your `redirectUri` with a one-time `pid_code`.
 The provider exchanges it automatically and sets `user`
-(`{ identityId, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }`).
+(`{ pid, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }`;
+`identityId` is also present as a deprecated one-release shim).
 
 Already logged in? The hosted page shows a one-tap consent screen asking to allow
 your website to sign in with the visitor's PeridotID — instead of another login.

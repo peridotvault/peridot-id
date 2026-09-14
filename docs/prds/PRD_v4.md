@@ -1,5 +1,10 @@
 # PRD_v4.md — Peridot ID Non-Custodial Smart Wallet & Multi-Chain Account Platform
 
+> Reading note: the architecture base below still stands, with two supersessions —
+> identities are now user-chosen `<handle>@pid` (not generated), and the `PidAccount`
+> hub is removed (1 identity = 1 wallet, rows reference the PID directly) per
+> [ADR-008](../adr/008-remove-pid-account.md). PDA seeds are `sha256(pid)`.
+
 **Version:** 4.0  
 **Status:** Implementation PRD  
 **Primary implementation agent:** OpenCode  

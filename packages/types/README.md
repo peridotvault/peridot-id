@@ -12,7 +12,7 @@ npm install @peridotvault/pid-types
 ## Usage
 
 ```ts
-import type { Identity, Profile, Account, Authority, ApiError } from '@peridotvault/pid-types';
+import type { Identity, Profile, ChainAccount, Authority, ApiError } from '@peridotvault/pid-types';
 
 async function getIdentity(): Promise<Identity | ApiError> {
   const res = await fetch('/v1/identity/me');
@@ -26,7 +26,7 @@ async function getIdentity(): Promise<Identity | ApiError> {
 |---|---|
 | Identity | `Identity`, `IdentityStatus`, `IdentityCredential`, `LoginResponse` |
 | Profile | `Profile`, `ProfileUpdate` |
-| Wallet / accounts | `Wallet`, `WalletCreate`, `ChainAccount`, `Account`, `WalletTransaction` |
+| Wallet / accounts | `Wallet`, `WalletCreate`, `ChainAccount`, `WalletTransaction` |
 | Authority (passkey) | `Authority` |
 | Intents | `Intent`, `IntentType`, `IntentPayload`, `IntentCreate` |
 | WebAuthn | `RegisterStart` |

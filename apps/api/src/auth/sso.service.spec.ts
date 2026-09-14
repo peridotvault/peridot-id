@@ -130,12 +130,10 @@ describe("SsoService", () => {
     await expect(service.consume("missing-code-000000000000")).rejects.toThrow("sso_code_invalid");
   });
 
-  it("round-trips returnTo (+ clientId/handle) through the opaque Google state", () => {
+  it("round-trips returnTo (+ clientId) through the opaque Google state", () => {
     expect(decodeState(encodeState("https://live2dev.com"))).toEqual({ returnTo: "https://live2dev.com" });
     const withApp = encodeState("https://mygame.dev/callback", "pidapp_abc");
     expect(decodeState(withApp)).toEqual({ returnTo: "https://mygame.dev/callback", clientId: "pidapp_abc" });
-    const withHandle = encodeState("https://mygame.dev/callback", undefined, "ifal");
-    expect(decodeState(withHandle)).toEqual({ returnTo: "https://mygame.dev/callback", handle: "ifal" });
     // legacy plain returnTo states keep working
     expect(decodeState("https://live2dev.com")).toEqual({ returnTo: "https://live2dev.com" });
   });

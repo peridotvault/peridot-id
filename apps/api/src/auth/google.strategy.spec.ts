@@ -1,4 +1,4 @@
-import { googleOAuthOptionsFactory } from "./google.strategy";
+import { googleOAuthOptionsFactory, GoogleStrategy, isPendingGoogleClaim } from "./google.strategy";
 
 function config(env: Record<string, string | undefined>, nodeEnv?: string) {
   const store: Record<string, string | undefined> = { ...env };
@@ -54,7 +54,35 @@ describe("googleOAuthOptionsFactory", () => {
     });
   });
 
-  it("returns null when neither set is configured", () => {
+  it("returns null when neither set is configured", async () => {
     expect(googleOAuthOptionsFactory(config({}))).toBeNull();
+  });
+});
+
+describe("GoogleStrategy.validate", () => {
+  const opts = { clientID: "id", clientSecret: "secret", callbackURL: "http://localhost/cb" };
+  const profile = { id: "google-1", displayName: "New" };
+
+  function doneValue(strategy: GoogleStrategy, req: unknown): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      void strategy.validate(req, "at", "rt", profile, (err: unknown, user?: unknown) => (err ? reject(err) : resolve(user)));
+    });
+  }
+
+  it("returns the existing identity for a known credential", async () => {
+    const auth = { findGoogleIdentity: jest.fn(async () => ({ pid: "ifal@pid" })) };
+    const strategy = new GoogleStrategy(opts, auth as never);
+
+    const user = await doneValue(strategy, { query: {} });
+    expect(user).toMatchObject({ pid: "ifal@pid" });
+  });
+
+  it("returns a claim marker for a new credential (handles are only chosen at claim)", async () => {
+    const auth = { findGoogleIdentity: jest.fn(async () => null) };
+    const strategy = new GoogleStrategy(opts, auth as never);
+
+    const user = await doneValue(strategy, { query: {} });
+    expect(isPendingGoogleClaim(user)).toBe(true);
+    if (isPendingGoogleClaim(user)) expect(user.claimProfile).toMatchObject({ id: "google-1" });
   });
 });

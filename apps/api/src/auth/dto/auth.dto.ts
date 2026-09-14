@@ -1,7 +1,6 @@
 import { IsOptional, IsString, Matches } from "class-validator";
 import { Transform } from "class-transformer";
 import { PID_HANDLE_REGEX } from "../../common/pid";
-
 export class LoginDto {
   /** Cross-domain success origin to redirect back to after Google (allowlisted). */
   @IsOptional()
@@ -12,17 +11,6 @@ export class LoginDto {
   @IsOptional()
   @IsString()
   clientId?: string;
-
-  /**
-   * User-chosen PID handle for FIRST-time sign-up (becomes the permanent
-   * `<handle>@pid`; can never be changed, reused, or reassigned). Ignored on
-   * returning logins. New users without one get a `pid_required` 400 from the
-   * callback — pick a handle and retry.
-   */
-  @IsOptional()
-  @Transform(({ value }) => (typeof value === "string" ? value.toLowerCase() : value))
-  @Matches(PID_HANDLE_REGEX, { message: "handle must be 3-20 chars: lowercase letters, numbers, underscore" })
-  handle?: string;
 }
 
 export class ExchangeDto {
@@ -38,6 +26,17 @@ export class ExchangeDto {
   @IsOptional()
   @IsString()
   clientSecret?: string;
+}
+
+/**
+ * Claim a pending post-auth PID ticket (Google-verified credential, no identity
+ * yet). The handle becomes the permanent `<handle>@pid` — immutable, never
+ * reused or reassigned. The ticket is single-use; expired tickets 410.
+ */
+export class ClaimDto {
+  @Transform(({ value }) => (typeof value === "string" ? value.toLowerCase() : value))
+  @Matches(PID_HANDLE_REGEX, { message: "handle must be 3-20 chars: lowercase letters, numbers, underscore" })
+  handle!: string;
 }
 
 /**

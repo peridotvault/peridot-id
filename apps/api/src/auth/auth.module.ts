@@ -6,6 +6,7 @@ import { CredentialModule } from "../credentials/credential.module";
 import { SecurityModule } from "../security/security-event.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
+import { ClaimService } from "./claim.service";
 import { PidAppsController } from "./apps.controller";
 import { PidAppsService } from "./apps.service";
 import { GoogleGuard } from "./google.guard";
@@ -23,6 +24,7 @@ import { SsoService } from "./sso.service";
   controllers: [AuthController, PidAppsController],
   providers: [
     AuthService,
+    ClaimService,
     PidAppsService,
     SsoService,
     JwtStrategy,

@@ -32,15 +32,19 @@ const peridot = Peridot({
 ## Sign in
 
 `auth.login()` redirects the browser to Google. The user signs in and is sent back to
-`CLIENT_SUCCESS_URL` with the session cookies already set. First-time users pass a
-`handle` — it becomes the permanent `<handle>@pid` (check
-`auth.pidAvailable(handle)` first; the handle can never be changed, reused, or reassigned).
+`CLIENT_SUCCESS_URL` with the session cookies already set — or, for a new credential,
+to the PID picker (`?claim=1`), where they choose the permanent `<handle>@pid`
+(check `auth.pidAvailable(handle)` first; the handle can never be changed, reused,
+or reassigned):
 
 ```ts
 await peridot.auth.login();
-await peridot.auth.login({ handle: "ifal" }); // first-time sign-up
 const { available, pid } = await peridot.auth.pidAvailable("ifal");
 // { available: true, pid: "ifal@pid" }
+const status = await peridot.auth.claimStatus();
+// { pending: true, email, displayName, avatarUrl } when a claim is waiting
+const claimed = await peridot.auth.claim("ifal");
+// { ok: true, pid: "ifal@pid", pidCode? } — session cookies set
 ```
 
 ## Identity

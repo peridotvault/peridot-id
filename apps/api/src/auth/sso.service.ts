@@ -66,29 +66,18 @@ export interface SsoGrantView {
   firstSeenAt: Date;
   lastUsedAt: Date;
 }
-/** Opaque Google `state` carrying returnTo (+ optional clientId/handle). Plain returnTo strings
+/** Opaque Google `state` carrying returnTo (+ optional clientId). Plain returnTo strings
  *  (pre-client_id clients like Live2Dev) decode via the fallback. */
-export function encodeState(returnTo: string, clientId?: string, handle?: string): string {
-  if (!clientId && !handle) return returnTo;
-  return Buffer.from(
-    JSON.stringify({
-      r: returnTo,
-      ...(clientId ? { c: clientId } : {}),
-      ...(handle ? { h: handle } : {}),
-    }),
-    "utf8",
-  ).toString("base64url");
+export function encodeState(returnTo: string, clientId?: string): string {
+  if (!clientId) return returnTo;
+  return Buffer.from(JSON.stringify({ r: returnTo, c: clientId }), "utf8").toString("base64url");
 }
 
-export function decodeState(state: string): { returnTo: string; clientId?: string; handle?: string } {
+export function decodeState(state: string): { returnTo: string; clientId?: string } {
   try {
-    const parsed = JSON.parse(Buffer.from(state, "base64url").toString("utf8")) as { r?: unknown; c?: unknown; h?: unknown };
+    const parsed = JSON.parse(Buffer.from(state, "base64url").toString("utf8")) as { r?: unknown; c?: unknown };
     if (typeof parsed?.r === "string") {
-      return {
-        returnTo: parsed.r,
-        clientId: typeof parsed.c === "string" ? parsed.c : undefined,
-        handle: typeof parsed.h === "string" ? parsed.h : undefined,
-      };
+      return { returnTo: parsed.r, clientId: typeof parsed.c === "string" ? parsed.c : undefined };
     }
   } catch {
     // not encoded — fall through to the legacy plain-returnTo form

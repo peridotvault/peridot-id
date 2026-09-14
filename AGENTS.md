@@ -36,9 +36,10 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
 
 ```sh
 export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
+cd contracts/svm # chain state lives here (test-ledger/), never at root
 solana-test-validator --reset > /tmp/validator.log 2>&1 &
 solana config set --url http://127.0.0.1:8899 && solana airdrop 5
-cd contracts/svm/smart-account
+cd smart-account
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot-smart-account-keypair.json
 pnpm --filter @peridotvault/pid-api dev        # API on :3301

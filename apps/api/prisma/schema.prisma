@@ -275,6 +275,27 @@ model SecurityEvent {
   @@map("security_events")
 }
 
+// Pending post-auth PID claims (Google-only entry). A verified credential with no
+// identity yet: the claim UI picks a handle, then one transaction creates the
+// identity + profile + credential and consumes the ticket. 10-min TTL, single-use,
+// nothing is created until claim — abandoning restarts cleanly on next login.
+model ClaimTicket {
+  id             String    @id @default(uuid())
+  provider       String
+  providerUserId String
+  email          String?
+  displayName    String?
+  avatarUrl      String?
+  redirectTo     String?
+  clientId       String?
+  consumedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+
+  @@index([expiresAt])
+  @@map("claim_tickets")
+}
+
 // One-time, expiring authorization codes for cross-domain SSO (OAuth-like). Issued
 // after a successful Google/passkey login when a relying party (e.g. Live2Dev on a
 // different origin) asked to be returned to. The code rides in the redirect URL and is

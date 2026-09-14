@@ -34,7 +34,8 @@ strings:
 | `400` | Validation error — one or more fields are invalid |
 | `401` | Missing, expired, or invalid access/refresh token |
 | `404` | Identity, profile, or wallet does not exist |
-| `409` | Conflict — e.g. email already associated with another account, or PID already taken |
+| `409` | Conflict — e.g. email already associated with another account, PID already taken, or credential already linked |
+| `410` | Gone — claim ticket expired; sign in again for a fresh one |
 | `429` | Rate limit exceeded |
 | `503` | Google OAuth is not configured on the server |
 

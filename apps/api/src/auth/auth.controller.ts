@@ -1,17 +1,19 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, Param, ParseUUIDPipe, Post, Req, Res, UseGuards } from "@nestjs/common";
 import { BadRequestException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { Request, Response } from "express";
 import { LoginResponse } from "@peridotvault/pid-types";
-import { REFRESH_COOKIE } from "../common/cookies";
+import { CLAIM_COOKIE, REFRESH_COOKIE, clearClaimCookie, setClaimCookie } from "../common/cookies";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { AuthenticateFinishDto } from "../credentials/dto/credential.dto";
 import { AuthenticateStartResult, CredentialService } from "../credentials/credential.service";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { AuthService } from "./auth.service";
-import { GoogleGuard } from "./google.guard";
-import { ExchangeDto, AuthorizeDto, LoginDto } from "./dto/auth.dto";
+import { ClaimService } from "./claim.service";
+import { GoogleGuard, isGoogleAuthError } from "./google.guard";
+import { isPendingGoogleClaim } from "./google.strategy";
+import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto } from "./dto/auth.dto";
 import { decodeState, encodeState, SsoService } from "./sso.service";
 
 /** Redirect target with a pid_code appended (keeps any existing query string). */
@@ -21,13 +23,37 @@ function withPidCode(returnTo: string, pidCode: string): string {
   return url.toString();
 }
 
+/** First-party landing URL with the claim flag (HttpOnly cookie carries the ticket). */
+function withClaimFlag(successUrl: string): string {
+  if (/^https?:\/\//.test(successUrl)) {
+    const url = new URL(successUrl);
+    url.searchParams.set("claim", "1");
+    return url.toString();
+  }
+  return successUrl.includes("?") ? `${successUrl}&claim=1` : `${successUrl}?claim=1`;
+}
+
+/** First-party landing URL with a retryable error code (cause stays server-side). */
+function withErrorFlag(successUrl: string, code: string): string {
+  if (/^https?:\/\//.test(successUrl)) {
+    const url = new URL(successUrl);
+    url.searchParams.set("error", code);
+    return url.toString();
+  }
+  const sep = successUrl.includes("?") ? "&" : "?";
+  return `${successUrl}${sep}error=${encodeURIComponent(code)}`;
+}
+
 @Controller("v1/auth")
 @UseGuards(ThrottlerGuard)
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly authService: AuthService,
     private readonly credentialService: CredentialService,
     private readonly ssoService: SsoService,
+    private readonly claimService: ClaimService,
     private readonly config: ConfigService,
   ) {}
 
@@ -37,19 +63,15 @@ export class AuthController {
   async login(@Req() req: Request, @Body() dto: LoginDto): Promise<LoginResponse> {
     const base = `${req.protocol}://${req.get("host")}`;
     let url = `${base}/v1/auth/google`;
-    const params = new URLSearchParams();
     if (dto.returnTo) {
       const resolved = await this.ssoService.resolveReturnTo(dto.returnTo, dto.clientId);
       if (!resolved) {
         throw new BadRequestException("returnTo is not an allowed origin");
       }
-      // state round-trips through Google: carries returnTo (+ clientId/handle when present)
-      params.set("returnTo", encodeState(resolved.redirectTo, resolved.clientId, dto.handle));
-    } else if (dto.handle) {
-      params.set("handle", dto.handle);
+      // state round-trips through Google: carries returnTo (+ clientId when present).
+      // Handles are never chosen here — new credentials land on the PID picker.
+      url += `?returnTo=${encodeURIComponent(encodeState(resolved.redirectTo, resolved.clientId))}`;
     }
-    const qs = params.toString();
-    if (qs) url += `?${qs}`;
     return { url };
   }
 
@@ -157,21 +179,73 @@ export class AuthController {
   @Get("google/callback")
   @UseGuards(GoogleGuard)
   async googleCallback(@Req() req: Request, @Res() res: Response): Promise<void> {
+    const successUrl = this.config.get<string>("CLIENT_SUCCESS_URL", "/");
+    // Strategy/transport failure arrives as a marker (see GoogleGuard) — send the
+    // user back to retry UI, never a raw 500 JSON dead end.
+    if (isGoogleAuthError(req.user)) {
+      this.logger.warn(`google callback failed: ${req.user.authError}`);
+      res.redirect(withErrorFlag(successUrl, req.user.authError));
+      return;
+    }
+    // state is user-controlled (comes back via Google) — re-validate before trusting it.
+    const rawState = typeof req.query.state === "string" ? req.query.state : undefined;
+    const { returnTo, clientId } = rawState ? decodeState(rawState) : { returnTo: undefined, clientId: undefined };
+    const resolved = returnTo ? await this.ssoService.resolveReturnTo(returnTo, clientId) : null;
+
+    // Verified credential, no identity yet → mint a claim ticket and send the
+    // user to the PID picker. Nothing is created until they claim.
+    if (isPendingGoogleClaim(req.user)) {
+      const ticketId = await this.claimService.mint(req.user.claimProfile, {
+        ...(resolved ? { redirectTo: resolved.redirectTo, clientId: resolved.clientId } : {}),
+      });
+      setClaimCookie(res, this.config, ticketId);
+      this.logger.log("google callback: claim ticket minted");
+      res.redirect(withClaimFlag(successUrl));
+      return;
+    }
+
     const identity = req.user as { pid: string };
     await this.authService.issueSession(res, identity.pid, req.headers["user-agent"], undefined, "google");
 
-    // state is user-controlled (comes back via Google) — re-validate before trusting it.
-    const rawState = typeof req.query.state === "string" ? req.query.state : undefined;
-    if (rawState) {
-      const { returnTo, clientId } = decodeState(rawState);
-      const resolved = await this.ssoService.resolveReturnTo(returnTo, clientId);
+    if (resolved) {
+      const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, { clientId: resolved.clientId });
+      res.redirect(withPidCode(resolved.redirectTo, pidCode));
+      return;
+    }
+    res.redirect(successUrl);
+  }
+
+  @Get("claim/status")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async claimStatus(@Req() req: Request): Promise<{ pending: boolean; email?: string | null; displayName?: string | null; avatarUrl?: string | null }> {
+    const ticketId = (req as Request & { cookies?: Record<string, string> }).cookies?.[CLAIM_COOKIE];
+    const ticket = await this.claimService.status(ticketId);
+    if (!ticket) return { pending: false };
+    return { pending: true, ...ticket };
+  }
+
+  @Post("claim")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async claim(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: ClaimDto,
+  ): Promise<{ ok: true; pid: string; pidCode?: string }> {
+    const ticketId = (req as Request & { cookies?: Record<string, string> }).cookies?.[CLAIM_COOKIE];
+    if (!ticketId) throw new BadRequestException("No pending claim — sign in again to get a fresh one.");
+    const { pid, redirectTo, clientId } = await this.claimService.claim(ticketId, dto.handle);
+    // Claim entry is Google-only today, hence the google family.
+    await this.authService.issueSession(res, pid, req.headers["user-agent"], undefined, "google");
+    clearClaimCookie(res, this.config);
+    if (redirectTo) {
+      const resolved = await this.ssoService.resolveReturnTo(redirectTo, clientId);
       if (resolved) {
-        const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, { clientId: resolved.clientId });
-        res.redirect(withPidCode(resolved.redirectTo, pidCode));
-        return;
+        const pidCode = await this.ssoService.issue(pid, resolved.redirectTo, { clientId: resolved.clientId });
+        return { ok: true, pid, pidCode };
       }
     }
-    res.redirect(this.config.get<string>("CLIENT_SUCCESS_URL", "/"));
+    return { ok: true, pid };
   }
 
   @Post("refresh")

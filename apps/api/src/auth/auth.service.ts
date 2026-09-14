@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { randomUUID } from "crypto";
@@ -44,62 +44,17 @@ export class AuthService {
   ) {}
 
   /**
-   * Google sign-in. Existing credential → reuse its identity (handle ignored).
-   * New credential → the caller MUST supply a user-chosen `handle`; it becomes
-   * the permanent `<handle>@pid` identity. Never auto-generated, never changed,
-   * never reused after delete (deleted rows keep their PK reserved).
+   * Existing identity for a Google credential, if any (bumps lastLoginAt).
+   * Used by the claim flow to tell returning users apart from new ones.
    */
-  async upsertGoogleIdentity(googleProfile: GoogleProfile, handle?: string) {
-    const providerId = googleProfile.id;
+  async findGoogleIdentity(providerUserId: string) {
     const existing = await this.prisma.identityCredential.findUnique({
-      where: { provider_providerUserId: { provider: "google", providerUserId: providerId } },
+      where: { provider_providerUserId: { provider: "google", providerUserId } },
       include: { identity: true },
     });
-    if (existing) {
-      await this.prisma.identityCredential.update({ where: { id: existing.id }, data: { lastLoginAt: new Date() } });
-      return existing.identity;
-    }
-
-    const email = googleProfile.emails?.[0]?.value ?? null;
-    if (email) {
-      const emailOwner = await this.prisma.identityCredential.findFirst({
-        where: { email },
-        select: { id: true },
-      });
-      if (emailOwner) throw new ConflictException("Email is already linked to another account");
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      const normalized = normalizePidHandle(handle ?? "");
-      if (!isPidHandle(normalized)) {
-        throw new BadRequestException(
-          "Choose your permanent PID handle: 3-20 chars, lowercase letters, numbers, underscore. It can never be changed.",
-        );
-      }
-      const pid = toPid(normalized);
-      const taken = await tx.identity.findUnique({ where: { pid }, select: { pid: true } });
-      if (taken) throw new ConflictException("PID already taken");
-      const identity = await tx.identity.create({
-        data: { pid, status: "active" },
-      });
-      await tx.profile.create({
-        data: {
-          pid: identity.pid,
-          displayName: googleProfile.displayName ?? null,
-          avatarUrl: googleProfile.photos?.[0]?.value ?? null,
-        },
-      });
-      await tx.identityCredential.create({
-        data: {
-          provider: "google",
-          providerUserId: providerId,
-          email,
-          pid: identity.pid,
-          lastLoginAt: new Date(),
-        },
-      });
-      return identity;
-    });
+    if (!existing) return null;
+    await this.prisma.identityCredential.update({ where: { id: existing.id }, data: { lastLoginAt: new Date() } });
+    return existing.identity;
   }
 
   /** Public availability check for the onboarding handle picker. */

@@ -1,12 +1,13 @@
 # PRD v5 — PeridotID Smart Wallet
 
 **Version:** 5.0
-**Status:** Draft
+**Status:** Implemented (wallet live on devnet; pre-mainnet hardening in tasks/012)
 **Supersedes:** PRD_v4 where they conflict (program framework, instruction set)
-**Builds on:** ADR 003–007, `apps/api` wallet module (record-only), `packages/sdk-js`
+**Builds on:** ADR 003–008, `apps/api` wallet module, `packages/sdk-js`
 
 **Naming:** the project is **PeridotID** (repo/package scope `peridot-id`), short name
-**`pid`** — already the on-chain identity format (`pid_<ULID>`). Use "PeridotID" in
+**`pid`** — the permanent ecosystem identity format (`<handle>@pid`, e.g. `ifal@pid`;
+1 identity = 1 personal wallet per ADR-008). Use "PeridotID" in
 product copy; "Peridot" alone refers to the wider ecosystem.
 
 ---

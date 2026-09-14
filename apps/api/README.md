@@ -38,5 +38,5 @@ for Vercel.
 ## Test
 
 ```sh
-pnpm --filter @peridotvault/pid-api exec jest   # 83 tests
+pnpm --filter @peridotvault/pid-api exec jest   # 185 tests, incl. route authz
 ```

@@ -23,7 +23,7 @@ Inventory, Achievements, Cloud Save
 ## Wallet (post-V1)
 - Chrome extension (thin shell over the SDK)
 - Passkey-authority refinement as Pinocchio introspection matures
-- Gas sponsorship, session keys, guardians, EVM smart accounts (PRD_v4 §31)
+- Session keys, guardians (multisig arrives as a separate wallet model — ADR-008)
 
 ## Ecosystem
 Partner SDKs, Developer Portal

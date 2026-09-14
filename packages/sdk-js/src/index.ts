@@ -47,18 +47,17 @@ export class PeridotAuth {
    * Begin Google OAuth. Optional `returnTo` (an allowlisted cross-origin) redirects back
    * there with a one-time `pid_code` for SSO (see `exchange`). Pass `clientId` when
    * logging in on behalf of a registered third-party app (binds the code to the app).
-   * First-time users MUST pass `handle`: it becomes the permanent `<handle>@pid`
-   * (never changeable, reused, or reassigned). Ignored on returning logins.
+   * New credentials land on the PID picker (claim flow) — handles are only ever
+   * chosen there, never up front.
    * Resolves true when the browser leaves for Google, false when the login URL
    * could not be obtained (caller stays put and shows an error).
    */
-  async login(opts?: { returnTo?: string; clientId?: string; handle?: string }): Promise<boolean> {
+  async login(opts?: { returnTo?: string; clientId?: string }): Promise<boolean> {
     const body =
-      opts?.returnTo || opts?.clientId || opts?.handle
+      opts?.returnTo || opts?.clientId
         ? {
             ...(opts.returnTo ? { returnTo: opts.returnTo } : {}),
             ...(opts.clientId ? { clientId: opts.clientId } : {}),
-            ...(opts.handle ? { handle: opts.handle } : {}),
           }
         : undefined;
     const res = await this.client.post<LoginResponse>("/v1/auth/login", body);
@@ -135,6 +134,32 @@ export class PeridotAuth {
       `/v1/auth/pid/available?handle=${encodeURIComponent(handle)}`,
     );
     return res.data as { available: boolean; pid: string | null };
+  }
+
+  /**
+   * Pending post-auth PID claim (if any): a verified credential with no identity
+   * yet. The claim UI shows this, then calls `claim(handle)`.
+   */
+  async claimStatus(): Promise<
+    | { pending: true; email: string | null; displayName: string | null; avatarUrl: string | null }
+    | { pending: false }
+  > {
+    const res = await this.client.get("/v1/auth/claim/status");
+    return res.data as { pending: boolean; email: string | null; displayName: string | null; avatarUrl: string | null };
+  }
+
+  /**
+   * Claim the pending credential under a fresh permanent handle. Issues the
+   * session on success (returns an SSO `pidCode` too when the claim came from a
+   * relying-party login).
+   */
+  async claim(handle: string): Promise<{ ok: boolean; pid: string; pidCode?: string }> {
+    const res = await this.client.post<{ ok: boolean; pid: string; pidCode?: string }>("/v1/auth/claim", { handle });
+    if (!res.ok) {
+      const msg = (res.data as ApiError)?.message;
+      throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Claim failed"));
+    }
+    return res.data as { ok: boolean; pid: string; pidCode?: string };
   }
 
   async refresh(): Promise<true | "step-up" | false> {

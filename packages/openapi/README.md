@@ -1,7 +1,7 @@
 # `@peridotvault/pid-openapi`
 
 The **source of truth** OpenAPI 3.0 specification for the PeridotID API. Consumed to
-generate API reference docs (via `fumadocs-openapi` in `apps/docs`) and as a contract
+generate API reference docs (via `fumadocs-openapi` in `apps/web`) and as a contract
 for API consumers.
 
 ## Layout

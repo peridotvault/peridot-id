@@ -209,6 +209,14 @@ export interface SsoGrant {
   lastUsedAt: string;
 }
 
+/** Pending post-auth PID claim (verified credential, no identity yet). */
+export interface ClaimStatus {
+  pending: boolean;
+  email?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+}
+
 /** Identity payload returned by `POST /v1/auth/exchange` for cross-origin SSO. */
 export interface ExchangeResult {
   /** Permanent PID (`<handle>@pid`) — treat as opaque, render as-is. */

@@ -3,12 +3,20 @@ import { ConfigService } from "@nestjs/config";
 import { PassportStrategy } from "@nestjs/passport";
 import { Strategy, VerifyCallback } from "passport-google-oauth20";
 import { AuthService, GoogleProfile } from "./auth.service";
-import { decodeState } from "./sso.service";
 
 export interface GoogleOAuthOptions {
   clientID: string;
   clientSecret: string;
   callbackURL: string;
+}
+
+/** Marker for a verified Google credential with no identity yet — the claim UI takes over. */
+export interface PendingGoogleClaim {
+  claimProfile: GoogleProfile;
+}
+
+export function isPendingGoogleClaim(user: unknown): user is PendingGoogleClaim {
+  return typeof user === "object" && user !== null && "claimProfile" in user;
 }
 
 @Injectable()
@@ -31,16 +39,14 @@ export class GoogleStrategy extends PassportStrategy(Strategy, "google") {
 
   async validate(req: unknown, accessToken: string, refreshToken: string, profile: GoogleProfile, done: VerifyCallback): Promise<void> {
     try {
-      // The user-chosen PID handle round-trips through OAuth `state` (see GoogleGuard).
-      let handle: string | undefined;
-      try {
-        const state = (req as { query?: { state?: unknown } })?.query?.state;
-        if (typeof state === "string") handle = decodeState(state).handle;
-      } catch {
-        handle = undefined;
+      // Returning credential → session as usual. New credentials defer to the
+      // claim screen (ClaimService) — handles are only ever chosen there.
+      const identity = await this.authService.findGoogleIdentity(profile.id);
+      if (identity) {
+        done(null, identity);
+        return;
       }
-      const identity = await this.authService.upsertGoogleIdentity(profile, handle);
-      done(null, identity);
+      done(null, { claimProfile: profile });
     } catch (err) {
       done(err as Error);
     }
