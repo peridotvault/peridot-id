@@ -8,7 +8,7 @@ import {
   LayoutGrid,
   Link2,
 } from "../icons";
-import type { Account, Authority, Identity, Profile } from "@peridotvault/pid-types";
+import type { Authority, ChainAccount, Identity, Profile } from "@peridotvault/pid-types";
 import type { TokenBalance } from "@peridotvault/pid-solana";
 import type { ActivationView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
@@ -50,7 +50,7 @@ export function HomeScreen({
   goAppConnections,
 }: HomeScreenProps) {
   const { peridot } = usePeridot();
-  const [account, setAccount] = useState<Account | null>(null);
+  const [chains, setChains] = useState<ChainAccount[] | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [pid, setPid] = useState<string | null>(null);
   const [solLamports, setSolLamports] = useState<number>(0);
@@ -70,8 +70,8 @@ export function HomeScreen({
         const detail = Array.isArray(acc.message) ? acc.message.join(" ") : acc.message;
         throw new Error(`Failed to create account (${acc.statusCode}${detail ? `: ${detail}` : ""})`);
       }
-      const acct = acc as Account;
-      setAccount(acct);
+      const rows = acc as ChainAccount[];
+      setChains(rows);
 
       try {
         const p = await peridot.profile.me();
@@ -102,7 +102,7 @@ export function HomeScreen({
         setPasskeys([]);
       }
       try {
-        const act = await peridot.wallet.activation(acct.id);
+        const act = await peridot.wallet.activation();
         if (!("statusCode" in act)) setActivation(act as ActivationView);
       } catch {
         setActivation(null);
@@ -118,7 +118,7 @@ export function HomeScreen({
     load();
   }, [load]);
 
-  const smart = account?.chainAccounts?.find((c) => c.accountType === "smart_account");
+  const smart = chains?.find((c) => c.accountType === "smart_account");
   const solBalance = solLamports / LAMPORTS_PER_SOL;
 
   const coins: Coin[] = [

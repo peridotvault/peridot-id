@@ -39,7 +39,7 @@ describe("AdminService", () => {
     });
     expect(chain.reference).toBe("84532");
     expect(chains.invalidate).toHaveBeenCalled();
-    expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.chain.created", expect.anything(), undefined);
+    expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.chain.created", expect.anything());
     expect(prisma.chain.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ decimals: 18 }) }),
     );

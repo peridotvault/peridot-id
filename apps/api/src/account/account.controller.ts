@@ -1,12 +1,14 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, UseGuards } from "@nestjs/common";
+import { Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { ActivationService, ActivationView } from "./activation.service";
-import { AccountService, AccountView, ChainAccountView } from "./account.service";
+import { AccountService, ChainAccountView } from "./account.service";
 import { EvmActivationService, EvmActivationView } from "./evm-activation.service";
 
-@Controller("v1/accounts")
+// ADR-008: 1 identity = 1 personal wallet. No account ids anywhere — the owner
+// always comes from the JWT, the wallet is resolved from it.
+@Controller("v1/account")
 @UseGuards(ThrottlerGuard)
 export class AccountController {
   constructor(
@@ -19,61 +21,53 @@ export class AccountController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  create(@CurrentUser() user: AuthenticatedUser): Promise<AccountView> {
-    return this.accountService.createAccount(user.pid);
+  create(@CurrentUser() user: AuthenticatedUser): Promise<ChainAccountView[]> {
+    return this.accountService.ensureAccount(user.pid);
   }
 
   @Get()
   @UseGuards(JwtAuthGuard)
-  list(@CurrentUser() user: AuthenticatedUser): Promise<AccountView[]> {
-    return this.accountService.getAccounts(user.pid);
+  get(@CurrentUser() user: AuthenticatedUser): Promise<ChainAccountView[]> {
+    return this.accountService.getChains(user.pid);
   }
 
-  @Get(":id")
+  @Get("chains")
   @UseGuards(JwtAuthGuard)
-  get(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<AccountView> {
-    return this.accountService.getAccount(user.pid, id);
+  chains(@CurrentUser() user: AuthenticatedUser): Promise<ChainAccountView[]> {
+    return this.accountService.getChains(user.pid);
   }
 
-  @Get(":id/chains")
+  @Get("activation")
   @UseGuards(JwtAuthGuard)
-  chains(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<ChainAccountView[]> {
-    return this.accountService.getAccountChains(user.pid, id);
+  activation(@CurrentUser() user: AuthenticatedUser): Promise<ActivationView> {
+    return this.activationService.viewOf(user);
   }
 
-  @Get(":id/activation")
-  @UseGuards(JwtAuthGuard)
-  activation(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<ActivationView> {
-    return this.activationService.viewOf(user, id);
-  }
-
-  @Post(":id/activate")
+  @Post("activate")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  activate(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<ActivationView> {
-    return this.activationService.activate(user, id);
+  activate(@CurrentUser() user: AuthenticatedUser): Promise<ActivationView> {
+    return this.activationService.activate(user);
   }
 
-  @Get(":id/evm/:chainRef/activation")
+  @Get("evm/:chainRef/activation")
   @UseGuards(JwtAuthGuard)
   evmActivation(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("id", ParseUUIDPipe) id: string,
     @Param("chainRef") chainRef: string,
   ): Promise<EvmActivationView> {
-    return this.evmActivationService.viewOf(user, id, chainRef);
+    return this.evmActivationService.viewOf(user, chainRef);
   }
 
-  @Post(":id/evm/:chainRef/activate")
+  @Post("evm/:chainRef/activate")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   evmActivate(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("id", ParseUUIDPipe) id: string,
     @Param("chainRef") chainRef: string,
   ): Promise<EvmActivationView> {
-    return this.evmActivationService.activate(user, id, chainRef);
+    return this.evmActivationService.activate(user, chainRef);
   }
 }

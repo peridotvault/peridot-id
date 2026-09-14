@@ -23,8 +23,8 @@ changes — fully non-custodial.
 ```ts
 import { deriveSmartAccountAddress, buildDepositSolInstruction, SolanaAdapter } from '@peridotvault/pid-solana';
 
-// Derive the smart-account PDA for an account id
-const smartAccount = deriveSmartAccountAddress(accountId);
+// Derive the smart-account PDA for a PID
+const smartAccount = deriveSmartAccountAddress(pid);
 ```
 
 ### Browser passkey signing
@@ -46,7 +46,7 @@ const adapter = new SolanaAdapter({ rpcUrl, programId });
 Primitives (`bytes`, payload hashes, WebAuthn ceremonies, key custody) live in
 `@peridotvault/pid-core` and are re-exported here, so existing imports keep working:
 
-- **Core** — `deriveSmartAccountAddress`, `accountIdToSeed32`, `buildAuthorizationPayload`,
+- **Core** — `deriveSmartAccountAddress`, `pidToSeed32`, `buildAuthorizationPayload`,
   `buildWebAuthnMessage`, `buildWithdrawPayload`, `DOMAIN`, `PID_PROGRAM_ID`,
   `INSTRUCTIONS_SYSVAR`, `SECP256R1_PRECOMPILE`, `sha256`
 - **Bytes** — `b64url`, `b64urlToBytes`, `concat`, `derToRawEcdsa`, `fromAscii`,

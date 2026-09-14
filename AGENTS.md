@@ -6,18 +6,19 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
 ## Naming conventions (keep consistent)
 
 - **Brand:** `PeridotID` in product copy; `peridot_id` for the Postgres DB name; `pid`
-  for long identifiers (cookies `pid_access`/`pid_refresh`, table `pid_accounts`, env
+  for long identifiers (cookies `pid_access`/`pid_refresh`, env
   `PID_*`). "Peridot ecosystem" refers to the wider Peridot products — a different thing.
 - **NPM packages:** `@peridotvault/pid-*` (npm org: `@peridotvault`; company: PT ANTIGANE LABS INDONESIA) — e.g.
   `@peridotvault/pid-api`, `@peridotvault/pid-types`, `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`,
   `@peridotvault/pid-evm`, `@peridotvault/pid-openapi`, `@peridotvault/pid-web`, `@peridotvault/pid-wallet`.
-- **On-chain:** PDA seed `["peridot_id", "account", account_id]`; signed-payload domain
+- **On-chain:** PDA seed `["peridot_id", "account", sha256(pid)]`; signed-payload domain
   `PID|SOLANA|SMART_ACCOUNT|v1`; program id `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
 - **Identity:** PID = `<handle>@pid` (e.g. `ifal@pid`) — permanent Antigane-ecosystem
   identity, user-chosen once at onboarding; immutable, never reused or reassigned.
-  Identity credentials key on `(provider, providerUserId)`. `pid` (not `peridot`) is
-  the ecosystem namespace in identifiers (cookies `pid_access`/`pid_refresh`, table
-  `pid_accounts`, env `PID_*`, codes `pid_code`/`pidapp_`/`pidsk_`).
+  1 identity = 1 personal wallet (ADR-008, no account hub). Identity credentials
+  key on `(provider, providerUserId)`. `pid` (not `peridot`) is
+  the ecosystem namespace in identifiers (cookies `pid_access`/`pid_refresh`, env
+  `PID_*`, codes `pid_code`/`pidapp_`/`pidsk_`).
 
 ## Environment
 
@@ -37,7 +38,7 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
 export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
 solana-test-validator --reset > /tmp/validator.log 2>&1 &
 solana config set --url http://127.0.0.1:8899 && solana airdrop 5
-cd programs/peridot-smart-account
+cd contracts/svm/smart-account
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot-smart-account-keypair.json
 pnpm --filter @peridotvault/pid-api dev        # API on :3301

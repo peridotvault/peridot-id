@@ -19,7 +19,8 @@ export {
   sha256,
 } from "./hash";
 export {
-  accountIdToSeed32,
+  pidToSeed32,
+  sha256Sync,
   asciiOf,
   b64url,
   b64urlToBytes,
@@ -44,7 +45,7 @@ export {
 } from "./webauthn";
 export type { PasskeyAssertion, PasskeySigner } from "./webauthn";
 export {
-  accountIdToSalt32,
+  pidToSalt32,
   addressToBytes,
   buildEvmAuthorizationPayload,
   compressedToX,

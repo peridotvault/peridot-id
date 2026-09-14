@@ -88,20 +88,17 @@ export class IntentService {
     return this.config.get<string>("SOLANA_NETWORK") ?? "devnet";
   }
 
-  /** The identity's default account with its smart-account chain row (ownership from token). */
+  /** The identity's smart-account chain row (ownership from token). */
   private async resolveAccount(pid: string) {
-    const account = await this.prisma.pidAccount.findFirst({
-      where: { pid, status: "active" },
-      include: { chainAccounts: { where: { status: "active" } } },
+    const smart = await this.prisma.chainAccount.findFirst({
+      where: { pid, status: "active", accountType: ACCOUNT_TYPE_SMART },
     });
-    if (!account) throw new NotFoundException("Account not found");
-    const smart = account.chainAccounts.find((c) => c.accountType === ACCOUNT_TYPE_SMART);
-    if (!smart) throw new BadRequestException("Smart account not created");
-    return { account, smart };
+    if (!smart) throw new NotFoundException("Account not found");
+    return { smart };
   }
 
-  private async assertAuthority(accountId: string): Promise<void> {
-    const count = await this.prisma.authority.count({ where: { accountId, status: "active" } });
+  private async assertAuthority(pid: string): Promise<void> {
+    const count = await this.prisma.authority.count({ where: { pid, status: "active" } });
     if (count === 0) throw new BadRequestException("No registered credentials");
   }
 
@@ -118,8 +115,8 @@ export class IntentService {
   }
 
   async createIntent(pid: string, input: IntentInput): Promise<IntentView> {
-    const { account, smart } = await this.resolveAccount(pid);
-    await this.assertAuthority(account.id);
+    const { smart } = await this.resolveAccount(pid);
+    await this.assertAuthority(pid);
 
     // §5.5 policy: shape + ownership + destination/amount validation.
     this.assertAmount(input.payload.amount);
@@ -137,26 +134,26 @@ export class IntentService {
 
     const intent = await this.prisma.intent.create({
       data: {
-        accountId: account.id,
+        pid,
         type: input.type,
         payload: {
           ...input.payload,
           chain: "solana",
           network: this.network(),
-          accountId: account.id,
+          pid,
           smartAccountAddress: smart.address,
         },
         expiresAt: new Date(Date.now() + INTENT_TTL_MS),
       },
     });
 
-    await this.security.log(pid, "intent.created", { intentId: intent.id, type: intent.type }, account.id);
+    await this.security.log(pid, "intent.created", { intentId: intent.id, type: intent.type });
     return toIntentView(intent);
   }
 
   async getIntent(pid: string, intentId: string): Promise<IntentView> {
     const intent = await this.prisma.intent.findFirst({
-      where: { id: intentId, account: { pid } },
+      where: { id: intentId, pid },
     });
     if (!intent) throw new NotFoundException("Intent not found");
     return toIntentView(intent);
@@ -171,24 +168,24 @@ export class IntentService {
     pid: string,
     input: { intentId: string; txHash: string; network?: string },
   ): Promise<TransactionView> {
-    const { account, smart } = await this.resolveAccount(pid);
+    const { smart } = await this.resolveAccount(pid);
     const intent = await this.prisma.intent.findFirst({
-      where: { id: input.intentId, accountId: account.id },
+      where: { id: input.intentId, pid },
     });
     if (!intent) throw new NotFoundException("Intent not found");
 
     if (intent.status !== "pending") {
-      await this.security.log(pid, "intent.replay_rejected", { intentId: intent.id }, account.id);
+      await this.security.log(pid, "intent.replay_rejected", { intentId: intent.id });
       throw new BadRequestException("Intent sudah dipakai");
     }
     if (intent.expiresAt < new Date()) {
-      await this.security.log(pid, "intent.expired", { intentId: intent.id }, account.id);
+      await this.security.log(pid, "intent.expired", { intentId: intent.id });
       throw new BadRequestException("Intent sudah kedaluwarsa");
     }
 
     const tx = await this.prisma.transaction.create({
       data: {
-        accountId: account.id,
+        pid,
         chainAccountId: smart.id,
         intentId: intent.id,
         chain: "solana",
@@ -199,13 +196,13 @@ export class IntentService {
     });
     await this.prisma.intent.update({ where: { id: intent.id }, data: { status: "executed" as IntentStatus } });
 
-    await this.security.log(pid, "intent.executed", { intentId: intent.id, txHash: input.txHash }, account.id);
+    await this.security.log(pid, "intent.executed", { intentId: intent.id, txHash: input.txHash });
     return toTxView(tx);
   }
 
   async getTransaction(pid: string, txId: string): Promise<TransactionView> {
     const tx = await this.prisma.transaction.findFirst({
-      where: { id: txId, account: { pid } },
+      where: { id: txId, pid },
     });
     if (!tx) throw new NotFoundException("Transaction not found");
     return toTxView(tx);
@@ -214,7 +211,7 @@ export class IntentService {
   /** Newest-first activity history for the identity's default account. */
   async listTransactions(pid: string, take = 50): Promise<TransactionView[]> {
     const txs = await this.prisma.transaction.findMany({
-      where: { account: { pid } },
+      where: { pid },
       orderBy: { createdAt: "desc" },
       take,
     });
@@ -226,10 +223,10 @@ export class IntentService {
    * Transaction row — the activity-history record. No intent lifecycle involved.
    */
   async recordActivity(pid: string, input: ActivityInput): Promise<TransactionView> {
-    const { account, smart } = await this.resolveAccount(pid);
+    const { smart } = await this.resolveAccount(pid);
     const tx = await this.prisma.transaction.create({
       data: {
-        accountId: account.id,
+        pid,
         chainAccountId: smart.id,
         type: input.type,
         amount: BigInt(input.amount),
@@ -242,7 +239,7 @@ export class IntentService {
         status: "submitted" as TransactionStatus,
       },
     });
-    await this.security.log(pid, "activity.recorded", { txId: tx.id, type: input.type }, account.id);
+    await this.security.log(pid, "activity.recorded", { txId: tx.id, type: input.type });
     return toTxView(tx);
   }
 

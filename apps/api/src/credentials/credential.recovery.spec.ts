@@ -3,14 +3,13 @@ import { CredentialService } from "../credentials/credential.service";
 import { mockSecurity, coseKey } from "../../test/factories";
 
 
-const ACCOUNT_ID = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
 // Opaque ES256 key (verification is mocked — exact bytes don't matter here).
 const COSE = coseKey();
 
 function authority(id: string, status = "active") {
   return {
     id,
-    accountId: ACCOUNT_ID,
+    pid: "pid_01HASH",
     type: "secp256r1",
     publicKey: COSE,
     credentialId: `cred-${id}`,
@@ -23,7 +22,7 @@ function authority(id: string, status = "active") {
 function challenge(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "challenge-1",
-    accountId: ACCOUNT_ID,
+    pid: "pid_01HASH",
     kind: "registration",
     challenge: "challenge-a",
     approvalChallenge: "approval-a",
@@ -39,7 +38,7 @@ function setup() {
   };
   const security = mockSecurity();
   const prisma = {
-    pidAccount: { findFirst: jest.fn(async () => ({ id: ACCOUNT_ID, pid: "pid_01HASH", status: "active" }) as any) },
+    identity: { findUnique: jest.fn(async () => ({ status: "active" }) as any) },
     authority: {
       findMany: jest.fn(async () => [] as any),
       findFirst: jest.fn(async () => null as any),
@@ -93,7 +92,7 @@ describe("Recovery & multi-device (task 008)", () => {
         approval: { id: "cred-auth-a", rawId: "x", response: { clientDataJSON: "y", authenticatorData: "a", signature: "s" } },
       }),
     ).rejects.toThrow(BadRequestException);
-    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "credential.register.rejected", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "credential.register.rejected", expect.any(Object));
   });
 
   it("revoking one credential keeps the wallet usable via the other (lost-device flow)", async () => {
@@ -125,16 +124,16 @@ describe("Recovery & multi-device (task 008)", () => {
     expect(views[0].credentialId).toBe("cred-auth-b");
 
     // authenticateFinish with the revoked credential's id → rejected
-    prisma.credentialChallenge.findFirst.mockResolvedValue({ id: "c1", accountId: ACCOUNT_ID, kind: "authentication", challenge: "c", approvalChallenge: null, isAdditional: false, expiresAt: new Date(Date.now() + 60_000) });
+    prisma.credentialChallenge.findFirst.mockResolvedValue({ id: "c1", pid: "pid_01HASH", kind: "authentication", challenge: "c", approvalChallenge: null, isAdditional: false, expiresAt: new Date(Date.now() + 60_000) });
     prisma.authority.findFirst.mockResolvedValue(null);
     await expect(
       service.authenticateFinish("pid_01HASH", { authenticationId: "c1", credential: { id: "cred-auth-a", rawId: "x", response: { clientDataJSON: "y", authenticatorData: "a", signature: "s" } } }),
     ).rejects.toThrow(BadRequestException);
   });
 
-  it("get/list throws NotFound when the account does not exist", async () => {
+  it("get/list throws NotFound when the identity does not exist", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(null as any);
+    prisma.identity.findUnique.mockResolvedValue(null as any);
 
     await expect(service.list("pid_nobody")).rejects.toThrow(NotFoundException);
   });

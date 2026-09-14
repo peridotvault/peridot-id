@@ -66,7 +66,7 @@ keep at least one way to log in.
 
 ```ts
 const profile = await peridot.profile.me();
-// { id, identityId, displayName, avatarUrl, locale, createdAt, updatedAt }
+// { pid, displayName, avatarUrl, locale, createdAt, updatedAt }
 
 const updated = await peridot.profile.update({
   displayName: 'PeridotPlayer',
@@ -74,21 +74,22 @@ const updated = await peridot.profile.update({
 });
 ```
 
-The PID (`identityId`, e.g. `ifal@pid`) is permanent and immutable — only the mutable
+The PID (`pid`, e.g. `ifal@pid`) is permanent and immutable — only the mutable
 labels above can be updated. There is no endpoint that changes, reuses, or reassigns it.
 
 ## Wallet
 
-Each identity can have **one wallet** — a Solana address associated with the PID. Custody is
-**record-only**: Peridot never generates, holds, or returns any key material.
+Each identity owns **one personal wallet** — its chain rows (Solana smart account
++ EVM counterfactuals), all derived from the PID. Custody is **record-only**:
+Peridot never generates, holds, or returns any key material.
 
 ```ts
-const wallet = await peridot.wallet.me();
-// { id, chain: "solana", address, status: "active", createdAt }
-// or ApiError { statusCode: 404 } when the PID has no wallet
+const rows = await peridot.wallet.me();
+// [{ id, chainNamespace, chainReference, address, accountType, status, ... }]
+// or ApiError { statusCode: 404 } when the PID has no wallet yet
 
-const created = await peridot.wallet.create("2nBoE7F2vLkGtvXh7QnUhvW5mYPbRmY8GXJqPz9tKcQ");
-// { id, chain: "solana", address, status: "active", createdAt }
+const created = await peridot.wallet.createAccount();
+// idempotent ensure — same rows back on repeat calls
 ```
 
 - Creating again returns the **existing** wallet — a PID can never have more than one.

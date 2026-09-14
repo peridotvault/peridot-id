@@ -1,5 +1,5 @@
 // Transaction instruction builders for the Peridot smart-account program (task 006).
-// The byte layouts MUST match `programs/peridot-smart-account/src/instructions/*`.
+// The byte layouts MUST match `contracts/svm/smart-account/src/instructions/*`.
 // Browser-safe: Uint8Array only (no Buffer).
 
 import {

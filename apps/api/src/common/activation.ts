@@ -17,9 +17,9 @@ export function classifyActivation(balance: number | bigint, required: number | 
 }
 
 /** Oldest active passkey — every signing flow requires one before proceeding. */
-export async function requireActiveAuthority(prisma: PrismaService, accountId: string) {
+export async function requireActiveAuthority(prisma: PrismaService, pid: string) {
   const authority = await prisma.authority.findFirst({
-    where: { accountId, status: "active" },
+    where: { pid, status: "active" },
     orderBy: { createdAt: "asc" },
   });
   if (!authority) throw new ConflictException("No passkey registered — register one first");

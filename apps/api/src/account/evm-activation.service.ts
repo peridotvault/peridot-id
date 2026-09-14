@@ -26,7 +26,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
 export interface EvmActivationView {
-  accountId: string;
+  pid: string;
   chainReference: string;
   status: string;
   smartAccountAddress: string;
@@ -101,7 +101,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   async poll(): Promise<void> {
     const pending = await this.prisma.chainAccount.findMany({
       where: { chain: { namespace: EIP155_NAMESPACE }, accountType: ACCOUNT_TYPE },
-      include: { account: { select: { pid: true } }, chain: true },
+      include: { chain: true },
     });
     for (const ca of pending) {
       try {
@@ -112,7 +112,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         const deployed = code !== "0x" && code.length > 2;
         if (deployed && ca.status !== "active") {
           await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: "active" } });
-          await this.security.log(ca.account.pid, "account.evm.promoted", { to: "active" }, ca.accountId);
+          await this.security.log(ca.pid, "account.evm.promoted", { to: "active" });
           continue;
         }
         if (ca.status === "active") continue;
@@ -128,9 +128,9 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async viewOf(user: { pid: string }, accountId: string, chainReference: string): Promise<EvmActivationView> {
+  async viewOf(user: { pid: string }, chainReference: string): Promise<EvmActivationView> {
     const chain = await this.chainOrThrow(chainReference);
-    const row = await this.ownedRow(user.pid, accountId, chain);
+    const row = await this.ownedRow(user.pid, chain);
     const rpc = await this.rpcFor(chainReference);
     let balance = 0n;
     let deployed = false;
@@ -145,7 +145,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     const required = await this.requiredWei(chainReference).catch(() => 0n);
     const status = deployed ? "active" : this.classify(balance, required, row.status);
     return {
-      accountId: row.accountId,
+      pid: user.pid,
       chainReference,
       status,
       smartAccountAddress: row.address,
@@ -159,18 +159,18 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
    * Deploy the counterfactual via the Peridot relayer (`deployAndInit` with the
    * registered passkey as authority). Idempotent once ACTIVE.
    */
-  async activate(user: { pid: string }, accountId: string, chainReference: string): Promise<EvmActivationView> {
+  async activate(user: { pid: string }, chainReference: string): Promise<EvmActivationView> {
     const chain = await this.chainOrThrow(chainReference);
-    const row = await this.ownedRow(user.pid, accountId, chain);
+    const row = await this.ownedRow(user.pid, chain);
     const adapter = await this.adapterFor(chainReference);
 
-    const live = await this.viewOf(user, accountId, chainReference);
+    const live = await this.viewOf(user, chainReference);
     if (live.status === "active") return live;
     if (live.status !== "ready") {
       throw new ConflictException(`Wallet must be READY to activate (currently ${live.status})`);
     }
 
-    const authority = await requireActiveAuthority(this.prisma, accountId);
+    const authority = await requireActiveAuthority(this.prisma, user.pid);
 
     const secret = this.config.get<string>("EVM_RELAYER_SECRET");
     if (!secret || !/^0x[0-9a-fA-F]{64}$/.test(secret)) {
@@ -186,7 +186,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
       const rpIdHash = await this.sha256Hex(this.config.get<string>("WEBAUTHN_RP_ID", "localhost"));
       const data = adapter.buildDeployAndInitData(
-        adapter.getSalt(accountId),
+        adapter.getSalt(user.pid),
         new Uint8Array(x),
         new Uint8Array(y),
         rpIdHash,
@@ -196,7 +196,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.transaction
         .create({
           data: {
-            accountId: row.accountId,
+            pid: user.pid,
             chainAccountId: row.id,
             type: "ACTIVATION",
             amount: BigInt(receipt.costWei),
@@ -211,20 +211,19 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
           },
         })
         .catch((err) => this.logger.warn(`evm activation activity record failed: ${(err as Error).message}`));
-      await this.security.log(user.pid, "account.evm.activated", { txHash: receipt.hash }, accountId);
+      await this.security.log(user.pid, "account.evm.activated", { txHash: receipt.hash });
     } catch (err) {
       await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "ready" } }).catch(() => undefined);
       throw err;
     }
-    return this.viewOf(user, accountId, chainReference);
+    return this.viewOf(user, chainReference);
   }
 
-  private async ownedRow(pid: string, accountId: string, chain: Pick<RegistryChain, "id" | "reference">) {
+  private async ownedRow(pid: string, chain: Pick<RegistryChain, "id" | "reference">) {
     const row = await this.prisma.chainAccount.findFirst({
-      where: { chainId: chain.id, accountType: ACCOUNT_TYPE, accountId },
-      include: { account: true },
+      where: { chainId: chain.id, accountType: ACCOUNT_TYPE, pid },
     });
-    if (!row || row.account.pid !== pid) throw new NotFoundException("Account not found");
+    if (!row) throw new NotFoundException("Account not found");
     return row;
   }
 

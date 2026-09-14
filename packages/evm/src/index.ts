@@ -1,6 +1,6 @@
 // Peridot EVM adapter — CREATE2 counterfactual accounts on top of pid-core.
 export {
-  accountIdToSalt32,
+  pidToSalt32,
   addressToBytes,
   buildEvmAuthorizationPayload,
   compressedToX,

@@ -170,7 +170,7 @@ export class SsoService {
         expiresAt: new Date(Date.now() + CODE_TTL_MS),
       },
     });
-    await this.security.log(pid, "sso.code.issued", { redirectTo }, undefined);
+    await this.security.log(pid, "sso.code.issued", { redirectTo });
     return code;
   }
 
@@ -217,7 +217,7 @@ export class SsoService {
       this.prisma.identityCredential.findMany({ where: { pid: row.pid }, select: { provider: true, email: true } }),
     ]);
 
-    await this.security.log(row.pid, "sso.code.consumed", {}, undefined);
+    await this.security.log(row.pid, "sso.code.consumed", {});
 
     return {
       pid: row.pid,

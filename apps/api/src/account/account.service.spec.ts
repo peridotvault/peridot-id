@@ -2,29 +2,15 @@ import { NotFoundException } from "@nestjs/common";
 import { AccountService } from "./account.service";
 import { mockSecurity, minimalChainsStub } from "../../test/factories";
 
-
 const PROGRAM_ID = "9LCZEdXdmLeEyU8Fik2721R28K4xWXTrVd76r4tczNZY";
-const ACCOUNT_ID = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
-const DERIVED = "E51nPEyN8TFAXQSxQoZBGgRG9XvLRA37d4ZMobA19cs"; // reference vector (seed = peridot_id)
+const DERIVED = "2XSyY7tMgbwfsHx7pkqYjwcpyoFLtFwzSophsFFtuaHj"; // PDA of ifal@pid (see smart-account.spec.ts)
 
 const SMART = "smart_account";
-
-function accountRow(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
-    id: ACCOUNT_ID,
-    pid: "pid_01HASH",
-    status: "active",
-    version: 1,
-    createdAt: new Date("2026-08-10T12:00:00.000Z"),
-    updatedAt: new Date("2026-08-10T12:00:00.000Z"),
-    ...overrides,
-  };
-}
 
 function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "chain-1",
-    accountId: ACCOUNT_ID,
+    pid: "pid_01HASH",
     chainId: "chain-sol",
     chain: { namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" },
     address: DERIVED,
@@ -40,17 +26,11 @@ function setup() {
   const config = { getOrThrow: jest.fn(() => PROGRAM_ID) };
   const security = mockSecurity();
   const prisma = {
-    pidAccount: {
-      findFirst: jest.fn(async () => null as any),
-      findMany: jest.fn(async () => [] as any),
-      create: jest.fn(async () => accountRow()),
-    },
     chainAccount: {
       findFirst: jest.fn(async () => null as any),
+      findMany: jest.fn(async () => [] as any),
       create: jest.fn(async () => chainRow()),
-    },
-    chain: {
-      findUnique: jest.fn(async () => ({ id: "chain-sol" })),
+      update: jest.fn(async () => chainRow()),
     },
     securityEvent: { create: jest.fn(async () => ({})) },
   };
@@ -60,55 +40,36 @@ function setup() {
 }
 
 describe("AccountService", () => {
-  it("createAccount seeds the smart_account with the derived PDA address", async () => {
+  it("ensureAccount seeds the smart_account with the derived PDA address", async () => {
     const { service, prisma, security } = setup();
-    prisma.pidAccount.findFirst
-      .mockResolvedValueOnce(null) // initial existence check
-      .mockResolvedValueOnce(accountRow({ chainAccounts: [chainRow()] })); // getAccount
+    prisma.chainAccount.findFirst.mockResolvedValueOnce(null); // smart row missing
+    prisma.chainAccount.findMany.mockResolvedValue([chainRow()]);
 
-    const view = await service.createAccount("pid_01HASH");
+    const views = await service.ensureAccount("ifal@pid");
 
-    expect(prisma.pidAccount.create).toHaveBeenCalledWith({ data: { pid: "pid_01HASH" } });
-    expect(prisma.chainAccount.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: {
-          accountId: ACCOUNT_ID,
-          chainId: "chain-sol",
-          address: DERIVED,
-          accountType: SMART,
-        },
-      }),
-    );
-    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "account.created", {}, ACCOUNT_ID);
-    expect(view.id).toBe(ACCOUNT_ID);
-    expect(view.chainAccounts[0].address).toBe(DERIVED);
+    expect(prisma.chainAccount.create).toHaveBeenCalledWith({
+      data: {
+        pid: "ifal@pid",
+        chainId: "chain-sol",
+        address: DERIVED,
+        accountType: SMART,
+      },
+    });
+    expect(security.log).toHaveBeenCalledWith("ifal@pid", "account.created", {});
+    expect(views[0].address).toBe(DERIVED);
   });
 
-  it("createAccount returns the existing account instead of creating a duplicate", async () => {
+  it("ensureAccount does not reseed the smart row when it already exists", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst
-      .mockResolvedValueOnce(accountRow()) // initial check
-      .mockResolvedValueOnce(accountRow({ chainAccounts: [chainRow()] })); // getAccount
-    prisma.chainAccount.findFirst.mockResolvedValue(chainRow()); // smart row already exists
-
-    const view = await service.createAccount("pid_01HASH");
-
-    expect(prisma.pidAccount.create).not.toHaveBeenCalled();
-    expect(prisma.chainAccount.create).not.toHaveBeenCalled();
-    expect(view.chainAccounts[0].address).toBe(DERIVED);
-  });
-
-  it("createAccount does not reseed the smart row when it already exists", async () => {
-    const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(accountRow({ chainAccounts: [chainRow()] }));
     prisma.chainAccount.findFirst.mockResolvedValue(chainRow());
+    prisma.chainAccount.findMany.mockResolvedValue([chainRow()]);
 
-    await service.createAccount("pid_01HASH");
+    await service.ensureAccount("pid_01HASH");
 
     expect(prisma.chainAccount.create).not.toHaveBeenCalled();
   });
 
-  it("createAccount seeds one identical EVM address per chain when the factory is configured", async () => {
+  it("ensureAccount seeds one identical EVM address per chain when the factory is configured", async () => {
     const { deriveEvmSmartAccountAddress } = jest.requireActual("@peridotvault/pid-evm") as typeof import("@peridotvault/pid-evm");
     const factory = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
     const impl = "0x0000000000000000000000000000000000000001";
@@ -139,29 +100,19 @@ describe("AccountService", () => {
     };
     const security = mockSecurity();
     const prisma = {
-      pidAccount: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValueOnce(null as any)
-          .mockResolvedValueOnce(accountRow({ chainAccounts: [chainRow()] })),
-        findMany: jest.fn(async () => [] as any),
-        create: jest.fn(async () => accountRow()),
-      },
       chainAccount: {
         findFirst: jest.fn(async () => null as any),
+        findMany: jest.fn(async () => [chainRow()] as any),
         create: jest.fn(async (args: { data: { address: string } }) => ({ id: "c", ...args.data })),
         update: jest.fn(async () => ({})),
-      },
-      chain: {
-        findUnique: jest.fn(async () => ({ id: "chain-sol" })),
       },
       securityEvent: { create: jest.fn(async () => ({})) },
     };
     const service = new AccountService(prisma as never, config as never, security as never, chains as never);
 
-    await service.createAccount("pid_01HASH");
+    await service.ensureAccount("pid_01HASH");
 
-    const expected = deriveEvmSmartAccountAddress(ACCOUNT_ID, factory, impl).address;
+    const expected = deriveEvmSmartAccountAddress("pid_01HASH", factory, impl).address;
     const creates = prisma.chainAccount.create.mock.calls.map((c) => (c[0] as { data: Record<string, unknown> }).data);
     const evmCreates = creates.filter((d) => d.chainId !== "chain-sol");
     // One row per phase-1 chain, all the same counterfactual address.
@@ -169,34 +120,28 @@ describe("AccountService", () => {
     for (const row of evmCreates) expect(row.address).toBe(expected);
   });
 
-  it("createAccount fails cleanly when the solana chain is not registered", async () => {
+  it("ensureAccount fails cleanly when the solana chain is not registered", async () => {
     const { service, prisma, chains } = setup();
     (chains.solanaChainIdOrThrow as jest.Mock).mockRejectedValue(new NotFoundException("Solana chain is not registered — run db:seed"));
 
-    await expect(service.createAccount("pid_01HASH")).rejects.toThrow(NotFoundException);
-    await expect(service.createAccount("pid_01HASH")).rejects.toThrow("run db:seed");
+    await expect(service.ensureAccount("pid_01HASH")).rejects.toThrow(NotFoundException);
+    await expect(service.ensureAccount("pid_01HASH")).rejects.toThrow("run db:seed");
     expect(prisma.chainAccount.create).not.toHaveBeenCalled();
   });
 
-  it("getAccount throws NotFound for an account that is not the PID's own", async () => {
+  it("getChains throws NotFound when the PID has no wallet yet", async () => {
     const { service } = setup();
 
-    await expect(service.getAccount("pid_OTHER", ACCOUNT_ID)).rejects.toThrow(NotFoundException);
+    await expect(service.getChains("pid_OTHER")).rejects.toThrow(NotFoundException);
   });
 
-  it("getAccountChains throws NotFound for another PID's account", async () => {
-    const { service } = setup();
-
-    await expect(service.getAccountChains("pid_OTHER", ACCOUNT_ID)).rejects.toThrow(NotFoundException);
-  });
-
-  it("getAccounts maps active accounts with their chain accounts", async () => {
+  it("getChains maps the wallet's chain rows", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findMany.mockResolvedValue([accountRow({ chainAccounts: [chainRow()] })]);
+    prisma.chainAccount.findMany.mockResolvedValue([chainRow()]);
 
-    const views = await service.getAccounts("pid_01HASH");
+    const views = await service.getChains("pid_01HASH");
 
     expect(views).toHaveLength(1);
-    expect(views[0].chainAccounts[0].accountType).toBe(SMART);
+    expect(views[0].accountType).toBe(SMART);
   });
 });

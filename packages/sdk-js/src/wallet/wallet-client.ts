@@ -3,7 +3,7 @@
 import { PublicKey } from "@peridotvault/pid-core";
 import { b64url, b64urlToBytes, buildWithdrawPayload, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import type { ParsedTx, PasskeySigner, TokenBalance, TransactionStatus } from "@peridotvault/pid-solana";
-import type { Account, ApiError, Authority, WalletTransaction } from "@peridotvault/pid-types";
+import type { ApiError, Authority, ChainAccount, WalletTransaction } from "@peridotvault/pid-types";
 import { BrowserPasskeySigner } from "@peridotvault/pid-core";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
@@ -66,11 +66,22 @@ export class PeridotWallet {
     this.historyStore = options.historyStore ?? new LocalHistoryStore();
   }
 
-  private async defaultAccountId(): Promise<string> {
-    const res = await this.api.get<Account[]>("/v1/accounts");
-    const account = Array.isArray(res.data) ? res.data[0] : undefined;
-    if (!account) throw new Error("Account not found — create an account first");
-    return account.id;
+  private cachedPid: string | null = null;
+
+  /** The token identity's PID — also the seed for every address derivation. Cached. */
+  private async pid(): Promise<string> {
+    if (!this.cachedPid) {
+      const res = await this.api.get<{ pid: string }>("/v1/identity/me");
+      if (!res.ok || isApiError(res.data)) throw new Error("Not signed in");
+      this.cachedPid = (res.data as { pid: string }).pid;
+    }
+    return this.cachedPid;
+  }
+
+  private async chains(): Promise<ChainAccount[]> {
+    const res = await this.api.get<ChainAccount[]>("/v1/account");
+    if (!res.ok || isApiError(res.data)) throw new Error("Account not found — create an account first");
+    return res.data as ChainAccount[];
   }
 
   /**
@@ -79,10 +90,8 @@ export class PeridotWallet {
    * id changed after the account was created.
    */
   private async smartAccountAddress(): Promise<string> {
-    const res = await this.api.get<Account[]>("/v1/accounts");
-    const account = Array.isArray(res.data) ? res.data[0] : undefined;
-    if (!account) throw new Error("Account not found — create an account first");
-    const smart = account.chainAccounts?.find((c) => c.accountType === "smart_account");
+    const rows = await this.chains();
+    const smart = rows.find((c) => c.accountType === "smart_account");
     if (!smart) throw new Error("Smart account not created");
     return smart.address;
   }
@@ -92,10 +101,8 @@ export class PeridotWallet {
    * `"421614"`), as stored by the API. Same funding-before-deploy shape as Solana.
    */
   async evmSmartAccountAddress(chainReference: string): Promise<string> {
-    const res = await this.api.get<Account[]>("/v1/accounts");
-    const account = Array.isArray(res.data) ? res.data[0] : undefined;
-    if (!account) throw new Error("Account not found — create an account first");
-    const evm = account.chainAccounts?.find(
+    const rows = await this.chains();
+    const evm = rows.find(
       (c) => c.chainNamespace === "eip155" && c.chainReference === chainReference && c.accountType === "smart_account",
     );
     if (!evm) throw new Error(`EVM smart account not created for chain ${chainReference}`);
@@ -109,32 +116,29 @@ export class PeridotWallet {
     return b64urlToBytes(auth.publicKey);
   }
 
-  /** The default account (with the deterministic smart-account address). */
-  async me(): Promise<Account | ApiError> {
-    const res = await this.api.get<Account[]>("/v1/accounts");
-    if (isApiError(res.data)) return res.data;
-    const account = (res.data ?? [])[0];
-    if (!account) return { statusCode: 404, message: "Account not found" };
-    return account;
+  /** The wallet's chain rows (idempotent setup lives in createAccount). */
+  async me(): Promise<ChainAccount[] | ApiError> {
+    const res = await this.api.get<ChainAccount[]>("/v1/account");
+    return res.data;
   }
 
-  /** Create the default Peridot account (idempotent) — returns it. */
-  async createAccount(): Promise<Account | ApiError> {
-    const res = await this.api.post<Account>("/v1/accounts");
+  /** Ensure the wallet (idempotent) — returns its chain rows. */
+  async createAccount(): Promise<ChainAccount[] | ApiError> {
+    const res = await this.api.post<ChainAccount[]>("/v1/account");
     return res.data;
   }
 
   /** Top up (deposit). The first SOL top-up also initializes the smart account (PRD_v5 §3). */
   async topup(input: TopupInput): Promise<{ signature: string }> {
-    const accountId = await this.defaultAccountId();
+    const pid = await this.pid();
     const feePayer = await this.feePayer.getOrCreate();
     const lamports = BigInt(input.amount);
     const authority = await this.authorityCompressed();
 
     const signature =
       input.asset === "SOL"
-        ? await this.adapter.initializeAndDepositSol(accountId, authority, feePayer, lamports)
-        : await this.adapter.depositToken(accountId, new PublicKey(input.asset), feePayer, lamports);
+        ? await this.adapter.initializeAndDepositSol(pid, authority, feePayer, lamports)
+        : await this.adapter.depositToken(pid, new PublicKey(input.asset), feePayer, lamports);
     return { signature };
   }
 
@@ -144,7 +148,7 @@ export class PeridotWallet {
    * server quotes. The passkey signs the exact payload; the server broadcasts it.
    */
   async withdraw(input: WithdrawInput): Promise<{ signature: string; relayFeeLamports: string; status: "confirmed" | "pending" }> {
-    const accountId = await this.defaultAccountId();
+    const pid = await this.pid();
     const amount = BigInt(input.amount);
     const destination = new PublicKey(input.to);
 
@@ -155,7 +159,7 @@ export class PeridotWallet {
     const relayFee = BigInt(quote.relayFeeLamports);
     const expiry = Math.floor(quote.chainTime) + 300;
 
-    const nonce = await this.adapter.getNonce(accountId);
+    const nonce = await this.adapter.getNonce(pid);
 
     const attempt = async (n: bigint): Promise<{ signature: string; relayFeeLamports: string; status: "confirmed" | "pending" }> => {
       const p = await buildWithdrawPayload(n, amount, destination, expiry, relayFee);
@@ -186,7 +190,7 @@ export class PeridotWallet {
     } catch (e) {
       // Stale nonce (another tx landed in between) — re-read and retry once.
       if (e instanceof Error && /stale|newer nonce/i.test(e.message)) {
-        const freshNonce = await this.adapter.getNonce(accountId);
+        const freshNonce = await this.adapter.getNonce(pid);
         return attempt(freshNonce);
       }
       throw e;
@@ -211,14 +215,14 @@ export class PeridotWallet {
   }
 
   /** Activate the smart account (server-side relayer). */
-  async activate(accountId: string): Promise<ActivationView | ApiError> {
-    const res = await this.api.post<ActivationView>(`/v1/accounts/${accountId}/activate`);
+  async activate(): Promise<ActivationView | ApiError> {
+    const res = await this.api.post<ActivationView>(`/v1/account/activate`);
     return res.data;
   }
 
   /** Current activation status of the smart account. */
-  async activation(accountId: string): Promise<ActivationView | ApiError> {
-    const res = await this.api.get<ActivationView>(`/v1/accounts/${accountId}/activation`);
+  async activation(): Promise<ActivationView | ApiError> {
+    const res = await this.api.get<ActivationView>(`/v1/account/activation`);
     return res.data;
   }
 

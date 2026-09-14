@@ -42,7 +42,7 @@ export class AdminService {
       include: { contracts: true },
     });
     this.chains.invalidate();
-    await this.security.log(pid, "admin.chain.created", { chainId: chain.id, reference: dto.reference }, undefined);
+    await this.security.log(pid, "admin.chain.created", { chainId: chain.id, reference: dto.reference });
     return chain;
   }
 
@@ -51,7 +51,7 @@ export class AdminService {
     if (!chain) throw new NotFoundException("Chain not found");
     const updated = await this.prisma.chain.update({ where: { id }, data: { ...dto }, include: { contracts: true } });
     this.chains.invalidate();
-    await this.security.log(pid, "admin.chain.updated", { chainId: id }, undefined);
+    await this.security.log(pid, "admin.chain.updated", { chainId: id });
     return updated;
   }
 
@@ -80,7 +80,7 @@ export class AdminService {
       },
     });
     this.chains.invalidate();
-    await this.security.log(pid, "admin.contract.upserted", { chainId, type: dto.type }, undefined);
+    await this.security.log(pid, "admin.contract.upserted", { chainId, type: dto.type });
     return contract;
   }
 }

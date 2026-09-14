@@ -26,7 +26,7 @@ import { SecurityEventService } from "../security/security-event.service";
 export type ActivationStatus = ChainAccountStatus;
 
 export interface ActivationView {
-  accountId: string;
+  pid: string;
   status: ActivationStatus;
   smartAccountAddress: string;
   balanceLamports: number;
@@ -138,7 +138,6 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         accountType: POLL_ACCOUNT_TYPE,
         status: { in: ["inactivated", "funded", "insufficient", "ready", "activating", "active"] },
       },
-      include: { account: { select: { pid: true } } },
     });
     if (pending.length === 0) return;
 
@@ -155,7 +154,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
             where: { id: ca.id },
             data: { status: "active" },
           });
-          await this.security.log(ca.account.pid, "account.activation.promoted", { from: ca.status, to: "active" }, ca.accountId);
+          await this.security.log(ca.pid, "account.activation.promoted", { from: ca.status, to: "active" });
           continue;
         }
         if (ca.status === "active") {
@@ -165,7 +164,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
             where: { id: ca.id },
             data: { status: "inactivated", activationBalance: null, activationRequired: null },
           });
-          await this.security.log(ca.account.pid, "account.activation.healed", { from: "active", to: "inactivated" }, ca.accountId);
+          await this.security.log(ca.pid, "account.activation.healed", { from: "active", to: "inactivated" });
           continue;
         }
 
@@ -176,7 +175,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
           where: { id: ca.id },
           data: { status: next, activationBalance: BigInt(balance), activationRequired: BigInt(required) },
         });
-        await this.security.log(ca.account.pid, "account.activation.polled", { status: next, balance }, ca.accountId);
+        await this.security.log(ca.pid, "account.activation.polled", { status: next, balance });
       } catch (err) {
         this.logger.warn(`activation poll failed for ${ca.address}: ${(err as Error).message}`);
       }
@@ -196,11 +195,11 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return classifyActivation(balance, required, current);
   }
 
-  /** Activate a READY account (idempotent once ACTIVE). */
-  async activate(user: { pid: string }, accountId: string): Promise<ActivationView> {
-    const chain = await this.ownedSolanaRow(user.pid, accountId);
+  /** Activate a READY wallet (idempotent once ACTIVE). */
+  async activate(user: { pid: string }): Promise<ActivationView> {
+    const chain = await this.ownedSolanaRow(user.pid);
 
-    if (chain.status === "active") return this.viewOf(user, accountId);
+    if (chain.status === "active") return this.viewOf(user);
 
     // Re-derive live state so a stale stored status can't block a genuinely READY account.
     const adapter = this.adapter();
@@ -216,13 +215,13 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     const required = Number(cost.totalLamports);
     const live = activated ? "active" : this.classify(balance, required, chain.status);
 
-    if (live === "active") return this.viewOf(user, accountId);
+    if (live === "active") return this.viewOf(user);
 
     if (live !== "ready") {
       throw new ConflictException(`Wallet must be READY to activate (currently ${live})`);
     }
 
-    const authority = await requireActiveAuthority(this.prisma, accountId);
+    const authority = await requireActiveAuthority(this.prisma, user.pid);
 
     await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "activating" } });
     try {
@@ -236,14 +235,14 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       }
       if (relayerBalance < required) {
         await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
-        await this.security.log(user.pid, "account.activation.relayer_unfunded", { relayer: this.relayer().publicKey.toBase58() }, accountId);
+        await this.security.log(user.pid, "account.activation.relayer_unfunded", { relayer: this.relayer().publicKey.toBase58() });
         throw new ServiceUnavailableException(
           "Peridot's activation service is temporarily out of funds. No SOL was deducted from your wallet — please try again in a moment.",
         );
       }
 
       const signature = await adapter.activate(
-        chain.account.id,
+        user.pid,
         coseToCompressedSecp256r1(Buffer.from(authority.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
         cost.totalLamports,
         this.relayer(),
@@ -254,7 +253,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       if (outcome !== "confirmed") {
         // Revert — the transaction never landed (or errored); the user's deposit is untouched.
         await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
-        await this.security.log(user.pid, "account.activation.unconfirmed", { signature, outcome, reason }, accountId);
+        await this.security.log(user.pid, "account.activation.unconfirmed", { signature, outcome, reason });
         throw new ServiceUnavailableException(
           outcome === "failed"
             ? `Activation was submitted but failed on-chain${reason ? ` (${shortReason(reason)})` : ""}. No SOL was deducted from your wallet — please try again.`
@@ -268,7 +267,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.transaction
         .create({
           data: {
-            accountId: chain.accountId,
+            pid: user.pid,
             chainAccountId: chain.id,
             type: "ACTIVATION",
             amount: BigInt(cost.totalLamports),
@@ -283,18 +282,18 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
           },
         })
         .catch((err) => this.logger.warn(`activation activity record failed: ${(err as Error).message}`));
-      await this.security.log(user.pid, "account.activated", { signature }, accountId);
+      await this.security.log(user.pid, "account.activated", { signature });
     } catch (err) {
       await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
       throw err;
     }
 
-    return this.viewOf(user, accountId);
+    return this.viewOf(user);
   }
 
   /** Activation view derived live from on-chain state (ownership-checked). */
-  async viewOf(user: { pid: string }, accountId: string): Promise<ActivationView> {
-    const chain = await this.ownedSolanaRow(user.pid, accountId);
+  async viewOf(user: { pid: string }): Promise<ActivationView> {
+    const chain = await this.ownedSolanaRow(user.pid);
     const adapter = this.adapter();
     let balance = 0;
     let activated = false;
@@ -313,7 +312,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       : this.classify(balance, required, chain.status);
 
     return {
-      accountId: chain.accountId,
+      pid: user.pid,
       status,
       smartAccountAddress: chain.address,
       balanceLamports: balance,
@@ -322,12 +321,11 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Solana smart row owned by the token identity — never a client-supplied one. */
-  private async ownedSolanaRow(pid: string, accountId: string) {
+  private async ownedSolanaRow(pid: string) {
     const chain = await this.prisma.chainAccount.findFirst({
-      where: { chain: { namespace: "solana" }, accountType: POLL_ACCOUNT_TYPE, accountId },
-      include: { account: true },
+      where: { chain: { namespace: SOLANA_NAMESPACE }, accountType: POLL_ACCOUNT_TYPE, pid },
     });
-    if (!chain || chain.account.pid !== pid) {
+    if (!chain) {
       throw new NotFoundException("Account not found");
     }
     return chain;

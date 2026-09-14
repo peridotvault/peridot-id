@@ -17,11 +17,11 @@ describe("evm-account", () => {
     );
   });
 
-  it("derives deterministically from the account id (not the key)", () => {
-    const a = deriveEvmSmartAccountAddress("b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e", "0x4e59b44847b379578588920cA78FbF26c0B4956C", "0x0000000000000000000000000000000000000001");
-    const b = deriveEvmSmartAccountAddress("b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e", "0x4e59b44847b379578588920cA78FbF26c0B4956C", "0x0000000000000000000000000000000000000001");
+  it("derives deterministically from the pid (not the key)", () => {
+    const a = deriveEvmSmartAccountAddress("ifal@pid", "0x4e59b44847b379578588920cA78FbF26c0B4956C", "0x0000000000000000000000000000000000000001");
+    const b = deriveEvmSmartAccountAddress("ifal@pid", "0x4e59b44847b379578588920cA78FbF26c0B4956C", "0x0000000000000000000000000000000000000001");
     expect(a.address).toBe(b.address);
-    expect(a.salt).toBe("0x00000000000000000000000000000000b3f1e6a92c4d4f8b9a3e8d7c5b2a1f9e");
+    expect(a.salt).toBe("0x98bc15cccd4fd3a85b71e5b29b430d0cc461e7b5ebb7ac1b13428299ce52cfe7");
   });
 
   it("matches the on-chain CREATE2 prediction (forge parity vector)", () => {

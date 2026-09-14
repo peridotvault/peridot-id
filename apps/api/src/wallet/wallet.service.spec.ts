@@ -6,52 +6,27 @@ import { minimalChainsStub } from "../../test/factories";
 
 const LINKED = "linked_address";
 
-function accountRow(pid: string, withLinked: boolean, address: string) {
+function linkedRow(pid: string, address: string) {
   return {
-    id: `acc-${pid}`,
+    id: `w-${pid}`,
     pid,
+    chainId: "chain-sol",
+    chain: { namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" },
+    address,
+    accountType: LINKED,
     status: "active",
-    version: 1,
     createdAt: new Date(),
     updatedAt: new Date(),
-    chainAccounts: withLinked
-      ? [
-          {
-            id: `w-${pid}`,
-            accountId: `acc-${pid}`,
-            chainId: "chain-sol",
-            chain: { namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" },
-            address,
-            accountType: LINKED,
-            status: "active",
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        ]
-      : [],
   };
 }
 
 function prismaMock() {
   const mocks: Record<string, unknown> = {
-    pidAccount: {
-      findFirst: jest.fn(async () => null),
-      create: jest.fn(
-        async (args: { data: { pid: string } }) => ({
-          id: `acc-${args.data.pid}`,
-          pid: args.data.pid,
-          status: "active",
-          version: 1,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        }),
-      ),
-    },
     chainAccount: {
       findFirst: jest.fn(async () => null),
       create: jest.fn(
         async (args: {
-          data: { accountId: string; chainId: string; address: string; accountType: string };
+          data: { pid: string; chainId: string; address: string; accountType: string };
         }) => ({
           id: "wallet-1",
           ...args.data,
@@ -79,7 +54,7 @@ function setup() {
 describe("WalletService", () => {
   it("getMe returns the linked_address for the authenticated PID", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", true, "addr-1"));
+    prisma.chainAccount.findFirst.mockResolvedValue(linkedRow("pid_01HASH", "addr-1"));
 
     const wallet = await service.getMe("pid_01HASH");
 
@@ -90,9 +65,9 @@ describe("WalletService", () => {
       status: "active",
       createdAt: expect.any(Date),
     });
-    expect(prisma.pidAccount.findFirst).toHaveBeenCalledWith(
+    expect(prisma.chainAccount.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { pid: "pid_01HASH", status: "active" },
+        where: { pid: "pid_01HASH", accountType: LINKED },
       }),
     );
   });
@@ -108,13 +83,10 @@ describe("WalletService", () => {
 
     const wallet = await service.create("pid_01HASH", "addr-solana");
 
-    expect(prisma.pidAccount.create).toHaveBeenCalledWith({
-      data: { pid: "pid_01HASH" },
-    });
     expect(prisma.chainAccount.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          accountId: "acc-pid_01HASH",
+          pid: "pid_01HASH",
           chainId: "chain-sol",
           address: "addr-solana",
           accountType: LINKED,
@@ -127,8 +99,7 @@ describe("WalletService", () => {
 
   it("create returns the existing linked_address instead of creating a duplicate", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", true, "addr-1"));
-    prisma.chainAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", true, "addr-1").chainAccounts[0]);
+    prisma.chainAccount.findFirst.mockResolvedValue(linkedRow("pid_01HASH", "addr-1"));
 
     const wallet = await service.create("pid_01HASH", "addr-2");
 
@@ -138,7 +109,6 @@ describe("WalletService", () => {
 
   it("create returns the existing wallet when a concurrent duplicate hits the unique index", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow("pid_01HASH", false, ""));
     prisma.chainAccount.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
         code: "P2002",
@@ -147,7 +117,7 @@ describe("WalletService", () => {
     );
     prisma.chainAccount.findFirst
       .mockResolvedValueOnce(null) // the pre-create existence check
-      .mockResolvedValueOnce(accountRow("pid_01HASH", true, "addr-1").chainAccounts[0]); // the P2002 recovery
+      .mockResolvedValueOnce(linkedRow("pid_01HASH", "addr-1")); // the P2002 recovery
 
     const wallet = await service.create("pid_01HASH", "addr-1");
 

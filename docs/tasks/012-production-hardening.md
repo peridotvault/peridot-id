@@ -16,7 +16,7 @@ before mainnet are listed below as the runbook.
 - **Rate limiting** — throttles on all sensitive routes (credentials, intents, transactions,
   accounts, wallet) via `@nestjs/throttler`.
 - **No-secret checks** — `.gitignore` covers Rust target/test-ledger + keypairs under
-  `programs/**/target/deploy`; deployer keypairs are never committed.
+  `contracts/**/target/deploy`; deployer keypairs are never committed.
 
 ## Runbook (stakeholder actions — NOT yet executed)
 

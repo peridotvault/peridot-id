@@ -17,7 +17,7 @@ coverage/
 graphify-out/
 
 # Rust / Solana program builds
-programs/**/target/
-programs/**/test-ledger/
+contracts/**/target/
+contracts/**/test-ledger/
 
 test-ledger/

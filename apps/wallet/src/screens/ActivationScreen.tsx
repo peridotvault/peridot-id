@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ArrowLeft, Rocket, Info, Copy } from "../icons";
-import type { Account, Authority } from "@peridotvault/pid-types";
+import type { Authority, ChainAccount } from "@peridotvault/pid-types";
 import type { ActivationView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
@@ -11,7 +11,7 @@ const LAMPORTS_PER_SOL = 1e9;
 
 export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {
   const { peridot } = usePeridot();
-  const [account, setAccount] = useState<Account | null>(null);
+  const [chains, setChains] = useState<ChainAccount[] | null>(null);
   const [activation, setActivation] = useState<ActivationView | null>(null);
   const [passkeys, setPasskeys] = useState<Authority[]>([]);
   const [busy, setBusy] = useState(false);
@@ -23,9 +23,9 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
       let acc = await peridot.wallet.me();
       if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
       if ("statusCode" in acc) throw new Error("Failed to create account");
-      setAccount(acc as Account);
+      setChains(acc as ChainAccount[]);
       try {
-        const act = await peridot.wallet.activation((acc as Account).id);
+        const act = await peridot.wallet.activation();
         if (!("statusCode" in act)) setActivation(act as ActivationView);
       } catch {
         /* activation read failed — leave null */
@@ -58,11 +58,11 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
   };
 
   const activate = async () => {
-    if (!account) return;
+    if (!chains) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await peridot.wallet.activate(account.id);
+      const res = await peridot.wallet.activate();
       if ("statusCode" in res) {
         const msg = Array.isArray(res.message) ? res.message.join(" ") : (res.message as string);
         throw new Error(msg);

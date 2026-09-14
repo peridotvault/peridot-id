@@ -1,5 +1,5 @@
 // EVM chain-account helpers (counterfactual CREATE2 accounts, one address per
-// pidAccount.id across every configured eip155 chain — the Solana PDA split).
+// pid across every configured eip155 chain — the Solana PDA split).
 
 import { EVM_CHAINS, type EvmChain } from "@peridotvault/pid-core/dist/evm";
 

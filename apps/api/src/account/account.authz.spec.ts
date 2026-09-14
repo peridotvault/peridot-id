@@ -24,10 +24,10 @@ function token(sub: string, extra: Record<string, unknown> = {}) {
 describe("Account authorization & abuse cases (routes)", () => {
   let app: INestApplication;
   let storage: ThrottlerStorage;
-  let state: { identities: Map<string, string>; accounts: Map<string, { id: string; pid: string }> };
+  let state: { identities: Map<string, string>; chains: Map<string, Record<string, unknown>> };
 
   beforeAll(async () => {
-    state = { identities: new Map(), accounts: new Map() };
+    state = { identities: new Map(), chains: new Map() };
     const prisma = {
       identity: {
         findUnique: jest.fn(async ({ where }: { where: { pid: string } }) => {
@@ -35,39 +35,29 @@ describe("Account authorization & abuse cases (routes)", () => {
           return status ? { status } : null;
         }),
       },
-      pidAccount: {
-        findFirst: jest.fn(async ({ where, include }: { where: { id?: string; pid: string; status?: string }; include?: { chainAccounts: object } }) => {
-          const row = [...state.accounts.values()].find((a) => a.pid === where.pid && (!where.id || a.id === where.id));
-          if (!row) return null;
-          return {
-            ...row,
+      chainAccount: {
+        findFirst: jest.fn(async ({ where }: { where: { pid: string } }) => {
+          const rows = [...state.chains.values()].filter((r) => r.pid === where.pid);
+          return (rows[0] as Record<string, unknown> | undefined) ?? null;
+        }),
+        findMany: jest.fn(async ({ where }: { where: { pid: string } }) =>
+          [...state.chains.values()].filter((r) => r.pid === where.pid),
+        ),
+        create: jest.fn(async ({ data }: { data: { pid: string } }) => {
+          const row = {
+            id: `chain-${data.pid}`,
+            pid: data.pid,
+            chainId: "chain-sol",
+            chain: { namespace: "solana", reference: "ref" },
+            address: `addr-${data.pid}`,
+            accountType: "smart_account",
             status: "active",
-            version: 1,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            ...(include ? { chainAccounts: [{ id: `chain-${row.id}`, accountId: row.id, chainId: "chain-sol", chain: { namespace: "solana", reference: "ref" }, address: `addr-${row.id}`, accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] } : {}),
           };
+          state.chains.set(row.id, row);
+          return row;
         }),
-        findMany: jest.fn(async () => []),
-        create: jest.fn(async ({ data }: { data: { pid: string } }) => {
-          const row = { id: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", pid: data.pid };
-          state.accounts.set(row.id, row);
-          return { ...row, status: "active", version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-        }),
-      },
-      chainAccount: {
-        findFirst: jest.fn(async () => null),
-        create: jest.fn(async () => ({
-          id: "chain-x",
-          accountId: "acc-x",
-          chainId: "chain-sol",
-          chain: { namespace: "solana", reference: "ref" },
-          address: "addr-x",
-          accountType: "smart_account",
-          status: "active",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })),
       },
       chain: {
         findUnique: jest.fn(async () => ({ id: "chain-sol" })),
@@ -120,59 +110,54 @@ describe("Account authorization & abuse cases (routes)", () => {
 
   beforeEach(() => {
     state.identities.clear();
-    state.accounts.clear();
+    state.chains.clear();
     (storage as unknown as { storage: Map<unknown, unknown> }).storage.clear();
   });
 
   it("rejects a request with no access cookie", async () => {
-    await request(app.getHttpServer()).get("/v1/accounts").expect(401);
+    await request(app.getHttpServer()).get("/v1/account").expect(401);
   });
 
   it("rejects a token for an unknown PID", async () => {
     const t = await token("pid_does_not_exist");
-    await request(app.getHttpServer()).get("/v1/accounts").set("Cookie", `pid_access=${t}`).expect(401);
+    await request(app.getHttpServer()).get("/v1/account").set("Cookie", `pid_access=${t}`).expect(401);
   });
 
-  it("creates the default account with a smart_account chain account", async () => {
+  it("creates the wallet with a smart_account chain row", async () => {
     state.identities.set("pid_a", "active");
     const t = await token("pid_a");
 
-    const res = await request(app.getHttpServer()).post("/v1/accounts").set("Cookie", `pid_access=${t}`).expect(200);
+    const res = await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${t}`).expect(200);
 
-    expect(res.body.id).toBe("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11");
-    expect(res.body.chainAccounts).toHaveLength(1);
-    expect(res.body.chainAccounts[0].accountType).toBe("smart_account");
-    expect(res.body).not.toHaveProperty("pid");
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].accountType).toBe("smart_account");
+    expect(res.body[0]).not.toHaveProperty("pid");
   });
 
-  it("GET /v1/accounts/:id never returns another PID's account (no IDOR)", async () => {
+  it("never returns another PID's wallet (isolation by construction — no ids in routes)", async () => {
     state.identities.set("pid_a", "active");
     state.identities.set("pid_b", "active");
-    state.accounts.set("11111111-1111-4111-8111-111111111111", { id: "11111111-1111-4111-8111-111111111111", pid: "pid_a" });
+    const tA = await token("pid_a");
     const tB = await token("pid_b");
 
-    await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111").set("Cookie", `pid_access=${tB}`).expect(404);
+    await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${tA}`).expect(200);
+
+    await request(app.getHttpServer()).get("/v1/account").set("Cookie", `pid_access=${tB}`).expect(404);
+    const resA = await request(app.getHttpServer()).get("/v1/account").set("Cookie", `pid_access=${tA}`).expect(200);
+    expect(resA.body).toHaveLength(1);
   });
 
-  it("returns 404 for an unknown account id", async () => {
+  it("returns 404 when the PID has no wallet yet", async () => {
     state.identities.set("pid_a", "active");
     const t = await token("pid_a");
 
-    await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111").set("Cookie", `pid_access=${t}`).expect(404);
+    await request(app.getHttpServer()).get("/v1/account").set("Cookie", `pid_access=${t}`).expect(404);
   });
 
-  it("rejects a malformed account id with 400", async () => {
-    state.identities.set("pid_a", "active");
-    const t = await token("pid_a");
-
-    await request(app.getHttpServer()).get("/v1/accounts/not-a-uuid").set("Cookie", `pid_access=${t}`).expect(400);
-  });
-
-  it("GET /v1/accounts/:id/chains is ownership-checked too", async () => {
+  it("GET /v1/account/chains is scoped to the caller too", async () => {
     state.identities.set("pid_b", "active");
-    state.accounts.set("11111111-1111-4111-8111-111111111111", { id: "11111111-1111-4111-8111-111111111111", pid: "pid_a" });
     const tB = await token("pid_b");
 
-    await request(app.getHttpServer()).get("/v1/accounts/11111111-1111-4111-8111-111111111111/chains").set("Cookie", `pid_access=${tB}`).expect(404);
+    await request(app.getHttpServer()).get("/v1/account/chains").set("Cookie", `pid_access=${tB}`).expect(404);
   });
 });

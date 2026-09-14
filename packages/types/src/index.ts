@@ -126,14 +126,6 @@ export interface ChainAccount {
   createdAt: string;
 }
 
-export interface Account {
-  id: string;
-  status: IdentityStatus;
-  version: number;
-  createdAt: string;
-  chainAccounts: ChainAccount[];
-}
-
 export interface Authority {
   id: string;
   type: "secp256r1";
@@ -159,7 +151,7 @@ export interface Intent {
   payload: IntentPayload & {
     chain: string;
     network: string;
-    accountId: string;
+    pid: string;
     smartAccountAddress: string;
   };
   status: "pending" | "approved" | "executed" | "expired" | "rejected" | "cancelled";

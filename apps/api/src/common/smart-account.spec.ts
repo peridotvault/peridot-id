@@ -1,31 +1,22 @@
-import { deriveSmartAccountAddress, uuidTo32 } from "./smart-account";
+import { deriveSmartAccountAddress, pidToSeed32 } from "./smart-account";
 
 // Reference vectors generated with @solana/web3.js v1 findProgramAddressSync
-// (task 002's shared vectors — packages/solana revalidates in task 006).
+// (ADR-008: seeds are sha256(pid); packages/solana revalidates task 006).
 const PROGRAM_ID = "9LCZEdXdmLeEyU8Fik2721R28K4xWXTrVd76r4tczNZY";
 
 describe("deriveSmartAccountAddress", () => {
-  it("matches web3.js for the primary vector (bump 255)", () => {
-    const accountId = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
-    expect(deriveSmartAccountAddress(accountId, PROGRAM_ID)).toEqual({
-      address: "E51nPEyN8TFAXQSxQoZBGgRG9XvLRA37d4ZMobA19cs",
-      bump: 254,
+  it("matches web3.js for a pid seed", () => {
+    expect(deriveSmartAccountAddress("ifal@pid", PROGRAM_ID)).toEqual({
+      address: "2XSyY7tMgbwfsHx7pkqYjwcpyoFLtFwzSophsFFtuaHj",
+      bump: 255,
     });
   });
 
-  it("matches web3.js when the first bump is on-curve (bump 253)", () => {
-    const accountId = "11111111-1111-4111-8111-111111110000";
-    expect(deriveSmartAccountAddress(accountId, PROGRAM_ID)).toEqual({
-      address: "fTLNrGoxPBRKvn1cZvk5k9D6XBSWa3sqbeo4prKZXD8",
-      bump: 254,
-    });
-  });
-
-  it("zero-pads the uuid to 32 bytes", () => {
-    const accountId = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
-    expect(uuidTo32(accountId).toString("hex")).toBe(
-      "00000000000000000000000000000000b3f1e6a92c4d4f8b9a3e8d7c5b2a1f9e",
+  it("seeds with sha256(lowercased pid)", () => {
+    expect(pidToSeed32("ifal@pid").toString("hex")).toBe(
+      "98bc15cccd4fd3a85b71e5b29b430d0cc461e7b5ebb7ac1b13428299ce52cfe7",
     );
-    expect(uuidTo32(accountId).length).toBe(32);
+    expect(pidToSeed32("ifal@pid").length).toBe(32);
+    expect(pidToSeed32("IFAL@PID").equals(pidToSeed32("ifal@pid"))).toBe(true);
   });
 });

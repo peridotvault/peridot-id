@@ -5,7 +5,7 @@ import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {PeridotAccount} from "./PeridotAccount.sol";
 
 /// @title PeridotFactory — CREATE2 factory for counterfactual smart accounts.
-/// @notice Salt = `bytes32(accountIdToSeed32(pidAccount.id))` (same seed as Solana).
+/// @notice Salt = `bytes32(pidToSeed32(pid))` (same seed as Solana).
 /// Authority is set on `initialize`, so rotation never changes the address.
 /// Deploy THIS factory at one address on every chain (keyless CREATE2 deploy of
 /// the implementation first, then the factory) and every account keeps one

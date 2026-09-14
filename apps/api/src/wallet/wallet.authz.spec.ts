@@ -74,24 +74,22 @@ describe("Wallet authorization & abuse cases (routes)", () => {
         })),
       },
       chainAccount: {
-        findFirst: jest.fn(async ({ where }: { where: { accountId: string; accountType: string } }) => {
-          const pid = where.accountId.replace(/^acc-/, "");
-          const row = state.wallets.get(pid);
+        findFirst: jest.fn(async ({ where }: { where: { pid: string; accountType: string } }) => {
+          const row = state.wallets.get(where.pid);
           return row || null;
         }),
         create: jest.fn(
-          async ({ data, select }: { data: { accountId: string; chainId: string; address: string; accountType: string }; select: Record<string, boolean> }) => {
-            const pid = data.accountId.replace(/^acc-/, "");
+          async ({ data, select }: { data: { pid: string; chainId: string; address: string; accountType: string }; select: Record<string, boolean> }) => {
             const row: WalletRow = {
-              id: `w-${pid}`,
-              pid,
+              id: `w-${data.pid}`,
+              pid: data.pid,
               chain: { namespace: "solana" },
               address: data.address,
               status: "active",
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };
-            state.wallets.set(pid, row);
+            state.wallets.set(data.pid, row);
             return pick(row, select);
           },
         ),

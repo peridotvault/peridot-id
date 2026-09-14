@@ -45,8 +45,8 @@ tags:
   - name: wallet
     description: |
       The user's wallet, associated with their PID. **Deprecated (V3 surface)** — preserved
-      for existing clients, backed by `linked_address` chain accounts. Use `/accounts` and
-      the smart account instead (ADR 004).
+      for existing clients, backed by `linked_address` chain accounts. Use `/account` and
+      the smart account instead (ADR-008).
   - name: account
     description: PeridotID account — owns chain accounts (smart account PDA, legacy linked address)
   - name: credentials
@@ -652,88 +652,60 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
-  /accounts:
+  /account:
     post:
       tags: [account]
-      summary: Create the default PeridotID account
+      summary: Ensure the identity's personal wallet
       description: |
-        Creates (or returns) the identity's default account, including the Solana
-        `smart_account` chain account whose address is deterministically derived (PDA) and
-        resolvable before any on-chain initialization (ADR 004 §5). Smart-account
-        initialization happens on the user's first on-chain top-up (PRD_v5 §3), not here.
+        Idempotent wallet setup for the authenticated PID (ADR-008: 1 identity =
+        1 personal wallet): ensures the Solana `smart_account` chain row whose
+        address is deterministically derived from the PID (PDA) and resolvable
+        before any on-chain initialization, plus EVM counterfactuals.
+        Smart-account initialization happens on the user's first on-chain top-up
+        (PRD_v5 §3), not here. Returns every chain row.
       security:
         - cookieAuth: []
       responses:
         "200":
-          description: The account
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Account"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-    get:
-      tags: [account]
-      summary: List the authenticated PID's accounts
-      security:
-        - cookieAuth: []
-      responses:
-        "200":
-          description: The accounts
+          description: The wallet's chain rows
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Account"
+                  $ref: "#/components/schemas/ChainAccount"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Solana chain is not registered (fresh DB without seed)
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
-  /accounts/{id}:
     get:
       tags: [account]
-      summary: Get one account (ownership-checked)
-      description: |
-        Returns the account only when it belongs to the authenticated PID. Resolution is
-        strictly from the access token — a client-supplied account id never changes the
-        owner (no IDOR).
+      summary: Get the authenticated PID's wallet chain rows
       security:
         - cookieAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
       responses:
         "200":
-          description: The account
+          description: The chain rows
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Account"
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChainAccount"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /accounts/{id}/chains:
+  /account/chains:
     get:
       tags: [account]
-      summary: List an account's chain accounts
+      summary: List the wallet's chain accounts
       security:
         - cookieAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
       responses:
         "200":
           description: The chain accounts
@@ -747,6 +719,100 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /account/activation:
+    get:
+      tags: [account]
+      summary: Live Solana activation view for the wallet
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Activation status derived live from on-chain state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivationView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /account/activate:
+    post:
+      tags: [account]
+      summary: Activate the wallet's Solana smart account (relayer-sponsored)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Activation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivationView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /account/evm/{chainRef}/activation:
+    get:
+      tags: [account]
+      summary: Live EVM activation view for one chain
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: chainRef
+          in: path
+          required: true
+          schema:
+            type: string
+          description: CAIP-2 reference (e.g. 97, 10143)
+      responses:
+        "200":
+          description: Activation status derived live from on-chain state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvmActivationView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /account/evm/{chainRef}/activate:
+    post:
+      tags: [account]
+      summary: Deploy the EVM counterfactual for one chain (relayer)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: chainRef
+          in: path
+          required: true
+          schema:
+            type: string
+          description: CAIP-2 reference (e.g. 97, 10143)
+      responses:
+        "200":
+          description: Activation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvmActivationView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /credentials:
     get:
@@ -1322,25 +1388,41 @@ components:
           type: string
           format: date-time
 
-    Account:
+    ActivationView:
       type: object
-      required: [id, status, version, createdAt, chainAccounts]
+      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports]
       properties:
-        id:
+        pid:
           type: string
-          format: uuid
+          pattern: "^[a-z0-9_]{3,20}@pid$"
         status:
           type: string
-          enum: [active, suspended, deleted]
-        version:
-          type: integer
-        createdAt:
+        smartAccountAddress:
           type: string
-          format: date-time
-        chainAccounts:
-          type: array
-          items:
-            $ref: "#/components/schemas/ChainAccount"
+        balanceLamports:
+          type: integer
+        requiredLamports:
+          type: integer
+
+    EvmActivationView:
+      type: object
+      required: [pid, chainReference, status, smartAccountAddress, deployed, balanceWei, requiredWei]
+      properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+        chainReference:
+          type: string
+        status:
+          type: string
+        smartAccountAddress:
+          type: string
+        deployed:
+          type: boolean
+        balanceWei:
+          type: string
+        requiredWei:
+          type: string
 
     Authority:
       type: object

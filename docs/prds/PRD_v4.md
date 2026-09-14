@@ -698,8 +698,8 @@ Use Anchor unless there is a strong technical reason to use native Rust.
 Suggested program structure:
 
 ```text
-programs/
-  peridot-smart-account/
+contracts/
+  svm/smart-account/
     src/
       lib.rs
       state.rs
@@ -1238,8 +1238,8 @@ peridot-id/
 │   ├── solana/
 │   └── shared/
 │
-├── programs/
-│   └── peridot-smart-account/
+├── contracts/
+│   └── svm/smart-account/
 │       ├── Anchor.toml
 │       ├── Cargo.toml
 │       └── src/

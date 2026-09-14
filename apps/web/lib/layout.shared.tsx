@@ -21,7 +21,6 @@ export function baseOptions(): BaseLayoutProps {
       title: <NavTitle />,
       transparentMode: 'top',
     },
-    githubUrl: 'https://github.com/peridotvault/peridot-id',
     links: [
       {
         type: 'menu',

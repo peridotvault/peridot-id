@@ -46,17 +46,17 @@ function setup() {
   const config = solanaRelayerConfig();
   const security = mockSecurity();
   const prisma = {
-    pidAccount: {
+    chainAccount: {
       findFirst: jest.fn(async () => ({
-        id: ACCOUNT_ID,
+        id: "chain-1",
         pid: IDENTITY_ID,
+        chainId: "chain-sol",
+        accountType: "smart_account",
+        address: SMART_ADDR,
         status: "active",
-        chainAccounts: [
-          { id: "chain-1", accountId: ACCOUNT_ID, accountType: "smart_account", address: SMART_ADDR, ...{} },
-        ],
       })),
     },
-    authority: { findFirst: jest.fn(async () => ({ id: "auth-1", publicKey: Buffer.from(COSE_HEX, "hex"), accountId: ACCOUNT_ID, status: "active", credentialId: "cred-1" })) },
+    authority: { findFirst: jest.fn(async () => ({ id: "auth-1", publicKey: Buffer.from(COSE_HEX, "hex"), pid: IDENTITY_ID, status: "active", credentialId: "cred-1" })) },
   };
   const service = new SponsoredWithdrawService(prisma as never, config as never, security as never);
   return { service, security };
@@ -112,7 +112,7 @@ describe("SponsoredWithdrawService", () => {
     expect(res.signature).toBe("sig-sponsor-sol");
     expect(res.status).toBe("confirmed");
     expect(adapterMock.sponsoredWithdrawSol).toHaveBeenCalledTimes(1);
-    expect(adapterMock.sponsoredWithdrawSol.mock.calls[0][0]).toBe(ACCOUNT_ID);
+    expect(adapterMock.sponsoredWithdrawSol.mock.calls[0][0]).toBe("pid_01HASH");
     // treasury() falls back to the relayer pubkey by default (production).
     expect(adapterMock.sponsoredWithdrawSol.mock.calls[0][9]).toEqual(new MockPublicKey(RELAYER));
   });

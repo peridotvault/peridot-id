@@ -9,10 +9,6 @@ jest.mock("@simplewebauthn/server", () => {
   return { ...actual, verifyAuthenticationResponse: jest.fn() };
 });
 
-const ACCOUNT_ID = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
-
-// A valid COSE_Key (ES256) with x = 0x11*32, y = 0x22*32 → compressed 0x02 || x.
-// map(5): kty, alg, crv, x, y (matches real simplewebauthn output — do not revert to map(4)).
 export const COSE_KEY = Buffer.concat([
   Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
   Buffer.alloc(32, 0x11),
@@ -24,7 +20,7 @@ const COMPRESSED_B64 = Buffer.concat([Buffer.from([0x02]), Buffer.alloc(32, 0x11
 function authority(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "auth-1",
-    accountId: ACCOUNT_ID,
+    pid: "pid_01HASH",
     type: "secp256r1",
     publicKey: COSE_KEY,
     credentialId: "cred-1",
@@ -41,8 +37,8 @@ function setup() {
   };
   const security = mockSecurity();
   const prisma = {
-    pidAccount: {
-      findFirst: jest.fn(async () => ({ id: ACCOUNT_ID, pid: "pid_01HASH", status: "active" })),
+    identity: {
+      findUnique: jest.fn(async () => ({ status: "active" })),
     },
     authority: {
       findMany: jest.fn(async () => [] as any),
@@ -100,7 +96,7 @@ describe("CredentialService", () => {
     expect((result.options.authenticatorSelection as Record<string, unknown>).authenticatorAttachment).toBe("platform");
     expect(prisma.credentialChallenge.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ kind: "registration", isAdditional: false, accountId: ACCOUNT_ID }),
+        data: expect.objectContaining({ kind: "registration", isAdditional: false, pid: "pid_01HASH" }),
       }),
     );
   });
@@ -172,7 +168,7 @@ describe("CredentialService", () => {
     const { service, prisma } = setup();
     prisma.credentialChallenge.findFirst.mockResolvedValue({
       id: "c1",
-      accountId: ACCOUNT_ID,
+      pid: "pid_01HASH",
       kind: "registration",
       challenge: "challenge-a",
       approvalChallenge: "approval-a",
@@ -187,7 +183,7 @@ describe("CredentialService", () => {
       }),
     ).rejects.toThrow(BadRequestException); // "Persetujuan kredensial yang ada diperlukan"
 
-    expect(securityLog(service)).toHaveBeenCalledWith("pid_01HASH", "credential.register.rejected", expect.any(Object), ACCOUNT_ID);
+    expect(securityLog(service)).toHaveBeenCalledWith("pid_01HASH", "credential.register.rejected", expect.any(Object));
   });
 
   it("registerFinish rejects a reused credentialId", async () => {
@@ -195,7 +191,7 @@ describe("CredentialService", () => {
     prisma.authority.findFirst.mockResolvedValue(authority()); // existing credential with same id
     prisma.credentialChallenge.findFirst.mockResolvedValue({
       id: "c1",
-      accountId: ACCOUNT_ID,
+      pid: "pid_01HASH",
       kind: "registration",
       challenge: "challenge-a",
       approvalChallenge: null,
@@ -232,7 +228,7 @@ describe("CredentialService", () => {
       where: { id: "auth-1" },
       data: { status: "revoked" },
     });
-    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "credential.revoked", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "credential.revoked", expect.any(Object));
     expect(view.id).toBe("auth-1");
   });
 
@@ -253,7 +249,7 @@ describe("CredentialService", () => {
     const { service, prisma } = setup();
     prisma.credentialChallenge.findFirst.mockResolvedValue({
       id: "c1",
-      accountId: ACCOUNT_ID,
+      pid: "pid_01HASH",
       kind: "authentication",
       challenge: "challenge-a",
       approvalChallenge: null,
@@ -270,7 +266,7 @@ describe("CredentialService", () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it("loginStart issues an unauthenticated discoverable-credential challenge (no accountId)", async () => {
+  it("loginStart issues an unauthenticated discoverable-credential challenge (no pid)", async () => {
     const { service, prisma } = setup();
 
     const result = await service.loginStart();
@@ -280,22 +276,22 @@ describe("CredentialService", () => {
     expect(prisma.credentialChallenge.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ kind: "login" }) }),
     );
-    // login challenge is deliberately scoped to no account (pre-auth).
-    const call = prisma.credentialChallenge.create.mock.calls[0][0] as { data: { accountId?: unknown } };
-    expect(call.data).not.toHaveProperty("accountId");
+    // login challenge is deliberately scoped to no identity (pre-auth).
+    const call = prisma.credentialChallenge.create.mock.calls[0][0] as { data: { pid?: unknown } };
+    expect(call.data).not.toHaveProperty("pid");
   });
 
   it("loginFinish returns the identity for a verified passkey", async () => {
     const { service, prisma } = setup();
     prisma.credentialChallenge.findFirst.mockResolvedValue({
       id: "challenge-1",
-      accountId: null,
+      pid: null,
       kind: "login",
       challenge: "challenge-a",
       expiresAt: new Date(Date.now() + 60_000),
     });
     prisma.authority.findFirst.mockResolvedValue(
-      authority({ id: "auth-1", credentialId: "cred-1", account: { pid: "pid_01HASH" } }),
+      authority({ id: "auth-1", credentialId: "cred-1", pid: "pid_01HASH" }),
     );
     const verify = (await import("@simplewebauthn/server")).verifyAuthenticationResponse as jest.Mock;
     verify.mockResolvedValue({ verified: true });
@@ -324,13 +320,13 @@ describe("CredentialService", () => {
     const { service, prisma } = setup();
     prisma.credentialChallenge.findFirst.mockResolvedValue({
       id: "challenge-1",
-      accountId: null,
+      pid: null,
       kind: "login",
       challenge: "challenge-a",
       expiresAt: new Date(Date.now() + 60_000),
     });
     prisma.authority.findFirst.mockResolvedValue(
-      authority({ id: "auth-1", credentialId: "cred-1", account: { pid: "pid_01HASH" } }),
+      authority({ id: "auth-1", credentialId: "cred-1", pid: "pid_01HASH" }),
     );
 
     await expect(
@@ -350,7 +346,7 @@ describe("CredentialService", () => {
     const { service, prisma } = setup();
     prisma.credentialChallenge.findFirst.mockResolvedValue({
       id: "challenge-1",
-      accountId: null,
+      pid: null,
       kind: "login",
       challenge: "challenge-a",
       expiresAt: new Date(Date.now() + 60_000),

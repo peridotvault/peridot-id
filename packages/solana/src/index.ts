@@ -2,7 +2,7 @@
 // @peridotvault/pid-core primitives (ADR 007 §8).
 
 export {
-  accountIdToSeed32,
+  pidToSeed32,
   buildAuthorizationPayload,
   buildWebAuthnMessage,
   buildWithdrawPayload,

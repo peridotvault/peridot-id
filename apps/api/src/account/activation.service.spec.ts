@@ -3,7 +3,6 @@ import { ActivationService } from "./activation.service";
 import { mockSecurity, solanaRelayerConfig, COSE_HEX, TREASURY } from "../../test/factories";
 
 
-const ACCOUNT_ID = "50997bcf-f3e3-406b-bc77-7108593ef5cb";
 const IDENTITY_ID = "pid_01HASH";
 const SMART_ADDR = "CNostmskLqp9bRX2StVVQ7cTJymAgNRweH1UxMsJQib7";
 const RELAYER = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
@@ -50,15 +49,15 @@ jest.mock("@peridotvault/pid-solana", () => ({
 function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "chain-1",
-    accountId: ACCOUNT_ID,
+    pid: IDENTITY_ID,
     chainId: "chain-sol",
     chain: { namespace: "solana", reference: "ref" },
     address: SMART_ADDR,
     accountType: "smart_account",
     status: "ready",
     createdAt: new Date(),
-    updatedAt: new Date(),
-    account: { id: ACCOUNT_ID, pid: IDENTITY_ID, status: "active" },
+    updatedAt: new Date()
+    ,
     ...overrides,
   };
 }
@@ -75,7 +74,7 @@ function setup() {
       update: jest.fn(async (_: unknown) => ({})),
       findMany: jest.fn(async () => [] as never),
     },
-    authority: { findFirst: jest.fn(async () => ({ id: "auth-1", publicKey: Buffer.from(COSE_HEX, "hex"), accountId: ACCOUNT_ID, status: "active" }) as never) },
+    authority: { findFirst: jest.fn(async () => ({ id: "auth-1", publicKey: Buffer.from(COSE_HEX, "hex"), status: "active" }) as never) },
     transaction: { create: jest.fn(async (a: unknown) => a), updateMany: jest.fn(async () => ({ count: 0 })) },
     securityEvent: { create: jest.fn(async () => ({})) },
   };
@@ -100,7 +99,7 @@ describe("ActivationService", () => {
     // PDA becomes program-owned — flip the response so viewOf reports active.
     adapterMock.isActivated.mockImplementation(async () => adapterMock.activate.mock.calls.length > 0);
 
-    const view = await service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID);
+    const view = await service.activate({ pid: IDENTITY_ID });
 
     expect(view.status).toBe("active");
     expect(prisma.transaction.create).toHaveBeenCalledWith(
@@ -118,21 +117,21 @@ describe("ActivationService", () => {
     expect(prisma.chainAccount.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "active" }) }),
     );
-    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activated", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activated", expect.any(Object));
   });
 
   it("returns 503 and creates no rows when the relayer is unfunded", async () => {
     const { service, prisma, security } = setup();
     relayerBalance = 0; // Peridot's float account is empty
 
-    await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.activate({ pid: IDENTITY_ID })).rejects.toThrow(ServiceUnavailableException);
 
     expect(adapterMock.activate).not.toHaveBeenCalled();
     expect(prisma.transaction.create).not.toHaveBeenCalled();
     expect(prisma.chainAccount.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "ready" }) }),
     );
-    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.relayer_unfunded", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.relayer_unfunded", expect.any(Object));
   });
 
   it(
@@ -141,14 +140,14 @@ describe("ActivationService", () => {
       const { service, prisma, security } = setup();
       adapterMock.getStatus.mockResolvedValue({ confirmed: false, signature: "sig1" } as never); // never lands
 
-      await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ServiceUnavailableException);
+      await expect(service.activate({ pid: IDENTITY_ID })).rejects.toThrow(ServiceUnavailableException);
 
       expect(adapterMock.activate).toHaveBeenCalled();
       expect(prisma.transaction.create).not.toHaveBeenCalled();
       expect(prisma.chainAccount.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: "ready" }) }),
       );
-      expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.unconfirmed", expect.any(Object), ACCOUNT_ID);
+      expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.unconfirmed", expect.any(Object));
     },
     20000,
   );
@@ -157,20 +156,20 @@ describe("ActivationService", () => {
     const { service, prisma, security } = setup();
     adapterMock.getStatus.mockResolvedValue({ confirmed: true, error: '{"InstructionError":0}', signature: "sig1" });
 
-    await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.activate({ pid: IDENTITY_ID })).rejects.toThrow(ServiceUnavailableException);
 
     expect(prisma.transaction.create).not.toHaveBeenCalled();
     expect(prisma.chainAccount.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "ready" }) }),
     );
-    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.unconfirmed", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.unconfirmed", expect.any(Object));
   });
 
   it("refuses to activate when the live status is not ready", async () => {
     const { service } = setup();
     userBalance = 0; // user address not funded → inactivated
 
-    await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID)).rejects.toThrow(ConflictException);
+    await expect(service.activate({ pid: IDENTITY_ID })).rejects.toThrow(ConflictException);
     expect(adapterMock.activate).not.toHaveBeenCalled();
   });
 
@@ -184,7 +183,7 @@ describe("ActivationService", () => {
     expect(prisma.chainAccount.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "inactivated" }) }),
     );
-    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.healed", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.healed", expect.any(Object));
   });
 
   it("leaves an actually-activated active row alone in the poll", async () => {
@@ -207,7 +206,7 @@ describe("ActivationService", () => {
       return isActivatedCalls >= 3; // loop(2) + final check
     });
 
-    const view = await service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID);
+    const view = await service.activate({ pid: IDENTITY_ID });
 
     expect(view.status).toBe("active");
     expect(prisma.transaction.create).toHaveBeenCalledWith(
@@ -228,6 +227,6 @@ describe("ActivationService", () => {
     expect(prisma.chainAccount.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "active" }) }),
     );
-    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.promoted", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.promoted", expect.any(Object));
   });
 });

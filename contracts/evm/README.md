@@ -10,7 +10,7 @@ the factory (Monad / BSC / Arbitrum testnets in phase 1).
   `initialize`; `execute` / `updateAuthority` verify a WebAuthn assertion whose
   challenge is the domain-separated payload — the `auth.rs` binding in Solidity).
 - `src/PeridotFactory.sol` — EIP-1167 proxy factory (`deploy` / `deployAndInit`
-  / `predict`). Salt = `bytes32(accountIdToSeed32(accountId))`, so rotation
+  / `predict`). Salt = `bytes32(pidToSeed32(pid))`, so rotation
   never moves the address.
 - `src/Base64Url.sol` — tiny base64url decoder for the challenge field.
 - `lib/openzeppelin-contracts/` — vendored sources used (MIT): `proxy/Clones.sol`

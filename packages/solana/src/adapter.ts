@@ -7,7 +7,7 @@ import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana
 import { u64le, i64le, normalizeLowS } from "@peridotvault/pid-core";
 import type { Bytes } from "@peridotvault/pid-core";
 import {
-  accountIdToSeed32,
+  pidToSeed32,
   buildAuthorizationPayload,
   buildWebAuthnMessage,
   deriveSmartAccountAddress,
@@ -46,20 +46,20 @@ export class SolanaAdapter {
     private readonly programId: PublicKey = PID_PROGRAM_ID,
   ) {}
 
-  getAddress(accountId: string): PublicKey {
-    return deriveSmartAccountAddress(accountId, this.programId).address;
+  getAddress(pid: string): PublicKey {
+    return deriveSmartAccountAddress(pid, this.programId).address;
   }
 
   /** The current on-chain nonce (u64 LE at state offset 4) — required for the next withdrawal. */
-  async getNonce(accountId: string): Promise<bigint> {
-    const info = await this.rpc.getAccountInfo(this.getAddress(accountId));
+  async getNonce(pid: string): Promise<bigint> {
+    const info = await this.rpc.getAccountInfo(this.getAddress(pid));
     if (!info) return 0n;
     if (info.data.length < 12) throw new Error("smart account not initialized");
     return info.data.readBigUInt64LE(4);
   }
 
-  async isInitialized(accountId: string): Promise<boolean> {
-    return (await this.rpc.getAccountInfo(this.getAddress(accountId))) !== null;
+  async isInitialized(pid: string): Promise<boolean> {
+    return (await this.rpc.getAccountInfo(this.getAddress(pid))) !== null;
   }
 
   /** True when the smart-account PDA is actually owned by our program (i.e. activated). */
@@ -85,10 +85,10 @@ export class SolanaAdapter {
   }
 
   /** Initialize the smart account with the passkey's compressed pubkey as authority. */
-  async initialize(accountId: string, authorityCompressed: Uint8Array, payer: Keypair): Promise<string> {
-    const smartAccount = this.getAddress(accountId);
+  async initialize(pid: string, authorityCompressed: Uint8Array, payer: Keypair): Promise<string> {
+    const smartAccount = this.getAddress(pid);
     const tx = await this.buildTx(
-      [buildInitializeInstruction(accountIdToSeed32(accountId), authorityCompressed, payer.publicKey, smartAccount)],
+      [buildInitializeInstruction(pidToSeed32(pid), authorityCompressed, payer.publicKey, smartAccount)],
       payer.publicKey,
     );
     return this.send(tx, [payer]);
@@ -96,17 +96,17 @@ export class SolanaAdapter {
 
   /** Activate the smart account via the relayer (disc 5). Returns the tx signature. */
   async activate(
-    accountId: string,
+    pid: string,
     authorityCompressed: Uint8Array<ArrayBufferLike>,
     activationFeeLamports: bigint,
     relayer: Keypair,
     treasury: PublicKey,
   ): Promise<string> {
-    const smartAccount = this.getAddress(accountId);
+    const smartAccount = this.getAddress(pid);
     const tx = await this.buildTx(
       [
         buildActivateInstruction(
-          accountIdToSeed32(accountId),
+          pidToSeed32(pid),
           authorityCompressed,
           activationFeeLamports,
           relayer.publicKey,
@@ -133,13 +133,13 @@ export class SolanaAdapter {
     totalLamports: bigint;
   }> {
     const conn = this.rpc.connection;
-    const accountId = "00000000000000000000000000000000";
+    const pid = "dummy";
     const dummyAuthority = new Uint8Array(33);
-    const smartAccount = this.getAddress(accountId);
+    const smartAccount = this.getAddress(pid);
     const dummyRelayer = Keypair.generate().publicKey;
     const dummyTreasury = Keypair.generate().publicKey;
     const ix = buildActivateInstruction(
-      accountIdToSeed32(accountId),
+      pidToSeed32(pid),
       dummyAuthority,
       0n,
       dummyRelayer,
@@ -163,9 +163,9 @@ export class SolanaAdapter {
   }
 
   /** Top-up SOL into the smart account — a plain transfer, no program instruction (PRD_v5 §4). */
-  async depositSol(accountId: string, from: Keypair, lamports: bigint): Promise<string> {
+  async depositSol(pid: string, from: Keypair, lamports: bigint): Promise<string> {
     const tx = await this.buildTx(
-      [buildDepositSolInstruction(from.publicKey, this.getAddress(accountId), lamports)],
+      [buildDepositSolInstruction(from.publicKey, this.getAddress(pid), lamports)],
       from.publicKey,
     );
     return this.send(tx, [from]);
@@ -176,15 +176,15 @@ export class SolanaAdapter {
    * in a single transaction. Idempotent — if already initialized, just deposits.
    */
   async initializeAndDepositSol(
-    accountId: string,
+    pid: string,
     authorityCompressed: Uint8Array,
     from: Keypair,
     lamports: bigint,
   ): Promise<string> {
-    const smartAccount = this.getAddress(accountId);
+    const smartAccount = this.getAddress(pid);
     const ixs: TransactionInstruction[] = [];
-    if (!(await this.isInitialized(accountId))) {
-      ixs.push(buildInitializeInstruction(accountIdToSeed32(accountId), authorityCompressed, from.publicKey, smartAccount));
+    if (!(await this.isInitialized(pid))) {
+      ixs.push(buildInitializeInstruction(pidToSeed32(pid), authorityCompressed, from.publicKey, smartAccount));
     }
     ixs.push(buildDepositSolInstruction(from.publicKey, smartAccount, lamports));
     const tx = await this.buildTx(ixs, from.publicKey);
@@ -192,8 +192,8 @@ export class SolanaAdapter {
   }
 
   /** Top-up an SPL token — idempotent ATA creation (if missing) + plain transfer. */
-  async depositToken(accountId: string, mint: PublicKey, owner: Keypair, amount: bigint): Promise<string> {
-    const smartAccount = this.getAddress(accountId);
+  async depositToken(pid: string, mint: PublicKey, owner: Keypair, amount: bigint): Promise<string> {
+    const smartAccount = this.getAddress(pid);
     const fromAta = await getAssociatedTokenAddress(mint, owner.publicKey);
     const ata = await getAssociatedTokenAddress(mint, smartAccount, true);
     const ixs: TransactionInstruction[] = [];
@@ -211,7 +211,7 @@ export class SolanaAdapter {
    * against nonce/amount/destination/expiry/relayFee) is supplied by the caller.
    */
   async sponsoredWithdrawSol(
-    accountId: string,
+    pid: string,
     authorityCompressed: Uint8Array,
     destination: PublicKey,
     amount: bigint,
@@ -222,7 +222,7 @@ export class SolanaAdapter {
     relayer: Keypair,
     treasury: PublicKey,
   ): Promise<string> {
-    const smartAccount = this.getAddress(accountId);
+    const smartAccount = this.getAddress(pid);
     const programIx = buildWithdrawSolInstruction(
       smartAccount,
       destination,
@@ -239,7 +239,7 @@ export class SolanaAdapter {
 
   /** Sponsored SPL token withdrawal (token amount via SPL CPI, relay fee reimbursed as SOL). */
   async sponsoredWithdrawToken(
-    accountId: string,
+    pid: string,
     authorityCompressed: Uint8Array,
     mint: PublicKey,
     destinationAta: PublicKey,
@@ -251,7 +251,7 @@ export class SolanaAdapter {
     relayer: Keypair,
     treasury: PublicKey,
   ): Promise<string> {
-    const smartAccount = this.getAddress(accountId);
+    const smartAccount = this.getAddress(pid);
     const sourceAta = await getAssociatedTokenAddress(mint, smartAccount, true);
     const programIx = buildWithdrawTokenInstruction(
       smartAccount,
@@ -270,21 +270,21 @@ export class SolanaAdapter {
   }
 
   /** True when the smart account holds `mint`'s ATA (so a token withdraw can point at it). */
-  async tokenAta(accountId: string, mint: PublicKey): Promise<PublicKey> {
-    return getAssociatedTokenAddress(mint, this.getAddress(accountId), true);
+  async tokenAta(pid: string, mint: PublicKey): Promise<PublicKey> {
+    return getAssociatedTokenAddress(mint, this.getAddress(pid), true);
   }
 
   /** Rotate the smart-account authority to a new passkey public key. */
   async updateAuthority(
-    accountId: string,
+    pid: string,
     currentAuthorityCompressed: Uint8Array,
     newAuthorityCompressed: Uint8Array,
     feePayer: Keypair,
     signer: PasskeySigner,
     opts: { allowCredentialId?: string; expiryTtlSeconds?: number } = {},
   ): Promise<string> {
-    const smartAccount = this.getAddress(accountId);
-    const nonce = await this.getNonce(accountId);
+    const smartAccount = this.getAddress(pid);
+    const nonce = await this.getNonce(pid);
     const expiry = (await this.rpc.getBlockTime()) + (opts.expiryTtlSeconds ?? DEFAULT_EXPIRY_TTL_SECONDS);
 
     const payload = await buildAuthorizationPayload([u64le(nonce), newAuthorityCompressed, i64le(expiry)]);
@@ -334,8 +334,8 @@ export class SolanaAdapter {
    *  margin is applied to. Mirrors estimateActivationCost's message-fee approach. */
   async estimateWithdrawFee(): Promise<bigint> {
     const conn = this.rpc.connection;
-    const accountId = "00000000000000000000000000000000";
-    const smartAccount = this.getAddress(accountId);
+    const pid = "dummy";
+    const smartAccount = this.getAddress(pid);
     const dummy = Keypair.generate().publicKey;
     const ix = buildWithdrawSolInstruction(
       smartAccount,
@@ -393,8 +393,8 @@ export class SolanaAdapter {
     return this.rpc.getParsedTransaction(signature);
   }
 
-  async getBalance(accountId: string): Promise<number> {
-    return this.rpc.getBalance(this.getAddress(accountId));
+  async getBalance(pid: string): Promise<number> {
+    return this.rpc.getBalance(this.getAddress(pid));
   }
 
   /** SPL token balances held by an explicit smart-account address (no re-derivation). */
@@ -404,8 +404,8 @@ export class SolanaAdapter {
   }
 
   /** SPL token balances held by the smart account (raw units + decimals per mint). */
-  async getTokenBalances(accountId: string): Promise<TokenBalance[]> {
-    return this.rpc.getTokenAccountsByOwner(this.getAddress(accountId));
+  async getTokenBalances(pid: string): Promise<TokenBalance[]> {
+    return this.rpc.getTokenAccountsByOwner(this.getAddress(pid));
   }
 }
 

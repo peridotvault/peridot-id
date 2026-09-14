@@ -65,7 +65,11 @@ model Identity {
   credentials IdentityCredential[]
   devices     Device[]
 
-  pidAccounts PidAccount[]
+  chainAccounts ChainAccount[]
+  authorities   Authority[]
+  intents       Intent[]
+  transactions  Transaction[]
+  challenges    CredentialChallenge[]
   securityEvents  SecurityEvent[]
   pidApps PidApp[]
 
@@ -130,36 +134,17 @@ model Session {
   @@map("sessions")
 }
 
-// ADR 004: PeridotID account — the wallet-owning entity. V1 creates exactly one default
-// account per identity (API exposes 1); schema permits many so a future multi-account
-// product needs no migration.
-model PidAccount {
-  id         String         @id @default(uuid())
-  pid        String
-  identity   Identity       @relation(fields: [pid], references: [pid], onDelete: Cascade)
-  status     IdentityStatus @default(active)
-  version    Int            @default(1)
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
-
-  chainAccounts  ChainAccount[]
-  authorities    Authority[]
-  transactions   Transaction[]
-  intents        Intent[]
-  securityEvents SecurityEvent[]
-  challenges     CredentialChallenge[]
-
-  @@index([pid])
-  @@map("pid_accounts")
-}
+// ADR-008: 1 identity = 1 personal wallet. The PidAccount hub is gone — every
+// wallet-owned row references Identity.pid directly. (A future multisig product
+// will be a separate wallet model shared by many identities, not this one.)
 
 // ADR 005: single-use, expiring WebAuthn ceremony state. No secret material — the challenge
 // is a random nonce (PRD_v4 §22: replay protection). `approvalChallenge` carries the
 // existing-credential approval required to add a second credential (ADR 006 §4).
 model CredentialChallenge {
   id                String           @id @default(uuid())
-  accountId         String?
-  account           PidAccount?  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  pid               String?
+  identity          Identity?  @relation(fields: [pid], references: [pid], onDelete: Cascade)
   kind              String
   challenge         String
   approvalChallenge String?
@@ -168,20 +153,20 @@ model CredentialChallenge {
   consumedAt        DateTime?
   createdAt         DateTime         @default(now())
 
-  @@index([accountId])
+  @@index([pid])
   @@map("credential_challenges")
 }
 
-// ADR 004: one row per chain account. `account_type` = smart_account (program PDA) or
-// linked_address (migrated V3 record-only). The unique constraint encodes one smart
-// account per chain per account in V1 while letting a migrated linked_address coexist.
+// ADR-008: one row per chain account of the identity's single personal wallet.
+// `account_type` = smart_account (program PDA) or linked_address (migrated V3
+// record-only). The unique constraint encodes one smart account per chain.
 // The chain is a single `chainId` FK — namespace/reference live once on `chains` and
 // are read back through the join (never duplicated here).
 // No key-material columns, ever (ADR 003 rule carried).
 model ChainAccount {
   id                 String            @id @default(uuid())
-  accountId          String
-  account            PidAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  pid                String
+  identity           Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
   chainId            String
   chain              Chain             @relation(fields: [chainId], references: [id], onDelete: Restrict)
   address            String
@@ -195,17 +180,17 @@ model ChainAccount {
   feePayers    WalletFeePayer[]
   transactions Transaction[]
 
-  @@unique([accountId, chainId, accountType])
+  @@unique([pid, chainId, accountType])
   @@index([chainId])
   @@map("chain_accounts")
 }
 
-// ADR 004/005: signing authority for a PeridotID account. Public material only — the
-// secret never leaves the client authenticator (passkey/secp256r1) or device.
+// ADR-008: signing authority for the identity's personal wallet. Public material
+// only — the secret never leaves the client authenticator (passkey/secp256r1).
 model Authority {
   id           String          @id @default(uuid())
-  accountId    String
-  account      PidAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  pid          String
+  identity     Identity  @relation(fields: [pid], references: [pid], onDelete: Cascade)
   type         String
   publicKey    Bytes
   credentialId String?
@@ -213,7 +198,7 @@ model Authority {
   createdAt    DateTime        @default(now())
   lastUsedAt   DateTime?
 
-  @@index([accountId])
+  @@index([pid])
   @@map("authorities")
 }
 
@@ -234,8 +219,8 @@ model WalletFeePayer {
 // and given an expiry before anything is signed.
 model Intent {
   id        String         @id @default(uuid())
-  accountId String
-  account   PidAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  pid       String
+  identity  Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
   type      String
   payload   Json
   status    IntentStatus   @default(pending)
@@ -244,14 +229,14 @@ model Intent {
 
   transactions Transaction[]
 
-  @@index([accountId])
+  @@index([pid])
   @@map("intents")
 }
 
 model Transaction {
   id             String            @id @default(uuid())
-  accountId      String
-  account        PidAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  pid            String
+  identity       Identity    @relation(fields: [pid], references: [pid], onDelete: Cascade)
   chainAccountId String
   chainAccount   ChainAccount      @relation(fields: [chainAccountId], references: [id], onDelete: Cascade)
   intentId       String?
@@ -270,7 +255,7 @@ model Transaction {
   errorCode      String?
   errorMessage   String?
 
-  @@index([accountId])
+  @@index([pid])
   @@index([chainAccountId])
   @@index([intentId])
   @@map("transactions")
@@ -282,14 +267,11 @@ model SecurityEvent {
   id         String           @id @default(uuid())
   pid        String
   identity   Identity         @relation(fields: [pid], references: [pid], onDelete: Cascade)
-  accountId  String?
-  account    PidAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
   eventType  String
   metadata   Json
   createdAt  DateTime         @default(now())
 
   @@index([pid])
-  @@index([accountId])
   @@map("security_events")
 }
 

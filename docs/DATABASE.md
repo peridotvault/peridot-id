@@ -17,29 +17,24 @@ Tables:
   (The old surrogate `id` and `username`/`usernameChangedAt` columns were removed when
   the PID became the user-chosen handle; see migrations `20260913000000_*` and
   `20260913120000_pid_columns_and_chain_fk`.)
-- `pid_accounts` — the wallet-owning entity (ADR 004). `identityId` FK → `identities.id`;
-  `status` (soft-delete convention), `version`. V1 creates exactly one default account per
-  identity; schema permits many (future multi-account).
-- `chain_accounts` — one row per chain account. `accountId` FK → `pid_accounts.id`;
-  CAIP-2 `chainNamespace`/`chainReference` (Solana V1); `address` (PDA for `smart_account`,
-  user-supplied for `linked_address`); `accountType ∈ {smart_account, linked_address}`.
-  `@@unique([accountId, chainNamespace, chainReference, accountType])` — one smart account
-  per chain per account, while a migrated `linked_address` may coexist. Compound FK
-  `(chainNamespace, chainReference)` → `chains(namespace, reference)`: every row must
-  reference a registered chain (fresh DBs must run `db:seed` first — account creation
-  fails cleanly otherwise). **No key-material columns, ever.**
-- `authorities` — signing authorities for an account (ADR 004/005). `type`
+- `chain_accounts` — one row per chain account of the identity's personal wallet.
+  `pid` FK → `identities.pid`; `chainId` FK → `chains.id`; `address` (PDA for
+  `smart_account`, user-supplied for `linked_address`);
+  `accountType ∈ {smart_account, linked_address}`.
+  `@@unique([pid, chainId, accountType])` — one smart account per chain.
+  **No key-material columns, ever.** (ADR-008 removed the `pid_accounts` hub;
+  every wallet-owned row references the PID directly.)
+- `authorities` — signing authorities for the wallet (ADR 005). `pid` FK; `type`
   (`secp256r1` passkey for V1), `publicKey` (bytea), `credentialId` (WebAuthn), `status`.
   **Public material only** — the secret never leaves the client authenticator.
 - `wallet_fee_payers` — user-controlled fee payer (ADR 006). `chainAccountId` FK;
   `address` only — the key never leaves the client.
-- `transactions` — `accountId`, `chainAccountId`, `intentId` (nullable — deposits have no
+- `transactions` — `pid`, `chainAccountId`, `intentId` (nullable — deposits have no
   intent), `chain`, `network`, `txHash`, `status`, `confirmedAt`, `errorCode/Message`.
-- `intents` — desired actions (PRD_v4 §5.4): `type`, `payload` (jsonb), `status`,
+- `intents` — desired actions (PRD_v4 §5.4): `pid`, `type`, `payload` (jsonb), `status`,
   `expiresAt` (intent expiration, §22).
-- `security_events` — audit log: `identityId`, nullable `accountId`, `eventType`,
-  `metadata` (jsonb). Written by auth, credential, wallet, and program-facing flows.
-  Never contains secrets.
+- `security_events` — audit log: `pid`, `eventType`, `metadata` (jsonb). Written by
+  auth, credential, wallet, and program-facing flows. Never contains secrets.
 - `devices` — one row per client device.
 - `sessions` — rotating refresh-token state.
 
@@ -48,10 +43,11 @@ ERD:
 ```text
 identities 1--* identity_credentials
 identities 1--1 profiles
-identities 1--* pid_accounts 1--* chain_accounts 1--* wallet_fee_payers
-pid_accounts 1--* authorities
-pid_accounts 1--* intents 1--* transactions *--1 chain_accounts
-identities 1--* security_events *--1 pid_accounts
+identities 1--* chain_accounts 1--* wallet_fee_payers
+identities 1--* authorities
+identities 1--* intents 1--* transactions *--1 chain_accounts
+identities 1--* credential_challenges
+identities 1--* security_events
 identities 1--* devices 1--* sessions
 ```
 
@@ -61,21 +57,23 @@ Invariants:
 - A non-null `email` is unique across `identity_credentials` (one email = one PID; enforced by
   a partial unique index plus the login-path check — ADR 002).
 - An identity always keeps at least one credential (unlink of the last one is rejected).
-- V1: one default `pid_accounts` per identity (app-level; schema permits many).
-- At most one `smart_account` chain account per account per chain (unique constraint);
+- One identity owns exactly one personal wallet (ADR-008) — wallet rows hang off
+  `identities.pid` directly; there is no account hub table.
+- At most one `smart_account` chain account per chain (unique constraint);
   `linked_address` rows may coexist (legacy V3 records).
 - The PID is the only source of truth — changing email, displayName, avatar, or linking/unlinking
-  providers never changes the PID or the account/wallet.
+  providers never changes the PID or the wallet.
 
 ## Wallet lifecycle (ADR 003/004)
 
-- **Creation** — explicit user action only. `POST /v1/wallet` records a user-supplied Solana
-  address as a `linked_address` chain account on the identity's default account (legacy V3
-  surface, deprecated). The smart account is created only by the user's first on-chain
-  top-up (PRD_v5 §3). No silent creation, no backfill.
-- **Retrieval** — `GET /v1/wallet/me` returns the default account's `linked_address` (`404`
+- **Creation** — explicit user action only. `POST /v1/account` ensures the Solana
+  `smart_account` chain row (PDA derived from the PID) plus EVM counterfactuals.
+  `POST /v1/wallet` records a user-supplied Solana address as a `linked_address`
+  chain row (legacy V3 surface, deprecated). The smart account is created only by
+  the user's first on-chain top-up (PRD_v5 §3). No silent creation, no backfill.
+- **Retrieval** — `GET /v1/account` returns the wallet's chain rows (`404`
   when none). The `smart_account` address is deterministically resolvable before on-chain
-  initialization (ADR 004 §5).
+  initialization (ADR-008 §seeds).
 - **Persistence** — accounts hang off `identities`, so they survive OAuth provider changes,
   credential unlinking, logins from another device, and session expiration.
 - **Deletion** — no wallet-deletion endpoint in V1. A DB delete cannot close an on-chain

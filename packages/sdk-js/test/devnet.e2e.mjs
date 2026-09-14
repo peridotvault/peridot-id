@@ -18,7 +18,7 @@ import { b64url, buildWebAuthnMessage, toHex } from "@peridotvault/pid-solana";
 const RPC = "https://api.devnet.solana.com";
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 const conn = new Connection(RPC, "confirmed");
-const ACCOUNT_ID = crypto.randomUUID();
+const PID = "ifal@pid";
 
 function compressedPub(pub) {
   const der = pub.export({ format: "der", type: "spki" });
@@ -52,7 +52,8 @@ async function main() {
 
   const mockApi = {
     async get(path) {
-      if (path === "/v1/accounts") return { ok: true, data: [{ id: ACCOUNT_ID, status: "active", version: 1, createdAt: new Date().toISOString(), chainAccounts: [{ id: "c1", chainNamespace: "solana", chainReference: "ref", address: "x", accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] }] };
+      if (path === "/v1/identity/me") return { ok: true, data: { pid: PID } };
+      if (path === "/v1/account") return { ok: true, data: [{ id: "c1", pid: PID, chainId: "chain-sol", chainNamespace: "solana", chainReference: "ref", address: "x", accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] };
       if (path === "/v1/credentials") return { ok: true, data: [{ id: "a1", type: "secp256r1", credentialId: "cred", publicKey: AUTHORITY_B64, createdAt: new Date().toISOString(), lastUsedAt: null }] };
       return { ok: true, data: {} };
     },

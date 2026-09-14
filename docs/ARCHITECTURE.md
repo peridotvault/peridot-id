@@ -30,7 +30,7 @@ Repo:
 apps/api      NestJS (auth, identity, profile, account, credentials, intent, wallet)
 apps/docs     Fumadocs
 apps/wallet   Expo wallet client (web + iOS + Android, PRD_v5 §9)
-programs/peridot-smart-account   Pinocchio smart-account program
+contracts/svm/smart-account   Pinocchio smart-account program
 packages/openapi / types / sdk-js / solana
 ```
 

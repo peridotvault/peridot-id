@@ -1,14 +1,14 @@
 // Shared Solana constants and pure helpers for the Peridot smart-account program.
 //
-// The instruction/account layouts here MUST match `programs/peridot-smart-account/src`
+// The instruction/account layouts here MUST match `contracts/svm/smart-account/src`
 // exactly — a mismatch fails on-chain. Task 005's integration suite is the cross-check.
 // Browser-safe: no Buffer, no node:crypto (WebCrypto for SHA-256).
 
 import { PublicKey } from "@solana/web3.js";
-import { accountIdToSeed32, concat, fromAscii, sha256 as hashSha256, u64le, i64le } from "./bytes";
+import { concat, fromAscii, pidToSeed32, sha256 as hashSha256, u64le, i64le } from "./bytes";
 import type { Bytes } from "./bytes";
 
-export { accountIdToSeed32 };
+export { pidToSeed32 };
 
 export const PID_PROGRAM_ID = new PublicKey("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
 export const SECP256R1_PRECOMPILE = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
@@ -36,13 +36,13 @@ export async function base64url(data: Uint8Array): Promise<string> {
   return b64url(data);
 }
 
-/** Derive the smart-account PDA: seeds ["peridot_id", "account", seed32]. */
-export function deriveSmartAccountAddress(accountId: string, programId: PublicKey = PID_PROGRAM_ID): {
+/** Derive the smart-account PDA: seeds ["peridot_id", "account", sha256(pid)]. */
+export function deriveSmartAccountAddress(pid: string, programId: PublicKey = PID_PROGRAM_ID): {
   address: PublicKey;
   bump: number;
 } {
   const [address, bump] = PublicKey.findProgramAddressSync(
-    [Buffer.from("peridot_id"), Buffer.from("account"), accountIdToSeed32(accountId) as unknown as Buffer],
+    [Buffer.from("peridot_id"), Buffer.from("account"), pidToSeed32(pid) as unknown as Buffer],
     programId,
   );
   return { address, bump };

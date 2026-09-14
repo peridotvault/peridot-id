@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 
-// PDA derivation for the Peridot smart account (ADR 004 §5, ADR 007 §2).
+// PDA derivation for the Peridot smart account (ADR 004 §5, ADR 007 §2, ADR-008).
 //
-// Seeds: ["peridot_id", "account", account_id_32] where account_id_32 is the zero-padded
-// 32-byte representation of the pid_accounts.id UUID. The program id is configurable
-// (PID_PROGRAM_ID). Canonical Solana findProgramAddress: sha256("ProgramDerivedAddress"
-// + seeds + program_id + bump), bump descending 255..0 until the resulting address is an
-// off-curve Ed25519 point (guaranteeing the PDA cannot have a private key).
+// Seeds: ["peridot_id", "account", sha256(pid)] — one identity owns exactly one
+// personal wallet, so the permanent PID *is* the seed. The program id is
+// configurable (PID_PROGRAM_ID). Canonical Solana findProgramAddress:
+// sha256("ProgramDerivedAddress" + seeds + program_id + bump), bump descending
+// 255..0 until the resulting address is an off-curve Ed25519 point
+// (guaranteeing the PDA cannot have a private key).
 //
 // Reference vectors are cross-checked against @solana/web3.js findProgramAddressSync in
 // account.service.spec.ts (task 002 shared vectors; packages/solana revalidates in task 006).
@@ -22,12 +23,11 @@ export interface SmartAccountAddress {
   bump: number;
 }
 
-/** UUID string (e.g. a pid_accounts.id) → its 16 raw bytes, zero-padded to 32. */
-export function uuidTo32(uuid: string): Buffer {
-  const hex = uuid.replace(/-/g, "");
-  const bytes = Buffer.from(hex, "hex");
-  if (bytes.length !== 16) throw new Error(`invalid uuid: ${uuid}`);
-  return Buffer.concat([Buffer.alloc(16), bytes]);
+/** PID string → its 32 seed bytes: sha256(lowercased PID). */
+export function pidToSeed32(pid: string): Buffer {
+  const normalized = pid.trim().toLowerCase();
+  if (normalized.length === 0) throw new Error("invalid pid");
+  return createHash("sha256").update(normalized, "utf8").digest();
 }
 
 export function base58Decode(input: string): Buffer {
@@ -135,9 +135,9 @@ export function findProgramAddress(seeds: Buffer[], programId: string): { addres
   return null;
 }
 
-/** Derive the smart-account PDA address for a pid_accounts.id (ADR 004 §5). */
-export function deriveSmartAccountAddress(accountId: string, programId: string): SmartAccountAddress {
-  const found = findProgramAddress([Buffer.from("peridot_id"), Buffer.from("account"), uuidTo32(accountId)], programId);
+/** Derive the smart-account PDA address for a PID (ADR-008: 1 identity = 1 wallet). */
+export function deriveSmartAccountAddress(pid: string, programId: string): SmartAccountAddress {
+  const found = findProgramAddress([Buffer.from("peridot_id"), Buffer.from("account"), pidToSeed32(pid)], programId);
   if (!found) throw new Error("failed to derive an off-curve PDA address");
   return { address: base58Encode(found.address), bump: found.bump };
 }

@@ -16,7 +16,7 @@ OAuth, JWT access cookie + rotating refresh cookie, `@nestjs/throttler`, Swagger
 serverless. `packages/openapi` (openapi.yaml is the API source of truth), `packages/types`,
 `packages/sdk-js`, `apps/docs` (Fumadocs). REST-first, cookie-auth, no GraphQL.
 
-V5 adds: `programs/peridot-smart-account` (Pinocchio/Rust), `packages/solana` — the only
+V5 adds: `contracts/svm/smart-account` (Pinocchio/Rust), `packages/solana` — the only
 package allowed to import `@solana/web3.js` (ADR 007) — and `apps/wallet` (Expo: one
 codebase for web + iOS + Android, PRD_v5 §9).
 

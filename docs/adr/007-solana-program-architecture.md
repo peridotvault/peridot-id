@@ -31,7 +31,7 @@ accordingly. Recorded reasons:
 Workspace layout (no Anchor workspace/IDL; plain Cargo):
 
 ```text
-programs/peridot-smart-account/
+contracts/svm/smart-account/
   Cargo.toml
   src/lib.rs, state.rs, errors.rs, instructions/{initialize,withdraw_sol,withdraw_token,update_authority,close}.rs
 ```
@@ -134,7 +134,7 @@ rotation procedure are documented in task 013 before mainnet.
 
 ## Consequences
 
-- New workspace members: `programs/peridot-smart-account` (Rust/Pinocchio) and
+- New workspace members: `contracts/svm/smart-account` (Rust/Pinocchio) and
   `packages/solana` (TypeScript). CI gains program build/test and lint steps (task 008).
 - `packages/core` owns the reusable primitives (encoding, domain-separated hashes,
   WebAuthn ceremonies, client key custody) and `packages/solana` the chain

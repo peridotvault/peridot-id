@@ -68,16 +68,13 @@ export class SponsoredWithdrawService {
     return solanaAdapter(this.pidSolana, this.config);
   }
 
-  /** The identity's default account + its smart-account chain row (ownership from token). */
-  private async resolveSmart(pid: string): Promise<{ accountId: string; chain: ChainAccount }> {
-    const account = await this.prisma.pidAccount.findFirst({
-      where: { pid, status: "active" },
-      include: { chainAccounts: true },
+  /** The identity's smart-account chain row (ownership from token). */
+  private async resolveSmart(pid: string): Promise<{ chain: ChainAccount }> {
+    const chain = await this.prisma.chainAccount.findFirst({
+      where: { pid, accountType: ACCOUNT_TYPE_SMART },
     });
-    if (!account) throw new NotFoundException("Account not found");
-    const chain = account.chainAccounts.find((c) => c.accountType === ACCOUNT_TYPE_SMART);
-    if (!chain) throw new BadRequestException("Smart account not created");
-    return { accountId: account.id, chain };
+    if (!chain) throw new NotFoundException("Account not found");
+    return { chain };
   }
 
   private async assertActivated(adapter: SolanaAdapter, address: string): Promise<void> {
@@ -121,12 +118,12 @@ export class SponsoredWithdrawService {
     },
   ): Promise<SponsoredWithdrawResult> {
     const adapter = this.adapter();
-    const { accountId, chain } = await this.resolveSmart(pid);
+    const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
 
-    // The asserting credential must be one of this account's active passkeys.
+    // The asserting credential must be one of this wallet's active passkeys.
     const authority = await this.prisma.authority.findFirst({
-      where: { accountId, credentialId: dto.assertion.id, status: "active" },
+      where: { pid, credentialId: dto.assertion.id, status: "active" },
     });
     if (!authority) throw new BadRequestException("Unknown or inactive passkey");
 
@@ -135,7 +132,7 @@ export class SponsoredWithdrawService {
     if (amount <= 0n) throw new BadRequestException("Amount must be greater than 0");
 
     // Stale-nonce / expired rejections happen before broadcast to avoid wasting the relay fee.
-    const chainNonce = BigInt(await adapter.getNonce(accountId));
+    const chainNonce = BigInt(await adapter.getNonce(pid));
     if (BigInt(dto.nonce) !== chainNonce) {
       throw new ConflictException("Authorization is stale — please try again (a newer nonce is active)");
     }
@@ -160,7 +157,7 @@ export class SponsoredWithdrawService {
     const relayerBal = await adapter.getBalanceOf(this.relayer().publicKey.toBase58());
     const feeForTx = await adapter.estimateWithdrawFee().catch(() => 5000n);
     if (relayerBal < Number(feeForTx)) {
-      await this.security.log(pid, "withdraw.relayer_unfunded", {}, accountId);
+      await this.security.log(pid, "withdraw.relayer_unfunded", {});
       throw new ServiceUnavailableException(
         "Peridot's fee service is briefly unavailable. No SOL was deducted from your wallet — please try again in a moment.",
       );
@@ -181,8 +178,8 @@ export class SponsoredWithdrawService {
 
     let signature: string;
     if (dto.asset === "SOL") {
-      signature = await adapter.sponsoredWithdrawSol(
-        accountId,
+      signature = await         adapter.sponsoredWithdrawSol(
+        pid,
         authorityCompressed,
         new PublicKey(dto.to),
         amount,
@@ -195,12 +192,12 @@ export class SponsoredWithdrawService {
       );
     } else {
       const mint = new PublicKey(dto.asset);
-      const sourceAta = await adapter.tokenAta(accountId, mint);
+      const sourceAta = await adapter.tokenAta(pid, mint);
       if (!(await adapter.hasAccount(sourceAta.toBase58()))) {
         throw new BadRequestException("Token account is not registered on this wallet yet");
       }
-      signature = await adapter.sponsoredWithdrawToken(
-        accountId,
+      signature = await         adapter.sponsoredWithdrawToken(
+        pid,
         authorityCompressed,
         mint,
         new PublicKey(dto.to),
@@ -215,7 +212,7 @@ export class SponsoredWithdrawService {
     }
 
     const status = (await adapter.waitForConfirmation(signature, 8, 1000)) === "confirmed" ? "confirmed" : "pending";
-    await this.security.log(pid, "withdraw.submitted", { signature, amount: amount.toString(), asset: dto.asset }, accountId);
+    await this.security.log(pid, "withdraw.submitted", { signature, amount: amount.toString(), asset: dto.asset });
     return { signature, relayFeeLamports: relayFee.toString(), status };
   }
 }

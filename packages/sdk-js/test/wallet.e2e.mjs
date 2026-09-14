@@ -6,15 +6,16 @@ import { PeridotWallet } from "@peridotvault/pid-sdk-js";
 import { b64url, buildWebAuthnMessage } from "@peridotvault/pid-solana";
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 const conn = new Connection("http://127.0.0.1:8899", "confirmed");
-const ACCOUNT_ID = crypto.randomUUID();
+const PID = "ifal@pid";
 function compressedPub(pub){const der=pub.export({format:"der",type:"spki"});const raw=der.subarray(der.length-65);const X=raw.subarray(1,33);return Buffer.concat([Buffer.from([(raw[64]&1)?0x03:0x02]),X]);}
 const passkey = crypto.generateKeyPairSync("ec",{namedCurve:"prime256v1"});
 const AUTHORITY_B64 = compressedPub(passkey.publicKey).toString("base64url");
 const feePayer = Keypair.generate();
-// mock API: account + credentials endpoints
+// mock API: identity + chain rows + credentials endpoints
 const mockApi = {
   async get(path){
-    if (path === "/v1/accounts") return { ok: true, data: [{ id: ACCOUNT_ID, status: "active", version: 1, createdAt: new Date().toISOString(), chainAccounts: [{ id: "c1", chainNamespace: "solana", chainReference: "ref", address: "x", accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] }] };
+    if (path === "/v1/identity/me") return { ok: true, data: { pid: PID } };
+    if (path === "/v1/account") return { ok: true, data: [{ id: "c1", pid: PID, chainId: "chain-sol", chainNamespace: "solana", chainReference: "ref", address: "x", accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] };
     if (path === "/v1/credentials") return { ok: true, data: [{ id: "a1", type: "secp256r1", credentialId: "cred", publicKey: AUTHORITY_B64, createdAt: new Date().toISOString(), lastUsedAt: null }] };
     return { ok: true, data: {} };
   },
@@ -28,7 +29,7 @@ await conn.confirmTransaction(await conn.requestAirdrop(feePayer.publicKey, 10*L
 const dest = Keypair.generate();
 await conn.confirmTransaction(await conn.requestAirdrop(dest.publicKey, 2*LAMPORTS_PER_SOL), "confirmed");
 const me = await wallet.me();
-assert.equal(me.id, ACCOUNT_ID);
+assert.equal(me[0].id, "c1");
 const t = await wallet.topup({ amount: "10000000", asset: "SOL" });
 await conn.confirmTransaction(t.signature, "confirmed");
 console.log("topup OK; balance:", await wallet.getBalance());

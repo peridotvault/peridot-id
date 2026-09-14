@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Check } from "../icons";
 import QRCode from "react-native-qrcode-svg";
-import type { Account } from "@peridotvault/pid-types";
+import type { ChainAccount } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";
@@ -32,7 +32,7 @@ export function ReceiveScreen({ onDone }: { onDone: () => void }) {
     let acc = await peridot.wallet.me();
     if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
     if ("statusCode" in acc) return;
-    const rows = (acc as Account).chainAccounts?.filter((c) => c.accountType === "smart_account") ?? [];
+    const rows = ((acc as ChainAccount[]) ?? []).filter((c) => c.accountType === "smart_account");
     setTargets(
       rows.map((c, i) => {
         if (c.chainNamespace === "solana") {

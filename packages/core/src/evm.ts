@@ -1,13 +1,13 @@
 // EVM counterfactual helpers — CREATE2 address derivation + payload binding.
 //
 // Mirrors `hash.ts` (Solana PDA) for `eip155` chains: the smart-account address is a
-// pure function of the pidAccount.id (as the CREATE2 salt), NOT of Google or the
+// pure function of the pid (as the CREATE2 salt), NOT of Google or the
 // passkey. The passkey (x,y) is stored later on `initialize`, so rotation never
 // changes the address — same split as Solana (PDA vs authority).
 // Browser-safe: @noble/hashes only, no Buffer, no node:crypto.
 
 import { keccak_256 } from "@noble/hashes/sha3";
-import { accountIdToSeed32, concat, fromAscii, fromHex, toHex } from "./bytes";
+import { concat, fromAscii, fromHex, pidToSeed32, toHex } from "./bytes";
 import type { Bytes } from "./bytes";
 
 // Re-exported byte vocabulary so EVM consumers never touch the web3.js index.
@@ -40,9 +40,9 @@ export function keccak256(data: Uint8Array): Uint8Array {
   return keccak_256(data);
 }
 
-/** CREATE2 salt for an account: the same zero-padded UUID seed Solana uses. */
-export function accountIdToSalt32(accountId: string): Uint8Array {
-  return accountIdToSeed32(accountId);
+/** CREATE2 salt for a pid: the same sha256(pid) seed Solana uses. */
+export function pidToSalt32(pid: string): Uint8Array {
+  return pidToSeed32(pid);
 }
 
 /** Raw 20 address bytes from a `0x…`/bare hex string. Throws on bad input. */
@@ -82,16 +82,16 @@ export function getCreate2Address(factory: string, salt32: Uint8Array, initCodeH
 }
 
 /**
- * Derive the counterfactual smart-account address: salt from the account id,
+ * Derive the counterfactual smart-account address: salt from the pid,
  * init code from the shared implementation. Same `(factory, implementation)`
  * on every chain → same address on every chain.
  */
 export function deriveEvmSmartAccountAddress(
-  accountId: string,
+  pid: string,
   factory: string,
   implementation: string,
 ): { address: string; salt: string } {
-  const salt = accountIdToSalt32(accountId);
+  const salt = pidToSalt32(pid);
   const initCodeHash = keccak256(minimalProxyInitCode(implementation));
   return { address: getCreate2Address(factory, salt, initCodeHash), salt: "0x" + toHex(salt) };
 }

@@ -27,7 +27,7 @@ const conn = new Connection("http://127.0.0.1:8899", "confirmed");
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest();
 const b64url = (b) => Buffer.from(b).toString("base64url");
 const now = () => Math.floor(Date.now() / 1000);
-const uuidTo32 = (uuid) => Buffer.concat([Buffer.alloc(16), Buffer.from(uuid.replace(/-/g, ""), "hex")]);
+const pidToSeed32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8"));
 
 function lowS(sig) {
   const r = BigInt("0x" + sig.subarray(0, 32).toString("hex"));
@@ -180,7 +180,7 @@ async function main() {
 
   const vclock = await conn.getBlockTime(await conn.getSlot());
   const now = () => vclock;
-  const accountId32 = uuidTo32(crypto.randomBytes(16).toString("hex"));
+  const accountId32 = pidToSeed32("testmain@pid");
   const [pda, bump] = PublicKey.findProgramAddressSync(
     [Buffer.from("peridot_id"), Buffer.from("account"), accountId32], PROGRAM);
   console.log(`program ${PROGRAM.toBase58()} pda ${pda.toBase58()} bump ${bump}`);
@@ -209,7 +209,7 @@ async function main() {
 
   // ---- activate: Peridot-sponsored claim + reimbursement (disc 5) ----
   {
-    const actId = uuidTo32(crypto.randomBytes(16).toString("hex"));
+    const actId = pidToSeed32("testactivate@pid");
     const [actPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), actId], PROGRAM);
     const relayer = Keypair.generate();
     const treasury = Keypair.generate();
@@ -278,7 +278,7 @@ async function main() {
   await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 9_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a5), [rentPayer], "challenge/args mismatch rejected");
 
   // ---- account mismatch (wrong PDA in args vs actual) ----
-  const otherId = uuidTo32(crypto.randomBytes(16).toString("hex"));
+  const otherId = pidToSeed32("testother@pid");
   const [otherPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), otherId], PROGRAM);
   const a6 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE));
   await expectErr(withdrawIx(otherPda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a6), [rentPayer], "account (PDA) mismatch rejected");

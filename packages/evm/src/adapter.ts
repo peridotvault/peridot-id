@@ -3,7 +3,7 @@
 // passkey (x,y) is set on initialize, so rotation never moves the address.
 
 import {
-  accountIdToSalt32,
+  pidToSalt32,
   buildEvmAuthorizationPayload,
   deriveEvmSmartAccountAddress,
   fromAscii,
@@ -51,22 +51,22 @@ export class EvmAdapter {
   }
 
   /** Counterfactual address for a pidAccount.id (same on every chain sharing the factory). */
-  getAddress(accountId: string): string {
-    return deriveEvmSmartAccountAddress(accountId, this.factory, this.implementation).address;
+  getAddress(pid: string): string {
+    return deriveEvmSmartAccountAddress(pid, this.factory, this.implementation).address;
   }
 
-  getSalt(accountId: string): string {
-    return "0x" + toHex(accountIdToSalt32(accountId));
+  getSalt(pid: string): string {
+    return "0x" + toHex(pidToSalt32(pid));
   }
 
   /** True once the proxy is deployed (code present). */
-  async isDeployed(accountId: string): Promise<boolean> {
-    const code = await this.rpc.getCode(this.getAddress(accountId));
+  async isDeployed(pid: string): Promise<boolean> {
+    const code = await this.rpc.getCode(this.getAddress(pid));
     return code !== "0x" && code !== "0x0" && code.length > 2;
   }
 
-  async getBalance(accountId: string): Promise<bigint> {
-    return this.rpc.getBalance(this.getAddress(accountId));
+  async getBalance(pid: string): Promise<bigint> {
+    return this.rpc.getBalance(this.getAddress(pid));
   }
 
   /** `deployAndInit(bytes32,bytes32,bytes32,bytes32)` calldata for the relayer/forge script. */

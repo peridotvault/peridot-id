@@ -3,27 +3,26 @@ import { IntentService } from "./intent.service";
 import { mockSecurity } from "../../test/factories";
 
 
-const ACCOUNT_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
 const SMART_ADDR = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
 
-function accountRow() {
+function smartRow() {
   return {
-    id: ACCOUNT_ID,
+    id: "chain-1",
     pid: "pid_01HASH",
+    chainId: "chain-sol",
+    chain: { namespace: "solana", reference: "ref" },
+    address: SMART_ADDR,
+    accountType: "smart_account",
     status: "active",
-    version: 1,
     createdAt: new Date(),
     updatedAt: new Date(),
-    chainAccounts: [
-      { id: "chain-1", accountId: ACCOUNT_ID, chainId: "chain-sol", chain: { namespace: "solana", reference: "ref" }, address: SMART_ADDR, accountType: "smart_account", status: "active", createdAt: new Date(), updatedAt: new Date() },
-    ],
   };
 }
 
 function intentRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "intent-1",
-    accountId: ACCOUNT_ID,
+    pid: "pid_01HASH",
     type: "WITHDRAW_SOL",
     payload: { amount: "5000000", destination: "dest1111111111111111111111111111111111111", chain: "solana", network: "devnet" },
     status: "pending",
@@ -36,7 +35,7 @@ function intentRow(overrides: Partial<Record<string, unknown>> = {}) {
 function txRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "tx-1",
-    accountId: ACCOUNT_ID,
+    pid: "pid_01HASH",
     chainAccountId: "chain-1",
     intentId: "intent-1",
     chain: "solana",
@@ -52,7 +51,7 @@ function setup() {
   const config = { get: jest.fn((key: string) => (key === "SOLANA_NETWORK" ? "devnet" : undefined)) };
   const security = mockSecurity();
   const prisma = {
-    pidAccount: { findFirst: jest.fn(async () => null as any) },
+    chainAccount: { findFirst: jest.fn(async () => null as any) },
     authority: { count: jest.fn(async () => 1) },
     intent: {
       create: jest.fn(async () => intentRow()),
@@ -75,7 +74,7 @@ const DEST = "DeSt1111111111111111111111111111111111111";
 describe("IntentService", () => {
   it("creates a WITHDRAW_SOL intent with policy + ownership context", async () => {
     const { service, prisma, security } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
 
     const view = await service.createIntent("pid_01HASH", {
       type: "WITHDRAW_SOL",
@@ -87,18 +86,18 @@ describe("IntentService", () => {
     expect(prisma.intent.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          accountId: ACCOUNT_ID,
+          pid: "pid_01HASH",
           type: "WITHDRAW_SOL",
           payload: expect.objectContaining({ amount: "5000000", destination: DEST, chain: "solana", network: "devnet", smartAccountAddress: SMART_ADDR }),
         }),
       }),
     );
-    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "intent.created", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "intent.created", expect.any(Object));
   });
 
   it("rejects a zero/negative amount", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
 
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "0", destination: DEST } })).rejects.toThrow(BadRequestException);
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "-5", destination: DEST } })).rejects.toThrow(BadRequestException);
@@ -106,21 +105,21 @@ describe("IntentService", () => {
 
   it("rejects an invalid destination", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
 
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "1", destination: "not-a-pubkey!" } })).rejects.toThrow(BadRequestException);
   });
 
   it("rejects withdrawing to the smart account itself", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
 
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "1", destination: SMART_ADDR } })).rejects.toThrow(BadRequestException);
   });
 
   it("rejects an account with no registered authority (passkey)", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
     prisma.authority.count.mockResolvedValue(0);
 
     await expect(service.createIntent("pid_01HASH", { type: "WITHDRAW_SOL", payload: { amount: "1", destination: DEST } })).rejects.toThrow(BadRequestException);
@@ -128,29 +127,29 @@ describe("IntentService", () => {
 
   it("records a submitted transaction and marks the intent executed (single-use)", async () => {
     const { service, prisma, security } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
     prisma.intent.findFirst.mockResolvedValue(intentRow());
 
     const view = await service.recordTransaction("pid_01HASH", { intentId: "intent-1", txHash: "sig1" });
 
     expect(view.txHash).toBe("sig1");
     expect(prisma.intent.update).toHaveBeenCalledWith({ where: { id: "intent-1" }, data: { status: "executed" } });
-    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "intent.executed", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "intent.executed", expect.any(Object));
   });
 
   it("rejects replaying an already-executed intent", async () => {
     const { service, prisma, security } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
     prisma.intent.findFirst.mockResolvedValue(intentRow({ status: "executed" }));
 
     await expect(service.recordTransaction("pid_01HASH", { intentId: "intent-1", txHash: "sig2" })).rejects.toThrow(BadRequestException);
-    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "intent.replay_rejected", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "intent.replay_rejected", expect.any(Object));
     expect(prisma.transaction.create).not.toHaveBeenCalled();
   });
 
   it("rejects an expired intent", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
     prisma.intent.findFirst.mockResolvedValue(intentRow({ expiresAt: new Date(Date.now() - 1000) }));
 
     await expect(service.recordTransaction("pid_01HASH", { intentId: "intent-1", txHash: "sig3" })).rejects.toThrow(BadRequestException);
@@ -164,7 +163,7 @@ describe("IntentService", () => {
 
   it("records an activity entry (deposit/withdraw/activation) with metadata", async () => {
     const { service, prisma, security } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
 
     const view = await service.recordActivity("pid_01HASH", {
       type: "WITHDRAW",
@@ -181,7 +180,7 @@ describe("IntentService", () => {
     expect(prisma.transaction.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          accountId: ACCOUNT_ID,
+          pid: "pid_01HASH",
           chainAccountId: "chain-1",
           type: "WITHDRAW",
           amount: 5000000n,
@@ -190,12 +189,12 @@ describe("IntentService", () => {
         }),
       }),
     );
-    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "activity.recorded", expect.any(Object), ACCOUNT_ID);
+    expect(security.log).toHaveBeenCalledWith("pid_01HASH", "activity.recorded", expect.any(Object));
   });
 
   it("records activity without a counterparty (deposits)", async () => {
     const { service, prisma } = setup();
-    prisma.pidAccount.findFirst.mockResolvedValue(accountRow());
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
 
     await service.recordActivity("pid_01HASH", { type: "DEPOSIT", amount: "1000000", asset: "SOL", direction: "in", txHash: "sig2" });
 
@@ -213,7 +212,7 @@ describe("IntentService", () => {
     expect(views).toHaveLength(1);
     expect(prisma.transaction.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { account: { pid: "pid_01HASH" } },
+        where: { pid: "pid_01HASH" },
         orderBy: { createdAt: "desc" },
       }),
     );

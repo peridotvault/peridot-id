@@ -2,7 +2,6 @@ import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { EvmActivationService } from "./evm-activation.service";
 import { mockSecurity, COSE_HEX } from "../../test/factories";
 
-const ACCOUNT_ID = "b3f1e6a9-2c4d-4f8b-9a3e-8d7c5b2a1f9e";
 const IDENTITY_ID = "pid_01HASH";
 const FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
 const IMPL = "0x0000000000000000000000000000000000000001";
@@ -23,15 +22,15 @@ function mockFetch() {
 function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: "evm-chain-1",
-    accountId: ACCOUNT_ID,
+    pid: IDENTITY_ID,
     chainId: "chain-97",
     chain: { namespace: "eip155", reference: "97" },
     address: "0x883c7FcF54967D2Fc3F769E44Cd78f74560909D6",
     accountType: "smart_account",
     status: "ready",
     createdAt: new Date(),
-    updatedAt: new Date(),
-    account: { id: ACCOUNT_ID, pid: IDENTITY_ID, status: "active" },
+    updatedAt: new Date()
+    ,
     ...overrides,
   };
 }
@@ -123,14 +122,14 @@ describe("EvmActivationService", () => {
   it("viewOf reports active when code is deployed", async () => {
     code = "0x6080604052";
     const { service } = setup();
-    const view = await service.viewOf({ pid: IDENTITY_ID }, ACCOUNT_ID, "97");
+    const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
     expect(view.status).toBe("active");
     expect(view.deployed).toBe(true);
   });
 
   it("viewOf reports inactivated on empty account", async () => {
     const { service } = setup();
-    const view = await service.viewOf({ pid: IDENTITY_ID }, ACCOUNT_ID, "97");
+    const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
     expect(view.status).toBe("inactivated");
     expect(view.balanceWei).toBe("0");
     expect(BigInt(view.requiredWei)).toBeGreaterThan(0n);
@@ -138,20 +137,20 @@ describe("EvmActivationService", () => {
 
   it("viewOf rejects unknown chains", async () => {
     const { service } = setup();
-    await expect(service.viewOf({ pid: IDENTITY_ID }, ACCOUNT_ID, "1")).rejects.toThrow("Unsupported EVM chain");
+    await expect(service.viewOf({ pid: IDENTITY_ID }, "1")).rejects.toThrow("Unsupported EVM chain");
   });
 
   it("activate refuses when no relayer key is configured", async () => {
     balance = "0x" + (10n ** 18n).toString(16); // funded
     const { service } = setup(); // no relayer secret
-    await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID, "97")).rejects.toThrow(
+    await expect(service.activate({ pid: IDENTITY_ID }, "97")).rejects.toThrow(
       ServiceUnavailableException,
     );
   });
 
   it("activate refuses a non-ready account", async () => {
     const { service } = setup("0x" + "11".repeat(32));
-    await expect(service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID, "97")).rejects.toThrow(ConflictException);
+    await expect(service.activate({ pid: IDENTITY_ID }, "97")).rejects.toThrow(ConflictException);
   });
 
   it("activate deploys via the relayer and marks active", async () => {
@@ -168,7 +167,7 @@ describe("EvmActivationService", () => {
         method === "eth_getCode" ? (deployed ? "0x6080604052" : "0x") : method === "eth_getBalance" ? balance : gasPrice;
       return { ok: true, json: async () => ({ result }) };
     });
-    const view = await service.activate({ pid: IDENTITY_ID }, ACCOUNT_ID, "97");
+    const view = await service.activate({ pid: IDENTITY_ID }, "97");
     expect(view.status).toBe("active");
     expect(prisma.transaction.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ chain: "eip155", asset: "tBNB" }) }),

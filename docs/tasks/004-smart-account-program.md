@@ -35,7 +35,7 @@ when `from` carries data). SHA-256 is a pure-Rust implementation (`src/sha256.rs
 
 ## Objective
 
-Implement `programs/peridot-smart-account` per ADR 007 (as amended): initialize,
+Implement `contracts/svm/smart-account` per ADR 007 (as amended): initialize,
 withdraw_sol, withdraw_token, update_authority, close — with nonce replay protection,
 domain-separated actions, controlled CPI, and events. No deposit instructions: deposits
 are plain transfers (PRD_v5 §4).
@@ -54,7 +54,7 @@ steal assets" true (PRD_v4 §23, PRD_v5 §8).
 
 ## Repository Context
 
-- No Rust workspace yet — this task creates `programs/peridot-smart-account/`
+- No Rust workspace yet — this task creates `contracts/svm/smart-account/`
   (plain Cargo, Pinocchio; src/{lib,state,errors}.rs, src/instructions/* — ADR 007 §1).
 - Solana toolchain + `solana-test-validator` for local development (docker-compose or
   documented local install — decide in this task, document in README).
