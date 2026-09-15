@@ -29,7 +29,7 @@ contract PeridotAccountTest is Test {
     function setUp() public {
         vm.warp(1_000_000);
         rpIdHash = sha256("localhost");
-        factory = new PeridotFactory(address(new PeridotAccount()));
+        factory = new PeridotFactory(address(new PeridotAccount()), address(this));
         account = PeridotAccount(payable(factory.deployAndInit(SALT, GX, GY, rpIdHash, 0, address(0))));
     }
 
@@ -199,6 +199,32 @@ contract PeridotAccountTest is Test {
         assertEq(deployed, factory.predict(salt));
     }
 
+    function test_DeployRejectsStranger() public {
+        vm.prank(address(0xBAD));
+        vm.expectRevert(PeridotFactory.Unauthorized.selector);
+        factory.deploy(keccak256("squat"));
+    }
+
+    function test_DeployAndInitRejectsStranger() public {
+        // No squat, no prefund drain: only the relayer reaches `initialize`.
+        vm.prank(address(0xBAD));
+        vm.expectRevert(PeridotFactory.Unauthorized.selector);
+        factory.deployAndInit(keccak256("squat"), GX, GY, rpIdHash, 1 ether, address(0xBAD));
+    }
+
+    function test_UpdateRelayer() public {
+        address next = address(0xCAFE);
+        vm.prank(address(0xBAD));
+        vm.expectRevert(PeridotFactory.Unauthorized.selector);
+        factory.updateRelayer(next);
+        factory.updateRelayer(next);
+        assertEq(factory.relayer(), next);
+        vm.expectRevert(PeridotFactory.Unauthorized.selector);
+        factory.deploy(keccak256("old-relayer"));
+        vm.prank(next);
+        factory.deploy(keccak256("new-relayer"));
+    }
+
     /// @dev base64url (no padding) encoder for building clientDataJSON challenges.
     function b64url(bytes memory data) internal pure returns (string memory) {
         bytes memory table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -225,7 +251,7 @@ contract PeridotAccountTest is Test {
 contract Create2ParityTest is Test {
     function test_LogCreate2Parity() public {
         PeridotAccount impl = new PeridotAccount();
-        PeridotFactory f = new PeridotFactory(address(impl));
+        PeridotFactory f = new PeridotFactory(address(impl), address(this));
         bytes32 salt = 0x00000000000000000000000000000000b3f1e6a92c4d4f8b9a3e8d7c5b2a1f9e;
         console.log("PARITY_FACTORY=%s", address(f));
         console.log("PARITY_IMPL=%s", address(impl));
@@ -236,7 +262,7 @@ contract Create2ParityTest is Test {
 contract PayloadParityTest is Test {
     function test_LogPayload() public {
         PeridotAccount impl = new PeridotAccount();
-        PeridotFactory f = new PeridotFactory(address(impl));
+        PeridotFactory f = new PeridotFactory(address(impl), address(this));
         PeridotAccount a = PeridotAccount(payable(f.deploy(bytes32(uint256(7)))));
         address to = address(0x1234);
         bytes32 payload = keccak256(

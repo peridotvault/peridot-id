@@ -24,6 +24,8 @@ import { SecurityEventService } from "../security/security-event.service";
 export interface WithdrawQuote {
   relayFeeLamports: string;
   chainTime: number;
+  /** Fee recipient the client must bind into the signed challenge. */
+  treasury: string;
 }
 
 export interface SponsoredWithdrawResult {
@@ -102,7 +104,7 @@ export class SponsoredWithdrawService {
     await this.assertActivated(adapter, chain.address);
     const relayFeeLamports = await this.relayFeeLamports(adapter);
     const chainTime = await adapter.chainTime();
-    return { relayFeeLamports: relayFeeLamports.toString(), chainTime };
+    return { relayFeeLamports: relayFeeLamports.toString(), chainTime, treasury: this.treasury().toBase58() };
   }
 
   async withdraw(

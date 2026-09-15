@@ -12,17 +12,32 @@ import {PeridotAccount} from "./PeridotAccount.sol";
 /// address on Monad / BSC / Arbitrum.
 contract PeridotFactory {
     address public immutable implementation;
+    /// @dev Only this address may deploy/initialize. Closes the squat + prefund-drain
+    /// vectors: attacker factories derive different addresses, and both deploy paths
+    /// here are gated. Zero address = deploys disabled (kill-switch).
+    address public relayer;
 
     event Deployed(address indexed account, bytes32 indexed salt);
+    event RelayerUpdated(address indexed relayer);
 
     error InitFailed();
+    error Unauthorized();
 
-    constructor(address _implementation) {
+    constructor(address _implementation, address _relayer) {
         implementation = _implementation;
+        relayer = _relayer;
+    }
+
+    /// @notice Rotate the relayer (current relayer only). Zero disables deploys.
+    function updateRelayer(address _relayer) external {
+        if (msg.sender != relayer) revert Unauthorized();
+        relayer = _relayer;
+        emit RelayerUpdated(_relayer);
     }
 
     /// @notice Deploy the proxy for `salt` (reverts if already deployed).
     function deploy(bytes32 salt) external returns (address account) {
+        if (msg.sender != relayer) revert Unauthorized();
         account = Clones.cloneDeterministic(implementation, salt);
         emit Deployed(account, salt);
     }
@@ -38,6 +53,7 @@ contract PeridotFactory {
         uint256 activationFee,
         address treasury
     ) external returns (address account) {
+        if (msg.sender != relayer) revert Unauthorized();
         account = Clones.cloneDeterministic(implementation, salt);
         (bool ok, ) =
             account.call(abi.encodeCall(PeridotAccount.initialize, (x, y, rpIdHash, activationFee, treasury)));

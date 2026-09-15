@@ -20,4 +20,4 @@ export {
 export type { Bytes, EvmChain } from "@peridotvault/pid-core/dist/evm";
 export { EvmRpc } from "./rpc";
 export type { EvmRpcLike } from "./rpc";
-export { EvmAdapter } from "./adapter";
+export { EvmAdapter, buildViewCalldata } from "./adapter";

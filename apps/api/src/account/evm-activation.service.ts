@@ -16,7 +16,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { ChainAccountStatus } from "@prisma/client";
-import { EvmAdapter, EvmRpc } from "@peridotvault/pid-evm";
+import { EvmAdapter, EvmRpc, buildViewCalldata, toHex } from "@peridotvault/pid-evm";
 import { ChainRegistryService, type RegistryChain } from "../chain/chain-registry.service";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
 import { ACCOUNT_TYPE_SMART, EIP155_NAMESPACE } from "../common/chains";
@@ -126,22 +126,57 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         const rpc = await this.rpcFor(ca.chain.reference);
         const code = await rpc.getCode(ca.address);
         const deployed = code !== "0x" && code.length > 2;
-        if (deployed && ca.status !== "active") {
-          await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: "active" } });
-          await this.security.log(ca.pid, "account.evm.promoted", { to: "active" });
+        if (!deployed) {
+          if (ca.status === "active") continue;
+          const balance = await rpc.getBalance(ca.address);
+          const required = await this.requiredWei(ca.chain.reference).catch(() => 0n);
+          const next = this.classify(balance, required, ca.status);
+          if (next !== ca.status) {
+            await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: next } });
+          }
           continue;
         }
-        if (ca.status === "active") continue;
-        const balance = await rpc.getBalance(ca.address);
-        const required = await this.requiredWei(ca.chain.reference).catch(() => 0n);
-        const next = this.classify(balance, required, ca.status);
-        if (next !== ca.status) {
-          await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: next } });
+        // Code alone proves nothing (squat/grief deploys exist): promote only on
+        // exact authority match, demote mismatched ACTIVE rows back to ready.
+        const matches = await this.deploymentMatches(rpc, ca.address, ca.pid).catch(() => false);
+        if (matches) {
+          if (ca.status !== "active") {
+            await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: "active" } });
+            await this.security.log(ca.pid, "account.evm.promoted", { to: "active" });
+          }
+        } else {
+          this.logger.warn(`evm authority mismatch for ${ca.address} (possible squat)`);
+          if (ca.status === "active") {
+            await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: "ready" } });
+          }
         }
       } catch (err) {
         this.logger.warn(`evm poll failed for ${ca.address}: ${(err as Error).message}`);
       }
     }
+  }
+
+  /**
+   * True when the deployed proxy is initialized with the registered passkey
+   * authority and RP ID. Fail-closed: any error (no credential, bad RPC) is false.
+   */
+  private async deploymentMatches(rpc: EvmRpc, address: string, pid: string): Promise<boolean> {
+    const authority = await requireActiveAuthority(this.prisma, pid);
+    const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
+    const rpIdHash = await this.sha256Hex(this.config.get<string>("WEBAUTHN_RP_ID", "localhost"));
+    const v = buildViewCalldata();
+    const [init, ax, ay, rp] = await Promise.all([
+      rpc.call<string>("eth_call", [{ to: address, data: v.initialized }, "latest"]),
+      rpc.call<string>("eth_call", [{ to: address, data: v.authorityX }, "latest"]),
+      rpc.call<string>("eth_call", [{ to: address, data: v.authorityY }, "latest"]),
+      rpc.call<string>("eth_call", [{ to: address, data: v.rpIdHash }, "latest"]),
+    ]);
+    return (
+      BigInt(init) === 1n &&
+      ax.toLowerCase() === `0x${toHex(new Uint8Array(x))}` &&
+      ay.toLowerCase() === `0x${toHex(new Uint8Array(y))}` &&
+      rp.toLowerCase() === `0x${toHex(rpIdHash)}`
+    );
   }
 
   async viewOf(user: { pid: string }, chainReference: string): Promise<EvmActivationView> {
@@ -159,7 +194,9 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`evm view failed for ${row.address}: ${(err as Error).message}`);
     }
     const required = await this.requiredWei(chainReference).catch(() => 0n);
-    const status = deployed ? "active" : this.classify(balance, required, row.status);
+    const status = deployed && (await this.deploymentMatches(rpc, row.address, user.pid).catch(() => false))
+      ? "active"
+      : this.classify(balance, required, row.status);
     return {
       pid: user.pid,
       chainReference,
@@ -210,6 +247,13 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         this.treasury(),
       );
       const receipt = await this.sendDeployTx(chainReference, secret as `0x${string}`, data);
+      // Verify the relayer deployed OUR authority (fail closed on mismatch).
+      const matches = await this.deploymentMatches(
+        await this.rpcFor(chainReference),
+        row.address,
+        user.pid,
+      ).catch(() => false);
+      if (!matches) throw new Error(`evm deploy verification failed: ${receipt.hash}`);
       await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "active" } });
       await this.prisma.transaction
         .create({

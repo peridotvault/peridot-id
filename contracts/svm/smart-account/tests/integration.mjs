@@ -29,6 +29,13 @@ const b64url = (b) => Buffer.from(b).toString("base64url");
 const now = () => Math.floor(Date.now() / 1000);
 const pidToSeed32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8"));
 
+// Test-only backend keypair (pubkey 5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ).
+// The program under test MUST be built with PID_BACKEND set to that pubkey:
+//   PID_BACKEND=5as9TQo7...ddzaZ cargo build-sbf
+// Creation paths (initialize/activate) require this key as payer/relayer.
+const BACKEND_SECRET = [2,165,58,5,85,113,187,187,189,165,0,247,194,28,78,38,100,30,150,157,210,65,241,136,120,108,19,175,51,247,44,88,68,27,157,74,181,156,0,3,4,104,44,101,23,145,208,210,131,227,116,208,145,70,66,152,114,42,243,151,173,78,79,158];
+const backend = Keypair.fromSecretKey(Buffer.from(BACKEND_SECRET));
+
 function lowS(sig) {
   const r = BigInt("0x" + sig.subarray(0, 32).toString("hex"));
   let s = BigInt("0x" + sig.subarray(32).toString("hex"));
@@ -46,14 +53,6 @@ function compressedPub(pub) {
   return Buffer.concat([Buffer.from([(raw[64] & 1) ? 0x03 : 0x02]), X]);
 }
 
-function buildPayload(nonce, amount, destBytes, expiry, relayFee = 0n) {
-  const nb = Buffer.alloc(8); nb.writeBigUInt64LE(BigInt(nonce));
-  const ab = Buffer.alloc(8); ab.writeBigUInt64LE(BigInt(amount));
-  const eb = Buffer.alloc(8); eb.writeBigInt64LE(BigInt(expiry));
-  const fb = Buffer.alloc(8); fb.writeBigUInt64LE(BigInt(relayFee));
-  return sha256(Buffer.concat([DOMAIN, nb, ab, destBytes, eb, fb]));
-}
-
 function makeAssertion(payloadHash) {
   const clientDataJSON = Buffer.from(JSON.stringify({
     type: "webauthn.get", challenge: b64url(payloadHash), origin: "https://peridot-id.example",
@@ -61,6 +60,34 @@ function makeAssertion(payloadHash) {
   const authenticatorData = Buffer.alloc(37);
   authenticatorData.writeUInt32BE(1, 33);
   return { clientDataJSON, messageData: Buffer.concat([authenticatorData, sha256(clientDataJSON)]) };
+}
+
+// Sign an arbitrary domain payload with a P-256 keypair ({ privateKey, publicKey }).
+function signPayload(keypair, payloadHash) {
+  const a = makeAssertion(payloadHash);
+  const sig = lowS(crypto.sign("sha256", a.messageData, { key: keypair.privateKey, dsaEncoding: "ieee-p1363" }));
+  return { ...a, sig, comp: compressedPub(keypair.publicKey) };
+}
+
+function initPayload(accountId32, authorityComp) {
+  return sha256(Buffer.concat([DOMAIN, accountId32, authorityComp]));
+}
+
+function activatePayload(accountId32, authorityComp, fee, expiry, treasuryBytes) {
+  const fb = Buffer.alloc(8); fb.writeBigUInt64LE(BigInt(fee));
+  const eb = Buffer.alloc(8); eb.writeBigInt64LE(BigInt(expiry));
+  return sha256(Buffer.concat([DOMAIN, accountId32, authorityComp, fb, eb, treasuryBytes]));
+}
+
+function buildPayload(nonce, amount, destBytes, expiry, relayFee = 0n, treasuryBytes = null, sourceBytes = null) {
+  const nb = Buffer.alloc(8); nb.writeBigUInt64LE(BigInt(nonce));
+  const ab = Buffer.alloc(8); ab.writeBigUInt64LE(BigInt(amount));
+  const eb = Buffer.alloc(8); eb.writeBigInt64LE(BigInt(expiry));
+  const fb = Buffer.alloc(8); fb.writeBigUInt64LE(BigInt(relayFee));
+  const parts = [DOMAIN, nb, ab, destBytes, eb, fb];
+  if (treasuryBytes) parts.push(treasuryBytes);
+  if (sourceBytes) parts.push(sourceBytes);
+  return sha256(Buffer.concat(parts));
 }
 
 function buildSecpIx(pubkeyComp, sigRaw, messageData) {
@@ -81,8 +108,9 @@ function wdData(disc, fields, clientDataJSON) {
 
 // disc=1 sponsored withdraw_sol: nonce, amount, dest, expiry, relay_fee. Accounts include
 // the treasury (receives the reimbursed relay fee) and the relayer (tx signer / fee payer).
+// The challenge binds the treasury — swapping the recipient invalidates the signature.
 function withdrawIx(pda, destPub, treasuryPub, relayerPub, nonce, amount, destBytes, relayFee, expiry, keypair, assertion) {
-  const payload = buildPayload(nonce, amount, destBytes, expiry, relayFee);
+  const payload = buildPayload(nonce, amount, destBytes, expiry, relayFee, treasuryPub.toBuffer());
   const sig = lowS(crypto.sign("sha256", assertion.messageData, { key: keypair.privateKey, dsaEncoding: "ieee-p1363" }));
   const comp = compressedPub(keypair.publicKey);
   const nb = Buffer.alloc(8); nb.writeBigUInt64LE(BigInt(nonce));
@@ -136,6 +164,7 @@ async function expectOk(tx, signers, label) {
   } catch (e) {
     const logs = await e.getLogs?.().catch(() => null);
     const errLine = logs?.find(l => l.includes("failed:") || l.includes("custom program error"));
+    console.error(`LOGS ${label}:`, logs ? logs.join(" | ") : "(no logs)");
     results.push(`FAIL ${label}: ${errLine || String(e.message).split("\n")[0]}`); failed++;
   }
 }
@@ -149,19 +178,43 @@ async function expectErr(tx, signers, label) {
   }
 }
 
-// disc=5 activate: account_id(32) | authority(33) | activation_fee u64
-function activateIx(accountId32, authorityComp, activationFee, relayerPub, pda, treasuryPub) {
+// disc=0 initialize, passkey-signed: account_id | authority | len | clientDataJSON.
+// Only the new authority's key can claim the PDA; the payer must be the backend.
+function initTx(accountId32, authorityComp, payerPub, pda, keypair) {
+  const s = signPayload(keypair, initPayload(accountId32, authorityComp));
+  const lenB = Buffer.alloc(2); lenB.writeUInt16LE(s.clientDataJSON.length);
+  const programIx = new TransactionInstruction({
+    keys: [
+      { pubkey: payerPub, isSigner: true, isWritable: true },
+      { pubkey: pda, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM,
+    data: Buffer.concat([Buffer.from([0]), accountId32, authorityComp, lenB, s.clientDataJSON]),
+  });
+  return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
+}
+
+// disc=5 activate, passkey-signed: account_id | authority | fee | expiry | len | clientDataJSON.
+// The relayer must be the backend; the fee recipient is challenge-bound.
+function activateIx(accountId32, authorityComp, activationFee, expiry, relayerPub, pda, treasuryPub, keypair) {
   const fee = Buffer.alloc(8); fee.writeBigUInt64LE(BigInt(activationFee));
-  return new TransactionInstruction({
+  const eb = Buffer.alloc(8); eb.writeBigInt64LE(BigInt(expiry));
+  const s = signPayload(keypair, activatePayload(accountId32, authorityComp, activationFee, expiry, treasuryPub.toBuffer()));
+  const lenB = Buffer.alloc(2); lenB.writeUInt16LE(s.clientDataJSON.length);
+  const programIx = new TransactionInstruction({
     keys: [
       { pubkey: relayerPub, isSigner: true, isWritable: true },
       { pubkey: pda, isSigner: false, isWritable: true },
       { pubkey: treasuryPub, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
     ],
     programId: PROGRAM,
-    data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, fee]),
+    data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, fee, eb, lenB, s.clientDataJSON]),
   });
+  return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
 }
 
 async function main() {
@@ -177,6 +230,8 @@ async function main() {
   await conn.confirmTransaction(await conn.requestAirdrop(dest.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
   // Treasury must be rent-exempt: direct lamport writes to a non-existent account are rejected.
   await conn.confirmTransaction(await conn.requestAirdrop(treasury.publicKey, LAMPORTS_PER_SOL), "confirmed");
+  // Backend funds creation/activation (payer/relayer gate) — needs its own float.
+  await conn.confirmTransaction(await conn.requestAirdrop(backend.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
 
   const vclock = await conn.getBlockTime(await conn.getSlot());
   const now = () => vclock;
@@ -185,17 +240,30 @@ async function main() {
     [Buffer.from("peridot_id"), Buffer.from("account"), accountId32], PROGRAM);
   console.log(`program ${PROGRAM.toBase58()} pda ${pda.toBase58()} bump ${bump}`);
 
-  // ---- initialize ----
-  const initData = Buffer.concat([Buffer.from([0]), accountId32, authorityComp]);
-  const initIx = new TransactionInstruction({
-    keys: [
-      { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
-      { pubkey: pda, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    programId: PROGRAM, data: initData,
-  });
-  await expectOk(new Transaction().add(initIx), [rentPayer], "initialize");
+  // ---- initialize: stranger payer rejected even with a valid self-signature ----
+  await expectErr(
+    initTx(accountId32, authorityComp, rentPayer.publicKey, pda, { privateKey, publicKey }),
+    [rentPayer],
+    "stranger-funded initialize rejected (Forbidden)",
+  );
+
+  // ---- initialize: squat attempt (stranger claims victim id with own key) ----
+  const squatId = pidToSeed32("testsquat@pid");
+  const [squatPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), squatId], PROGRAM);
+  const squatAuth = compressedPub(p2);
+  await expectErr(
+    initTx(squatId, squatAuth, rentPayer.publicKey, squatPda, { privateKey: k2, publicKey: p2 }),
+    [rentPayer],
+    "squat rejected (Forbidden)",
+  );
+  assert.equal(await conn.getAccountInfo(squatPda), null, "squat created nothing");
+
+  // ---- initialize (backend-paid, passkey-signed) ----
+  await expectOk(
+    initTx(accountId32, authorityComp, backend.publicKey, pda, { privateKey, publicKey }),
+    [backend],
+    "initialize",
+  );
 
   const acct = await conn.getAccountInfo(pda);
   assert.equal(acct.data.length, 80, "state len 80");
@@ -205,15 +273,16 @@ async function main() {
   results.push("PASS state layout");
 
   // ---- initialize again → AlreadyInitialized ----
-  await expectErr(new Transaction().add(initIx), [rentPayer], "re-initialize rejected");
+  await expectErr(
+    initTx(accountId32, authorityComp, backend.publicKey, pda, { privateKey, publicKey }),
+    [backend],
+    "re-initialize rejected",
+  );
 
   // ---- activate: Peridot-sponsored claim + reimbursement (disc 5) ----
   {
     const actId = pidToSeed32("testactivate@pid");
     const [actPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), actId], PROGRAM);
-    const relayer = Keypair.generate();
-    const treasury = Keypair.generate();
-    await conn.confirmTransaction(await conn.requestAirdrop(relayer.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
 
     // Pre-fund the PDA (the user's deposit) more than enough to cover activation.
     const funded = 150_000_000; // 0.15 SOL
@@ -223,9 +292,18 @@ async function main() {
 
     const beforeTreasury = (await conn.getAccountInfo(treasury.publicKey))?.lamports ?? 0;
     const activationFee = 1_592_460;
-    await expectOk(new Transaction().add(
-      activateIx(actId, authorityComp, activationFee, relayer.publicKey, actPda, treasury.publicKey)
-    ), [relayer], "activate claims PDA and reimburses treasury");
+    const actExpiry = now() + 3600;
+    // Stranger relayer (not backend) cannot claim, even self-signed.
+    await expectErr(
+      activateIx(actId, authorityComp, activationFee, actExpiry, rentPayer.publicKey, actPda, treasury.publicKey, { privateKey, publicKey }),
+      [rentPayer],
+      "stranger-relayed activate rejected (Forbidden)",
+    );
+    await expectOk(
+      activateIx(actId, authorityComp, activationFee, actExpiry, backend.publicKey, actPda, treasury.publicKey, { privateKey, publicKey }),
+      [backend],
+      "activate claims PDA and reimburses treasury",
+    );
 
     const claimed = await conn.getAccountInfo(actPda);
     assert.ok(claimed, "activate created on-chain account");
@@ -239,9 +317,43 @@ async function main() {
   }
 
   // ---- activate an already-initialized account → rejected ----
-  await expectErr(new Transaction().add(
-    activateIx(accountId32, authorityComp, 1000, rentPayer.publicKey, pda, dest.publicKey)
-  ), [rentPayer], "activate on initialized account rejected");
+  await expectErr(
+    activateIx(accountId32, authorityComp, 1000, now() + 3600, backend.publicKey, pda, dest.publicKey, { privateKey, publicKey }),
+    [backend],
+    "activate on initialized account rejected",
+  );
+
+  // ---- activate with swapped treasury (victim sig, attacker recipient) ----
+  {
+    const swapId = pidToSeed32("testswaptreasury@pid");
+    const [swapPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), swapId], PROGRAM);
+    await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: swapPda, lamports: 150_000_000 })
+    ), [rentPayer], { commitment: "confirmed" }), "confirmed");
+    const evilTreasury = Keypair.generate();
+    // Sign over the REAL treasury, submit with the ATTACKER treasury → challenge mismatch.
+    const fee = Buffer.alloc(8); fee.writeBigUInt64LE(1_592_460n);
+    const eb = Buffer.alloc(8); eb.writeBigInt64LE(BigInt(now() + 3600));
+    const s = signPayload({ privateKey, publicKey }, activatePayload(swapId, authorityComp, 1_592_460, now() + 3600, treasury.publicKey.toBuffer()));
+    const lenB = Buffer.alloc(2); lenB.writeUInt16LE(s.clientDataJSON.length);
+    const swapIx = new TransactionInstruction({
+      keys: [
+        { pubkey: backend.publicKey, isSigner: true, isWritable: true },
+        { pubkey: swapPda, isSigner: false, isWritable: true },
+        { pubkey: evilTreasury.publicKey, isSigner: false, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+      ],
+      programId: PROGRAM,
+      data: Buffer.concat([Buffer.from([5]), swapId, authorityComp, fee, eb, lenB, s.clientDataJSON]),
+    });
+    await expectErr(
+      new Transaction().add(swapIx, buildSecpIx(s.comp, s.sig, s.messageData)),
+      [backend],
+      "activate treasury swap rejected (InvalidChallenge)",
+    );
+    assert.equal((await conn.getAccountInfo(swapPda)).owner.toBase58(), SystemProgram.programId.toBase58(), "swapped activate claimed nothing");
+  }
 
   // ---- deposit (plain transfer) ----
   await sendAndConfirmTransaction(conn, new Transaction().add(
@@ -252,35 +364,61 @@ async function main() {
   const destBytes = dest.publicKey.toBuffer();
   const expiry = now() + 3600;
   const treasury0 = (await conn.getAccountInfo(treasury.publicKey))?.lamports ?? 0;
-  const a = makeAssertion(buildPayload(0, 5_000_000, destBytes, expiry, RELAY_FEE));
+  const a = makeAssertion(buildPayload(0, 5_000_000, destBytes, expiry, RELAY_FEE, treasury.publicKey.toBuffer()));
   await expectOk(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 0, 5_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a), [rentPayer], "withdraw valid");
   const treasury1 = (await conn.getAccountInfo(treasury.publicKey))?.lamports ?? 0;
   assert.equal(treasury1 - treasury0, Number(RELAY_FEE), "relay fee reimbursed to treasury");
   results.push("PASS relay fee reimbursed");
 
   // ---- unauthorized transfer (wrong passkey) ----
-  const a1 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE));
+  const a1 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE, treasury.publicKey.toBuffer()));
   await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey: k2, publicKey: p2 }, a1), [rentPayer], "unauthorized passkey rejected");
 
   // ---- invalid nonce / replay ----
-  const a2 = makeAssertion(buildPayload(0, 1_000_000, destBytes, expiry, RELAY_FEE));
+  const a2 = makeAssertion(buildPayload(0, 1_000_000, destBytes, expiry, RELAY_FEE, treasury.publicKey.toBuffer()));
   await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 0, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a2), [rentPayer], "replay (nonce 0) rejected");
 
-  const a3 = makeAssertion(buildPayload(99, 1_000_000, destBytes, expiry, RELAY_FEE));
+  const a3 = makeAssertion(buildPayload(99, 1_000_000, destBytes, expiry, RELAY_FEE, treasury.publicKey.toBuffer()));
   await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 99, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a3), [rentPayer], "invalid nonce rejected");
 
   // ---- expired expiry ----
-  const a4 = makeAssertion(buildPayload(1, 1_000_000, destBytes, now() - 60, RELAY_FEE));
+  const a4 = makeAssertion(buildPayload(1, 1_000_000, destBytes, now() - 60, RELAY_FEE, treasury.publicKey.toBuffer()));
   await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, RELAY_FEE, now() - 60, { privateKey, publicKey }, a4), [rentPayer], "expired expiry rejected");
 
   // ---- transaction substitution (challenge binds amount X, executes Y) ----
-  const a5 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE));
+  const a5 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE, treasury.publicKey.toBuffer()));
   await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 9_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a5), [rentPayer], "challenge/args mismatch rejected");
+
+  // ---- fee diversion (victim sig over real treasury, evil recipient in ix) ----
+  {
+    const evilTreasury = Keypair.generate();
+    const nb = Buffer.alloc(8); nb.writeBigUInt64LE(1n);
+    const ab = Buffer.alloc(8); ab.writeBigUInt64LE(1_000_000n);
+    const eb = Buffer.alloc(8); eb.writeBigInt64LE(BigInt(expiry));
+    const fb = Buffer.alloc(8); fb.writeBigUInt64LE(RELAY_FEE);
+    const swapIx = new TransactionInstruction({
+      keys: [
+        { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: dest.publicKey, isSigner: false, isWritable: true },
+        { pubkey: evilTreasury.publicKey, isSigner: false, isWritable: true },
+        { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+      ],
+      programId: PROGRAM,
+      data: wdData(1, [nb, ab, destBytes, eb, fb], a5.clientDataJSON),
+    });
+    const s = { comp: compressedPub(publicKey), sig: lowS(crypto.sign("sha256", a5.messageData, { key: privateKey, dsaEncoding: "ieee-p1363" })) };
+    await expectErr(
+      new Transaction().add(swapIx, buildSecpIx(s.comp, s.sig, a5.messageData)),
+      [rentPayer],
+      "treasury swap rejected (InvalidChallenge)",
+    );
+  }
 
   // ---- account mismatch (wrong PDA in args vs actual) ----
   const otherId = pidToSeed32("testother@pid");
   const [otherPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), otherId], PROGRAM);
-  const a6 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE));
+  const a6 = makeAssertion(buildPayload(1, 1_000_000, destBytes, expiry, RELAY_FEE, treasury.publicKey.toBuffer()));
   await expectErr(withdrawIx(otherPda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a6), [rentPayer], "account (PDA) mismatch rejected");
 
   // ---- malformed instruction (truncated clientDataJSON length) ----
@@ -305,10 +443,10 @@ async function main() {
   await expectOk(updateAuthIx(pda, 1, newAuth, expiry, { privateKey, publicKey }, ra), [rentPayer], "update_authority valid");
 
   // Now the OLD key must be rejected, the NEW key accepted.
-  const a7 = makeAssertion(buildPayload(2, 1_000_000, destBytes, expiry, RELAY_FEE));
+  const a7 = makeAssertion(buildPayload(2, 1_000_000, destBytes, expiry, RELAY_FEE, treasury.publicKey.toBuffer()));
   await expectErr(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 2, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey, publicKey }, a7), [rentPayer], "old authority rejected after rotation");
 
-  const a8 = makeAssertion(buildPayload(2, 1_000_000, destBytes, expiry, RELAY_FEE));
+  const a8 = makeAssertion(buildPayload(2, 1_000_000, destBytes, expiry, RELAY_FEE, treasury.publicKey.toBuffer()));
   await expectOk(withdrawIx(pda, dest.publicKey, treasury.publicKey, rentPayer.publicKey, 2, 1_000_000, destBytes, RELAY_FEE, expiry, { privateKey: k2, publicKey: p2 }, a8), [rentPayer], "new authority accepted after rotation");
 
   // ---- sponsored token withdraw (disc 2) — tokens move via SPL CPI, relay fee reimbursed ----
@@ -326,7 +464,7 @@ async function main() {
     const ttAmount = 2_000_000n;
     const tokenAtaBytes = destToken.address.toBuffer();
     const ttExpiry = now() + 3600;
-    const ttAssertion = makeAssertion(buildPayload(3, ttAmount, tokenAtaBytes, ttExpiry, ttRelay));
+    const ttAssertion = makeAssertion(buildPayload(3, ttAmount, tokenAtaBytes, ttExpiry, ttRelay, treasury.publicKey.toBuffer(), smartToken.address.toBuffer()));
     const ttSig = lowS(crypto.sign("sha256", ttAssertion.messageData, { key: k2, dsaEncoding: "ieee-p1363" }));
     const ttComp = compressedPub(p2);
     const nb = Buffer.alloc(8); nb.writeBigUInt64LE(3n);

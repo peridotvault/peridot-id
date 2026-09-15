@@ -1,10 +1,11 @@
-import { Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { ActivationService, ActivationView } from "./activation.service";
 import { AccountService, ChainAccountView } from "./account.service";
 import { EvmActivationService, EvmActivationView } from "./evm-activation.service";
+import { ActivateDto } from "./dto/activate.dto";
 
 // ADR-008: 1 identity = 1 personal wallet. No account ids anywhere — the owner
 // always comes from the JWT, the wallet is resolved from it.
@@ -47,8 +48,11 @@ export class AccountController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  activate(@CurrentUser() user: AuthenticatedUser): Promise<ActivationView> {
-    return this.activationService.activate(user);
+  activate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ActivateDto,
+  ): Promise<ActivationView> {
+    return this.activationService.activate(user, dto);
   }
 
   @Get("evm/:chainRef/activation")

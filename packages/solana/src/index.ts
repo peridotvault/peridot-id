@@ -2,10 +2,13 @@
 // @peridotvault/pid-core primitives (ADR 007 §8).
 
 export {
+  buildActivatePayload,
   pidToSeed32,
   buildAuthorizationPayload,
+  buildInitializePayload,
   buildWebAuthnMessage,
   buildWithdrawPayload,
+  buildWithdrawTokenPayload,
   deriveSmartAccountAddress,
   DOMAIN,
   INSTRUCTIONS_SYSVAR,

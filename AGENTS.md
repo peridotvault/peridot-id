@@ -40,8 +40,9 @@ cd contracts/svm # chain state lives here (test-ledger/), never at root
 solana-test-validator --reset > /tmp/validator.log 2>&1 &
 solana config set --url http://127.0.0.1:8899 && solana airdrop 5
 cd smart-account
+PID_BACKEND=<backend-pubkey> cargo build-sbf # backend allowlist baked in (build.rs)
 solana program deploy target/deploy/peridot_smart_account.so \
-  --program-id target/deploy/peridot-smart-account-keypair.json
+  --program-id target/deploy/peridot_smart_account-keypair.json
 pnpm --filter @peridotvault/pid-api dev        # API on :3301
 cd apps/wallet && pnpm dev:web         # Expo web on :8081
 ```
@@ -66,8 +67,8 @@ prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
 
 ## Verification
 
-- API: `pnpm --filter @peridotvault/pid-api exec jest` (178 tests).
-- Program: `cargo test` (12) + `tests/integration.mjs` (13 cases) against the local
+- API: `pnpm --filter @peridotvault/pid-api exec jest` (195 tests).
+- Program: `cargo test` (12) + `tests/integration.mjs` (21 cases) against the local
   validator; devnet E2E `packages/sdk-js/test/devnet.e2e.mjs`.
 - Full: `pnpm typecheck`.
 

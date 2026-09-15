@@ -1,4 +1,4 @@
-import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { ActivationService } from "./activation.service";
 import { mockSecurity, solanaRelayerConfig, COSE_HEX, TREASURY } from "../../test/factories";
 
@@ -33,6 +33,7 @@ const adapterMock = {
     marginLamports: BigInt(823760),
   })),
   activate: jest.fn(async () => "sig1"),
+  chainTime: jest.fn(async () => 1000000000),
   getStatus: jest.fn(async () => ({ confirmed: true, error: undefined, signature: "sig1" })) as jest.Mock<Promise<{ confirmed: boolean; error?: string; signature: string }>>,
 };
 
@@ -44,6 +45,7 @@ jest.mock("@peridotvault/pid-solana", () => ({
   SolanaAdapter: jest.fn(() => adapterMock),
   SolanaRpc: jest.fn(() => ({})),
   fromHex: jest.fn((hex: string) => Uint8Array.from(Buffer.from(hex, "hex"))),
+  b64urlToBytes: jest.fn((s: string) => Uint8Array.from(Buffer.from(s, "base64url"))),
 }));
 
 function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
@@ -99,7 +101,7 @@ describe("ActivationService", () => {
     // PDA becomes program-owned — flip the response so viewOf reports active.
     adapterMock.isActivated.mockImplementation(async () => adapterMock.activate.mock.calls.length > 0);
 
-    const view = await service.activate({ pid: IDENTITY_ID });
+    const view = await service.activate({ pid: IDENTITY_ID }, { expiry: 2000000000, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } });
 
     expect(view.status).toBe("active");
     expect(prisma.transaction.create).toHaveBeenCalledWith(
@@ -120,11 +122,21 @@ describe("ActivationService", () => {
     expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activated", expect.any(Object));
   });
 
-  it("returns 503 and creates no rows when the relayer is unfunded", async () => {
-    const { service, prisma, security } = setup();
+  it("rejects an assertion from an unknown credential", async () => {
+    const { service, prisma } = setup();
+    (prisma.authority.findFirst as jest.Mock)
+      .mockResolvedValueOnce({ id: "auth-1", publicKey: Buffer.from(COSE_HEX, "hex"), status: "active" })
+      .mockResolvedValueOnce(null);
+    await expect(
+      service.activate({ pid: IDENTITY_ID }, { expiry: 2000000000, assertion: { id: "nope", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } }),
+    ).rejects.toThrow(BadRequestException);
+    expect(adapterMock.activate).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 and creates no rows when the relayer is unfunded", async () => {    const { service, prisma, security } = setup();
     relayerBalance = 0; // Peridot's float account is empty
 
-    await expect(service.activate({ pid: IDENTITY_ID })).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.activate({ pid: IDENTITY_ID }, { expiry: 2000000000, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } })).rejects.toThrow(ServiceUnavailableException);
 
     expect(adapterMock.activate).not.toHaveBeenCalled();
     expect(prisma.transaction.create).not.toHaveBeenCalled();
@@ -140,7 +152,7 @@ describe("ActivationService", () => {
       const { service, prisma, security } = setup();
       adapterMock.getStatus.mockResolvedValue({ confirmed: false, signature: "sig1" } as never); // never lands
 
-      await expect(service.activate({ pid: IDENTITY_ID })).rejects.toThrow(ServiceUnavailableException);
+      await expect(service.activate({ pid: IDENTITY_ID }, { expiry: 2000000000, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } })).rejects.toThrow(ServiceUnavailableException);
 
       expect(adapterMock.activate).toHaveBeenCalled();
       expect(prisma.transaction.create).not.toHaveBeenCalled();
@@ -156,7 +168,7 @@ describe("ActivationService", () => {
     const { service, prisma, security } = setup();
     adapterMock.getStatus.mockResolvedValue({ confirmed: true, error: '{"InstructionError":0}', signature: "sig1" });
 
-    await expect(service.activate({ pid: IDENTITY_ID })).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.activate({ pid: IDENTITY_ID }, { expiry: 2000000000, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } })).rejects.toThrow(ServiceUnavailableException);
 
     expect(prisma.transaction.create).not.toHaveBeenCalled();
     expect(prisma.chainAccount.update).toHaveBeenCalledWith(
@@ -169,7 +181,7 @@ describe("ActivationService", () => {
     const { service } = setup();
     userBalance = 0; // user address not funded → inactivated
 
-    await expect(service.activate({ pid: IDENTITY_ID })).rejects.toThrow(ConflictException);
+    await expect(service.activate({ pid: IDENTITY_ID }, { expiry: 2000000000, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } })).rejects.toThrow(ConflictException);
     expect(adapterMock.activate).not.toHaveBeenCalled();
   });
 
@@ -206,7 +218,7 @@ describe("ActivationService", () => {
       return isActivatedCalls >= 3; // loop(2) + final check
     });
 
-    const view = await service.activate({ pid: IDENTITY_ID });
+    const view = await service.activate({ pid: IDENTITY_ID }, { expiry: 2000000000, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } });
 
     expect(view.status).toBe("active");
     expect(prisma.transaction.create).toHaveBeenCalledWith(

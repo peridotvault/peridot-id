@@ -49,11 +49,14 @@ forge test
 cd contracts/evm
 anvil &   # localhost:8545, funded default keys
 DEPLOYER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6bb9d3777c8a7f2383c692335d6779b7f1549d21b7 \
+RELAYER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
   forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
 ```
 
 First run deploys implementation + factory and prints `IMPLEMENTATION`, `FACTORY`,
-`INIT_CODE_HASH` — note them. (Localnet deploys against anvil's own chain id;
+`INIT_CODE_HASH` — note them. `RELAYER` (required) is the only address allowed to
+`deploy`/`deployAndInit` — squat + prefund-drain protection; rotate on-chain via
+`updateRelayer`, or set to `0x0` to disable deploys. (Localnet deploys against anvil's own chain id;
 API wiring below is for testnet and up.) Wire the API (`apps/api/.env`):
 
 ```sh
@@ -81,10 +84,10 @@ Phase-1 chains — same flow on each, same addresses everywhere:
    CREATE2 deployer (`0x4e59b44847b379578588920cA78FbF26c0B4956C`, already on
    all four testnets) with the same bytecode → same address.
 2. Run the factory script with that address on each chain:
-   ```sh
-   IMPLEMENTATION=0x... DEPLOYER_PRIVATE_KEY=0x... \
-     forge script script/Deploy.s.sol --rpc-url $EVM_RPC_URL_97 --broadcast
-   ```
+    ```sh
+    IMPLEMENTATION=0x... RELAYER=0x... DEPLOYER_PRIVATE_KEY=0x... \
+      forge script script/Deploy.s.sol --rpc-url $EVM_RPC_URL_97 --broadcast
+    ```
    Deploying the factory through the same keyless deployer keeps the factory
    address identical too. Verify both addresses on each chain's explorer.
 3. Put the outputs in `apps/api/.env` (`EVM_FACTORY_ADDRESS`,

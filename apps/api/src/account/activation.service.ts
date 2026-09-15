@@ -5,6 +5,7 @@
 // uses one deterministic address.
 
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -15,7 +16,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ChainAccount, ChainAccountStatus, TransactionStatus } from "@prisma/client";
-import type { Keypair, PublicKey, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
+import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
 import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE } from "../common/chains";
@@ -31,6 +32,9 @@ export interface ActivationView {
   smartAccountAddress: string;
   balanceLamports: number;
   requiredLamports: number;
+  /** Chain time (unix seconds) + fee recipient the client binds into the activation challenge. */
+  chainTime: number;
+  treasury: string;
 }
 
 const POLL_ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
@@ -195,8 +199,16 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return classifyActivation(balance, required, current);
   }
 
-  /** Activate a READY wallet (idempotent once ACTIVE). */
-  async activate(user: { pid: string }): Promise<ActivationView> {
+  /** Activate a READY wallet (idempotent once ACTIVE). The claim is passkey-signed
+   *  by the client (payload binds account, fee, expiry, treasury) — the relayer only
+   *  submits, so a stranger can neither squat the PDA nor divert the fee. */
+  async activate(
+    user: { pid: string },
+    dto: {
+      expiry: number;
+      assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
+    },
+  ): Promise<ActivationView> {
     const chain = await this.ownedSolanaRow(user.pid);
 
     if (chain.status === "active") return this.viewOf(user);
@@ -221,10 +233,16 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException(`Wallet must be READY to activate (currently ${live})`);
     }
 
-    const authority = await requireActiveAuthority(this.prisma, user.pid);
+    await requireActiveAuthority(this.prisma, user.pid);
 
     await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "activating" } });
     try {
+      // The asserting credential must be one of this wallet's active passkeys, and the
+      // ix authority must be THAT key (the payload is bound to the signer).
+      const asserting = await this.prisma.authority.findFirst({
+        where: { pid: user.pid, credentialId: dto.assertion.id, status: "active" },
+      });
+      if (!asserting) throw new BadRequestException("Unknown or inactive passkey");
       // Pre-check: Peridot's relayer floats the fee + rent. If it's out of SOL the tx would
       // be silently dropped (skipPreflight), so fail fast with a clear message instead.
       let relayerBalance = 0;
@@ -241,12 +259,18 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         );
       }
 
+      // Stale expiries are rejected before broadcast (the program enforces it too).
+      const chainTime = await adapter.chainTime().catch(() => 0);
+      if (dto.expiry <= chainTime) throw new BadRequestException("Authorization expired — please try again");
+
       const signature = await adapter.activate(
         user.pid,
-        coseToCompressedSecp256r1(Buffer.from(authority.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
+        coseToCompressedSecp256r1(Buffer.from(asserting.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
         cost.totalLamports,
         this.relayer(),
         this.treasury(),
+        dto.expiry,
+        this.toAssertion(dto.assertion),
       );
 
       const { outcome, reason } = await this.confirmActivation(signature, chain.address);
@@ -291,6 +315,22 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return this.viewOf(user);
   }
 
+  /** Decode a client assertion DTO into chain bytes (mirrors SponsoredWithdrawService). */
+  private toAssertion(dto: {
+    id: string;
+    signature: string;
+    authenticatorData: string;
+    clientDataJSON: string;
+  }): PasskeyAssertion {
+    const { b64urlToBytes } = this.pidSolana;
+    return {
+      credentialId: dto.id,
+      signature: b64urlToBytes(dto.signature) as unknown as Uint8Array<ArrayBufferLike>,
+      authenticatorData: b64urlToBytes(dto.authenticatorData) as unknown as Uint8Array<ArrayBufferLike>,
+      clientDataJSON: b64urlToBytes(dto.clientDataJSON) as unknown as Uint8Array<ArrayBufferLike>,
+    };
+  }
+
   /** Activation view derived live from on-chain state (ownership-checked). */
   async viewOf(user: { pid: string }): Promise<ActivationView> {
     const chain = await this.ownedSolanaRow(user.pid);
@@ -307,6 +347,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     const required = Number(cost.totalLamports);
 
     // Authoritative: a program-owned PDA is ACTIVE regardless of stored status.
+    // (Safe: program-owned state can only be created through this program's
+    // passkey-gated creators — unlike EVM code-presence, ownership is proof.)
     const status: ChainAccountStatus = activated
       ? "active"
       : this.classify(balance, required, chain.status);
@@ -317,6 +359,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       smartAccountAddress: chain.address,
       balanceLamports: balance,
       requiredLamports: required,
+      chainTime: await adapter.chainTime().catch(() => 0),
+      treasury: this.treasury().toBase58(),
     };
   }
 

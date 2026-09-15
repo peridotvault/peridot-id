@@ -27,9 +27,16 @@ solana --version  # 2.3.13
 
 ```sh
 cd contracts/svm/smart-account
-cargo build-sbf   # -> target/deploy/peridot_smart_account.so
+PID_BACKEND=<backend-pubkey-base58> cargo build-sbf   # -> target/deploy/peridot_smart_account.so
 cargo test        # 12 unit tests
 ```
+
+`PID_BACKEND` is baked in by `build.rs` (`src/config.rs`): only that address may pay
+for `initialize` / relay `activate` — the PID-ownership proof that makes squatting
+and prefund-drain impossible. Same program id on every cluster, backend const per
+env. Unset = creation disabled (fail-closed zeros). Local integration tests use the
+test key `5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ` (secret in `tests/integration.mjs`,
+test-only).
 
 ## Localnet
 
@@ -42,9 +49,12 @@ solana-test-validator --reset > /tmp/validator.log 2>&1 &
 solana config set --url http://127.0.0.1:8899 && solana airdrop 5
 cd smart-account
 solana program deploy target/deploy/peridot_smart_account.so \
-  --program-id target/deploy/peridot-smart-account-keypair.json
-node tests/integration.mjs <program-id>   # 13 cases
+  --program-id target/deploy/peridot_smart_account-keypair.json
+node tests/integration.mjs <program-id>   # 21 cases (PID_BACKEND=test key build)
 ```
+No deploy key handy (the declared id's keypair is secret)? Load the binary at its
+declared address instead — program-id check passes, upgrades don't apply locally:
+`solana-test-validator --reset --bpf-program CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT target/deploy/peridot_smart_account.so`.
 
 Wire the API to it (`apps/api/.env`):
 

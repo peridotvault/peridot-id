@@ -837,9 +837,15 @@ paths:
   /account/activate:
     post:
       tags: [account]
-      summary: Activate the wallet's Solana smart account (relayer-sponsored)
+      summary: Activate the wallet's Solana smart account (relayer-sponsored, passkey-signed claim)
       security:
         - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Activate"
       responses:
         "200":
           description: Activation result
@@ -1486,7 +1492,7 @@ components:
 
     ActivationView:
       type: object
-      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports]
+      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports, chainTime, treasury]
       properties:
         pid:
           type: string
@@ -1499,6 +1505,12 @@ components:
           type: integer
         requiredLamports:
           type: integer
+        chainTime:
+          type: integer
+          description: "Chain time (unix seconds) for the activation challenge expiry"
+        treasury:
+          type: string
+          description: "Fee recipient the client binds into the activation challenge"
 
     EvmActivationView:
       type: object
@@ -1599,6 +1611,33 @@ components:
         credential:
           type: object
           description: "WebAuthn AuthenticationResponseJSON"
+
+    PasskeyAssertion:
+      type: object
+      required: [id, signature, authenticatorData, clientDataJSON]
+      properties:
+        id:
+          type: string
+          description: "Credential ID that produced the assertion"
+        signature:
+          type: string
+          description: "base64url 64-byte r‖s secp256r1 signature"
+        authenticatorData:
+          type: string
+          description: "base64url authenticatorData"
+        clientDataJSON:
+          type: string
+          description: "base64url clientDataJSON (challenge = domain payload)"
+
+    Activate:
+      type: object
+      required: [expiry, assertion]
+      properties:
+        expiry:
+          type: integer
+          description: "Chain-time expiry (unix seconds) the passkey signed against"
+        assertion:
+          $ref: "#/components/schemas/PasskeyAssertion"
 
     IntentCreate:
       type: object

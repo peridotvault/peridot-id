@@ -4,7 +4,7 @@
 
 import { createAssociatedTokenAccountIdempotentInstruction, createTransferInstruction, getAssociatedTokenAddress } from "@solana/spl-token";
 import { Keypair, PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { u64le, i64le, normalizeLowS } from "@peridotvault/pid-core";
+import { u64le, i64le, normalizeLowS, buildInitializePayload, buildActivatePayload } from "@peridotvault/pid-core";
 import type { Bytes } from "@peridotvault/pid-core";
 import {
   pidToSeed32,
@@ -84,39 +84,56 @@ export class SolanaAdapter {
     return tx;
   }
 
-  /** Initialize the smart account with the passkey's compressed pubkey as authority. */
-  async initialize(pid: string, authorityCompressed: Uint8Array, payer: Keypair): Promise<string> {
+  /**
+   * Initialize the smart account. Passkey-signed: only the new authority's key can
+   * claim the PDA (no squatting). The payer funds rent and signs as fee payer.
+   */
+  async initialize(
+    pid: string,
+    authorityCompressed: Uint8Array,
+    payer: Keypair,
+    signer: PasskeySigner,
+  ): Promise<string> {
     const smartAccount = this.getAddress(pid);
-    const tx = await this.buildTx(
-      [buildInitializeInstruction(pidToSeed32(pid), authorityCompressed, payer.publicKey, smartAccount)],
+    const accountId = pidToSeed32(pid);
+    const payload = await buildInitializePayload(accountId, authorityCompressed);
+    const assertion = await signer.sign(payload, {});
+    const programIx = buildInitializeInstruction(
+      accountId,
+      authorityCompressed,
       payer.publicKey,
+      smartAccount,
+      assertion.clientDataJSON,
     );
-    return this.send(tx, [payer]);
+    return this.submitPasskeyTx(programIx, authorityCompressed, assertion, payer);
   }
 
-  /** Activate the smart account via the relayer (disc 5). Returns the tx signature. */
+  /**
+   * Activate the smart account via the relayer (disc 5). The claim is passkey-signed
+   * (payload binds account, fee, expiry, treasury) — the caller supplies the client's
+   * assertion; the relayer only submits and floats rent/gas. Returns the tx signature.
+   */
   async activate(
     pid: string,
     authorityCompressed: Uint8Array<ArrayBufferLike>,
     activationFeeLamports: bigint,
     relayer: Keypair,
     treasury: PublicKey,
+    expiry: number,
+    assertion: PasskeyAssertion,
   ): Promise<string> {
     const smartAccount = this.getAddress(pid);
-    const tx = await this.buildTx(
-      [
-        buildActivateInstruction(
-          pidToSeed32(pid),
-          authorityCompressed,
-          activationFeeLamports,
-          relayer.publicKey,
-          smartAccount,
-          treasury,
-        ),
-      ],
+    const programIx = buildActivateInstruction(
+      pidToSeed32(pid),
+      authorityCompressed,
+      activationFeeLamports,
       relayer.publicKey,
+      smartAccount,
+      treasury,
+      expiry,
+      assertion.clientDataJSON,
     );
-    return this.send(tx, [relayer]);
+    return this.submitRelayedPasskeyTx(programIx, authorityCompressed, assertion, relayer);
   }
 
   /** Balance of the smart account address (lamports). */
@@ -145,6 +162,8 @@ export class SolanaAdapter {
       dummyRelayer,
       smartAccount,
       dummyTreasury,
+      0,
+      new Uint8Array([0x7b, 0x7d]),
     );
     const rawTx = new Transaction();
     rawTx.add(ix);
@@ -168,26 +187,6 @@ export class SolanaAdapter {
       [buildDepositSolInstruction(from.publicKey, this.getAddress(pid), lamports)],
       from.publicKey,
     );
-    return this.send(tx, [from]);
-  }
-
-  /**
-   * First top-up (wallet activation, PRD_v5 §3): initialize the smart account AND deposit
-   * in a single transaction. Idempotent — if already initialized, just deposits.
-   */
-  async initializeAndDepositSol(
-    pid: string,
-    authorityCompressed: Uint8Array,
-    from: Keypair,
-    lamports: bigint,
-  ): Promise<string> {
-    const smartAccount = this.getAddress(pid);
-    const ixs: TransactionInstruction[] = [];
-    if (!(await this.isInitialized(pid))) {
-      ixs.push(buildInitializeInstruction(pidToSeed32(pid), authorityCompressed, from.publicKey, smartAccount));
-    }
-    ixs.push(buildDepositSolInstruction(from.publicKey, smartAccount, lamports));
-    const tx = await this.buildTx(ixs, from.publicKey);
     return this.send(tx, [from]);
   }
 

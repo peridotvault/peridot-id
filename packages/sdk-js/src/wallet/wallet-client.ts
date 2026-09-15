@@ -1,7 +1,7 @@
 // Peridot wallet client (task 009) — the PRD_v5 §9 surface over the Solana adapter.
 
 import { PublicKey } from "@peridotvault/pid-core";
-import { b64url, b64urlToBytes, buildWithdrawPayload, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
+import { b64url, b64urlToBytes, buildActivatePayload, buildWithdrawPayload, buildWithdrawTokenPayload, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import type { ParsedTx, PasskeySigner, TokenBalance, TransactionStatus } from "@peridotvault/pid-solana";
 import type { ApiError, Authority, ChainAccount, WalletTransaction } from "@peridotvault/pid-types";
 import { BrowserPasskeySigner } from "@peridotvault/pid-core";
@@ -44,6 +44,8 @@ export interface ActivationView {
   smartAccountAddress: string;
   balanceLamports: number;
   requiredLamports: number;
+  chainTime: number;
+  treasury: string;
 }
 
 function isApiError(v: unknown): v is ApiError {
@@ -128,16 +130,19 @@ export class PeridotWallet {
     return res.data;
   }
 
-  /** Top up (deposit). The first SOL top-up also initializes the smart account (PRD_v5 §3). */
+  /**
+   * Top up (deposit). Plain transfer only — account creation is a separate,
+   * backend-gated + passkey-signed step (`activate()`), so topping up an
+   * uninitialized address just funds it for later activation.
+   */
   async topup(input: TopupInput): Promise<{ signature: string }> {
     const pid = await this.pid();
     const feePayer = await this.feePayer.getOrCreate();
     const lamports = BigInt(input.amount);
-    const authority = await this.authorityCompressed();
 
     const signature =
       input.asset === "SOL"
-        ? await this.adapter.initializeAndDepositSol(pid, authority, feePayer, lamports)
+        ? await this.adapter.depositSol(pid, feePayer, lamports)
         : await this.adapter.depositToken(pid, new PublicKey(input.asset), feePayer, lamports);
     return { signature };
   }
@@ -152,17 +157,32 @@ export class PeridotWallet {
     const amount = BigInt(input.amount);
     const destination = new PublicKey(input.to);
 
-    // Fresh quote — the client signs the relay fee, so it must match the server's fair fee.
-    const quoteRes = await this.api.post<{ relayFeeLamports: string; chainTime: number }>("/v1/wallet/withdraw/quote", { asset: input.asset });
+    // Fresh quote — the client signs the relay fee AND the treasury, both must match the server.
+    const quoteRes = await this.api.post<{ relayFeeLamports: string; chainTime: number; treasury: string }>(
+      "/v1/wallet/withdraw/quote",
+      { asset: input.asset },
+    );
     if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
-    const quote = quoteRes.data as { relayFeeLamports: string; chainTime: number };
+    const quote = quoteRes.data as { relayFeeLamports: string; chainTime: number; treasury: string };
     const relayFee = BigInt(quote.relayFeeLamports);
+    const treasury = new PublicKey(quote.treasury);
     const expiry = Math.floor(quote.chainTime) + 300;
 
     const nonce = await this.adapter.getNonce(pid);
 
     const attempt = async (n: bigint): Promise<{ signature: string; relayFeeLamports: string; status: "confirmed" | "pending" }> => {
-      const p = await buildWithdrawPayload(n, amount, destination, expiry, relayFee);
+      const p =
+        input.asset === "SOL"
+          ? await buildWithdrawPayload(n, amount, destination, expiry, relayFee, treasury)
+          : await buildWithdrawTokenPayload(
+              n,
+              amount,
+              destination,
+              expiry,
+              relayFee,
+              treasury,
+              await this.adapter.tokenAta(pid, new PublicKey(input.asset)),
+            );
       const a = await this.passkeySigner.sign(p, {});
       const res = await this.api.post<{ signature: string; relayFeeLamports: string; status: "confirmed" | "pending" }>("/v1/wallet/withdraw", {
         asset: input.asset,
@@ -214,9 +234,34 @@ export class PeridotWallet {
     return this.adapter.getTokenBalancesOf(await this.smartAccountAddress());
   }
 
-  /** Activate the smart account (server-side relayer). */
+  /**
+   * Activate the smart account. The claim is passkey-signed (payload binds account,
+   * fee, expiry, treasury) so nobody else can squat the PDA or divert the fee; the
+   * server's relayer only submits. Reads the live view first for fee + chain time.
+   */
   async activate(): Promise<ActivationView | ApiError> {
-    const res = await this.api.post<ActivationView>(`/v1/account/activate`);
+    const pid = await this.pid();
+    const viewRes = await this.activation();
+    if (isApiError(viewRes)) return viewRes;
+    const authority = await this.authorityCompressed();
+    const expiry = Math.floor(viewRes.chainTime) + 300;
+    const payload = await buildActivatePayload(
+      pidToSeed32(pid),
+      authority,
+      BigInt(viewRes.requiredLamports),
+      expiry,
+      new PublicKey(viewRes.treasury),
+    );
+    const a = await this.passkeySigner.sign(payload, {});
+    const res = await this.api.post<ActivationView>(`/v1/account/activate`, {
+      expiry,
+      assertion: {
+        id: a.credentialId,
+        signature: b64url(a.signature),
+        authenticatorData: b64url(a.authenticatorData),
+        clientDataJSON: b64url(a.clientDataJSON),
+      },
+    });
     return res.data;
   }
 

@@ -39,12 +39,16 @@ impl TryFrom<u8> for Instruction {
 /// Fixed-layout instruction payload after the discriminator byte.
 ///
 /// Layouts:
-/// - Initialize:      account_id [u8; 32] | authority [u8; 33]
+/// - Initialize:      account_id [u8; 32] | authority [u8; 33] | len u16 | clientDataJSON
 /// - WithdrawSol:     nonce u64 | amount u64 | destination [u8; 32] | expiry i64 | relay_fee u64 | len u16 | clientDataJSON
 /// - WithdrawToken:   nonce u64 | amount u64 | destination_ata [u8; 32] | expiry i64 | relay_fee u64 | len u16 | clientDataJSON
 /// - UpdateAuthority: nonce u64 | new_authority [u8; 33] | expiry i64 | len u16 | clientDataJSON
 /// - Close:           nonce u64 | expiry i64 | len u16 | clientDataJSON
-/// - Activate:        account_id [u8; 32] | authority [u8; 33] | activation_fee u64
+/// - Activate:        account_id [u8; 32] | authority [u8; 33] | activation_fee u64 | expiry i64 | len u16 | clientDataJSON
+/// Initialize and Activate are passkey-signed (payload binds account_id ‖ authority,
+/// plus fee ‖ expiry ‖ treasury for Activate) — creation cannot be squatted.
+/// Withdraw payloads bind the treasury (and source ATA for tokens) so the fee
+/// recipient cannot be swapped; the `len u16` prefixes the raw WebAuthn clientDataJSON.
 /// Withdraws are relayer-sponsored: `relay_fee` (network fee × (1 + margin)) is reimbursed
 /// from the smart account to the Peridot treasury, and the relayer is the tx fee payer.
 /// The `len u16` prefixes the raw WebAuthn clientDataJSON passed for on-chain verification.

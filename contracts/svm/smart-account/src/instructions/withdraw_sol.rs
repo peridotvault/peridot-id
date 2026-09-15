@@ -98,6 +98,7 @@ pub fn process(
         &destination_bytes,
         &expiry.to_le_bytes(),
         &relay_fee.to_le_bytes(),
+        &treasury.address().as_array()[..],
     ]);
     auth::check_expiry(expiry)?;
     auth::verify_secp256r1(instructions, &authority, client_json, &payload)?;

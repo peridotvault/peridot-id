@@ -7,9 +7,12 @@
 // no hosts, no app flow.
 
 export {
+  buildActivatePayload,
   buildAuthorizationPayload,
+  buildInitializePayload,
   buildWebAuthnMessage,
   buildWithdrawPayload,
+  buildWithdrawTokenPayload,
   deriveSmartAccountAddress,
   DOMAIN,
   INSTRUCTIONS_SYSVAR,

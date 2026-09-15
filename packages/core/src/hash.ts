@@ -56,15 +56,48 @@ export async function buildAuthorizationPayload(parts: Uint8Array[]): Promise<Ui
   return hashSha256(concat(DOMAIN, ...parts));
 }
 
-/** Convenience for the common WITHDRAW_SOL payload (includes the relayer-reimbursed relay fee). */
+/** Convenience for the common WITHDRAW_SOL payload (fee recipient bound — cannot be swapped). */
 export async function buildWithdrawPayload(
   nonce: bigint,
   amount: bigint,
   destination: PublicKey,
   expiry: number,
   relayFeeLamports: bigint = 0n,
+  treasury: PublicKey,
 ): Promise<Uint8Array> {
-  return buildAuthorizationPayload([u64le(nonce), u64le(amount), destination.toBytes(), i64le(expiry), u64le(relayFeeLamports)]);
+  return buildAuthorizationPayload([u64le(nonce), u64le(amount), destination.toBytes(), i64le(expiry), u64le(relayFeeLamports), treasury.toBytes()]);
+}
+
+/** WITHDRAW_TOKEN payload: also binds the treasury and the debited source ATA. */
+export async function buildWithdrawTokenPayload(
+  nonce: bigint,
+  amount: bigint,
+  destinationAta: PublicKey,
+  expiry: number,
+  relayFeeLamports: bigint,
+  treasury: PublicKey,
+  sourceAta: PublicKey,
+): Promise<Uint8Array> {
+  return buildAuthorizationPayload([u64le(nonce), u64le(amount), destinationAta.toBytes(), i64le(expiry), u64le(relayFeeLamports), treasury.toBytes(), sourceAta.toBytes()]);
+}
+
+/** INITIALIZE payload: only the new authority itself can claim the PDA (no squat). */
+export async function buildInitializePayload(
+  accountId32: Uint8Array,
+  authorityCompressed: Uint8Array,
+): Promise<Uint8Array> {
+  return buildAuthorizationPayload([accountId32, authorityCompressed]);
+}
+
+/** ACTIVATE payload: binds the claim, the fee, its expiry, and the fee recipient. */
+export async function buildActivatePayload(
+  accountId32: Uint8Array,
+  authorityCompressed: Uint8Array,
+  activationFeeLamports: bigint,
+  expiry: number,
+  treasury: PublicKey,
+): Promise<Uint8Array> {
+  return buildAuthorizationPayload([accountId32, authorityCompressed, u64le(activationFeeLamports), i64le(expiry), treasury.toBytes()]);
 }
 
 /**

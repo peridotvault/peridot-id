@@ -17,12 +17,13 @@ import { concat, u16le, u64le, i64le, fromAscii } from "@peridotvault/pid-core";
 import type { Bytes } from "@peridotvault/pid-core";
 import { IX, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE } from "@peridotvault/pid-core";
 
-/** Build the `initialize(account_id, authority)` instruction (disc 0). */
+/** Build the passkey-signed `initialize(account_id, authority, clientDataJSON)` instruction (disc 0). */
 export function buildInitializeInstruction(
   accountId32: Uint8Array,
   authorityCompressed: Uint8Array,
   payer: PublicKey,
   smartAccount: PublicKey,
+  clientDataJSON: Uint8Array,
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
@@ -31,16 +32,17 @@ export function buildInitializeInstruction(
       { pubkey: payer, isSigner: true, isWritable: true },
       { pubkey: smartAccount, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
     ],
     programId: PID_PROGRAM_ID,
-    data: concat([IX.initialize], accountId32, authorityCompressed) as unknown as Buffer,
+    data: concat([IX.initialize], accountId32, authorityCompressed, u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
 
 /**
- * Build the `activate(account_id, authority, activation_fee)` instruction (disc 5).
- * Peridot-sponsored activation: relayer claims the (possibly pre-funded) PDA, then the
- * activation fee is reimbursed from the smart account to `treasury`.
+ * Build the passkey-signed `activate(account_id, authority, activation_fee, expiry, clientDataJSON)`
+ * instruction (disc 5). Peridot-sponsored activation: relayer claims the (possibly pre-funded)
+ * PDA, then the activation fee is reimbursed from the smart account to `treasury`.
  */
 export function buildActivateInstruction(
   accountId32: Uint8Array,
@@ -49,6 +51,8 @@ export function buildActivateInstruction(
   relayer: PublicKey,
   smartAccount: PublicKey,
   treasury: PublicKey,
+  expiry: number,
+  clientDataJSON: Uint8Array,
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
@@ -58,9 +62,10 @@ export function buildActivateInstruction(
       { pubkey: smartAccount, isSigner: false, isWritable: true },
       { pubkey: treasury, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
     ],
     programId: PID_PROGRAM_ID,
-    data: concat([IX.activate], accountId32, authorityCompressed, u64le(activationFeeLamports)) as unknown as Buffer,
+    data: concat([IX.activate], accountId32, authorityCompressed, u64le(activationFeeLamports), i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
 

@@ -6,6 +6,7 @@ import {PeridotAccount} from "../src/PeridotAccount.sol";
 import {PeridotFactory} from "../src/PeridotFactory.sol";
 
 /// @notice Deploy implementation + factory. Env: IMPLEMENTATION (optional reuse),
+/// RELAYER (required — the only address allowed to deploy/initialize),
 /// DEPLOYER_PRIVATE_KEY. Same-address flow: first deploy the implementation via
 /// the keyless CREATE2 deployer on every chain, then set IMPLEMENTATION and run
 /// this script the same way so the factory lands at one address everywhere.
@@ -13,12 +14,13 @@ import {PeridotFactory} from "../src/PeridotFactory.sol";
 contract Deploy is Script {
     function run() external {
         address implementation = vm.envOr("IMPLEMENTATION", address(0));
+        address relayer = vm.envAddress("RELAYER");
         uint256 key = vm.envUint("DEPLOYER_PRIVATE_KEY");
         vm.startBroadcast(key);
         if (implementation == address(0)) {
             implementation = address(new PeridotAccount());
         }
-        PeridotFactory factory = new PeridotFactory(implementation);
+        PeridotFactory factory = new PeridotFactory(implementation, relayer);
         vm.stopBroadcast();
         console.log("IMPLEMENTATION=%s", implementation);
         console.log("FACTORY=%s", address(factory));

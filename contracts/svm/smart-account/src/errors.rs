@@ -27,6 +27,8 @@ pub enum PeridotError {
     Expired = 9,
     /// The WebAuthn challenge / clientDataJSON binding is invalid.
     InvalidChallenge = 10,
+    /// The caller is not the authorized backend (creation paths only).
+    Forbidden = 11,
 }
 
 impl From<PeridotError> for ProgramError {

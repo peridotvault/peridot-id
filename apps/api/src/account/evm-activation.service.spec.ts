@@ -1,6 +1,9 @@
+import { createHash } from "crypto";
 import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
+import { keccak256, fromAscii, toHex } from "@peridotvault/pid-evm";
 import { EvmActivationService } from "./evm-activation.service";
 import { mockSecurity, COSE_HEX } from "../../test/factories";
+import { coseToRawXy } from "../credentials/cose";
 
 const IDENTITY_ID = "pid_01HASH";
 const FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
@@ -10,11 +13,36 @@ const IMPL = "0x0000000000000000000000000000000000000001";
 let code = "0x";
 let balance = "0x0";
 let gasPrice = "0x3b9aca00"; // 1 gwei
+// eth_call overrides by calldata; default = exact authority match.
+let viewOverrides: Record<string, string> = {};
+
+const sel = (sig: string) => `0x${toHex(keccak256(fromAscii(sig)).subarray(0, 4))}`;
+const word = (hex: string) => `0x${hex.replace(/^0x/, "").toLowerCase().padStart(64, "0")}`;
+const CRED = coseToRawXy(Buffer.from(COSE_HEX, "hex"));
+const RP_HASH = createHash("sha256").update("localhost").digest();
+
+function defaultView(data: string): string {
+  if (data === sel("initialized()")) return word("1");
+  if (data === sel("authorityX()")) return word(toHex(new Uint8Array(CRED.x)));
+  if (data === sel("authorityY()")) return word(toHex(new Uint8Array(CRED.y)));
+  if (data === sel("rpIdHash()")) return word(toHex(new Uint8Array(RP_HASH)));
+  return word("0");
+}
 
 function mockFetch() {
   (global as unknown as { fetch: unknown }).fetch = jest.fn(async (_url: unknown, opts: unknown) => {
-    const { method } = JSON.parse((opts as { body: string }).body) as { method: string };
-    const result = method === "eth_getCode" ? code : method === "eth_getBalance" ? balance : gasPrice;
+    const { method, params } = JSON.parse((opts as { body: string }).body) as {
+      method: string;
+      params?: Array<{ data?: string }>;
+    };
+    const result =
+      method === "eth_getCode"
+        ? code
+        : method === "eth_getBalance"
+          ? balance
+          : method === "eth_call"
+            ? (viewOverrides[params?.[0]?.data ?? ""] ?? defaultView(params?.[0]?.data ?? ""))
+            : gasPrice;
     return { ok: true, json: async () => ({ result }) };
   });
 }
@@ -115,6 +143,7 @@ beforeEach(() => {
   code = "0x";
   balance = "0x0";
   gasPrice = "0x3b9aca00";
+  viewOverrides = {};
   mockFetch();
 });
 
@@ -125,6 +154,33 @@ describe("EvmActivationService", () => {
     const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
     expect(view.status).toBe("active");
     expect(view.deployed).toBe(true);
+  });
+
+  it("viewOf does not promote on authority mismatch (squat)", async () => {
+    code = "0x6080604052";
+    balance = "0x" + (10n ** 18n).toString(16); // funded → would be ready
+    viewOverrides[sel("authorityX()")] = word("deadbeef");
+    const { service } = setup();
+    const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
+    expect(view.deployed).toBe(true);
+    expect(view.status).not.toBe("active");
+  });
+
+  it("poll promotes on exact match and demotes mismatched active rows", async () => {
+    code = "0x6080604052";
+    const { service, prisma } = setup();
+    (prisma.chainAccount.findMany as jest.Mock).mockResolvedValueOnce([chainRow({ status: "ready" })]);
+    await service.poll();
+    expect(prisma.chainAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "active" } }),
+    );
+    (prisma.chainAccount.update as jest.Mock).mockClear();
+    viewOverrides[sel("authorityY()")] = word("deadbeef");
+    (prisma.chainAccount.findMany as jest.Mock).mockResolvedValueOnce([chainRow({ status: "active" })]);
+    await service.poll();
+    expect(prisma.chainAccount.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "ready" } }),
+    );
   });
 
   it("viewOf reports inactivated on empty account", async () => {
@@ -162,9 +218,20 @@ describe("EvmActivationService", () => {
       return { hash: "0xdeploy", from: "0xrelayer", costWei: "100000000000000" };
     });
     (global as unknown as { fetch: unknown }).fetch = jest.fn(async (_url: unknown, opts: unknown) => {
-      const { method } = JSON.parse((opts as { body: string }).body) as { method: string };
+      const { method, params } = JSON.parse((opts as { body: string }).body) as {
+        method: string;
+        params?: Array<{ data?: string }>;
+      };
       const result =
-        method === "eth_getCode" ? (deployed ? "0x6080604052" : "0x") : method === "eth_getBalance" ? balance : gasPrice;
+        method === "eth_getCode"
+          ? deployed
+            ? "0x6080604052"
+            : "0x"
+          : method === "eth_getBalance"
+            ? balance
+            : method === "eth_call"
+              ? defaultView(params?.[0]?.data ?? "")
+              : gasPrice;
       return { ok: true, json: async () => ({ result }) };
     });
     const view = await service.activate({ pid: IDENTITY_ID }, "97");

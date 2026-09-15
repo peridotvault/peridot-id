@@ -116,6 +116,27 @@ export class EvmAdapter {
       hexBytes(args.treasury, 20),
     ]);
   }
+
+  /** eth_call data for the read-only poll checks (initialized/authorityX/authorityY/rpIdHash). */
+  viewCalldata(): { initialized: string; authorityX: string; authorityY: string; rpIdHash: string } {
+    return buildViewCalldata();
+  }
+}
+
+/** Standalone view calldata (no adapter instance needed — used by the API poll). */
+export function buildViewCalldata(): {
+  initialized: string;
+  authorityX: string;
+  authorityY: string;
+  rpIdHash: string;
+} {
+  const sel = (sig: string) => "0x" + toHex(selector(sig));
+  return {
+    initialized: sel("initialized()"),
+    authorityX: sel("authorityX()"),
+    authorityY: sel("authorityY()"),
+    rpIdHash: sel("rpIdHash()"),
+  };
 }
 
 function hexBytes(hex: string, expected: number): Uint8Array {

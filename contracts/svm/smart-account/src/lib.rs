@@ -24,6 +24,12 @@ pub mod secp256r1;
 pub mod sha256;
 pub mod state;
 
+/// Backend allowlist, baked at build time by `build.rs` from `PID_BACKEND`.
+/// Creation paths require the payer/relayer to equal it (PID-ownership proof).
+pub mod config {
+    include!(concat!(env!("OUT_DIR"), "/config.rs"));
+}
+
 use pinocchio::{error::ProgramError, program_entrypoint, AccountView, Address, ProgramResult};
 
 use instructions::{Instruction, InstructionData};
