@@ -1,16 +1,20 @@
 //! PeridotID smart account program.
 //!
 //! A non-custodial Solana smart account (PDA) that owns the user's assets. The asset
-//! controlling authority for V1 is an **Ed25519 device key** that signs the transaction
-//! directly (ADR 005 Option A — invoked via the ADR 005 fallback: Pinocchio has no
-//! instruction introspection for the secp256r1 precompile pattern, see the task file).
-//! The `authority_type` discriminant in state keeps the secp256r1 passkey path open.
+//! controlling authority is a secp256r1 (P-256) WebAuthn passkey (ADR 005 Option B):
+//! the SDK places a Secp256r1 precompile instruction immediately after this
+//! program's instruction and the program verifies it via the Instructions sysvar
+//! (`auth.rs::verify_secp256r1_v2`), enforcing stored-authority match, RP-ID hash,
+//! user-verification flag, exact `authenticatorData ‖ sha256(clientDataJSON)`
+//! message binding, and equality of the WebAuthn challenge with the V2
+//! domain-separated authorization payload recomputed from instruction args.
 //!
-//! The program verifies authorization by requiring the registered authority account to be
-//! a transaction signer (`is_signer`) whose address equals `state.authority`. The Solana
-//! runtime verifies that signer's Ed25519 signature over the entire transaction message —
-//! which includes this instruction's nonce/amount/destination — binding the authorization
-//! to the exact action (PRD_v4 §24/§25).
+//! V2 authorization schema (`contracts/V2_AUTHORIZATION.md`, canonical): every
+//! payload starts with `DOMAIN_V2 ‖ op-tag ‖ account_id`, the user authorizes an
+//! absolute `max_fee` (never an exact fee), and reimbursement splits base →
+//! relayer (fee payer) and markup → canonical treasury per the signed
+//! fee-policy version. State is versioned (v1 80B legacy-readable, v2 112B with
+//! RP-ID hash); rotation never moves the PDA.
 
 #![no_std]
 #![allow(unexpected_cfgs)]
@@ -19,13 +23,15 @@ extern crate alloc;
 
 pub mod auth;
 pub mod errors;
+pub mod fee;
 pub mod instructions;
 pub mod secp256r1;
 pub mod sha256;
 pub mod state;
 
-/// Backend allowlist, baked at build time by `build.rs` from `PID_BACKEND`.
-/// Creation paths require the payer/relayer to equal it (PID-ownership proof).
+/// Backend allowlist + canonical treasury, baked at build time by `build.rs`
+/// from `PID_BACKEND` / `PID_TREASURY`. Creation paths require the payer/relayer
+/// to equal `BACKEND` (PID-ownership proof); fee markup goes to `TREASURY`.
 pub mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
 }
@@ -66,5 +72,6 @@ pub fn process_instruction(
             Instruction::UpdateAuthority => instructions::update_authority::process(program_id, accounts, &instruction_data),
             Instruction::Close => instructions::close::process(program_id, accounts, &instruction_data),
             Instruction::Activate => instructions::activate::process(program_id, accounts, &instruction_data),
+            Instruction::Execute => instructions::execute::process(program_id, accounts, &instruction_data),
         }
 }

@@ -5,9 +5,12 @@
 import {
   pidToSalt32,
   buildEvmAuthorizationPayload,
+  buildEvmAuthorizationPayloadV2,
+  buildEvmAuthorizationPayloadV3,
   deriveEvmSmartAccountAddress,
   fromAscii,
   keccak256,
+  OP_EVM,
   toHex,
 } from "@peridotvault/pid-core/dist/evm";
 import type { Bytes } from "@peridotvault/pid-core/dist/evm";
@@ -69,7 +72,7 @@ export class EvmAdapter {
     return this.rpc.getBalance(this.getAddress(pid));
   }
 
-  /** `deployAndInit(bytes32,bytes32,bytes32,bytes32,uint256,address)` calldata for the relayer/forge script. */
+  /** `deployAndInit(bytes32,bytes32,bytes32,bytes32,uint256,address)` calldata for the relayer/forge script (V1, frozen). */
   buildDeployAndInitData(
     salt: Bytes | string,
     x: Bytes,
@@ -90,7 +93,7 @@ export class EvmAdapter {
     return "0x" + toHex(selector("deployAndInit(bytes32,bytes32,bytes32,bytes32,uint256,address)")) + parts.join("");
   }
 
-  /** EVM authorization payload (what the passkey signs as the WebAuthn challenge). */
+  /** EVM authorization payload (what the passkey signs as the WebAuthn challenge) (V1, frozen). */
   buildExecutePayload(args: {
     chainId: bigint | number;
     account: string;
@@ -117,8 +120,286 @@ export class EvmAdapter {
     ]);
   }
 
-  /** eth_call data for the read-only poll checks (initialized/authorityX/authorityY/rpIdHash). */
-  viewCalldata(): { initialized: string; authorityX: string; authorityY: string; rpIdHash: string } {
+  /** V2 `deployAndInit` calldata: passkey-bound activation (salt, authority,
+   *  rpIdHash, maxFee, policy, deadline, fee + assertion). Matches the V2 factory. */
+  buildDeployAndInitDataV2(args: {
+    salt: Bytes | string;
+    x: Bytes;
+    y: Bytes;
+    rpIdHash: Bytes;
+    maxFee: bigint | number;
+    feePolicyVersion: number;
+    deadline: bigint | number;
+    fee: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const saltHex = typeof args.salt === "string" ? args.salt : "0x" + toHex(args.salt);
+    const sel = "0x" + toHex(selector("deployAndInit(bytes32,bytes32,bytes32,bytes32,uint256,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)"));
+    const head = [
+      pad32(saltHex),
+      pad32("0x" + toHex(args.x)),
+      pad32("0x" + toHex(args.y)),
+      pad32("0x" + toHex(args.rpIdHash)),
+      pad32("0x" + toHex(ube(args.maxFee, 32))),
+      pad32("0x" + toHex(ube(args.feePolicyVersion, 2))),
+      pad32("0x" + toHex(ube(args.deadline, 8))),
+      pad32("0x" + toHex(ube(args.fee, 32))),
+    ];
+    // Dynamic params: offsets relative to the start of the encoding (after selector).
+    // paddedLen includes the 32-byte length prefix.
+    const staticSize = 12 * 32;
+    const authData = args.authenticatorData;
+    const clientData = args.clientDataJSON;
+    constCoderCheck(authData, clientData, args.r, args.s);
+    const off0 = staticSize;
+    const off1 = off0 + paddedLen(authData.length);
+    const enc0 = pad32("0x" + toHex(ube(off0, 32)));
+    const enc1 = pad32("0x" + toHex(ube(off1, 32)));
+    // Static tail follows PARAMETER order: offsets first, then r/s.
+    const tail = [
+      enc0,
+      enc1,
+      encBytes32(args.r),
+      encBytes32(args.s),
+      encodeBytes(authData),
+      encodeBytes(clientData),
+    ];
+    return sel + head.join("") + tail.join("");
+  }
+
+  /** V2 EVM `execute` authorization payload (what the passkey signs as the challenge). */
+  buildExecutePayloadV2(args: {
+    chainId: bigint | number;
+    account: string;
+    nonce: bigint | number;
+    to: string;
+    value: bigint | number;
+    dataHash: Bytes;
+    deadline: bigint | number;
+    maxFee: bigint | number;
+    feePolicyVersion: number;
+  }): Uint8Array {
+    // Field-for-field match of the V2 contract's
+    // `abi.encodePacked(DOMAIN_V2, opTag, chainid, account, nonce:uint64, to, value, dataHash, deadline:uint64, maxFee, feePolicyVersion:uint16)`.
+    return buildEvmAuthorizationPayloadV2(OP_EVM.execute, [
+      ube(args.chainId, 32),
+      hexBytes(args.account, 20),
+      ube(args.nonce, 8),
+      hexBytes(args.to, 20),
+      ube(args.value, 32),
+      args.dataHash,
+      ube(args.deadline, 8),
+      ube(args.maxFee, 32),
+      ube(args.feePolicyVersion, 2),
+    ]);
+  }
+
+  /** V2 `updateAuthority` authorization payload (previously had no SDK builder). */
+  buildUpdateAuthorityPayloadV2(args: {
+    chainId: bigint | number;
+    account: string;
+    nonce: bigint | number;
+    newX: Bytes;
+    newY: Bytes;
+    deadline: bigint | number;
+  }): Uint8Array {
+    return buildEvmAuthorizationPayloadV2(OP_EVM.updateAuthority, [
+      ube(args.chainId, 32),
+      hexBytes(args.account, 20),
+      ube(args.nonce, 8),
+      args.newX,
+      args.newY,
+      ube(args.deadline, 8),
+    ]);
+  }
+
+  /** V2 activation authorization payload (what the new key signs for `deployAndInit`) (frozen). */
+  buildActivatePayloadV2(args: {
+    salt: Bytes | string;
+    x: Bytes;
+    y: Bytes;
+    rpIdHash: Bytes;
+    maxFee: bigint | number;
+    feePolicyVersion: number;
+    deadline: bigint | number;
+    chainId: bigint | number;
+    factory: string;
+  }): Uint8Array {
+    const saltBytes = typeof args.salt === "string" ? fromHexStrip0x(args.salt, 32) : args.salt;
+    return buildEvmAuthorizationPayloadV2(OP_EVM.activate, [
+      saltBytes,
+      args.x,
+      args.y,
+      args.rpIdHash,
+      ube(args.maxFee, 32),
+      ube(args.feePolicyVersion, 2),
+      ube(args.deadline, 8),
+      ube(args.chainId, 32),
+      hexBytes(args.factory, 20),
+    ]);
+  }
+
+  /** V3 `deployAndInit` calldata: passkey-bound activation (salt, authority,
+   *  rpIdHash, policy, deadline, networkFee + assertion). Matches the V3 factory:
+   *  `deployAndInit(bytes32,bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)`.
+   *  Static tail follows parameter order: offsets first, then r/s. */
+  buildDeployAndInitDataV3(args: {
+    salt: Bytes | string;
+    x: Bytes;
+    y: Bytes;
+    rpIdHash: Bytes;
+    feePolicyVersion: number;
+    deadline: bigint | number;
+    networkFee: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const saltHex = typeof args.salt === "string" ? args.salt : "0x" + toHex(args.salt);
+    const sel = "0x" + toHex(selector("deployAndInit(bytes32,bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)"));
+    const head = [
+      pad32(saltHex),
+      pad32("0x" + toHex(args.x)),
+      pad32("0x" + toHex(args.y)),
+      pad32("0x" + toHex(args.rpIdHash)),
+      pad32("0x" + toHex(ube(args.feePolicyVersion, 2))),
+      pad32("0x" + toHex(ube(args.deadline, 8))),
+      pad32("0x" + toHex(ube(args.networkFee, 32))),
+    ];
+    const staticSize = 11 * 32;
+    const authData = args.authenticatorData;
+    const clientData = args.clientDataJSON;
+    constCoderCheck(authData, clientData, args.r, args.s);
+    const off0 = staticSize;
+    const off1 = off0 + paddedLen(authData.length);
+    const tail = [
+      pad32("0x" + toHex(ube(off0, 32))),
+      pad32("0x" + toHex(ube(off1, 32))),
+      encBytes32(args.r),
+      encBytes32(args.s),
+      encodeBytes(authData),
+      encodeBytes(clientData),
+    ];
+    return sel + head.join("") + tail.join("");
+  }
+
+  /** V3 EVM `execute` authorization payload (no fee amounts — policy version only). */
+  buildExecutePayloadV3(args: {
+    chainId: bigint | number;
+    account: string;
+    nonce: bigint | number;
+    to: string;
+    value: bigint | number;
+    dataHash: Bytes;
+    deadline: bigint | number;
+    feePolicyVersion: number;
+  }): Uint8Array {
+    // Field-for-field match of the V3 contract's
+    // `abi.encodePacked(DOMAIN_V3, opTag, chainid, account, nonce:uint64, to, value, dataHash, deadline:uint64, feePolicyVersion:uint16)`.
+    return buildEvmAuthorizationPayloadV3(OP_EVM.execute, [
+      ube(args.chainId, 32),
+      hexBytes(args.account, 20),
+      ube(args.nonce, 8),
+      hexBytes(args.to, 20),
+      ube(args.value, 32),
+      args.dataHash,
+      ube(args.deadline, 8),
+      ube(args.feePolicyVersion, 2),
+    ]);
+  }
+
+  /** V3 `execute` calldata: `execute(address,uint256,bytes,uint64,uint16,uint256,bytes,bytes,bytes32,bytes32)`.
+   *  Static tail follows parameter order: offsets first, then r/s. */
+  buildExecuteDataV3(args: {
+    to: string;
+    value: bigint | number;
+    data: Bytes;
+    deadline: bigint | number;
+    feePolicyVersion: number;
+    networkFee: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const sel = "0x" + toHex(selector("execute(address,uint256,bytes,uint64,uint16,uint256,bytes,bytes,bytes32,bytes32)"));
+    const head = [
+      encodeAddress(args.to),
+      pad32("0x" + toHex(ube(args.value, 32))),
+    ];
+    const staticSize = 10 * 32;
+    const callData = args.data;
+    const authData = args.authenticatorData;
+    const clientData = args.clientDataJSON;
+    constCoderCheck(authData, clientData, args.r, args.s);
+    const offData = staticSize;
+    const offAuth = offData + paddedLen(callData.length);
+    const offClient = offAuth + paddedLen(authData.length);
+    const tail = [
+      pad32("0x" + toHex(ube(offData, 32))),
+      pad32("0x" + toHex(ube(args.deadline, 8))),
+      pad32("0x" + toHex(ube(args.feePolicyVersion, 2))),
+      pad32("0x" + toHex(ube(args.networkFee, 32))),
+      pad32("0x" + toHex(ube(offAuth, 32))),
+      pad32("0x" + toHex(ube(offClient, 32))),
+      encBytes32(args.r),
+      encBytes32(args.s),
+      encodeBytes(callData),
+      encodeBytes(authData),
+      encodeBytes(clientData),
+    ];
+    return sel + head.join("") + tail.join("");
+  }
+
+  /** V3 `updateAuthority` authorization payload (domain V3 only). */
+  buildUpdateAuthorityPayloadV3(args: {
+    chainId: bigint | number;
+    account: string;
+    nonce: bigint | number;
+    newX: Bytes;
+    newY: Bytes;
+    deadline: bigint | number;
+  }): Uint8Array {
+    return buildEvmAuthorizationPayloadV3(OP_EVM.updateAuthority, [
+      ube(args.chainId, 32),
+      hexBytes(args.account, 20),
+      ube(args.nonce, 8),
+      args.newX,
+      args.newY,
+      ube(args.deadline, 8),
+    ]);
+  }
+
+  /** V3 activation authorization payload (no fee amounts — policy version only). */
+  buildActivatePayloadV3(args: {
+    salt: Bytes | string;
+    x: Bytes;
+    y: Bytes;
+    rpIdHash: Bytes;
+    feePolicyVersion: number;
+    deadline: bigint | number;
+    chainId: bigint | number;
+    factory: string;
+  }): Uint8Array {
+    const saltBytes = typeof args.salt === "string" ? fromHexStrip0x(args.salt, 32) : args.salt;
+    return buildEvmAuthorizationPayloadV3(OP_EVM.activate, [
+      saltBytes,
+      args.x,
+      args.y,
+      args.rpIdHash,
+      ube(args.feePolicyVersion, 2),
+      ube(args.deadline, 8),
+      ube(args.chainId, 32),
+      hexBytes(args.factory, 20),
+    ]);
+  }
+
+  /** eth_call data for the read-only poll checks (initialized/authorityX/authorityY/rpIdHash/factory). */
+  viewCalldata(): { initialized: string; authorityX: string; authorityY: string; rpIdHash: string; factory: string } {
     return buildViewCalldata();
   }
 }
@@ -129,6 +410,7 @@ export function buildViewCalldata(): {
   authorityX: string;
   authorityY: string;
   rpIdHash: string;
+  factory: string;
 } {
   const sel = (sig: string) => "0x" + toHex(selector(sig));
   return {
@@ -136,6 +418,7 @@ export function buildViewCalldata(): {
     authorityX: sel("authorityX()"),
     authorityY: sel("authorityY()"),
     rpIdHash: sel("rpIdHash()"),
+    factory: sel("factory()"),
   };
 }
 
@@ -147,6 +430,37 @@ function hexBytes(hex: string, expected: number): Uint8Array {
   const out = new Uint8Array(expected);
   for (let i = 0; i < expected; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
   return out;
+}
+
+function fromHexStrip0x(hex: string, expected: number): Uint8Array {
+  return hexBytes(hex, expected);
+}
+
+/** Padded length of a dynamic ABI value. */
+function paddedLen(len: number): number {
+  return 32 + Math.ceil(len / 32) * 32;
+}
+
+/** ABI-encode dynamic `bytes` (length word + right-padded data). Returns hex without 0x. */
+function encodeBytes(data: Bytes): string {
+  const len = data.length;
+  const padded = Math.ceil(len / 32) * 32;
+  const out = new Uint8Array(32 + padded);
+  const view = new DataView(out.buffer);
+  // Length as uint256 BE in the last 8 bytes (lengths here always fit).
+  view.setUint32(28, len);
+  out.set(data, 32);
+  return toHex(out);
+}
+
+function encBytes32(data: Bytes): string {
+  if (data.length !== 32) throw new Error("expected 32 bytes");
+  return toHex(data);
+}
+
+function constCoderCheck(authData: Bytes, clientData: Bytes, r: Bytes, s: Bytes): void {
+  if (r.length !== 32 || s.length !== 32) throw new Error("r/s must be 32 bytes");
+  if (authData.length === 0 || clientData.length === 0) throw new Error("assertion bytes required");
 }
 
 // Re-exported so callers keep one import (mirrors pid-solana index habit).

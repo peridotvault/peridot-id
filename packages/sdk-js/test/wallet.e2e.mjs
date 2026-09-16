@@ -1,13 +1,17 @@
-// Task 009 acceptance: PeridotWallet topup (deposit-only) + backend-gated initialize +
-// sponsored withdraw via the adapter, against the local validator (test backend build).
+// Task 009 acceptance (V3): PeridotWallet topup (deposit-only) + backend-gated,
+// RP-ID-bound initialize + capped sponsored withdraw via the adapter, against the
+// local validator (test backend build).
 // Mock API covers identity/credentials only; chain reads go direct.
 import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { PeridotWallet } from "../dist/esm/index.js";
-import { SolanaAdapter, SolanaRpc, b64url, buildWebAuthnMessage, buildWithdrawPayload } from "@peridotvault/pid-solana";
+import { SolanaAdapter, SolanaRpc, b64url, buildWebAuthnMessage, buildWithdrawPayloadV3 } from "@peridotvault/pid-solana";
 import { pidToSeed32 } from "@peridotvault/pid-core";
+const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
+// Canonical revenue vault (must match the program's PID_TREASURY build const).
+const TREASURY = new PublicKey("J8HubZoRgyr4z29Rv97zXdEzWqMJQz69LFvWa82m25s9");
 const conn = new Connection("http://127.0.0.1:8899", "confirmed");
 const PID = "ifal@pid";
 function compressedPub(pub){const der=pub.export({format:"der",type:"spki"});const raw=der.subarray(der.length-65);const X=raw.subarray(1,33);return Buffer.concat([Buffer.from([(raw[64]&1)?0x03:0x02]),X]);}
@@ -32,8 +36,8 @@ const mockApi = {
   },
   async post(){ return { ok: true, data: {} }; },
 };
-// mock passkey signer
-const signer = { async sign(challenge){ const cj=Buffer.from(JSON.stringify({type:"webauthn.get",challenge:b64url(challenge),origin:"x"})); const ad=Buffer.alloc(37);ad.writeUInt32BE(1,33); const md=await buildWebAuthnMessage(ad,cj); let s=crypto.sign("sha256",md,{key:passkey.privateKey,dsaEncoding:"ieee-p1363"}); const r=BigInt("0x"+s.subarray(0,32).toString("hex"));let ss=BigInt("0x"+s.subarray(32).toString("hex"));if(ss>N/2n)ss=N-ss; return {credentialId:"cred",signature:Buffer.concat([Buffer.from(r.toString(16).padStart(64,"0"),"hex"),Buffer.from(ss.toString(16).padStart(64,"0"),"hex")]),authenticatorData:ad,clientDataJSON:cj}; } };
+// mock passkey signer (V3: authenticatorData carries the RP-ID hash + UV flag)
+const signer = { async sign(challenge){ const cj=Buffer.from(JSON.stringify({type:"webauthn.get",challenge:b64url(challenge),origin:"x"})); const ad=Buffer.concat([RP_ID_HASH,Buffer.from([0x05,0,0,0,1])]); const md=await buildWebAuthnMessage(ad,cj); let s=crypto.sign("sha256",md,{key:passkey.privateKey,dsaEncoding:"ieee-p1363"}); const r=BigInt("0x"+s.subarray(0,32).toString("hex"));let ss=BigInt("0x"+s.subarray(32).toString("hex"));if(ss>N/2n)ss=N-ss; return {credentialId:"cred",signature:Buffer.concat([Buffer.from(r.toString(16).padStart(64,"0"),"hex"),Buffer.from(ss.toString(16).padStart(64,"0"),"hex")]),authenticatorData:ad,clientDataJSON:cj}; } };
 const storeMap = new Map([["peridot.feePayer.ed25519", Buffer.from(feePayer.secretKey).toString("hex")]]);
 const wallet = new PeridotWallet(mockApi, { solanaRpcUrl: "http://127.0.0.1:8899", passkeySigner: signer, feePayerStore: { get: async(k)=>storeMap.get(k) ?? null, set: async(k,v)=>storeMap.set(k,v) } });
 const adapter = new SolanaAdapter(new SolanaRpc("http://127.0.0.1:8899"));
@@ -41,25 +45,24 @@ await conn.confirmTransaction(await conn.requestAirdrop(feePayer.publicKey, 10*L
 await conn.confirmTransaction(await conn.requestAirdrop(backend.publicKey, 10*LAMPORTS_PER_SOL), "confirmed");
 const dest = Keypair.generate();
 await conn.confirmTransaction(await conn.requestAirdrop(dest.publicKey, 2*LAMPORTS_PER_SOL), "confirmed");
-const treasury = Keypair.generate();
-await conn.confirmTransaction(await conn.requestAirdrop(treasury.publicKey, LAMPORTS_PER_SOL), "confirmed");
 const me = await wallet.me();
 assert.equal(me[0].id, "c1");
-// backend-gated, passkey-signed initialize (no squat without the key + backend)
-const initSig = await adapter.initialize(PID, AUTHORITY_COMP, backend, signer);
+// backend-gated, passkey-signed V3 initialize (no squat without the key + backend)
+const initSig = await adapter.initialize(PID, AUTHORITY_COMP, RP_ID_HASH, backend, signer);
 await conn.confirmTransaction(initSig, "confirmed");
 assert.equal(await adapter.isInitialized(PID), true, "initialized");
 // topup is deposit-only now (creation is the activate flow)
 const t = await wallet.topup({ amount: "10000000", asset: "SOL" });
 await conn.confirmTransaction(t.signature, "confirmed");
 console.log("topup OK; balance:", await wallet.getBalance());
-// sponsored withdraw via the adapter (treasury-bound challenge)
+// sponsored withdraw V3 via the adapter (op-tagged, account-bound, policy-only)
 const nonce = await adapter.getNonce(PID);
 const expiry = Math.floor(Date.now() / 1000) + 300;
 const fee = 100_000n;
-const payload = await buildWithdrawPayload(nonce, 5_000_000n, dest.publicKey, expiry, fee, treasury.publicKey);
+const networkFee = 100_000n;
+const payload = await buildWithdrawPayloadV3(pidToSeed32(PID), nonce, 5_000_000n, dest.publicKey, expiry, 1);
 const assertion = await signer.sign(payload);
-const wSig = await adapter.sponsoredWithdrawSol(PID, AUTHORITY_COMP, dest.publicKey, 5_000_000n, fee, nonce, expiry, assertion, backend, treasury.publicKey);
+const wSig = await adapter.sponsoredWithdrawSolV3(PID, AUTHORITY_COMP, dest.publicKey, 5_000_000n, 1, networkFee, nonce, expiry, assertion, backend, TREASURY);
 await conn.confirmTransaction(wSig, "confirmed");
 const st = await adapter.getStatus(wSig);
 assert.equal(st.confirmed, true);

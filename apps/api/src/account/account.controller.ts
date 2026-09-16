@@ -6,6 +6,7 @@ import { ActivationService, ActivationView } from "./activation.service";
 import { AccountService, ChainAccountView } from "./account.service";
 import { EvmActivationService, EvmActivationView } from "./evm-activation.service";
 import { ActivateDto } from "./dto/activate.dto";
+import { EvmActivateDto } from "./dto/evm-activate.dto";
 
 // ADR-008: 1 identity = 1 personal wallet. No account ids anywhere — the owner
 // always comes from the JWT, the wallet is resolved from it.
@@ -71,7 +72,8 @@ export class AccountController {
   evmActivate(
     @CurrentUser() user: AuthenticatedUser,
     @Param("chainRef") chainRef: string,
+    @Body() dto: EvmActivateDto,
   ): Promise<EvmActivationView> {
-    return this.evmActivationService.activate(user, chainRef);
+    return this.evmActivationService.activate(user, chainRef, dto);
   }
 }

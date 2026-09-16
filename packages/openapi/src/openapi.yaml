@@ -748,6 +748,176 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /wallet/rotate:
+    post:
+      tags: [wallet]
+      summary: Rotate the on-chain authority to a registered replacement credential
+      description: |
+        Credential-lifecycle rotation: register the replacement credential first (approval
+        flow), then the current key authorizes on-chain `update_authority` here. The old
+        credential is revoked in DB only after the chain confirms the new authority.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateAuthority"
+      responses:
+        "200":
+          description: Rotation result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signature, status]
+                properties:
+                  signature:
+                    type: string
+                  status:
+                    type: string
+                    enum: [confirmed, pending]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/withdraw/quote:
+    post:
+      tags: [wallet]
+      summary: Quote the realtime network fee for a sponsored withdrawal
+      description: |
+        Returns the backend's realtime network-cost estimate plus the fixed protocol
+        percentage for the active fee policy. The client signs the intent + policy
+        (never amounts) and echoes the quoted network fee as the drift reference.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset]
+              properties:
+                asset:
+                  type: string
+      responses:
+        "200":
+          description: Fee quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WithdrawQuote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/withdraw:
+    post:
+      tags: [wallet]
+      summary: Sponsored SOL/SPL withdrawal (passkey-authorized, V3)
+      description: |
+        The relayer submits and floats the network fee; the smart account reimburses
+        the attested network cost in full plus the on-chain-recomputed protocol fee,
+        atomically. The backend rejects drift beyond 120% of the quoted network fee.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SponsoredWithdraw"
+      responses:
+        "200":
+          description: Withdrawal result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SponsoredWithdrawResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/execute/quote:
+    post:
+      tags: [wallet]
+      summary: Quote the realtime network fee for a generic execute
+      description: |
+        Returns the backend's realtime network-cost estimate for the exact call
+        shape (target, metas, data length) plus the fixed protocol percentage
+        for the active fee policy. The client signs call_hash + policy (never
+        amounts) and echoes the quoted network fee as the drift reference.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SponsoredExecuteQuote"
+      responses:
+        "200":
+          description: Fee quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WithdrawQuote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/execute:
+    post:
+      tags: [wallet]
+      summary: Sponsored generic execute (passkey-authorized, V3)
+      description: |
+        One passkey-signed intent drives an arbitrary Solana call with the PDA as
+        signer (wallet parity with the EVM `execute`). The relayer submits and
+        floats the network fee; the smart account reimburses the attested network
+        cost in full plus the on-chain-recomputed protocol fee, atomically. The
+        backend rejects drift beyond 120% of the quoted network fee.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SponsoredExecute"
+      responses:
+        "200":
+          description: Execute result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SponsoredWithdrawResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /account:
     post:
       tags: [account]
@@ -890,7 +1060,7 @@ paths:
   /account/evm/{chainRef}/activate:
     post:
       tags: [account]
-      summary: Deploy the EVM counterfactual for one chain (relayer)
+      summary: Deploy the EVM counterfactual for one chain (relayer-submitted, passkey-authorized)
       security:
         - cookieAuth: []
       parameters:
@@ -900,6 +1070,12 @@ paths:
           schema:
             type: string
           description: CAIP-2 reference (e.g. 97, 10143)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvmActivate"
       responses:
         "200":
           description: Activation result
@@ -1492,7 +1668,7 @@ components:
 
     ActivationView:
       type: object
-      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports, chainTime, treasury]
+      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports, networkFeeLamports, protocolFeeBps, chainTime, treasury, feePolicyVersion, rpIdHash]
       properties:
         pid:
           type: string
@@ -1505,16 +1681,29 @@ components:
           type: integer
         requiredLamports:
           type: integer
+          description: "Total lamports required (rent + networkFee + protocolFee)"
+        networkFeeLamports:
+          type: integer
+          description: "Realtime network-cost estimate the backend will attest near"
+        protocolFeeBps:
+          type: integer
+          description: "Fixed protocol percentage in bps for the quoted policy version"
         chainTime:
           type: integer
           description: "Chain time (unix seconds) for the activation challenge expiry"
         treasury:
           type: string
-          description: "Fee recipient the client binds into the activation challenge"
+          description: "Canonical revenue vault (informational — enforced on-chain)"
+        feePolicyVersion:
+          type: integer
+          description: "Fee-policy version the quote was computed under (must be signed)"
+        rpIdHash:
+          type: string
+          description: "base64url sha256 of the WebAuthn RP ID (bound into the V3 activation payload)"
 
     EvmActivationView:
       type: object
-      required: [pid, chainReference, status, smartAccountAddress, deployed, balanceWei, requiredWei]
+      required: [pid, chainReference, status, smartAccountAddress, deployed, balanceWei, requiredWei, networkFeeWei, protocolFeeBps]
       properties:
         pid:
           type: string
@@ -1531,6 +1720,13 @@ components:
           type: string
         requiredWei:
           type: string
+          description: "Total wei required (networkFee + protocolFee)"
+        networkFeeWei:
+          type: string
+          description: "Realtime network-cost estimate the backend will attest near"
+        protocolFeeBps:
+          type: integer
+          description: "Fixed protocol percentage in bps for the quoted policy version"
 
     Authority:
       type: object
@@ -1631,11 +1827,190 @@ components:
 
     Activate:
       type: object
-      required: [expiry, assertion]
+      required: [expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
       properties:
         expiry:
           type: integer
-          description: "Chain-time expiry (unix seconds) the passkey signed against"
+          description: "Chain-time expiry (unix seconds) the passkey signed against (TTL ≤ 600s)"
+        feePolicyVersion:
+          type: integer
+          description: "Signed fee-policy version selecting the fixed protocol percentage"
+        quotedNetworkFeeLamports:
+          type: string
+          description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        assertion:
+          $ref: "#/components/schemas/PasskeyAssertion"
+
+    EvmActivate:
+      type: object
+      required: [quotedNetworkFeeWei, feePolicyVersion, deadline, assertion]
+      properties:
+        quotedNetworkFeeWei:
+          type: string
+          description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        feePolicyVersion:
+          type: integer
+          description: "Signed fee-policy version selecting the fixed protocol percentage"
+        deadline:
+          type: integer
+          description: "Authorization deadline (unix seconds, TTL ≤ 600s)"
+        assertion:
+          type: object
+          required: [id, r, s, authenticatorData, clientDataJSON]
+          properties:
+            id:
+              type: string
+              description: "Credential ID that produced the assertion"
+            r:
+              type: string
+              description: "hex 32-byte r of the secp256r1 signature over the V3 activation payload"
+            s:
+              type: string
+              description: "hex 32-byte s of the secp256r1 signature (low-S enforced on-chain)"
+            authenticatorData:
+              type: string
+              description: "hex authenticatorData (first 32 bytes must equal the RP-ID hash)"
+            clientDataJSON:
+              type: string
+              description: "base64url clientDataJSON (challenge = V3 activation payload)"
+
+    WithdrawQuote:
+      type: object
+      required: [networkFeeLamports, protocolFeeBps, feePolicyVersion, totalFeeLamports, chainTime, treasury]
+      properties:
+        networkFeeLamports:
+          type: string
+          description: "Realtime network-cost estimate the backend will attest near"
+        protocolFeeBps:
+          type: integer
+          description: "Fixed protocol percentage in bps for the quoted policy version"
+        feePolicyVersion:
+          type: integer
+          description: "Fee-policy version the quote was computed under (must be signed)"
+        totalFeeLamports:
+          type: string
+          description: "networkFee + protocolFee at quote time (informational)"
+        chainTime:
+          type: integer
+        treasury:
+          type: string
+          description: "Canonical revenue vault (informational — enforced on-chain)"
+
+    SponsoredWithdraw:
+      type: object
+      required: [asset, to, amount, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      properties:
+        asset:
+          type: string
+          description: '"SOL" or an SPL mint address'
+        to:
+          type: string
+        amount:
+          type: string
+        nonce:
+          type: string
+        expiry:
+          type: integer
+          description: "Chain-time expiry (unix seconds, TTL ≤ 600s)"
+        feePolicyVersion:
+          type: integer
+          description: "Signed fee-policy version selecting the fixed protocol percentage"
+        quotedNetworkFeeLamports:
+          type: string
+          description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        assertion:
+          $ref: "#/components/schemas/PasskeyAssertion"
+
+    SponsoredWithdrawResult:
+      type: object
+      required: [signature, networkFeeLamports, protocolFeeLamports, status]
+      properties:
+        signature:
+          type: string
+        networkFeeLamports:
+          type: string
+        protocolFeeLamports:
+          type: string
+        status:
+          type: string
+          enum: [confirmed, pending]
+
+    ExecuteMeta:
+      type: object
+      required: [address, writable, signer]
+      properties:
+        address:
+          type: string
+          description: "Bound CPI account (base58, in order)"
+        writable:
+          type: boolean
+        signer:
+          type: boolean
+          description: "Only the PDA or the relayer can carry the signer bit"
+
+    SponsoredExecuteQuote:
+      type: object
+      required: [target, metas, data]
+      properties:
+        target:
+          type: string
+          description: "Target program (never the smart-account program)"
+        metas:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/ExecuteMeta"
+        data:
+          type: string
+          description: "base64url inner instruction data (length shapes the estimate; content is opaque)"
+
+    SponsoredExecute:
+      type: object
+      required: [target, metas, data, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      properties:
+        target:
+          type: string
+          description: "Target program (never the smart-account program)"
+        metas:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/ExecuteMeta"
+        data:
+          type: string
+          description: "base64url inner instruction data (≤ 10_240 bytes)"
+        nonce:
+          type: string
+        expiry:
+          type: integer
+          description: "Chain-time expiry (unix seconds, TTL ≤ 600s)"
+        feePolicyVersion:
+          type: integer
+          description: "Signed fee-policy version selecting the fixed protocol percentage"
+        quotedNetworkFeeLamports:
+          type: string
+          description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        assertion:
+          $ref: "#/components/schemas/PasskeyAssertion"
+
+    RotateAuthority:
+      type: object
+      required: [oldCredentialId, newCredentialId, nonce, expiry, assertion]
+      properties:
+        oldCredentialId:
+          type: string
+          description: "Credential ID of the current (signing) authority"
+        newCredentialId:
+          type: string
+          description: "Credential ID of the already-registered replacement authority"
+        nonce:
+          type: string
+          description: "Chain nonce the current key signed against"
+        expiry:
+          type: integer
+          description: "Chain-time expiry (unix seconds, TTL ≤ 600s)"
         assertion:
           $ref: "#/components/schemas/PasskeyAssertion"
 

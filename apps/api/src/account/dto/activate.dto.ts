@@ -17,11 +17,21 @@ class ActivateAssertionDto {
 }
 
 export class ActivateDto {
-  /** Chain-time expiry (unix seconds) the passkey signed against. */
+  /** Chain-time expiry (unix seconds) the passkey signed against (TTL ≤ 600s enforced). */
   @IsInt()
   @Min(0)
   @Max(4102444800)
   expiry!: number;
+
+  /** The quoted network fee the client signed against (drift reference, not a cap). */
+  @IsString()
+  quotedNetworkFeeLamports!: string;
+
+  /** Signed fee-policy version (selects the protocol percentage; unknown versions rejected on-chain). */
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  feePolicyVersion!: number;
 
   @IsObject()
   @ValidateNested()

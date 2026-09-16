@@ -1,7 +1,7 @@
 // Peridot wallet client (task 009) — the PRD_v5 §9 surface over the Solana adapter.
 
 import { PublicKey } from "@peridotvault/pid-core";
-import { b64url, b64urlToBytes, buildActivatePayload, buildWithdrawPayload, buildWithdrawTokenPayload, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
+import { b64url, b64urlToBytes, buildActivatePayload, buildActivatePayloadV2, buildActivatePayloadV3, buildExecutePayloadV3, buildUpdateAuthorityPayloadV2, buildUpdateAuthorityPayloadV3, buildWithdrawPayload, buildWithdrawPayloadV2, buildWithdrawPayloadV3, buildWithdrawTokenPayload, buildWithdrawTokenPayloadV2, buildWithdrawTokenPayloadV3, executeCallHash, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import type { ParsedTx, PasskeySigner, TokenBalance, TransactionStatus } from "@peridotvault/pid-solana";
 import type { ApiError, Authority, ChainAccount, WalletTransaction } from "@peridotvault/pid-types";
 import { BrowserPasskeySigner } from "@peridotvault/pid-core";
@@ -26,6 +26,18 @@ export interface WithdrawInput {
   to: string; // Solana address (or ATA for tokens)
 }
 
+export interface ExecuteMetaInput {
+  address: string;
+  writable: boolean;
+  signer: boolean;
+}
+
+export interface ExecuteInput {
+  target: string; // target program (never the smart-account program)
+  metas: ExecuteMetaInput[]; // bound CPI accounts, in order (PDA as signer required)
+  data: string; // base64url inner instruction data (≤ 10_240 bytes)
+}
+
 interface ApiLike {
   get<T>(path: string): Promise<{ ok: boolean; data: T | ApiError }>;
   post<T>(path: string, body?: unknown): Promise<{ ok: boolean; data: T | ApiError }>;
@@ -44,8 +56,20 @@ export interface ActivationView {
   smartAccountAddress: string;
   balanceLamports: number;
   requiredLamports: number;
+  networkFeeLamports: number;
+  protocolFeeBps: number;
   chainTime: number;
   treasury: string;
+  feePolicyVersion: number;
+  /** base64url sha256 of the WebAuthn RP ID (bound into the activation payload). */
+  rpIdHash: string;
+}
+
+export interface RotateInput {
+  /** Credential id of the current (signing) authority. Defaults to the first active credential. */
+  oldCredentialId?: string;
+  /** Credential id of the already-registered replacement authority. */
+  newCredentialId: string;
 }
 
 function isApiError(v: unknown): v is ApiError {
@@ -148,49 +172,53 @@ export class PeridotWallet {
   }
 
   /**
-   * Relayer-sponsored withdrawal. Peridot's relayer pays the network fee (the smart account
-   * is a PDA and can't), and the smart account reimburses it with a small relay fee that the
-   * server quotes. The passkey signs the exact payload; the server broadcasts it.
+   * Relayer-sponsored withdrawal (V3). Peridot's relayer pays the network fee (the smart
+   * account is a PDA and can't); the smart account reimburses the attested network cost
+   * in full plus the on-chain-recomputed protocol fee. The client signs the intent plus
+   * the fee policy (never amounts) and echoes the quoted network fee as the drift
+   * reference; the server re-quotes once if fees moved beyond the drift bound.
    */
-  async withdraw(input: WithdrawInput): Promise<{ signature: string; relayFeeLamports: string; status: "confirmed" | "pending" }> {
+  async withdraw(input: WithdrawInput): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
     const pid = await this.pid();
     const amount = BigInt(input.amount);
     const destination = new PublicKey(input.to);
+    const accountId = pidToSeed32(pid);
 
-    // Fresh quote — the client signs the relay fee AND the treasury, both must match the server.
-    const quoteRes = await this.api.post<{ relayFeeLamports: string; chainTime: number; treasury: string }>(
-      "/v1/wallet/withdraw/quote",
-      { asset: input.asset },
-    );
-    if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
-    const quote = quoteRes.data as { relayFeeLamports: string; chainTime: number; treasury: string };
-    const relayFee = BigInt(quote.relayFeeLamports);
-    const treasury = new PublicKey(quote.treasury);
-    const expiry = Math.floor(quote.chainTime) + 300;
+    const getQuote = async () => {
+      const quoteRes = await this.api.post<{ networkFeeLamports: string; protocolFeeBps: number; feePolicyVersion: number; totalFeeLamports: string; chainTime: number; treasury: string }>(
+        "/v1/wallet/withdraw/quote",
+        { asset: input.asset },
+      );
+      if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
+      return quoteRes.data as { networkFeeLamports: string; protocolFeeBps: number; feePolicyVersion: number; totalFeeLamports: string; chainTime: number; treasury: string };
+    };
 
-    const nonce = await this.adapter.getNonce(pid);
-
-    const attempt = async (n: bigint): Promise<{ signature: string; relayFeeLamports: string; status: "confirmed" | "pending" }> => {
+    const attempt = async (
+      n: bigint,
+      quote: { networkFeeLamports: string; feePolicyVersion: number; chainTime: number },
+    ): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> => {
+      const expiry = Math.floor(quote.chainTime) + 300;
       const p =
         input.asset === "SOL"
-          ? await buildWithdrawPayload(n, amount, destination, expiry, relayFee, treasury)
-          : await buildWithdrawTokenPayload(
+          ? await buildWithdrawPayloadV3(accountId, n, amount, destination, expiry, quote.feePolicyVersion)
+          : await buildWithdrawTokenPayloadV3(
+              accountId,
               n,
               amount,
               destination,
               expiry,
-              relayFee,
-              treasury,
+              quote.feePolicyVersion,
               await this.adapter.tokenAta(pid, new PublicKey(input.asset)),
             );
       const a = await this.passkeySigner.sign(p, {});
-      const res = await this.api.post<{ signature: string; relayFeeLamports: string; status: "confirmed" | "pending" }>("/v1/wallet/withdraw", {
+      const res = await this.api.post<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }>("/v1/wallet/withdraw", {
         asset: input.asset,
         to: input.to,
         amount: input.amount,
         nonce: n.toString(),
         expiry,
-        relayFeeLamports: relayFee.toString(),
+        feePolicyVersion: quote.feePolicyVersion,
+        quotedNetworkFeeLamports: quote.networkFeeLamports,
         assertion: {
           id: a.credentialId,
           signature: b64url(a.signature),
@@ -202,16 +230,98 @@ export class PeridotWallet {
         const msg = (res.data as { message?: string | string[] }).message ?? "Withdrawal failed";
         throw new Error(Array.isArray(msg) ? msg.join(" ") : msg);
       }
-      return res.data as { signature: string; relayFeeLamports: string; status: "confirmed" | "pending" };
+      return res.data as { signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" };
     };
 
+    const nonce = await this.adapter.getNonce(pid);
+    const quote = await getQuote();
     try {
-      return await attempt(nonce);
+      return await attempt(nonce, quote);
     } catch (e) {
+      if (!(e instanceof Error)) throw e;
       // Stale nonce (another tx landed in between) — re-read and retry once.
-      if (e instanceof Error && /stale|newer nonce/i.test(e.message)) {
+      if (/stale|newer nonce/i.test(e.message)) {
         const freshNonce = await this.adapter.getNonce(pid);
-        return attempt(freshNonce);
+        return attempt(freshNonce, quote);
+      }
+      // Network fee moved beyond the drift bound — re-quote once and sign fresh intent.
+      if (/moved — re-quote|re-quote/i.test(e.message)) {
+        const fresh = await getQuote();
+        const freshNonce = await this.adapter.getNonce(pid);
+        return attempt(freshNonce, fresh);
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Relayer-sponsored generic execute (V3, disc 6) — wallet parity with the EVM
+   * `execute`: one passkey-signed intent drives an arbitrary Solana call with
+   * the PDA as signer. The client signs `call_hash` (target ‖ metas ‖ data) plus
+   * the fee policy; the server re-quotes once if fees moved beyond the drift bound.
+   */
+  async execute(input: ExecuteInput): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
+    const pid = await this.pid();
+    const accountId = pidToSeed32(pid);
+    const target = new PublicKey(input.target);
+    const metas = input.metas.map((m) => ({ address: new PublicKey(m.address), writable: m.writable, signer: m.signer }));
+    const data = b64urlToBytes(input.data);
+
+    const getQuote = async () => {
+      const quoteRes = await this.api.post<{ networkFeeLamports: string; protocolFeeBps: number; feePolicyVersion: number; totalFeeLamports: string; chainTime: number; treasury: string }>(
+        "/v1/wallet/execute/quote",
+        { target: input.target, metas: input.metas, data: input.data },
+      );
+      if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
+      return quoteRes.data as { networkFeeLamports: string; protocolFeeBps: number; feePolicyVersion: number; totalFeeLamports: string; chainTime: number; treasury: string };
+    };
+
+    const attempt = async (
+      n: bigint,
+      quote: { networkFeeLamports: string; feePolicyVersion: number; chainTime: number },
+    ): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> => {
+      const expiry = Math.floor(quote.chainTime) + 300;
+      const callHash = await executeCallHash(target, metas, data);
+      const p = await buildExecutePayloadV3(accountId, n, expiry, quote.feePolicyVersion, callHash);
+      const a = await this.passkeySigner.sign(p, {});
+      const res = await this.api.post<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }>("/v1/wallet/execute", {
+        target: input.target,
+        metas: input.metas,
+        data: input.data,
+        nonce: n.toString(),
+        expiry,
+        feePolicyVersion: quote.feePolicyVersion,
+        quotedNetworkFeeLamports: quote.networkFeeLamports,
+        assertion: {
+          id: a.credentialId,
+          signature: b64url(a.signature),
+          authenticatorData: b64url(a.authenticatorData),
+          clientDataJSON: b64url(a.clientDataJSON),
+        },
+      });
+      if (!res.ok || "statusCode" in res.data) {
+        const msg = (res.data as { message?: string | string[] }).message ?? "Execute failed";
+        throw new Error(Array.isArray(msg) ? msg.join(" ") : msg);
+      }
+      return res.data as { signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" };
+    };
+
+    const nonce = await this.adapter.getNonce(pid);
+    const quote = await getQuote();
+    try {
+      return await attempt(nonce, quote);
+    } catch (e) {
+      if (!(e instanceof Error)) throw e;
+      // Stale nonce (another tx landed in between) — re-read and retry once.
+      if (/stale|newer nonce/i.test(e.message)) {
+        const freshNonce = await this.adapter.getNonce(pid);
+        return attempt(freshNonce, quote);
+      }
+      // Network fee moved beyond the drift bound — re-quote once and sign fresh intent.
+      if (/moved — re-quote|re-quote/i.test(e.message)) {
+        const fresh = await getQuote();
+        const freshNonce = await this.adapter.getNonce(pid);
+        return attempt(freshNonce, fresh);
       }
       throw e;
     }
@@ -235,26 +345,30 @@ export class PeridotWallet {
   }
 
   /**
-   * Activate the smart account. The claim is passkey-signed (payload binds account,
-   * fee, expiry, treasury) so nobody else can squat the PDA or divert the fee; the
-   * server's relayer only submits. Reads the live view first for fee + chain time.
+   * Activate the smart account (V3). The claim is passkey-signed (payload binds op-tag,
+   * account, authority, RP-ID hash, policy, expiry — no amounts) so nobody else can
+   * squat the PDA or change the fee policy; the server's relayer only submits.
+   * Reads the live view first for policy + chain time.
    */
   async activate(): Promise<ActivationView | ApiError> {
     const pid = await this.pid();
     const viewRes = await this.activation();
     if (isApiError(viewRes)) return viewRes;
     const authority = await this.authorityCompressed();
+    const rpIdHash = b64urlToBytes(viewRes.rpIdHash);
     const expiry = Math.floor(viewRes.chainTime) + 300;
-    const payload = await buildActivatePayload(
+    const payload = await buildActivatePayloadV3(
       pidToSeed32(pid),
       authority,
-      BigInt(viewRes.requiredLamports),
+      rpIdHash,
+      viewRes.feePolicyVersion,
       expiry,
-      new PublicKey(viewRes.treasury),
     );
     const a = await this.passkeySigner.sign(payload, {});
     const res = await this.api.post<ActivationView>(`/v1/account/activate`, {
       expiry,
+      feePolicyVersion: viewRes.feePolicyVersion,
+      quotedNetworkFeeLamports: viewRes.networkFeeLamports.toString(),
       assertion: {
         id: a.credentialId,
         signature: b64url(a.signature),
@@ -263,6 +377,50 @@ export class PeridotWallet {
       },
     });
     return res.data;
+  }
+
+  /**
+   * Credential lifecycle rotation (V2): the replacement credential must already be
+   * registered (via the approval flow). The CURRENT key signs the rotation
+   * authorization; the server submits it and revokes the old credential only after
+   * the chain confirms the new authority.
+   */
+  async rotate(input: RotateInput): Promise<{ signature: string; status: "confirmed" | "pending" }> {
+    const pid = await this.pid();
+    const credsRes = await this.api.get<Authority[]>("/v1/credentials");
+    if (!credsRes.ok || isApiError(credsRes.data) || !Array.isArray(credsRes.data)) {
+      throw new Error("No passkey registered");
+    }
+    const creds = credsRes.data as Authority[];
+    const oldCred = input.oldCredentialId
+      ? creds.find((c) => c.credentialId === input.oldCredentialId)
+      : creds.find((c) => c.credentialId != null);
+    const newCred = creds.find((c) => c.credentialId === input.newCredentialId);
+    if (!oldCred?.credentialId) throw new Error("Current credential not found");
+    if (!newCred?.credentialId) throw new Error("Replacement credential is not registered — register it first");
+    const newKey = b64urlToBytes(newCred.publicKey);
+    const nonce = await this.adapter.getNonce(pid);
+    const chainTime = await this.adapter.chainTime();
+    const expiry = Math.floor(chainTime) + 300;
+    const payload = await buildUpdateAuthorityPayloadV3(pidToSeed32(pid), nonce, newKey, expiry);
+    const a = await this.passkeySigner.sign(payload, { allowCredentialId: oldCred.credentialId });
+    const res = await this.api.post<{ signature: string; status: "confirmed" | "pending" }>("/v1/wallet/rotate", {
+      oldCredentialId: oldCred.credentialId,
+      newCredentialId: newCred.credentialId,
+      nonce: nonce.toString(),
+      expiry,
+      assertion: {
+        id: a.credentialId,
+        signature: b64url(a.signature),
+        authenticatorData: b64url(a.authenticatorData),
+        clientDataJSON: b64url(a.clientDataJSON),
+      },
+    });
+    if (!res.ok || "statusCode" in res.data) {
+      const msg = (res.data as { message?: string | string[] }).message ?? "Rotation failed";
+      throw new Error(Array.isArray(msg) ? msg.join(" ") : msg);
+    }
+    return res.data as { signature: string; status: "confirmed" | "pending" };
   }
 
   /** Current activation status of the smart account. */

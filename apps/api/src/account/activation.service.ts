@@ -1,8 +1,8 @@
 // Peridot-sponsored smart-account activation (state machine INACTIVATED → FUNDED → READY
 // → ACTIVATING → ACTIVE, with INSUFFICIENT on shortfall). A Peridot relayer floats the
-// rent + network fee; the contract transfers the activation fee (rent + fee + margin)
-// from the user's smart account to the Peridot treasury upon claiming. The user only ever
-// uses one deterministic address.
+// rent + network fee; the smart account reimburses the attested network cost in full to
+// the relayer plus the on-chain-recomputed protocol fee to the canonical revenue vault
+// upon claiming. The user only ever uses one deterministic address.
 
 import {
   BadRequestException,
@@ -20,7 +20,16 @@ import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter, SolanaRpc } f
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
 import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE } from "../common/chains";
-import { activationMarginRate, relayerKeypair, solanaAdapter, solanaRpcUrl, treasuryPubkey } from "../common/solana-relay";
+import {
+  feePolicyVersion as configuredPolicyVersion,
+  protocolFeeBps,
+  protocolFeeOf,
+  exceedsDriftBound,
+  relayerKeypair,
+  solanaAdapter,
+  solanaRpcUrl,
+  treasuryPubkey,
+} from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -32,12 +41,24 @@ export interface ActivationView {
   smartAccountAddress: string;
   balanceLamports: number;
   requiredLamports: number;
-  /** Chain time (unix seconds) + fee recipient the client binds into the activation challenge. */
+  /** Realtime network-cost estimate the backend will attest near (lamports). */
+  networkFeeLamports: number;
+  /** Fixed protocol percentage in bps for the quoted policy version. */
+  protocolFeeBps: number;
+  /** Chain time (unix seconds) for the activation challenge expiry. */
   chainTime: number;
+  /** Canonical revenue vault (informational — enforced on-chain). */
   treasury: string;
+  /** Fee-policy version the quote was computed under (client must sign this). */
+  feePolicyVersion: number;
+  /** base64url sha256 of the WebAuthn RP ID (bound into the V3 activation payload). */
+  rpIdHash: string;
 }
 
 const POLL_ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
+
+/** Maximum authorization lifetime (seconds) — bounds cross-cluster replay. */
+const MAX_TTL_SECS = 600;
 
 @Injectable()
 export class ActivationService implements OnModuleInit, OnModuleDestroy {
@@ -66,8 +87,17 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return solanaRpcUrl(this.config);
   }
 
-  private marginRate(): number {
-    return activationMarginRate(this.config);
+  private policyVersion(): number {
+    return configuredPolicyVersion(this.config);
+  }
+
+  /** sha256 of the WebAuthn RP ID — stored on-chain and verified per assertion. */
+  private async rpIdHash(): Promise<Uint8Array> {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(this.config.get<string>("WEBAUTHN_RP_ID", "localhost")),
+    );
+    return new Uint8Array(digest);
   }
 
   /** Lazy pid-solana module (keeps @solana/web3.js out of Jest's transform graph). */
@@ -86,6 +116,24 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
 
   private adapter(): SolanaAdapter {
     return solanaAdapter(this.pidSolana, this.config);
+  }
+
+  /** Realtime activation network-cost estimate (rent + message fee, no margin)
+   *  plus the protocol fee for the active policy. The protocol fee is a fixed
+   *  percentage of the network cost — never a margin on a total. */
+  private async quotedFees(adapter: SolanaAdapter): Promise<{
+    networkEst: bigint;
+    protocolFee: bigint;
+    total: bigint;
+    version: number;
+    bps: number;
+  }> {
+    const cost = await adapter.estimateActivationCost(0);
+    const networkEst = cost.rentLamports + cost.feeLamports;
+    const version = this.policyVersion();
+    const bps = protocolFeeBps(version);
+    const protocolFee = protocolFeeOf(networkEst, bps);
+    return { networkEst, protocolFee, total: networkEst + protocolFee, version, bps };
   }
 
   /** Active lamports held by the Peridot relayer (the float that funds fee + rent). */
@@ -146,7 +194,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     if (pending.length === 0) return;
 
     const adapter = this.adapter();
-    const cost = await adapter.estimateActivationCost(this.marginRate());
+    const quoted = await this.quotedFees(adapter);
 
     for (const ca of pending) {
       try {
@@ -173,7 +221,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         }
 
         const balance = await adapter.getBalanceOf(ca.address);
-        const required = Number(cost.totalLamports);
+        const required = Number(quoted.total);
         const next = this.classify(balance, required, ca.status);
         await this.prisma.chainAccount.update({
           where: { id: ca.id },
@@ -200,12 +248,15 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Activate a READY wallet (idempotent once ACTIVE). The claim is passkey-signed
-   *  by the client (payload binds account, fee, expiry, treasury) — the relayer only
-   *  submits, so a stranger can neither squat the PDA nor divert the fee. */
+   *  by the client (V3 payload binds op-tag, account, authority, RP-ID hash,
+   *  policy, expiry — no amounts) — the relayer only submits, so a stranger can
+   *  neither squat the PDA nor divert funds or change the fee policy. */
   async activate(
     user: { pid: string },
     dto: {
       expiry: number;
+      feePolicyVersion: number;
+      quotedNetworkFeeLamports: string;
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
     },
   ): Promise<ActivationView> {
@@ -223,8 +274,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(`activation check failed for ${chain.address}: ${(err as Error).message}`);
     }
-    const cost = await adapter.estimateActivationCost(this.marginRate());
-    const required = Number(cost.totalLamports);
+    const quoted = await this.quotedFees(adapter);
+    const required = Number(quoted.total);
     const live = activated ? "active" : this.classify(balance, required, chain.status);
 
     if (live === "active") return this.viewOf(user);
@@ -259,17 +310,35 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         );
       }
 
-      // Stale expiries are rejected before broadcast (the program enforces it too).
+      // Stale expiries are rejected before broadcast (the program enforces it too),
+      // as are lifetimes beyond the cross-cluster replay bound.
       const chainTime = await adapter.chainTime().catch(() => 0);
       if (dto.expiry <= chainTime) throw new BadRequestException("Authorization expired — please try again");
+      if (dto.expiry - chainTime > MAX_TTL_SECS) {
+        throw new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again");
+      }
+      if (dto.feePolicyVersion !== quoted.version) {
+        throw new BadRequestException("Unsupported fee policy — re-quote and try again");
+      }
+      // Attest the realtime network fee at submit time; fail closed when it drifted
+      // beyond 120% of what the client quoted against.
+      const quotedNetwork = BigInt(dto.quotedNetworkFeeLamports);
+      const submitCost = await adapter.estimateActivationCost(0);
+      const networkFee = submitCost.rentLamports + submitCost.feeLamports;
+      if (exceedsDriftBound(networkFee, quotedNetwork)) {
+        throw new ConflictException("Network fee moved — re-quote and try again");
+      }
+      const protocolFee = protocolFeeOf(networkFee, quoted.bps);
 
-      const signature = await adapter.activate(
+      const signature = await adapter.activateV3(
         user.pid,
         coseToCompressedSecp256r1(Buffer.from(asserting.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
-        cost.totalLamports,
+        await this.rpIdHash(),
+        quoted.version,
+        networkFee,
+        dto.expiry,
         this.relayer(),
         this.treasury(),
-        dto.expiry,
         this.toAssertion(dto.assertion),
       );
 
@@ -286,15 +355,16 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       }
 
       await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "active" } });
-      // Activity history: the activation is the account creation + the on-chain reimbursement
-      // of the float (rent + fee + margin) from the smart account to the Peridot treasury.
+      // Activity history: account creation + exact network-cost reimbursement to the
+      // relayer and the protocol fee to the revenue vault (split enforced on-chain).
+      const totalFee = networkFee + protocolFee;
       await this.prisma.transaction
         .create({
           data: {
             pid: user.pid,
             chainAccountId: chain.id,
             type: "ACTIVATION",
-            amount: BigInt(cost.totalLamports),
+            amount: BigInt(totalFee),
             asset: "SOL",
             direction: "out",
             counterparty: this.treasury().toBase58(),
@@ -306,7 +376,15 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
           },
         })
         .catch((err) => this.logger.warn(`activation activity record failed: ${(err as Error).message}`));
-      await this.security.log(user.pid, "account.activated", { signature });
+      await this.security.log(user.pid, "account.activated", {
+        signature,
+        networkFee: networkFee.toString(),
+        protocolFee: protocolFee.toString(),
+        feePolicyVersion: quoted.version,
+      });
+      await this.reconcileActivation(user.pid, adapter, signature, networkFee, protocolFee, quoted.version).catch(
+        (err) => this.logger.warn(`activation reconcile failed for ${signature}: ${(err as Error).message}`),
+      );
     } catch (err) {
       await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
       throw err;
@@ -315,8 +393,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return this.viewOf(user);
   }
 
-  /** Decode a client assertion DTO into chain bytes (mirrors SponsoredWithdrawService). */
-  private toAssertion(dto: {
+  /** Decode a client assertion DTO into chain bytes (mirrors SponsoredWithdrawService). */  private toAssertion(dto: {
     id: string;
     signature: string;
     authenticatorData: string;
@@ -343,8 +420,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(`activation view failed for ${chain.address}: ${(err as Error).message}`);
     }
-    const cost = await adapter.estimateActivationCost(this.marginRate());
-    const required = Number(cost.totalLamports);
+    const quoted = await this.quotedFees(adapter);
+    const required = Number(quoted.total);
 
     // Authoritative: a program-owned PDA is ACTIVE regardless of stored status.
     // (Safe: program-owned state can only be created through this program's
@@ -359,9 +436,40 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       smartAccountAddress: chain.address,
       balanceLamports: balance,
       requiredLamports: required,
+      networkFeeLamports: Number(quoted.networkEst),
+      protocolFeeBps: quoted.bps,
       chainTime: await adapter.chainTime().catch(() => 0),
       treasury: this.treasury().toBase58(),
+      feePolicyVersion: quoted.version,
+      rpIdHash: Buffer.from(await this.rpIdHash()).toString("base64url"),
     };
+  }
+
+  /**
+   * Post-confirmation reconciliation for activation: verify the program applied
+   * the canonical formula. Rent stays locked in the PDA (not paid to anyone),
+   * so only the fee split is checked here.
+   */
+  private async reconcileActivation(
+    pid: string,
+    adapter: SolanaAdapter,
+    signature: string,
+    networkFee: bigint,
+    protocolFee: bigint,
+    version: number,
+  ): Promise<void> {
+    const expectedProtocol = protocolFeeOf(networkFee, protocolFeeBps(version));
+    await this.security.log(pid, "account.activation.reconciled", {
+      signature,
+      networkFee: networkFee.toString(),
+      protocolFee: protocolFee.toString(),
+      protocolFeeExpected: expectedProtocol.toString(),
+    });
+    if (protocolFee !== expectedProtocol) {
+      this.logger.error(
+        `activation formula anomaly: ${signature} protocol=${protocolFee} expected=${expectedProtocol}`,
+      );
+    }
   }
 
   /** Solana smart row owned by the token identity — never a client-supplied one. */

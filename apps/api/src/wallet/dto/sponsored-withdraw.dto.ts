@@ -32,15 +32,21 @@ export class SponsoredWithdrawDto {
   @Matches(/^\d+$/, { message: "Nonce must be an integer" })
   nonce!: string;
 
-  /** Chain-time expiry (unix seconds) the passkey signed against. */
+  /** Chain-time expiry (unix seconds) the passkey signed against (TTL ≤ 600s enforced). */
   @IsInt()
   @Min(0)
   @Max(4102444800)
   expiry!: number;
 
-  /** The signed relay fee (lamports) reimbursed to the Peridot treasury. */
-  @Matches(/^\d+$/, { message: "Relay fee must be an integer" })
-  relayFeeLamports!: string;
+  /** The quoted network fee the client signed against (drift reference, not a cap). */
+  @Matches(/^\d+$/, { message: "Quoted network fee must be an integer" })
+  quotedNetworkFeeLamports!: string;
+
+  /** Signed fee-policy version (selects the protocol percentage; unknown versions rejected on-chain). */
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  feePolicyVersion!: number;
 
   @IsOptional()
   @IsString()
@@ -59,6 +65,7 @@ export class WithdrawQuoteDto {
 
 export interface SponsoredWithdrawResult {
   signature: string;
-  relayFeeLamports: string;
+  networkFeeLamports: string;
+  protocolFeeLamports: string;
   status: "confirmed" | "pending";
 }

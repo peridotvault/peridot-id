@@ -6,6 +6,7 @@
 // chain state live and returns wei as strings.
 
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -20,7 +21,13 @@ import { EvmAdapter, EvmRpc, buildViewCalldata, toHex } from "@peridotvault/pid-
 import { ChainRegistryService, type RegistryChain } from "../chain/chain-registry.service";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
 import { ACCOUNT_TYPE_SMART, EIP155_NAMESPACE } from "../common/chains";
-import { activationMarginRate } from "../common/solana-relay";
+import {
+  feePolicyVersion as configuredPolicyVersion,
+  protocolFeeBps,
+  protocolFeeOf,
+  exceedsDriftBound,
+  MAX_TTL_SECS,
+} from "../common/solana-relay";
 import { coseToRawXy } from "../credentials/cose";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -33,11 +40,18 @@ export interface EvmActivationView {
   deployed: boolean;
   balanceWei: string;
   requiredWei: string;
+  /** Realtime network-cost estimate the backend will attest near (wei). */
+  networkFeeWei: string;
+  /** Fixed protocol percentage in bps for the quoted policy version. */
+  protocolFeeBps: number;
 }
 
 const ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
-// `initialize` selector + deploy estimate headroom (measured ~250k, margin via rate).
+// `initialize` selector + deploy estimate headroom (measured ~250k + V3 assertion calldata).
 const DEPLOY_GAS_ESTIMATE = 350_000n;
+// OP-Stack L1-fee oracle (Base/OP Sepolia family). Absent chains return 0 (best-effort).
+const L1_GAS_ORACLE = "0x420000000000000000000000000000000000000F";
+const L1_FEE_SELECTOR = "49904e67"; // getL1Fee(bytes)
 
 @Injectable()
 export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
@@ -80,33 +94,47 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     return new EvmAdapter(await this.rpcFor(chainReference), deployment.factory, deployment.implementation);
   }
 
-  private marginRate(): number {
-    return activationMarginRate(this.config);
+  private policyVersion(): number {
+    return configuredPolicyVersion(this.config);
   }
 
-  /** Live deploy cost: static gas estimate × live gas price × (1 + margin), plus the activation fee. */
-  private async requiredWei(chainReference: string): Promise<bigint> {
+  /** Realtime network-cost estimate for the deploy (no margin — the protocol fee is separate). */
+  private async networkFeeWei(chainReference: string): Promise<bigint> {
     const rpc = await this.rpcFor(chainReference);
     // 1 gwei fallback when the node hides the price.
     const gasPrice = await rpc.gasPrice().catch(() => 1_000_000_000n);
-    const margin = BigInt(Math.round(this.marginRate() * 100));
-    return ((DEPLOY_GAS_ESTIMATE * gasPrice * (100n + margin)) / 100n) + this.activationFeeWei();
+    return DEPLOY_GAS_ESTIMATE * gasPrice;
   }
 
-  /** On-chain revenue hook (mirrors SVM `activation_fee`): pulled to treasury on init. Zero disables. */
-  private activationFeeWei(): bigint {
+  /** Live deploy cost attested by the backend: network estimate + L2 data fee where available. */
+  private async requiredWei(chainReference: string): Promise<bigint> {
+    return this.networkFeeWei(chainReference);
+  }
+
+  /**
+   * L1 data fee for a confirmed tx via the OP-Stack oracle (best-effort: 0 when the
+   * chain has no oracle). Uses the actual transaction input, so this is exact where
+   * the oracle exists — the reconciliation counterpart to the on-chain sanity bound.
+   */
+  private async l1DataFeeWei(chainReference: string, txHash: string): Promise<bigint> {
     try {
-      const fee = BigInt(this.config.get<string>("EVM_ACTIVATION_FEE_WEI", "0") ?? "0");
-      return fee < 0n ? 0n : fee;
+      const rpc = await this.rpcFor(chainReference);
+      const tx = await rpc.call<{ input: string }>("eth_getTransactionByHash", [txHash]);
+      if (!tx || typeof tx.input !== "string" || tx.input === "0x") return 0n;
+      const input = (tx.input.startsWith("0x") ? tx.input.slice(2) : tx.input) as string;
+      // getL1Fee(bytes): selector + offset(32) + length(32) + padded bytes.
+      const lenHex = input.length / 2;
+      const paddedLen = Math.ceil(lenHex / 32) * 32;
+      const call =
+        `0x${L1_FEE_SELECTOR}` +
+        `0000000000000000000000000000000000000000000000000000000000000020` +
+        lenHex.toString(16).padStart(64, "0") +
+        input.padEnd(paddedLen * 2, "0");
+      const res = await rpc.call<string>("eth_call", [{ to: L1_GAS_ORACLE, data: call }, "latest"]);
+      return BigInt(res);
     } catch {
       return 0n;
     }
-  }
-
-  /** Zero address disables the fee (matches the contract's skip path). */
-  private treasury(): string {
-    const raw = this.config.get<string>("EVM_TREASURY_ADDRESS", "") ?? "";
-    return /^0x[0-9a-fA-F]{40}$/.test(raw) ? raw : "0x0000000000000000000000000000000000000000";
   }
 
   private classify(balance: bigint, required: bigint, current: string): ChainAccountStatus {
@@ -129,7 +157,8 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         if (!deployed) {
           if (ca.status === "active") continue;
           const balance = await rpc.getBalance(ca.address);
-          const required = await this.requiredWei(ca.chain.reference).catch(() => 0n);
+          const networkFee = await this.networkFeeWei(ca.chain.reference).catch(() => 0n);
+          const required = networkFee + protocolFeeOf(networkFee, protocolFeeBps(this.policyVersion()));
           const next = this.classify(balance, required, ca.status);
           if (next !== ca.status) {
             await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: next } });
@@ -138,7 +167,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         }
         // Code alone proves nothing (squat/grief deploys exist): promote only on
         // exact authority match, demote mismatched ACTIVE rows back to ready.
-        const matches = await this.deploymentMatches(rpc, ca.address, ca.pid).catch(() => false);
+        const matches = await this.deploymentMatches(rpc, ca.address, ca.pid, ca.chain.reference).catch(() => false);
         if (matches) {
           if (ca.status !== "active") {
             await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: "active" } });
@@ -158,24 +187,34 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * True when the deployed proxy is initialized with the registered passkey
-   * authority and RP ID. Fail-closed: any error (no credential, bad RPC) is false.
+   * authority and RP ID **and** canonically associated with our factory.
+   * Fail-closed: any error (no credential, bad RPC) is false.
    */
-  private async deploymentMatches(rpc: EvmRpc, address: string, pid: string): Promise<boolean> {
+  private async deploymentMatches(
+    rpc: EvmRpc,
+    address: string,
+    pid: string,
+    chainReference: string,
+  ): Promise<boolean> {
     const authority = await requireActiveAuthority(this.prisma, pid);
     const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
     const rpIdHash = await this.sha256Hex(this.config.get<string>("WEBAUTHN_RP_ID", "localhost"));
+    const deployment = await this.chains.deploymentFor(chainReference);
     const v = buildViewCalldata();
-    const [init, ax, ay, rp] = await Promise.all([
+    const [init, ax, ay, rp, factory] = await Promise.all([
       rpc.call<string>("eth_call", [{ to: address, data: v.initialized }, "latest"]),
       rpc.call<string>("eth_call", [{ to: address, data: v.authorityX }, "latest"]),
       rpc.call<string>("eth_call", [{ to: address, data: v.authorityY }, "latest"]),
       rpc.call<string>("eth_call", [{ to: address, data: v.rpIdHash }, "latest"]),
+      rpc.call<string>("eth_call", [{ to: address, data: v.factory }, "latest"]),
     ]);
     return (
       BigInt(init) === 1n &&
       ax.toLowerCase() === `0x${toHex(new Uint8Array(x))}` &&
       ay.toLowerCase() === `0x${toHex(new Uint8Array(y))}` &&
-      rp.toLowerCase() === `0x${toHex(rpIdHash)}`
+      rp.toLowerCase() === `0x${toHex(rpIdHash)}` &&
+      !!deployment &&
+      factory.toLowerCase() === `0x${"0".repeat(24)}${deployment.factory.slice(2).toLowerCase()}`
     );
   }
 
@@ -193,8 +232,10 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(`evm view failed for ${row.address}: ${(err as Error).message}`);
     }
-    const required = await this.requiredWei(chainReference).catch(() => 0n);
-    const status = deployed && (await this.deploymentMatches(rpc, row.address, user.pid).catch(() => false))
+    const networkFee = await this.networkFeeWei(chainReference).catch(() => 0n);
+    const version = this.policyVersion();
+    const required = networkFee + protocolFeeOf(networkFee, protocolFeeBps(version));
+    const status = deployed && (await this.deploymentMatches(rpc, row.address, user.pid, chainReference).catch(() => false))
       ? "active"
       : this.classify(balance, required, row.status);
     return {
@@ -205,14 +246,28 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       deployed,
       balanceWei: balance.toString(),
       requiredWei: required.toString(),
+      networkFeeWei: networkFee.toString(),
+      protocolFeeBps: protocolFeeBps(version),
     };
   }
 
   /**
-   * Deploy the counterfactual via the Peridot relayer (`deployAndInit` with the
-   * registered passkey as authority). Idempotent once ACTIVE.
+   * Deploy the counterfactual via the Peridot relayer (V3 passkey-bound
+   * `deployAndInit` with the registered passkey as authority). The user's
+   * assertion binds salt, authority, rpIdHash, policy, deadline,
+   * chainId and factory (no amounts) — the relayer submits but authorizes
+   * nothing. Idempotent once ACTIVE.
    */
-  async activate(user: { pid: string }, chainReference: string): Promise<EvmActivationView> {
+  async activate(
+    user: { pid: string },
+    chainReference: string,
+    dto: {
+      quotedNetworkFeeWei: string;
+      feePolicyVersion: number;
+      deadline: number;
+      assertion: { id: string; r: string; s: string; authenticatorData: string; clientDataJSON: string };
+    },
+  ): Promise<EvmActivationView> {
     const chain = await this.chainOrThrow(chainReference);
     const row = await this.ownedRow(user.pid, chain);
     const adapter = await this.adapterFor(chainReference);
@@ -234,37 +289,68 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
+    const version = this.policyVersion();
+    if (dto.feePolicyVersion !== version) {
+      throw new BadRequestException("Unsupported fee policy — re-quote and try again");
+    }
+    const bps = protocolFeeBps(version);
+    const rpc = await this.rpcFor(chainReference);
+    const now = await rpc.blockTimestamp().catch(() => Math.floor(Date.now() / 1000));
+    if (dto.deadline <= now) throw new BadRequestException("Authorization expired — please try again");
+    if (dto.deadline - now > MAX_TTL_SECS) {
+      throw new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again");
+    }
+    // Attest the realtime network fee at submit time; fail closed when it drifted
+    // beyond 120% of what the client quoted against.
+    const quoted = BigInt(dto.quotedNetworkFeeWei);
+    const networkFee = await this.networkFeeWei(chainReference);
+    if (exceedsDriftBound(networkFee, quoted)) {
+      throw new ConflictException("Network fee moved — re-quote and try again");
+    }
+    const protocolFee = protocolFeeOf(networkFee, bps);
+    const asserting = await this.prisma.authority.findFirst({
+      where: { pid: user.pid, credentialId: dto.assertion.id, status: "active" },
+    });
+    if (!asserting) throw new BadRequestException("Unknown or inactive passkey");
+
     await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "activating" } });
     try {
       const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
       const rpIdHash = await this.sha256Hex(this.config.get<string>("WEBAUTHN_RP_ID", "localhost"));
-      const data = adapter.buildDeployAndInitData(
-        adapter.getSalt(user.pid),
-        new Uint8Array(x),
-        new Uint8Array(y),
+      const data = adapter.buildDeployAndInitDataV3({
+        salt: adapter.getSalt(user.pid),
+        x: new Uint8Array(x),
+        y: new Uint8Array(y),
         rpIdHash,
-        this.activationFeeWei(),
-        this.treasury(),
-      );
+        feePolicyVersion: version,
+        deadline: dto.deadline,
+        networkFee,
+        authenticatorData: fromHexDto(dto.assertion.authenticatorData),
+        clientDataJSON: Buffer.from(dto.assertion.clientDataJSON, "base64url"),
+        r: fromHexDto(dto.assertion.r),
+        s: fromHexDto(dto.assertion.s),
+      });
       const receipt = await this.sendDeployTx(chainReference, secret as `0x${string}`, data);
       // Verify the relayer deployed OUR authority (fail closed on mismatch).
       const matches = await this.deploymentMatches(
         await this.rpcFor(chainReference),
         row.address,
         user.pid,
+        chainReference,
       ).catch(() => false);
       if (!matches) throw new Error(`evm deploy verification failed: ${receipt.hash}`);
       await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "active" } });
+      const deployment = await this.chains.deploymentFor(chainReference);
       await this.prisma.transaction
         .create({
           data: {
             pid: user.pid,
             chainAccountId: row.id,
             type: "ACTIVATION",
-            amount: BigInt(receipt.costWei),
+            amount: networkFee + protocolFee,
             asset: chain.nativeSymbol,
             direction: "out",
-            counterparty: receipt.from,
+            counterparty: deployment?.factory ?? receipt.from,
             chain: "eip155",
             network: chain.name,
             txHash: receipt.hash,
@@ -273,12 +359,57 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
           },
         })
         .catch((err) => this.logger.warn(`evm activation activity record failed: ${(err as Error).message}`));
-      await this.security.log(user.pid, "account.evm.activated", { txHash: receipt.hash });
+      await this.security.log(user.pid, "account.evm.activated", {
+        txHash: receipt.hash,
+        networkFee: networkFee.toString(),
+        protocolFee: protocolFee.toString(),
+        feePolicyVersion: version,
+      });
+      await this.reconcileActivation(user.pid, chainReference, receipt, networkFee, protocolFee, version).catch(
+        (err) => this.logger.warn(`evm activation reconcile failed for ${receipt.hash}: ${(err as Error).message}`),
+      );
     } catch (err) {
       await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "ready" } }).catch(() => undefined);
       throw err;
     }
     return this.viewOf(user, chainReference);
+  }
+
+  /**
+   * Post-confirmation reconciliation for EVM activation: verify the contract
+   * applied the canonical formula, and the attested network fee tracks the
+   * actual receipt cost (execution gas + L1 data fee where the oracle exists).
+   */
+  private async reconcileActivation(
+    pid: string,
+    chainReference: string,
+    receipt: { hash: string; costWei: string; l1FeeWei?: string },
+    networkFee: bigint,
+    protocolFee: bigint,
+    version: number,
+  ): Promise<void> {
+    const expectedProtocol = protocolFeeOf(networkFee, protocolFeeBps(version));
+    const l1Fee = receipt.l1FeeWei != null ? BigInt(receipt.l1FeeWei) : 0n;
+    const actual = BigInt(receipt.costWei) + l1Fee;
+    const overAttested = exceedsDriftBound(networkFee, actual);
+    await this.security.log(pid, "account.evm.activation.reconciled", {
+      txHash: receipt.hash,
+      networkFee: networkFee.toString(),
+      protocolFee: protocolFee.toString(),
+      protocolFeeExpected: expectedProtocol.toString(),
+      actualNetworkFee: actual.toString(),
+      overAttested,
+    });
+    if (protocolFee !== expectedProtocol) {
+      this.logger.error(
+        `evm activation formula anomaly: ${receipt.hash} protocol=${protocolFee} expected=${expectedProtocol}`,
+      );
+    }
+    if (overAttested) {
+      this.logger.error(
+        `evm activation over-attestation anomaly: ${receipt.hash} attested=${networkFee} actual=${actual}`,
+      );
+    }
   }
 
   private async ownedRow(pid: string, chain: Pick<RegistryChain, "id" | "reference">) {
@@ -299,7 +430,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     chainReference: string,
     secret: `0x${string}`,
     data: string,
-  ): Promise<{ hash: string; from: string; costWei: string }> {
+  ): Promise<{ hash: string; from: string; costWei: string; l1FeeWei: string }> {
     const chain = await this.chainOrThrow(chainReference);
     const chainId = Number(chain.reference);
     if (!Number.isInteger(chainId)) throw new NotFoundException("Unsupported EVM chain");
@@ -325,6 +456,16 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") throw new Error(`evm deploy reverted: ${hash}`);
     const gasPrice = receipt.effectiveGasPrice ?? 0n;
-    return { hash, from: account.address, costWei: (receipt.gasUsed * gasPrice).toString() };
+    const l1Fee = await this.l1DataFeeWei(chainReference, hash);
+    return { hash, from: account.address, costWei: (receipt.gasUsed * gasPrice).toString(), l1FeeWei: l1Fee.toString() };
   }
+}
+
+/** Hex (`0x`-prefixed or bare) → bytes. */
+function fromHexDto(hex: string): Uint8Array {
+  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (clean.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(clean)) throw new BadRequestException("Invalid hex bytes");
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  return out;
 }

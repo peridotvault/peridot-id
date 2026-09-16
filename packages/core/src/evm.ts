@@ -16,6 +16,17 @@ export type { Bytes };
 
 /** Domain separator for the EVM signed authorization payload (mirrors DOMAIN). */
 export const DOMAIN_EVM = fromAscii("PID|EVM|SMART_ACCOUNT|v1");
+/** V2 domain (frozen). V1 payloads can never verify as V2. */
+export const DOMAIN_EVM_V2 = fromAscii("PID|EVM|SMART_ACCOUNT|v2");
+/** V3 domain (canonical). V2 payloads can never verify as V3. */
+export const DOMAIN_EVM_V3 = fromAscii("PID|EVM|SMART_ACCOUNT|v3");
+
+/** V2 operation tags — first payload byte after the domain. */
+export const OP_EVM = {
+  execute: 0x01,
+  updateAuthority: 0x03,
+  activate: 0x05,
+} as const;
 
 export interface EvmChain {
   namespace: "eip155";
@@ -64,7 +75,8 @@ export function toChecksumAddress(address: string): string {
 
 /**
  * EIP-1167 minimal-proxy creation code for `implementation`.
- * 45 bytes: prefix ++ implementation ++ suffix.
+ * Creation code: 20B prefix ++ implementation (20B) ++ 15B suffix (55B total,
+ * deploying the 45B runtime proxy).
  */
 export function minimalProxyInitCode(implementation: string): Uint8Array {
   return concat(fromHex("3d602d80600a3d3981f3363d3d373d3d3d363d73"), addressToBytes(implementation), fromHex("5af43d82803e903d91602b57fd5bf3"));
@@ -99,6 +111,16 @@ export function deriveEvmSmartAccountAddress(
 /** Domain-separated EVM authorization payload: `keccak256(DOMAIN_EVM ‖ parts…)`. */
 export function buildEvmAuthorizationPayload(parts: Uint8Array[]): Uint8Array {
   return keccak256(concat(DOMAIN_EVM, ...parts));
+}
+
+/** V2 payload hash: `keccak256(DOMAIN_EVM_V2 ‖ opTag ‖ parts…)` (frozen). */
+export function buildEvmAuthorizationPayloadV2(opTag: number, parts: Uint8Array[]): Uint8Array {
+  return keccak256(concat(DOMAIN_EVM_V2, new Uint8Array([opTag & 0xff]), ...parts));
+}
+
+/** V3 payload hash: `keccak256(DOMAIN_EVM_V3 ‖ opTag ‖ parts…)` (canonical). */
+export function buildEvmAuthorizationPayloadV3(opTag: number, parts: Uint8Array[]): Uint8Array {
+  return keccak256(concat(DOMAIN_EVM_V3, new Uint8Array([opTag & 0xff]), ...parts));
 }
 
 /**

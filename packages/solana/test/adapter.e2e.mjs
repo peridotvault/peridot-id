@@ -1,15 +1,19 @@
-// Adapter acceptance: passkey-signed initialize → deposit → sponsored withdraw.
+// Adapter acceptance (V3): passkey-signed initialize → deposit → sponsored withdraw.
 // Runs against the local validator with the TEST backend build:
-//   PID_BACKEND=5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ cargo build-sbf
+//   PID_BACKEND=5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ \
+//   PID_TREASURY=J8HubZoRgyr4z29Rv97zXdEzWqMJQz69LFvWa82m25s9 cargo build-sbf
 //   solana-test-validator --reset --bpf-program CiwLJ1h... <so> &
 //   node packages/solana/test/adapter.e2e.mjs
 import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import pkg from "../dist/index.js";
-const { SolanaRpc, SolanaAdapter, buildWebAuthnMessage, buildWithdrawPayload, b64url } = pkg;
+const { SolanaRpc, SolanaAdapter, buildWebAuthnMessage, buildWithdrawPayloadV3, pidToSeed32, b64url } = pkg;
 
+const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
+// Canonical revenue vault (must match the program's PID_TREASURY build const).
+const TREASURY = new PublicKey("J8HubZoRgyr4z29Rv97zXdEzWqMJQz69LFvWa82m25s9");
 const conn = new Connection("http://127.0.0.1:8899", "confirmed");
 const rpc = new SolanaRpc("http://127.0.0.1:8899");
 const adapter = new SolanaAdapter(rpc);
@@ -26,14 +30,14 @@ function compressedPub(pub) {
 }
 
 // Mock passkey signer: builds a WebAuthn-style assertion over the given challenge.
+// authenticatorData carries the RP-ID hash + UV flag, as the V3 program enforces.
 function mockPasskeySigner(keypair) {
   return {
     async sign(challenge) {
       const clientDataJSON = Buffer.from(JSON.stringify({
         type: "webauthn.get", challenge: b64url(challenge), origin: "https://peridot-id.example",
       }));
-      const authenticatorData = Buffer.alloc(37);
-      authenticatorData.writeUInt32BE(1, 33);
+      const authenticatorData = Buffer.concat([RP_ID_HASH, Buffer.from([0x05, 0, 0, 0, 1])]);
       const md = await buildWebAuthnMessage(authenticatorData, clientDataJSON);
       let sig = crypto.sign("sha256", md, { key: keypair.privateKey, dsaEncoding: "ieee-p1363" });
       const r = BigInt("0x" + sig.subarray(0, 32).toString("hex"));
@@ -53,12 +57,10 @@ async function main() {
   const authorityComp = compressedPub(passkey.publicKey);
   await conn.confirmTransaction(await conn.requestAirdrop(backend.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
   const dest = Keypair.generate();
-  const treasury = Keypair.generate();
-  await conn.confirmTransaction(await conn.requestAirdrop(treasury.publicKey, LAMPORTS_PER_SOL), "confirmed");
   const signer = mockPasskeySigner(passkey);
 
-  // initialize (backend-paid, passkey-signed)
-  const initSig = await adapter.initialize(accountId, authorityComp, backend, signer);
+  // initialize (backend-paid, passkey-signed, V2 state with RP-ID hash, V3 challenge)
+  const initSig = await adapter.initialize(accountId, authorityComp, RP_ID_HASH, backend, signer);
   await conn.confirmTransaction(initSig, "confirmed");
   assert.equal(await adapter.isInitialized(accountId), true, "initialized");
   console.log("init OK", initSig);
@@ -68,14 +70,15 @@ async function main() {
   await conn.confirmTransaction(depSig, "confirmed");
   console.log("deposit OK; balance:", await adapter.getBalance(accountId));
 
-  // sponsored withdraw (treasury-bound challenge)
+  // sponsored withdraw V3 (op-tagged, account-bound, policy-only challenge)
+  const seed32 = pidToSeed32(accountId);
   const nonce = await adapter.getNonce(accountId);
   const expiry = Math.floor(Date.now() / 1000) + 300;
-  const fee = 100_000n;
-  const payload = await buildWithdrawPayload(nonce, 5_000_000n, dest.publicKey, expiry, fee, treasury.publicKey);
+  const networkFee = 100_000n;
+  const payload = await buildWithdrawPayloadV3(seed32, nonce, 5_000_000n, dest.publicKey, expiry, 1);
   const assertion = await signer.sign(payload);
-  const wSig = await adapter.sponsoredWithdrawSol(
-    accountId, authorityComp, dest.publicKey, 5_000_000n, fee, nonce, expiry, assertion, backend, treasury.publicKey,
+  const wSig = await adapter.sponsoredWithdrawSolV3(
+    accountId, authorityComp, dest.publicKey, 5_000_000n, 1, networkFee, nonce, expiry, assertion, backend, TREASURY,
   );
   await conn.confirmTransaction(wSig, "confirmed");
   const status = await adapter.getStatus(wSig);

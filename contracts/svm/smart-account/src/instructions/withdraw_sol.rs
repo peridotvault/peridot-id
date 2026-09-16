@@ -1,12 +1,15 @@
-//! Sponsored SOL withdrawal (authorized by a secp256r1 passkey, ADR 005 B).
+//! Sponsored SOL withdrawal, V3 authorization (authorized by a secp256r1 passkey).
 //!
 //! The smart account is a PDA and cannot be a transaction fee payer. Peridot's relayer
-//! signs the transaction and floats the network fee; the smart account reimburses
-//! `relay_fee` (network fee × (1 + margin)) to the Peridot treasury in the same
-//! transaction, so the fee comes out of the user's balance.
+//! signs the transaction and floats the network fee; the smart account reimburses the
+//! attested `network_fee` in full to the relayer plus `protocol_fee` (recomputed
+//! on-chain from the signed fee-policy version) to the canonical revenue vault.
 //!
-//! The passkey signs the domain-separated authorization payload
-//! (nonce ‖ amount ‖ destination ‖ expiry ‖ relay_fee); the SDK places the Secp256r1
+//! The passkey signs the V3 domain-separated authorization payload
+//! (op-tag ‖ account_id ‖ nonce ‖ amount ‖ destination ‖ expiry ‖ policy) — no
+//! amounts for fees are signed (network costs float with gas by design); binding
+//! `account_id` means a signature for one PID can never authorize a sibling
+//! account, even under a shared authority. The SDK places the Secp256r1
 //! precompile instruction immediately after this one and this processor verifies it via
 //! the Instructions sysvar (auth.rs).
 //!
@@ -15,7 +18,9 @@
 
 use crate::{
     auth,
+    config::TREASURY,
     errors::PeridotError,
+    fee::{policy_protocol_bps, split_attested_fee, total_fee},
     state::{verify_nonce, verify_pda, SmartAccount, SmartAccountMut},
 };
 use pinocchio::{account::AccountView, error::ProgramError, Address, ProgramResult};
@@ -23,19 +28,20 @@ use pinocchio::{account::AccountView, error::ProgramError, Address, ProgramResul
 use super::InstructionData;
 
 /// Instruction data layout:
-/// `nonce u64 | amount u64 | destination [u8; 32] | expiry i64 | relay_fee u64 | client_json_len u16 | clientDataJSON`.
+/// `nonce u64 | amount u64 | destination [u8; 32] | expiry i64 | policy u16 | network_fee u64 | client_json_len u16 | clientDataJSON`.
 const NONCE_OFFSET: usize = 0;
 const AMOUNT_OFFSET: usize = 8;
 const DESTINATION_OFFSET: usize = 16;
 const EXPIRY_OFFSET: usize = 48;
-const RELAY_FEE_OFFSET: usize = 56;
-const CLIENT_JSON_LEN_OFFSET: usize = 64;
+const POLICY_OFFSET: usize = 56;
+const NETWORK_FEE_OFFSET: usize = 58;
+const CLIENT_JSON_LEN_OFFSET: usize = 66;
 
 /// Accounts:
 ///   0. `[WRITE]` smart account PDA
 ///   1. `[WRITE]` destination (receives the SOL)
-///   2. `[WRITE]` treasury (receives the reimbursed relay fee)
-///   3. `[WRITE, SIGNER]` relayer (pays the network fee)
+///   2. `[WRITE]` canonical revenue vault (receives the protocol fee; must equal `config::TREASURY`)
+///   3. `[WRITE, SIGNER]` relayer (pays the network fee; receives the exact reimbursement)
 ///   4. `[]` instructions sysvar (for secp256r1 introspection)
 pub fn process(
     program_id: &Address,
@@ -64,12 +70,18 @@ pub fn process(
     if destination.address() == smart_account.address() || treasury.address() == smart_account.address() {
         return Err(PeridotError::InvalidDestination.into());
     }
+    // Fee recipients are canonical, never caller-chosen: protocol fee goes to the
+    // build-time revenue vault, reimbursement goes to the relayer signer.
+    if treasury.address().as_array() != &TREASURY {
+        return Err(PeridotError::InvalidDestination.into());
+    }
 
     let nonce = data.read_u64_at(NONCE_OFFSET)?;
     let amount = data.read_u64_at(AMOUNT_OFFSET)?;
     let destination_bytes = data.read_array::<32>(DESTINATION_OFFSET)?;
     let expiry = i64::from_le_bytes(data.read_array::<8>(EXPIRY_OFFSET)?);
-    let relay_fee = data.read_u64_at(RELAY_FEE_OFFSET)?;
+    let policy_version = data.read_u16_at(POLICY_OFFSET)?;
+    let network_fee = data.read_u64_at(NETWORK_FEE_OFFSET)?;
     let client_json_len = u16::from_le_bytes(data.read_array::<2>(CLIENT_JSON_LEN_OFFSET)?) as usize;
     let client_json = data
         .read_bytes(CLIENT_JSON_LEN_OFFSET + 2, client_json_len)?;
@@ -79,41 +91,43 @@ pub fn process(
         return Err(PeridotError::InvalidDestination.into());
     }
 
-    let authority = {
+    let (authority, account_id, rp_id_hash) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        state.authority()
-    };
-    let account_id = {
-        let borrowed = smart_account.try_borrow()?;
-        let state = SmartAccount::try_from_bytes(&borrowed)?;
-        state.account_id()
+        (state.authority(), state.account_id(), state.rp_id_hash()?)
     };
     verify_pda(smart_account, program_id, account_id)?;
 
-    let payload = auth::payload_hash(&[
+    let bps = policy_protocol_bps(policy_version)?;
+    let payload = auth::payload_hash_v3(&[
+        &[auth::OP_WITHDRAW_SOL],
+        &account_id,
         &nonce.to_le_bytes(),
         &amount.to_le_bytes(),
         &destination_bytes,
         &expiry.to_le_bytes(),
-        &relay_fee.to_le_bytes(),
-        &treasury.address().as_array()[..],
+        &policy_version.to_le_bytes(),
     ]);
     auth::check_expiry(expiry)?;
-    auth::verify_secp256r1(instructions, &authority, client_json, &payload)?;
+    auth::verify_secp256r1_v2(instructions, &authority, &rp_id_hash, client_json, &payload)?;
 
-    if smart_account.lamports() < amount + relay_fee {
+    let (relayer_fee, protocol_fee) = split_attested_fee(network_fee, bps);
+    let total = total_fee(relayer_fee, protocol_fee);
+    if smart_account.lamports() < amount.saturating_add(total) || total < network_fee {
         return Err(PeridotError::InsufficientFunds.into());
     }
 
-    // Move lamports directly to the destination (amount) and the treasury (relay fee).
+    // Move lamports directly: amount to the destination, exact network cost back
+    // to the relayer (fee payer), protocol fee to the canonical revenue vault.
     let from = *smart_account;
     let to = *destination;
     let t = *treasury;
+    let r = *relayer;
     to.set_lamports(to.lamports() + amount);
-    t.set_lamports(t.lamports() + relay_fee);
-    from.set_lamports(from.lamports() - amount - relay_fee);
+    r.set_lamports(r.lamports() + relayer_fee);
+    t.set_lamports(t.lamports() + protocol_fee);
+    from.set_lamports(from.lamports() - amount - total);
 
     let mut data_ref = smart_account.try_borrow_mut()?;
     let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;

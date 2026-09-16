@@ -29,6 +29,16 @@ pub enum PeridotError {
     InvalidChallenge = 10,
     /// The caller is not the authorized backend (creation paths only).
     Forbidden = 11,
+    /// Retired in V3 (no user-signed amount caps). Slot intentionally unused.
+    RetiredFeeExceedsMax = 12,
+    /// The fee-policy version is unknown or unsupported.
+    UnknownFeePolicy = 13,
+    /// The account has no RP-ID hash (pre-V2 state; re-onboard required).
+    MissingRpIdHash = 14,
+    /// A policy percentage exceeds the protocol maximum.
+    ExceedsMaxBps = 15,
+    /// The CPI target is forbidden (the smart account cannot call itself).
+    InvalidTarget = 16,
 }
 
 impl From<PeridotError> for ProgramError {

@@ -7,12 +7,16 @@
 //! The program introspects it via the Instructions sysvar and verifies:
 //!
 //! 1. the recovered public key equals the stored authority (the passkey owns the account);
-//! 2. the signed message ends with `sha256(clientDataJSON)` where `clientDataJSON` is a
-//!    program argument (binds the exact bytes the passkey attested);
-//! 3. the `"challenge"` inside `clientDataJSON` decodes to the authorization payload the
-//!    program recomputes from its own arguments (domain ‖ nonce ‖ action ‖ expiry) —
-//!    preventing transaction substitution;
-//! 4. the expiry has not passed (Clock sysvar).
+//! 2. the signed message is exactly `authenticatorData ‖ sha256(clientDataJSON)`
+//!    where `clientDataJSON` is a program argument (binds the exact bytes the
+//!    passkey attested);
+//! 3. `authenticatorData[0:32]` equals the stored RP-ID hash and the user-verification
+//!    flag (`0x04`) is set — the same semantics the EVM counterpart enforces;
+//! 4. the `"challenge"` inside `clientDataJSON` decodes to the V2 authorization
+//!    payload the program recomputes from its own arguments (domain ‖ op-tag ‖
+//!    account ‖ action ‖ expiry ‖ fee cap) — preventing transaction substitution;
+//! 5. the expiry has not passed and is not further in the future than `MAX_TTL_SECS`
+//!    (Clock sysvar) — bounding cross-cluster replay of an otherwise-valid signature.
 
 use crate::errors::PeridotError;
 use crate::secp256r1::Secp256r1Instruction;
@@ -22,8 +26,32 @@ use pinocchio::{
     AccountView,
 };
 
-/// Domain separator for the signed authorization payload (PRD_v4 §25).
+/// Domain separator for the V1 signed authorization payload (frozen, legacy).
 pub const DOMAIN: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v1";
+/// Domain separator for the V2 signed authorization payload (frozen, legacy).
+/// V1 signatures can never verify as V2: the domain differs and every V2 payload
+/// additionally starts with an explicit operation tag byte.
+pub const DOMAIN_V2: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v2";
+/// Domain separator for the V3 signed authorization payload (canonical).
+/// V2 signatures can never verify as V3: the domain differs. V3 drops all
+/// amount fields from payloads — only the fee-policy version is bound.
+pub const DOMAIN_V3: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v3";
+
+/// V2 operation tags (match the instruction discriminators in `instructions`).
+pub const OP_INITIALIZE: u8 = 0;
+pub const OP_WITHDRAW_SOL: u8 = 1;
+pub const OP_WITHDRAW_TOKEN: u8 = 2;
+pub const OP_UPDATE_AUTHORITY: u8 = 3;
+pub const OP_CLOSE: u8 = 4;
+pub const OP_ACTIVATE: u8 = 5;
+/// Generic CPI execution (discriminator 6) — fully generic + self-call deny-list.
+pub const OP_EXECUTE: u8 = 6;
+
+/// Maximum authorization lifetime in seconds, enforced on-chain alongside expiry.
+/// Bounds cross-cluster replay: the same PDA exists on every cluster by design,
+/// and V1 payloads carry no cluster binding, so a leaked assertion is only live
+/// for this window (and only until its nonce is consumed).
+pub const MAX_TTL_SECS: i64 = 600;
 
 /// sha256 — pure-Rust implementation (the `sol_sha256` syscall crashes this SBF toolchain).
 #[inline(always)]
@@ -31,15 +59,36 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     crate::sha256::sha256(data)
 }
 
-/// Domain-separated authorization payload hash: `sha256(DOMAIN ‖ parts...)`. This is the
-/// value the client puts in the WebAuthn challenge (base64url). Every part is a fixed-size
-/// little-endian/raw field from the program instruction, so the program can recompute it
-/// exactly (PRD_v4 §25 domain separation).
+/// Domain-separated V1 authorization payload hash: `sha256(DOMAIN ‖ parts...)`.
+/// Frozen legacy — V2 uses [`payload_hash_v2`]. Every part is a fixed-size
+/// little-endian/raw field from the program instruction, so the program can
+/// recompute it exactly (PRD_v4 §25 domain separation).
+#[allow(dead_code)]
 pub fn payload_hash(parts: &[&[u8]]) -> [u8; 32] {
+    hash_with_domain(DOMAIN, parts)
+}
+
+/// Domain-separated V2 authorization payload hash: `sha256(DOMAIN_V2 ‖ parts...)`.
+/// Frozen legacy — V3 uses [`payload_hash_v3`].
+/// The first part MUST be the one-byte operation tag (`OP_*`).
+#[allow(dead_code)]
+pub fn payload_hash_v2(parts: &[&[u8]]) -> [u8; 32] {
+    hash_with_domain(DOMAIN_V2, parts)
+}
+
+/// Domain-separated V3 authorization payload hash: `sha256(DOMAIN_V3 ‖ parts...)`.
+/// This is the value the client puts in the WebAuthn challenge (base64url).
+/// The first part MUST be the one-byte operation tag (`OP_*`). V3 payloads bind
+/// the fee-policy version but no amounts: network costs float with gas by design.
+pub fn payload_hash_v3(parts: &[&[u8]]) -> [u8; 32] {
+    hash_with_domain(DOMAIN_V3, parts)
+}
+
+fn hash_with_domain(domain: &[u8], parts: &[&[u8]]) -> [u8; 32] {
     let mut buf = [0u8; 256];
     let mut len = 0usize;
-    buf[..DOMAIN.len()].copy_from_slice(DOMAIN);
-    len += DOMAIN.len();
+    buf[..domain.len()].copy_from_slice(domain);
+    len += domain.len();
     for p in parts {
         buf[len..len + p.len()].copy_from_slice(p);
         len += p.len();
@@ -104,8 +153,10 @@ fn extract_challenge(client_data_json: &[u8], out: &mut [u8; 32]) -> Result<(), 
     Ok(())
 }
 
-/// Full passkey authorization check. `expected_payload` is the sha256 hash of the
+/// Full V1 passkey authorization check (frozen legacy — V2 uses
+/// [`verify_secp256r1_v2`]). `expected_payload` is the sha256 hash of the
 /// domain-separated authorization the program recomputes from its own instruction args.
+#[allow(dead_code)]
 pub fn verify_secp256r1(
     instructions_account: &AccountView,
     expected_authority: &[u8; 33],
@@ -141,10 +192,65 @@ pub fn verify_secp256r1(
     Ok(())
 }
 
-/// Reject a signature whose expiry has passed (Clock syscall).
+/// Full V2 passkey authorization check. `expected_payload` is the V2 payload hash
+/// the program recomputes from its own instruction args; `expected_rp_id` is the
+/// account's stored RP-ID hash. Enforces the same RP-ID + user-verification
+/// semantics as the EVM counterpart (`PeridotAccount._verify`).
+pub fn verify_secp256r1_v2(
+    instructions_account: &AccountView,
+    expected_authority: &[u8; 33],
+    expected_rp_id: &[u8; 32],
+    client_data_json: &[u8],
+    expected_payload: &[u8; 32],
+) -> Result<(), ProgramError> {
+    // The Secp256r1 precompile instruction must be the one immediately after ours.
+    let instructions = Instructions::try_from(instructions_account)?;
+    let ix = instructions.get_instruction_relative(1)?;
+    let secp = Secp256r1Instruction::try_from(&ix)?;
+
+    // 1. The recovered public key must be the account's authority (the passkey).
+    let signer = secp.get_signer(0)?;
+    if signer != expected_authority {
+        return Err(PeridotError::Unauthorized.into());
+    }
+
+    // 2. The signed message must be exactly `authenticatorData ‖ sha256(clientDataJSON)`.
+    //    authenticatorData is at least 37 bytes (32B RP-ID hash + flags + counter).
+    let message = secp.get_message_data(0)?;
+    let client_hash = sha256(client_data_json);
+    if message.len() < 37 + 32 || &message[message.len() - 32..] != &client_hash {
+        return Err(PeridotError::InvalidChallenge.into());
+    }
+    let authenticator_data = &message[..message.len() - 32];
+
+    // 3. RP-ID hash + user-verification flag, matching the EVM `_verify` rule.
+    if authenticator_data[0..32] != expected_rp_id[..] {
+        return Err(PeridotError::Unauthorized.into());
+    }
+    if authenticator_data[32] & 0x04 == 0 {
+        return Err(PeridotError::Unauthorized.into());
+    }
+
+    // 4. The challenge inside clientDataJSON must equal the authorization payload — blocks
+    //    transaction substitution (the dApp can't show one action and execute another).
+    let mut challenge = [0u8; 32];
+    extract_challenge(client_data_json, &mut challenge)?;
+    if &challenge != expected_payload {
+        return Err(PeridotError::InvalidChallenge.into());
+    }
+
+    Ok(())
+}
+
+/// Reject a signature whose expiry has passed or whose lifetime exceeds
+/// `MAX_TTL_SECS` (Clock sysvar). The TTL cap bounds cross-cluster replay of an
+/// otherwise-valid signature: the same PDA exists on every cluster by design.
 pub fn check_expiry(expiry: i64) -> Result<(), ProgramError> {
     let clock = Clock::get()?;
     if clock.unix_timestamp > expiry {
+        return Err(PeridotError::Expired.into());
+    }
+    if expiry - clock.unix_timestamp > MAX_TTL_SECS {
         return Err(PeridotError::Expired.into());
     }
     Ok(())
@@ -153,7 +259,7 @@ pub fn check_expiry(expiry: i64) -> Result<(), ProgramError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{format, string::String, vec, vec::Vec};
+    use alloc::{format, string::String, vec::Vec};
 
     #[test]
     fn base64url_decodes_32_bytes() {
@@ -182,6 +288,43 @@ mod tests {
         let json = br#"{"type":"webauthn.get","origin":"x"}"#;
         let mut out = [0u8; 32];
         assert!(extract_challenge(json, &mut out).is_err());
+    }
+
+    #[test]
+    fn payload_hash_v2_is_domain_and_op_separated() {
+        let account_id = [0x22u8; 32];
+        let nonce = 7u64.to_le_bytes();
+        let h_v2 = payload_hash_v2(&[&[OP_WITHDRAW_SOL], &account_id, &nonce]);
+        // Same fields under the V1 domain must differ.
+        let h_v1 = payload_hash(&[&[OP_WITHDRAW_SOL], &account_id, &nonce]);
+        assert_ne!(h_v1, h_v2);
+        // Same fields under a different op-tag must differ.
+        let h_other = payload_hash_v2(&[&[OP_CLOSE], &account_id, &nonce]);
+        assert_ne!(h_v2, h_other);
+        // Reference computation: sha256(DOMAIN_V2 ‖ parts).
+        let mut buf = Vec::new();
+        buf.extend_from_slice(DOMAIN_V2);
+        buf.extend_from_slice(&[OP_WITHDRAW_SOL]);
+        buf.extend_from_slice(&account_id);
+        buf.extend_from_slice(&nonce);
+        assert_eq!(h_v2, sha256(&buf));
+    }
+
+    #[test]
+    fn payload_hash_v3_is_domain_separated_from_v2() {
+        let account_id = [0x22u8; 32];
+        let nonce = 7u64.to_le_bytes();
+        let h_v3 = payload_hash_v3(&[&[OP_WITHDRAW_SOL], &account_id, &nonce]);
+        let h_v2 = payload_hash_v2(&[&[OP_WITHDRAW_SOL], &account_id, &nonce]);
+        let h_v1 = payload_hash(&[&[OP_WITHDRAW_SOL], &account_id, &nonce]);
+        assert_ne!(h_v3, h_v2);
+        assert_ne!(h_v3, h_v1);
+        let mut buf = Vec::new();
+        buf.extend_from_slice(DOMAIN_V3);
+        buf.extend_from_slice(&[OP_WITHDRAW_SOL]);
+        buf.extend_from_slice(&account_id);
+        buf.extend_from_slice(&nonce);
+        assert_eq!(h_v3, sha256(&buf));
     }
 
     #[test]

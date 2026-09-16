@@ -1,6 +1,9 @@
-//! Close the smart account, returning rent to a destination (authorized by the secp256r1
-//! passkey). Not exposed by any V1 API (ADR 004 lifecycle: a DB delete must never close an
+//! Close the smart account, V3 authorization (authorized by the secp256r1 passkey).
+//! Not exposed by any V1 API (ADR 004 lifecycle: a DB delete must never close an
 //! on-chain account); exists in the program for teardown.
+//!
+//! The V3 payload binds op-tag ‖ account_id ‖ nonce ‖ destination ‖ expiry, so a
+//! close signature for one PID can never close a sibling account.
 
 use crate::{
     auth,
@@ -18,7 +21,7 @@ const CLIENT_JSON_LEN_OFFSET: usize = 16;
 
 /// Accounts:
 ///   0. `[WRITE]` smart account PDA
-///   1. `[WRITE]` destination (receives the rent lamports)
+///   1. `[WRITE]` destination (receives the rent lamports; must differ from the PDA)
 ///   2. `[]` instructions sysvar
 pub fn process(
     program_id: &Address,
@@ -39,6 +42,9 @@ pub fn process(
     if smart_account.data_len() == 0 {
         return Err(PeridotError::Uninitialized.into());
     }
+    if destination.address() == smart_account.address() {
+        return Err(PeridotError::InvalidDestination.into());
+    }
 
     let nonce = data.read_u64_at(NONCE_OFFSET)?;
     let expiry = i64::from_le_bytes(data.read_array::<8>(EXPIRY_OFFSET)?);
@@ -46,28 +52,25 @@ pub fn process(
     let client_json = data
         .read_bytes(CLIENT_JSON_LEN_OFFSET + 2, client_json_len)?;
 
-    let authority = {
+    let (authority, account_id, rp_id_hash) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        state.authority()
-    };
-    let account_id = {
-        let borrowed = smart_account.try_borrow()?;
-        let state = SmartAccount::try_from_bytes(&borrowed)?;
-        state.account_id()
+        (state.authority(), state.account_id(), state.rp_id_hash()?)
     };
     verify_pda(smart_account, program_id, account_id)?;
 
     // Bind the destination into the signed payload (no value moves to an unapproved address).
     let destination_bytes: [u8; 32] = *destination.address().as_array();
-    let payload = auth::payload_hash(&[
+    let payload = auth::payload_hash_v3(&[
+        &[auth::OP_CLOSE],
+        &account_id,
         &nonce.to_le_bytes(),
         &destination_bytes,
         &expiry.to_le_bytes(),
     ]);
     auth::check_expiry(expiry)?;
-    auth::verify_secp256r1(instructions, &authority, client_json, &payload)?;
+    auth::verify_secp256r1_v2(instructions, &authority, &rp_id_hash, client_json, &payload)?;
 
     let lamports = smart_account.lamports();
     let to = *destination;

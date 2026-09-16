@@ -4,6 +4,7 @@ use pinocchio::error::ProgramError;
 
 pub mod activate;
 pub mod close;
+pub mod execute;
 pub mod initialize;
 pub mod update_authority;
 pub mod withdraw_sol;
@@ -18,6 +19,7 @@ pub enum Instruction {
     UpdateAuthority = 3,
     Close = 4,
     Activate = 5,
+    Execute = 6,
 }
 
 impl TryFrom<u8> for Instruction {
@@ -31,27 +33,33 @@ impl TryFrom<u8> for Instruction {
             3 => Ok(Self::UpdateAuthority),
             4 => Ok(Self::Close),
             5 => Ok(Self::Activate),
+            6 => Ok(Self::Execute),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
 }
 
-/// Fixed-layout instruction payload after the discriminator byte.
+/// Fixed-layout V3 instruction payload after the discriminator byte.
 ///
-/// Layouts:
-/// - Initialize:      account_id [u8; 32] | authority [u8; 33] | len u16 | clientDataJSON
-/// - WithdrawSol:     nonce u64 | amount u64 | destination [u8; 32] | expiry i64 | relay_fee u64 | len u16 | clientDataJSON
-/// - WithdrawToken:   nonce u64 | amount u64 | destination_ata [u8; 32] | expiry i64 | relay_fee u64 | len u16 | clientDataJSON
+/// Layouts (all multi-byte integers little-endian; `network_fee` is the backend-
+/// attested realtime network cost — the program recomputes the protocol fee from
+/// the signed policy version, never trusting a caller-supplied total):
+/// - Initialize:      account_id [u8; 32] | authority [u8; 33] | rp_id_hash [u8; 32] | len u16 | clientDataJSON
+/// - WithdrawSol:     nonce u64 | amount u64 | destination [u8; 32] | expiry i64 | policy u16 | network_fee u64 | len u16 | clientDataJSON
+/// - WithdrawToken:   nonce u64 | amount u64 | destination_ata [u8; 32] | expiry i64 | policy u16 | network_fee u64 | len u16 | clientDataJSON
 /// - UpdateAuthority: nonce u64 | new_authority [u8; 33] | expiry i64 | len u16 | clientDataJSON
 /// - Close:           nonce u64 | expiry i64 | len u16 | clientDataJSON
-/// - Activate:        account_id [u8; 32] | authority [u8; 33] | activation_fee u64 | expiry i64 | len u16 | clientDataJSON
-/// Initialize and Activate are passkey-signed (payload binds account_id ‖ authority,
-/// plus fee ‖ expiry ‖ treasury for Activate) — creation cannot be squatted.
-/// Withdraw payloads bind the treasury (and source ATA for tokens) so the fee
-/// recipient cannot be swapped; the `len u16` prefixes the raw WebAuthn clientDataJSON.
-/// Withdraws are relayer-sponsored: `relay_fee` (network fee × (1 + margin)) is reimbursed
-/// from the smart account to the Peridot treasury, and the relayer is the tx fee payer.
-/// The `len u16` prefixes the raw WebAuthn clientDataJSON passed for on-chain verification.
+/// - Activate:        account_id [u8; 32] | authority [u8; 33] | rp_id_hash [u8; 32] | policy u16 | expiry i64 | network_fee u64 | len u16 | clientDataJSON
+/// - Execute:         nonce u64 | target [u8; 32] | meta_count u8 | metas meta_count×(addr[32] ‖ flags u8) | data_len u16 | data | expiry i64 | policy u16 | network_fee u64 | len u16 | clientDataJSON
+/// Every V3 authorization payload starts with the one-byte op-tag (`auth::OP_*`,
+/// equal to the discriminator) followed by `account_id`, so a signature for one
+/// operation or one account can never authorize another. Fee recipients are
+/// canonical (`config::TREASURY` revenue vault for the protocol fee, the relayer
+/// signer for the exact network-cost reimbursement) — no per-call treasury.
+/// The `len u16` prefixes the raw WebAuthn clientDataJSON passed for on-chain
+/// verification.
+/// Withdraws/activations are relayer-sponsored: `protocol_fee` is recomputed as
+/// `floor(network_fee × bps / 10_000)` per the signed fee-policy version.
 pub struct InstructionData<'a> {
     data: &'a [u8],
 }
@@ -67,6 +75,14 @@ impl<'a> InstructionData<'a> {
             .get(offset..offset + 8)
             .ok_or(ProgramError::InvalidInstructionData)?;
         Ok(u64::from_le_bytes(bytes.try_into().expect("8 bytes")))
+    }
+
+    pub fn read_u16_at(&self, offset: usize) -> Result<u16, ProgramError> {
+        let bytes = self
+            .data
+            .get(offset..offset + 2)
+            .ok_or(ProgramError::InvalidInstructionData)?;
+        Ok(u16::from_le_bytes(bytes.try_into().expect("2 bytes")))
     }
 
     pub fn read_array<const N: usize>(&self, offset: usize) -> Result<[u8; N], ProgramError> {

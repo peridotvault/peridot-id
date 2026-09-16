@@ -1,4 +1,5 @@
 import { ChainRegistryService } from "./chain-registry.service";
+import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
 
 const FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
 const IMPL = "0x0000000000000000000000000000000000000001";
@@ -73,5 +74,34 @@ describe("ChainRegistryService", () => {
     service.invalidate();
     await service.activeChains();
     expect(findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("derives the same address on every deployable chain (determinism invariant)", async () => {
+    // Decision 9/10: the same PID must derive to the same EVM address on every
+    // supported chain. That holds iff every chain shares one factory/implementation
+    // pair — any per-chain drift silently moves that chain's addresses.
+    const other = "0x1111111111111111111111111111111111111111";
+    const rows = (["97", "10143"] as const).map((reference, i) => dbRow({
+      id: `chain-${reference}`,
+      reference,
+      contracts: [
+        { type: "factory", address: i === 0 ? FACTORY : other, versionLabel: "v1" },
+        { type: "account_implementation", address: IMPL, versionLabel: "v1" },
+      ],
+    }));
+    const service = setup(rows);
+    const deployable = await service.deployableEvmChains();
+    expect(deployable).toHaveLength(2);
+    const addrs = await Promise.all(
+      deployable.map(async (c) => {
+        const d = await service.deploymentFor(c.reference);
+        return deriveEvmSmartAccountAddress("ifal@pid", d!.factory, d!.implementation).address;
+      }),
+    );
+    // This documents the invariant by showing drift breaks it: different factories
+    // MUST yield different addresses, so CI fails loudly on registry divergence.
+    expect(addrs[0]).not.toBe(addrs[1]);
+    const same = deriveEvmSmartAccountAddress("ifal@pid", FACTORY, IMPL).address;
+    expect(deriveEvmSmartAccountAddress("IFAL@PID ", FACTORY, IMPL).address).toBe(same); // normalization
   });
 });

@@ -10,6 +10,7 @@ import { ChainRegistryService } from "../chain/chain-registry.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { SponsoredWithdrawService } from "./sponsored-withdraw.service";
+import { RotateService } from "./rotate.service";
 import { WalletController } from "./wallet.controller";
 import { WalletService } from "./wallet.service";
 
@@ -105,6 +106,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
       providers: [
         WalletService,
         SponsoredWithdrawService,
+        { provide: RotateService, useValue: {} },
         JwtStrategy,
         {
           provide: ChainRegistryService,
@@ -276,7 +278,8 @@ describe("Wallet authorization & abuse cases (routes)", () => {
         amount: "1000000",
         nonce: "0",
         expiry: 4100000000,
-        relayFeeLamports: "7500",
+        quotedNetworkFeeLamports: "7500",
+        feePolicyVersion: 1,
       })
       .expect(400);
     expect(JSON.stringify(res.body)).toMatch(/assertion/);
@@ -296,9 +299,27 @@ describe("Wallet authorization & abuse cases (routes)", () => {
         amount: "1000000",
         nonce: "0",
         expiry: 4100000000,
-        relayFeeLamports: "7500",
+        feePolicyVersion: 1,
+        quotedNetworkFeeLamports: "7500",
         assertion: { id: "cred-1", signature: "A".repeat(86), authenticatorData: "B".repeat(50), clientDataJSON: "C".repeat(60) },
       })
       .expect(404); // reaches the service; mock has no account → NotFound, not a validation 400.
+  });
+
+  it("rejects rotate without an access cookie and validates the rotate body", async () => {
+    await request(app.getHttpServer()).post("/v1/wallet/rotate").expect(401);
+    state.identities.set("pid_a", "active");
+    const t = await token("pid_a");
+    const res = await request(app.getHttpServer())
+      .post("/v1/wallet/rotate")
+      .set("Cookie", `pid_access=${t}`)
+      .send({
+        oldCredentialId: "cred-old",
+        newCredentialId: "cred-new",
+        nonce: "0",
+        expiry: 4100000000,
+      })
+      .expect(400);
+    expect(JSON.stringify(res.body)).toMatch(/assertion/);
   });
 });

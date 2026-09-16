@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { ConflictException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { keccak256, fromAscii, toHex } from "@peridotvault/pid-evm";
 import { EvmActivationService } from "./evm-activation.service";
 import { mockSecurity, COSE_HEX } from "../../test/factories";
@@ -23,6 +23,7 @@ const RP_HASH = createHash("sha256").update("localhost").digest();
 
 function defaultView(data: string): string {
   if (data === sel("initialized()")) return word("1");
+  if (data === sel("factory()")) return word(FACTORY);
   if (data === sel("authorityX()")) return word(toHex(new Uint8Array(CRED.x)));
   if (data === sel("authorityY()")) return word(toHex(new Uint8Array(CRED.y)));
   if (data === sel("rpIdHash()")) return word(toHex(new Uint8Array(RP_HASH)));
@@ -40,9 +41,11 @@ function mockFetch() {
         ? code
         : method === "eth_getBalance"
           ? balance
-          : method === "eth_call"
-            ? (viewOverrides[params?.[0]?.data ?? ""] ?? defaultView(params?.[0]?.data ?? ""))
-            : gasPrice;
+          : method === "eth_getBlockByNumber"
+            ? { timestamp: "0x3b9aca00" }
+            : method === "eth_call"
+              ? (viewOverrides[params?.[0]?.data ?? ""] ?? defaultView(params?.[0]?.data ?? ""))
+              : gasPrice;
     return { ok: true, json: async () => ({ result }) };
   });
 }
@@ -199,14 +202,36 @@ describe("EvmActivationService", () => {
   it("activate refuses when no relayer key is configured", async () => {
     balance = "0x" + (10n ** 18n).toString(16); // funded
     const { service } = setup(); // no relayer secret
-    await expect(service.activate({ pid: IDENTITY_ID }, "97")).rejects.toThrow(
+    await expect(service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 1,
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    })).rejects.toThrow(
       ServiceUnavailableException,
     );
   });
 
   it("activate refuses a non-ready account", async () => {
     const { service } = setup("0x" + "11".repeat(32));
-    await expect(service.activate({ pid: IDENTITY_ID }, "97")).rejects.toThrow(ConflictException);
+    await expect(service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 1,
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    })).rejects.toThrow(ConflictException);
   });
 
   it("activate deploys via the relayer and marks active", async () => {
@@ -229,15 +254,127 @@ describe("EvmActivationService", () => {
             : "0x"
           : method === "eth_getBalance"
             ? balance
-            : method === "eth_call"
-              ? defaultView(params?.[0]?.data ?? "")
-              : gasPrice;
+            : method === "eth_getBlockByNumber"
+              ? { timestamp: "0x3b9aca00" }
+              : method === "eth_call"
+                ? defaultView(params?.[0]?.data ?? "")
+                : gasPrice;
       return { ok: true, json: async () => ({ result }) };
     });
-    const view = await service.activate({ pid: IDENTITY_ID }, "97");
+    const view = await service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 1,
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    });
     expect(view.status).toBe("active");
     expect(prisma.transaction.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ chain: "eip155", asset: "tBNB" }) }),
     );
+  });
+
+  it("activate rejects drift beyond 120% of the quoted network fee", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    await expect(service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1",
+      feePolicyVersion: 1,
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    })).rejects.toThrow(ConflictException);
+  });
+
+  it("activate accepts attestation at exactly 120% of the quote", async () => {
+    // attested 350000×1e9 = 350000000000000 vs quoted 291666666666667:
+    // 350000000000000×100 == 3.5e16 < 291666666666667×120 == 35000000000000040.
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service, prisma } = setup("0x" + "11".repeat(32));
+    let deployed = false;
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = jest.fn(async () => {
+      deployed = true;
+      return { hash: "0xdeploy", from: "0xrelayer", costWei: "100000000000000", l1FeeWei: "0" };
+    });
+    (global as unknown as { fetch: unknown }).fetch = jest.fn(async (_url: unknown, opts: unknown) => {
+      const { method, params } = JSON.parse((opts as { body: string }).body) as {
+        method: string;
+        params?: Array<{ data?: string }>;
+      };
+      const result =
+        method === "eth_getCode"
+          ? deployed
+            ? "0x6080604052"
+            : "0x"
+          : method === "eth_getBalance"
+            ? balance
+            : method === "eth_getBlockByNumber"
+              ? { timestamp: "0x3b9aca00" }
+              : method === "eth_call"
+                ? defaultView(params?.[0]?.data ?? "")
+                : method === "eth_getTransactionByHash"
+                  ? { input: "0x1234" }
+                  : gasPrice;
+      return { ok: true, json: async () => ({ result }) };
+    });
+    const view = await service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "291666666666667",
+      feePolicyVersion: 1,
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    });
+    expect(view.status).toBe("active");
+    expect(prisma.transaction.create).toHaveBeenCalled();
+  });
+
+  it("activate rejects attestation one unit above the 120% boundary", async () => {
+    // 350000000000000×100 == 3.5e16 > 291666666666666×120 == 34999999999999920.
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    await expect(service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "291666666666666",
+      feePolicyVersion: 1,
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    })).rejects.toThrow(ConflictException);
+  });
+
+  it("activate rejects an over-TTL deadline", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    await expect(service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 1,
+      deadline: 1000000901,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    })).rejects.toThrow(BadRequestException);
   });
 });

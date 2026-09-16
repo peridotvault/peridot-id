@@ -15,7 +15,8 @@ import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { PeridotWallet } from "@peridotvault/pid-sdk-js";
-import { SolanaAdapter, SolanaRpc, b64url, buildWebAuthnMessage, toHex } from "@peridotvault/pid-solana";
+import { SolanaAdapter, SolanaRpc, b64url, buildWebAuthnMessage, pidToSeed32, toHex } from "@peridotvault/pid-solana";
+const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
 
 const BACKEND_SECRET = process.env.PID_RELAYER_SECRET;
 assert.ok(BACKEND_SECRET && /^[0-9a-fA-F]{128}$/.test(BACKEND_SECRET), "PID_RELAYER_SECRET (64-byte hex) required");
@@ -70,7 +71,7 @@ async function main() {
         const rpc = new SolanaRpc(RPC);
         const adapter = new SolanaAdapter(rpc);
         const fee = await adapter.estimateWithdrawFee();
-        return { ok: true, data: { relayFeeLamports: (fee * 2n).toString(), chainTime: Math.floor(Date.now() / 1000), treasury: TREASURY } };
+        return { ok: true, data: { networkFeeLamports: fee.toString(), protocolFeeBps: 5000, feePolicyVersion: 1, totalFeeLamports: (fee + fee / 2n).toString(), chainTime: Math.floor(Date.now() / 1000), treasury: TREASURY } };
       }
       return { ok: true, data: {} };
     },
@@ -79,7 +80,7 @@ async function main() {
   const signer = {
     async sign(challenge) {
       const cj = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge: b64url(challenge), origin: "https://peridot-id.example" }));
-      const ad = Buffer.alloc(37); ad.writeUInt32BE(1, 33);
+      const ad = Buffer.concat([RP_ID_HASH, Buffer.from([0x05, 0, 0, 0, 1])]);
       const md = await buildWebAuthnMessage(ad, cj);
       let s = crypto.sign("sha256", md, { key: passkey.privateKey, dsaEncoding: "ieee-p1363" });
       const r = BigInt("0x" + s.subarray(0, 32).toString("hex"));
@@ -101,7 +102,7 @@ async function main() {
   const direct = new Adapter(new Rpc(RPC));
   const authorityComp = Buffer.from(AUTHORITY_B64, "base64url");
   if (!(await direct.isInitialized(PID))) {
-    const initSig = await direct.initialize(PID, authorityComp, backend, signer);
+    const initSig = await direct.initialize(PID, authorityComp, RP_ID_HASH, backend, signer);
     await conn.confirmTransaction(initSig, "confirmed");
     console.log("initialize OK:", initSig);
   } else {
@@ -120,15 +121,15 @@ async function main() {
   assert.ok(balance >= 10_000_000, "deposit landed");
 
   // Passkey-authorized withdrawal via the adapter (mock API cannot broadcast).
-  const { buildWithdrawPayload } = await import("@peridotvault/pid-solana");
+  const { buildWithdrawPayloadV3 } = await import("@peridotvault/pid-solana");
   const nonce = await direct.getNonce(PID);
   const expiry = Math.floor(Date.now() / 1000) + 300;
-  const relayFee = (await direct.estimateWithdrawFee()) * 2n;
+  const networkFee = await direct.estimateWithdrawFee();
   const treasury = new PublicKey(TREASURY);
-  const payload = await buildWithdrawPayload(nonce, 5_000_000n, dest.publicKey, expiry, relayFee, treasury);
+  const payload = await buildWithdrawPayloadV3(pidToSeed32(PID), nonce, 5_000_000n, dest.publicKey, expiry, 1);
   const assertion = await signer.sign(payload);
-  const wSig = await direct.sponsoredWithdrawSol(
-    PID, authorityComp, dest.publicKey, 5_000_000n, relayFee, nonce, expiry, assertion, backend, treasury,
+  const wSig = await direct.sponsoredWithdrawSolV3(
+    PID, authorityComp, dest.publicKey, 5_000_000n, 1, networkFee, nonce, expiry, assertion, backend, treasury,
   );
   await conn.confirmTransaction(wSig, "confirmed");
   const wStatus = await direct.getStatus(wSig);

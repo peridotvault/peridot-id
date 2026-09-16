@@ -39,7 +39,7 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
         return;
       }
       const res = await peridot.wallet.withdraw({ amount: lamports, asset, to });
-      const feeSol = Number(BigInt(res.relayFeeLamports)) / LAMPORTS_PER_SOL;
+      const feeSol = Number(BigInt(res.networkFeeLamports) + BigInt(res.protocolFeeLamports)) / LAMPORTS_PER_SOL;
       if (res.status === "confirmed") {
         setResult(
           `Sent and confirmed on-chain. Network fee ${feeSol.toFixed(6)} SOL was reimbursed from your balance.\nSignature: ${res.signature}`,

@@ -7,9 +7,11 @@ introspection (ADR 005 Option B).
 
 - `smart-account/` — the program crate (`peridot-smart-account`; package name is
   load-bearing: `.so` + keypair filenames derive from it, do not rename lightly)
-  - `src/` — `lib.rs`, `state.rs`, `auth.rs`, `secp256r1.rs`, `sha256.rs`,
-    `errors.rs`, `instructions/`
-  - `tests/integration.mjs` — 13 adversarial cases (task 005)
+  - `src/` — `lib.rs`, `state.rs`, `auth.rs`, `fee.rs`, `secp256r1.rs`, `sha256.rs`,
+    `errors.rs`, `instructions/` (V2 authorization schema — `contracts/V2_AUTHORIZATION.md`)
+  - `tests/integration.mjs` — adversarial cases incl. squat, non-canonical-vault,
+    over-attested-fee policy checks (formula + drift + TTL),
+    cross-account replay and TTL cases (task 005)
 
 ## Prereqs
 
@@ -27,16 +29,18 @@ solana --version  # 2.3.13
 
 ```sh
 cd contracts/svm/smart-account
-PID_BACKEND=<backend-pubkey-base58> cargo build-sbf   # -> target/deploy/peridot_smart_account.so
-cargo test        # 12 unit tests
+PID_BACKEND=<backend-pubkey-base58> PID_TREASURY=<treasury-pubkey-base58> cargo build-sbf   # -> target/deploy/peridot_smart_account.so
+cargo test        # unit tests (auth vectors, fee policy, domain separation)
 ```
 
-`PID_BACKEND` is baked in by `build.rs` (`src/config.rs`): only that address may pay
-for `initialize` / relay `activate` — the PID-ownership proof that makes squatting
-and prefund-drain impossible. Same program id on every cluster, backend const per
-env. Unset = creation disabled (fail-closed zeros). Local integration tests use the
-test key `5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ` (secret in `tests/integration.mjs`,
-test-only).
+`PID_BACKEND` / `PID_TREASURY` are baked in by `build.rs` (`src/config.rs`): only
+`BACKEND` may pay for `initialize` / relay `activate` — the PID-ownership proof
+that makes squatting and prefund-drain impossible — and the protocol fee goes to the
+canonical `TREASURY` revenue vault (defaults to `BACKEND` when unset). Same program
+id on every cluster, backend/treasury consts per env; neither enters PDA derivation. Unset
+`PID_BACKEND` = creation disabled (fail-closed zeros). Local integration tests use
+the test key `5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ` (secret in
+`tests/integration.mjs`, test-only).
 
 ## Localnet
 
@@ -50,7 +54,7 @@ solana config set --url http://127.0.0.1:8899 && solana airdrop 5
 cd smart-account
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot_smart_account-keypair.json
-node tests/integration.mjs <program-id>   # 21 cases (PID_BACKEND=test key build)
+node tests/integration.mjs <program-id>   # 34 cases (PID_BACKEND + PID_TREASURY test-key build)
 ```
 No deploy key handy (the declared id's keypair is secret)? Load the binary at its
 declared address instead — program-id check passes, upgrades don't apply locally:
@@ -111,6 +115,9 @@ Funds on old-program PDAs stay there — nothing migrates them.
 - `sol_sha256` syscall crashes this SBF toolchain — the program uses pure-Rust
   SHA-256 (`src/sha256.rs`); the TS mirror is `pidToSeed32` (`@peridotvault/pid-core`).
 - The precompile enforces low-S and does not simulate correctly — send with
-  `skipPreflight`. Expiries use the chain clock (`Clock` sysvar), not wall time.
+  `skipPreflight`. Expiries use the chain clock (`Clock` sysvar), not wall time;
+  authorization TTL is capped at 600s on-chain (`auth::MAX_TTL_SECS`).
+- State is versioned: v1 (80B) reads remain valid, writers stamp v2 (112B with
+  RP-ID hash). V2 spends/rotations require v2 state (`MissingRpIdHash` otherwise).
 - `target/` and `test-ledger/` are gitignored — keypairs under `target/deploy`
   are never committed.

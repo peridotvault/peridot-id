@@ -7,6 +7,8 @@ export interface EvmRpcLike {
   getCode(address: string): Promise<string>;
   chainId(): Promise<number>;
   gasPrice(): Promise<bigint>;
+  /** Latest block timestamp (unix seconds) — chain clock for authorization TTL. */
+  blockTimestamp(): Promise<number>;
   call(method: string, params: unknown[]): Promise<unknown>;
 }
 
@@ -58,5 +60,10 @@ export class EvmRpc implements EvmRpcLike {
 
   async gasPrice(): Promise<bigint> {
     return BigInt(await this.call<string>("eth_gasPrice", []));
+  }
+
+  async blockTimestamp(): Promise<number> {
+    const block = await this.call<{ timestamp: string }>("eth_getBlockByNumber", ["latest", false]);
+    return Number(BigInt(block.timestamp));
   }
 }

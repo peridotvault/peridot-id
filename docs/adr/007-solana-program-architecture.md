@@ -160,8 +160,24 @@ rotation procedure are documented in task 013 before mainnet.
 
 ## Migration considerations
 
-None on-chain (no prior program exists). Devnet → mainnet is a fresh deploy with a new,
-secured upgrade authority; devnet program id is never reused for mainnet (task 013).
+None on-chain (no prior program exists).
+
+### Amendment (V2): one program keypair across the intended cluster set
+
+The original line below is superseded: the product requirement is one PID → one
+PDA on localnet, devnet, testnet and mainnet, which requires reusing one program
+keypair on every cluster (same seeds + same program id = same address; a fresh id
+would move every wallet with no migration path).
+
+- The program ID is reused across the intended cluster set. Per-cluster difference
+  is build-time configuration (`PID_BACKEND`, `PID_TREASURY` baked by `build.rs`)
+  plus RPC/network config — derivation never depends on the backend signer.
+- Devnet → mainnet is a fresh *deployment of the same program id* (same keypair,
+  secured upgrade authority / multisig before launch, task 012); only the baked
+  `PID_BACKEND`/`PID_TREASURY` consts and the RPC endpoints differ.
+
+Superseded (kept for history): "Devnet → mainnet is a fresh deploy with a new,
+secured upgrade authority; devnet program id is never reused for mainnet (task 013)."
 
 ## References
 

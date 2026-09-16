@@ -2,6 +2,13 @@
 
 Status: accepted (with one explicit deferral — encrypted server-side key backup)
 
+> Supersession note (V3 fee model): §2 “user-controlled fee-payer” and §3 “No
+> sponsorship — hard rule” are superseded. The canonical model is now
+> relayer-sponsored submission with attested `networkFee` + fixed
+> `protocolFeeBps` enforced on-chain (`contracts/V2_AUTHORIZATION.md`,
+> `contracts/WHITEPAPER.md`). Recovery, rotation-approval, and
+> never-custodial-keys rules in this ADR remain in force.
+
 This ADR is the **WALLET_SECURITY_MODEL.md** deliverable of PRD_v4 Phase 0 (§29). It answers
 the Phase-0 questions: where each secret lives, how the fee payer is managed, how a second
 device obtains authorization, and how recovery works.

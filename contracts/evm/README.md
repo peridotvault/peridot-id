@@ -6,15 +6,23 @@ smart-account program. Salt = `sha256(pid)`, so one identity owns one address pe
 
 ## Contracts
 
-- `src/PeridotAccount.sol` — passkey-owned account (`secp256r1` authority set on
-  `initialize`; `execute` / `updateAuthority` verify a WebAuthn assertion whose
-  challenge is the domain-separated payload — the `auth.rs` binding in Solidity).
-  `execute` mirrors SVM `withdraw_sol`: `relayFee` is inside the signed payload
-  and paid to `treasury` from the account balance; `initialize` pulls an
-  `activationFee` to `treasury` (SVM `activate` parity, pre-funded counterfactual).
-- `src/PeridotFactory.sol` — EIP-1167 proxy factory (`deploy` / `deployAndInit`
-  / `predict`). Salt = `bytes32(pidToSeed32(pid))`, so rotation
-  never moves the address. `deployAndInit` takes `(activationFee, treasury)`.
+- `src/PeridotAccount.sol` — passkey-owned account, V3 authorization + fee schema
+  (`contracts/V2_AUTHORIZATION.md`, canonical): the `secp256r1` authority is set on
+  the passkey-bound `initialize`; `execute` / `updateAuthority` verify a WebAuthn
+  assertion whose challenge is the V3 domain-separated payload (op-tagged, account-
+  and chain-bound, policy-bound, no amounts). `execute` mirrors SVM `withdraw_sol`:
+  the submitter attests `networkFee`, the contract sanity-checks it against measured
+  gas (`GasAnomaly`), recomputes `protocolFee` from policy, and splits relayerFee →
+  `msg.sender`, protocolFee → factory vault; `initialize` does the same for
+  activation (SVM `activate` parity, pre-funded counterfactual).
+- `src/PeridotFactory.sol` — EIP-1167 proxy factory (`deployAndInit` / `predict`;
+  there is intentionally NO bare `deploy` — a deployed-but-uninitialized proxy is a
+  squat vector) AND canonical revenue vault (`receive()` accumulates protocol fees;
+  `addAdmin` / `removeAdmin` / `withdrawRevenue`, admin-only, floor ≥1 admin, with
+  events; no path touches user accounts). Salt = `bytes32(pidToSeed32(pid))`, so
+  rotation never moves the address. `deployAndInit` is relayer-submitted but
+  user-authorized (passkey binds salt, authority, rpIdHash, policy, deadline,
+  chainid, factory). Constructor: `(implementation, relayer, admins[])`.
 - `src/Base64Url.sol` — tiny base64url decoder for the challenge field.
 - `lib/openzeppelin-contracts/` — vendored sources used (MIT): `proxy/Clones.sol`
   for deterministic proxies, `utils/cryptography/P256.sol` for signature
@@ -40,8 +48,11 @@ forge test
 (pubkey = generator G). To regenerate after touching the payload layout:
 
 1. `forge test --match-test test_LogVector -vv` → prints payload `h`.
-2. Sign `h` with P-256 privkey 1 (e.g. `@noble/curves`), normalize to low-S.
-3. Paste `r`/`s` into `VEC_R`/`VEC_S`, set `VEC_READY = true`, `forge test`.
+2. Sign `h` as a RAW prehashed P-256 digest with privkey 1 (NOT via a
+   hash-then-sign API — e.g. python `ecdsa.SigningKey.sign_digest`), normalize
+   to low-S. See `test/vectors/README.md`.
+3. Paste `r`/`s` into `VEC_ACT_*` / `VEC_EXE_*` / `VEC_ROT_*`, set `VEC_READY = true`,
+   `forge test` (29 tests).
 
 ## Localnet
 
@@ -50,13 +61,18 @@ cd contracts/evm
 anvil &   # localhost:8545, funded default keys
 DEPLOYER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6bb9d3777c8a7f2383c692335d6779b7f1549d21b7 \
 RELAYER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+ADMINS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
   forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
 ```
 
 First run deploys implementation + factory and prints `IMPLEMENTATION`, `FACTORY`,
 `INIT_CODE_HASH` — note them. `RELAYER` (required) is the only address allowed to
-`deploy`/`deployAndInit` — squat + prefund-drain protection; rotate on-chain via
-`updateRelayer`, or set to `0x0` to disable deploys. (Localnet deploys against anvil's own chain id;
+submit `deployAndInit` — but it authorizes nothing: authority, fee policy and
+recipients are fixed by the user's signed authorization + the factory's immutables.
+Rotate the submitter on-chain via `updateRelayer`, or set to `0x0` to disable
+deploys. `ADMINS` (required, comma-separated) seeds the revenue administrators —
+same value on every chain; the factory itself accumulates protocol revenue
+(`withdrawRevenue`, admin-only). (Localnet deploys against anvil's own chain id;
 API wiring below is for testnet and up.) Wire the API (`apps/api/.env`):
 
 ```sh
@@ -66,8 +82,9 @@ EVM_IMPLEMENTATION_ADDRESS=<implementation>
 
 Without the relayer key, `POST /v1/account/evm/:chainRef/activate` only confirms
 an out-of-band deployment to ACTIVE (`EVM_RELAYER_SECRET` enables API-driven
-`deployAndInit`). Revenue hooks: `EVM_TREASURY_ADDRESS` + `EVM_ACTIVATION_FEE_WEI`
-(zero/unset = skip; `requiredWei` covers gas + fee so READY means fully funded).
+`deployAndInit`, which now requires the user's V3 activation assertion in the body).
+Protocol revenue lands in the factory vault itself (no treasury address anywhere);
+`requiredWei`/`networkFeeWei` cover the attested network cost so READY means funded.
 
 ## Testnet
 
@@ -85,7 +102,7 @@ Phase-1 chains — same flow on each, same addresses everywhere:
    all four testnets) with the same bytecode → same address.
 2. Run the factory script with that address on each chain:
     ```sh
-    IMPLEMENTATION=0x... RELAYER=0x... DEPLOYER_PRIVATE_KEY=0x... \
+    IMPLEMENTATION=0x... RELAYER=0x... ADMINS=0x... DEPLOYER_PRIVATE_KEY=0x... \
       forge script script/Deploy.s.sol --rpc-url $EVM_RPC_URL_97 --broadcast
     ```
    Deploying the factory through the same keyless deployer keeps the factory

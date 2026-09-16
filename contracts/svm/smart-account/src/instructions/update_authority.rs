@@ -1,4 +1,10 @@
-//! Rotate the smart account authority (authorized by the current secp256r1 passkey).
+//! Rotate the smart account authority, V3 authorization (authorized by the current
+//! secp256r1 passkey).
+//!
+//! The V3 payload binds op-tag ‖ account_id ‖ nonce ‖ new authority ‖ expiry, so a
+//! rotation signature for one PID can never rotate a sibling account, even under a
+//! shared current key. The zero key is rejected: it could never authorize again and
+//! would brick the account. Rotation rewrites key bytes only — the PDA never moves.
 
 use crate::{
     auth,
@@ -45,26 +51,27 @@ pub fn process(
     let client_json = data
         .read_bytes(CLIENT_JSON_LEN_OFFSET + 2, client_json_len)?;
 
-    let current_authority = {
+    if new_authority == [0u8; AUTHORITY_LEN] {
+        return Err(PeridotError::Unauthorized.into());
+    }
+
+    let (current_authority, account_id, rp_id_hash) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        state.authority()
-    };
-    let account_id = {
-        let borrowed = smart_account.try_borrow()?;
-        let state = SmartAccount::try_from_bytes(&borrowed)?;
-        state.account_id()
+        (state.authority(), state.account_id(), state.rp_id_hash()?)
     };
     verify_pda(smart_account, program_id, account_id)?;
 
-    let payload = auth::payload_hash(&[
+    let payload = auth::payload_hash_v3(&[
+        &[auth::OP_UPDATE_AUTHORITY],
+        &account_id,
         &nonce.to_le_bytes(),
         &new_authority,
         &expiry.to_le_bytes(),
     ]);
     auth::check_expiry(expiry)?;
-    auth::verify_secp256r1(instructions, &current_authority, client_json, &payload)?;
+    auth::verify_secp256r1_v2(instructions, &current_authority, &rp_id_hash, client_json, &payload)?;
 
     debug_assert_eq!(new_authority.len(), AUTHORITY_LEN);
     let mut data_ref = smart_account.try_borrow_mut()?;
