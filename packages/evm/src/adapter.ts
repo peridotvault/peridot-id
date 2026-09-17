@@ -9,6 +9,7 @@ import {
   buildEvmAuthorizationPayloadV3,
   deriveEvmSmartAccountAddress,
   fromAscii,
+  fromHex,
   keccak256,
   OP_EVM,
   toHex,
@@ -402,6 +403,193 @@ export class EvmAdapter {
   viewCalldata(): { initialized: string; authorityX: string; authorityY: string; rpIdHash: string; factory: string } {
     return buildViewCalldata();
   }
+
+  /** V4 `grantPermission` calldata (GrantArgs tuple is all-static). */
+  buildGrantPermissionData(args: {
+    grant: {
+      permissionId: Bytes;
+      sessionX: Bytes;
+      sessionY: Bytes;
+      kind: number;
+      target: string;
+      selector: Bytes;
+      token: string;
+      to: string;
+      perTxCap: bigint | number;
+      totalLimit: bigint | number;
+      nftId: bigint | number;
+      validAfter: bigint | number;
+      validUntil: bigint | number;
+      salt: Bytes;
+      deadline: bigint | number;
+    };
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const sel = "0x" + toHex(selector("grantPermission((bytes32,bytes32,bytes32,uint8,address,bytes4,address,address,uint256,uint256,uint256,uint64,uint64,bytes32,uint64),bytes,bytes,bytes32,bytes32)"));
+    const g = args.grant;
+    mustBytes(g.permissionId, 32, "permissionId");
+    mustBytes(g.sessionX, 32, "sessionX");
+    mustBytes(g.sessionY, 32, "sessionY");
+    mustBytes(g.selector, 4, "selector");
+    mustBytes(g.salt, 32, "salt");
+    constCoderCheck(args.authenticatorData, args.clientDataJSON, args.r, args.s);
+    return sel + abiEncodeCall([
+      {
+        t: "tuple",
+        fields: [
+          { t: "bytes32", value: g.permissionId },
+          { t: "bytes32", value: g.sessionX },
+          { t: "bytes32", value: g.sessionY },
+          { t: "uint", bytes: 1, value: g.kind },
+          { t: "address", value: g.target },
+          { t: "bytesN", bytes: 4, value: g.selector },
+          { t: "address", value: g.token },
+          { t: "address", value: g.to },
+          { t: "uint", bytes: 32, value: g.perTxCap },
+          { t: "uint", bytes: 32, value: g.totalLimit },
+          { t: "uint", bytes: 32, value: g.nftId },
+          { t: "uint", bytes: 8, value: g.validAfter },
+          { t: "uint", bytes: 8, value: g.validUntil },
+          { t: "bytes32", value: g.salt },
+          { t: "uint", bytes: 8, value: g.deadline },
+        ],
+      },
+      { t: "bytes", value: args.authenticatorData },
+      { t: "bytes", value: args.clientDataJSON },
+      { t: "bytes32", value: args.r },
+      { t: "bytes32", value: args.s },
+    ]);
+  }
+
+  /** V4 `revokePermission` calldata. */
+  buildRevokePermissionData(args: {
+    permissionId: Bytes;
+    deadline: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const sel = "0x" + toHex(selector("revokePermission(bytes32,uint64,bytes,bytes,bytes32,bytes32)"));
+    mustBytes(args.permissionId, 32, "permissionId");
+    return sel + abiEncodeCall([
+      { t: "bytes32", value: args.permissionId },
+      { t: "uint", bytes: 8, value: args.deadline },
+      { t: "bytes", value: args.authenticatorData },
+      { t: "bytes", value: args.clientDataJSON },
+      { t: "bytes32", value: args.r },
+      { t: "bytes32", value: args.s },
+    ]);
+  }
+
+  /** V4 `executeWithPermission` calldata. */
+  buildExecuteWithPermissionData(args: {
+    permissionId: Bytes;
+    target: string;
+    value: bigint | number;
+    data: Bytes;
+    deadline: bigint | number;
+    seq: bigint | number;
+    feePolicyVersion: number;
+    networkFee: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const sel = "0x" + toHex(selector("executeWithPermission(bytes32,address,uint256,bytes,uint64,uint64,uint16,uint256,bytes,bytes,bytes32,bytes32)"));
+    mustBytes(args.permissionId, 32, "permissionId");
+    return sel + abiEncodeCall([
+      { t: "bytes32", value: args.permissionId },
+      { t: "address", value: args.target },
+      { t: "uint", bytes: 32, value: args.value },
+      { t: "bytes", value: args.data },
+      { t: "uint", bytes: 8, value: args.deadline },
+      { t: "uint", bytes: 8, value: args.seq },
+      { t: "uint", bytes: 2, value: args.feePolicyVersion },
+      { t: "uint", bytes: 32, value: args.networkFee },
+      { t: "bytes", value: args.authenticatorData },
+      { t: "bytes", value: args.clientDataJSON },
+      { t: "bytes32", value: args.r },
+      { t: "bytes32", value: args.s },
+    ]);
+  }
+
+  /** ERC-7579 `execute(bytes32,bytes)` calldata (auth packed inside per Exec7579Args). */
+  build7579ExecuteData(args: { mode: Bytes; exec: Exec7579Tuple }): string {
+    const sel = "0x" + toHex(selector("execute(bytes32,bytes)"));
+    mustBytes(args.mode, 32, "mode");
+    return sel + abiEncodeCall([{ t: "bytes32", value: args.mode }, { t: "tuple", fields: exec7579Fields(args.exec) }]);
+  }
+
+  /** ERC-7579 `executeFromExecutor(bytes32,bytes)` calldata (PermExecArgs tuple). */
+  buildExecuteFromExecutorData(args: { mode: Bytes; exec: PermExecTuple }): string {
+    const sel = "0x" + toHex(selector("executeFromExecutor(bytes32,bytes)"));
+    mustBytes(args.mode, 32, "mode");
+    return sel + abiEncodeCall([{ t: "bytes32", value: args.mode }, { t: "tuple", fields: permExecFields(args.exec) }]);
+  }
+
+  /** ERC-7579 `installModule` / `uninstallModule` calldata (owner assertion appended). */
+  buildInstallModuleData(args: {
+    uninstall: boolean;
+    moduleTypeId: bigint | number;
+    module: string;
+    initData: Bytes;
+    deadline: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const sig = args.uninstall
+      ? "uninstallModule(uint256,address,bytes,uint64,bytes,bytes,bytes32,bytes32)"
+      : "installModule(uint256,address,bytes,uint64,bytes,bytes,bytes32,bytes32)";
+    const sel = "0x" + toHex(selector(sig));
+    return sel + abiEncodeCall([
+      { t: "uint", bytes: 32, value: args.moduleTypeId },
+      { t: "address", value: args.module },
+      { t: "bytes", value: args.initData },
+      { t: "uint", bytes: 8, value: args.deadline },
+      { t: "bytes", value: args.authenticatorData },
+      { t: "bytes", value: args.clientDataJSON },
+      { t: "bytes32", value: args.r },
+      { t: "bytes32", value: args.s },
+    ]);
+  }
+
+  /** ERC-1271 `isValidSignature` calldata (`signature` = abi.encode(authData, clientData, r, s)). */
+  build1271Calldata(args: { hash: Bytes; authenticatorData: Bytes; clientDataJSON: Bytes; r: Bytes; s: Bytes }): string {
+    const sel = "0x" + toHex(selector("isValidSignature(bytes32,bytes)"));
+    mustBytes(args.hash, 32, "hash");
+    const inner = abiEncodeCall([
+      { t: "bytes", value: args.authenticatorData },
+      { t: "bytes", value: args.clientDataJSON },
+      { t: "bytes32", value: args.r },
+      { t: "bytes32", value: args.s },
+    ]);
+    return sel + abiEncodeCall([{ t: "bytes32", value: args.hash }, { t: "bytes", value: fromHex(inner) }]);
+  }
+
+  /** Read-only V4 poll selectors (permission record, module flags, mode support). */
+  viewCalldataV4(): {
+    getPermission: string;
+    isModuleInstalled: string;
+    supportsModule: string;
+    supportsExecutionMode: string;
+    accountId: string;
+  } {
+    const sel = (sig: string) => "0x" + toHex(selector(sig));
+    return {
+      getPermission: sel("getPermission(bytes32)"),
+      isModuleInstalled: sel("isModuleInstalled(uint256,address,bytes)"),
+      supportsModule: sel("supportsModule(uint256)"),
+      supportsExecutionMode: sel("supportsExecutionMode(bytes32)"),
+      accountId: sel("accountId()"),
+    };
+  }
 }
 
 /** Standalone view calldata (no adapter instance needed — used by the API poll). */
@@ -461,6 +649,134 @@ function encBytes32(data: Bytes): string {
 function constCoderCheck(authData: Bytes, clientData: Bytes, r: Bytes, s: Bytes): void {
   if (r.length !== 32 || s.length !== 32) throw new Error("r/s must be 32 bytes");
   if (authData.length === 0 || clientData.length === 0) throw new Error("assertion bytes required");
+}
+
+function mustBytes(v: Bytes, expected: number, name: string): void {
+  if (v.length !== expected) throw new Error(`expected ${expected} bytes for ${name}`);
+}
+
+/** Minimal ABI coder: static scalars + `bytes` + nested tuples (no arrays). */
+export type AbiValue =
+  | { t: "uint"; bytes: number; value: bigint | number }
+  | { t: "address"; value: string }
+  | { t: "bytes32"; value: Bytes }
+  | { t: "bytesN"; bytes: number; value: Bytes }
+  | { t: "bytes"; value: Bytes }
+  | { t: "tuple"; fields: AbiValue[] };
+
+function isDynamic(v: AbiValue): boolean {
+  return v.t === "bytes" || (v.t === "tuple" && v.fields.some(isDynamic));
+}
+
+function encodeStatic(v: AbiValue): string {
+  switch (v.t) {
+    case "uint":
+      return toHex(ube(v.value, v.bytes)).padStart(64, "0").slice(-64);
+    case "address":
+      return encodeAddress(v.value);
+    case "bytes32":
+      mustBytes(v.value, 32, "bytes32");
+      return toHex(v.value);
+    case "bytesN": {
+      if (v.value.length !== v.bytes) throw new Error(`expected ${v.bytes} bytes`);
+      return (toHex(v.value) + "0".repeat(64)).slice(0, 64);
+    }
+    default:
+      throw new Error("dynamic value has no static encoding");
+  }
+}
+
+/** Encode a top-level arg list (or tuple fields): offsets relative to sequence start. Returns hex (no 0x). */
+function abiEncodeSequence(values: AbiValue[]): string {
+  const statics: string[] = [];
+  const dynamics: string[] = [];
+  let staticSize = 0;
+  for (const v of values) {
+    if (v.t !== "tuple" && !isDynamic(v)) staticSize += 32;
+    else if (v.t === "tuple" && !v.fields.some(isDynamic)) staticSize += v.fields.length * 32;
+    else staticSize += 32;
+  }
+  let tailBytes = 0;
+  for (const v of values) {
+    if (v.t === "tuple" && !v.fields.some(isDynamic)) {
+      for (const f of v.fields) statics.push(encodeStatic(f));
+      continue;
+    }
+    if (v.t !== "tuple" && !isDynamic(v)) {
+      statics.push(encodeStatic(v));
+      continue;
+    }
+    statics.push(toHex(ube(staticSize + tailBytes, 32)));
+    if (v.t === "bytes") {
+      const tail = encodeBytes(v.value);
+      dynamics.push(tail);
+      tailBytes += tail.length / 2;
+    } else if (v.t === "tuple") {
+      const tail = abiEncodeSequence(v.fields);
+      dynamics.push(tail);
+      tailBytes += tail.length / 2;
+    } else {
+      throw new Error("unreachable: static value in dynamic slot");
+    }
+  }
+  return statics.join("") + dynamics.join("");
+}
+
+/** Encode top-level call args (after the selector). Returns hex (no 0x). */
+function abiEncodeCall(values: AbiValue[]): string {
+  return abiEncodeSequence(values);
+}
+
+export interface Exec7579Tuple {
+  target: string;
+  value: bigint | number;
+  data: Bytes;
+  deadline: bigint | number;
+  feePolicyVersion: number;
+  networkFee: bigint | number;
+  authenticatorData: Bytes;
+  clientDataJSON: Bytes;
+  r: Bytes;
+  s: Bytes;
+}
+
+export interface PermExecTuple extends Exec7579Tuple {
+  permissionId: Bytes;
+  seq: bigint | number;
+  feeRecipient: string;
+}
+
+function exec7579Fields(e: Exec7579Tuple): AbiValue[] {
+  return [
+    { t: "address", value: e.target },
+    { t: "uint", bytes: 32, value: e.value },
+    { t: "bytes", value: e.data },
+    { t: "uint", bytes: 8, value: e.deadline },
+    { t: "uint", bytes: 2, value: e.feePolicyVersion },
+    { t: "uint", bytes: 32, value: e.networkFee },
+    { t: "bytes", value: e.authenticatorData },
+    { t: "bytes", value: e.clientDataJSON },
+    { t: "bytes32", value: e.r },
+    { t: "bytes32", value: e.s },
+  ];
+}
+
+function permExecFields(e: PermExecTuple): AbiValue[] {
+  return [
+    { t: "bytes32", value: e.permissionId },
+    { t: "address", value: e.target },
+    { t: "uint", bytes: 32, value: e.value },
+    { t: "bytes", value: e.data },
+    { t: "uint", bytes: 8, value: e.deadline },
+    { t: "uint", bytes: 8, value: e.seq },
+    { t: "uint", bytes: 2, value: e.feePolicyVersion },
+    { t: "uint", bytes: 32, value: e.networkFee },
+    { t: "address", value: e.feeRecipient },
+    { t: "bytes", value: e.authenticatorData },
+    { t: "bytes", value: e.clientDataJSON },
+    { t: "bytes32", value: e.r },
+    { t: "bytes32", value: e.s },
+  ];
 }
 
 // Re-exported so callers keep one import (mirrors pid-solana index habit).

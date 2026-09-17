@@ -39,6 +39,19 @@ pub enum PeridotError {
     ExceedsMaxBps = 15,
     /// The CPI target is forbidden (the smart account cannot call itself).
     InvalidTarget = 16,
+    /// The session record is missing or malformed.
+    SessionNotFound = 17,
+    /// The session has been revoked by the owner.
+    SessionRevoked = 18,
+    /// The session expired (hard expiry) or timed out (inactivity).
+    SessionExpired = 19,
+    /// The session sequence does not match (replay or skip).
+    BadSessionSeq = 20,
+    /// A session-authorized call violated its scope (wrong program, vault
+    /// passed, protected account changed, or upgrade record unreadable).
+    SessionScopeViolation = 21,
+    /// The session lifetime exceeds the 24h maximum.
+    SessionTtlExceeded = 22,
 }
 
 impl From<PeridotError> for ProgramError {

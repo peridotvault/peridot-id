@@ -67,8 +67,12 @@ prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
 
 ## Verification
 
-- API: `pnpm --filter @peridotvault/pid-api exec jest` (195 tests).
-- Program: `cargo test` (12) + `tests/integration.mjs` (21 cases) against the local
+- API: `pnpm --filter @peridotvault/pid-api exec jest` (259 tests).
+- EVM: `forge test --root contracts/evm` (65: 32 V3 + 33 V4 permission/adversarial);
+  anvil loops `test/anvil-v3-e2e.mjs` + `test/anvil-v4-perm-e2e.mjs`.
+- Program: `cargo test` (27) + `tests/integration.mjs` (37 cases) +
+  `tests/session.mjs <program-id> <forwarder-id>` (24 session cases; deploy
+  `contracts/svm/mock-forwarder` first) against the local
   validator; devnet E2E `packages/sdk-js/test/devnet.e2e.mjs`.
 - Full: `pnpm typecheck`.
 

@@ -259,6 +259,16 @@ The same passkey model carries forward: EVM smart accounts verify secp256r1 pass
 the same WebAuthn flow (RIP-7212-style precompile). One passkey, every chain — chain
 adapters absorb the differences (PRD_v4 §5.6).
 
+> **V4 status (2026-09-16, ADR 009):** this future is built on EVM. The owner
+> passkey stays the one credential across chains; EVM additionally supports
+> owner-registered scoped session keys (P-256, `PID|EVM|PERMISSION|v1` domain)
+> plus a constrained ERC-7579 surface and owner-only ERC-1271 — see
+> `contracts/V4_PERMISSIONS.md`. The Solana program surface in §5 above is unchanged.
+>
+> **SVM sessions status (2026-09-17, ADR-010):** Solana additionally supports
+> owner-registered Ed25519 gameplay sessions in isolated PDAs — see
+> `contracts/SVM_SESSIONS.md` (separate design, not a port).
+
 ---
 
 ## 7. First Top-Up Bootstrap
@@ -359,6 +369,15 @@ for debugging and security audits (PRD_v4 §17).
 - Mainnet deployment
 
 ### Not Required for V1
+
+> **V4 status (2026-09-16, ADR 009):** multi-chain EVM counterfactuals, the
+> sponsored-relayer fee model, and scoped session keys have shipped on EVM
+> (pre-audit). Social recovery/guardians, multisig, bundler infrastructure,
+> fiat on-ramp, swaps, NFT marketplace, desktop/extension clients, extra OAuth
+> providers, and the external audit remain not-required.
+>
+> **SVM sessions status (2026-09-17, ADR-010):** Solana gameplay sessions have
+> shipped (pre-audit) as PDA-isolated sessions — see `contracts/SVM_SESSIONS.md`.
 
 - Multi-chain support (EVM and others via future adapters)
 - Social recovery / guardians

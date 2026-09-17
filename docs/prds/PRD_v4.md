@@ -127,6 +127,17 @@ DO NOT implement:
 
 These can be future phases.
 
+> **V4 status (2026-09-16, ADR 009):** several items above have since shipped
+> **on EVM only** — gas sponsorship (relayer `networkFee` + protocol-fee policy),
+> session keys (scoped P-256 permissions), and the EVM smart account with a
+> constrained ERC-7579 surface. Social recovery/MPC/multisig/bridges remain
+> unbuilt everywhere.
+>
+> **SVM sessions status (2026-09-17, ADR-010):** scoped gameplay sessions have
+> since shipped **on Solana** as PDA-isolated Ed25519 session keys
+> (`contracts/SVM_SESSIONS.md`) — a separate design from the EVM layer, not a
+> port. Guardians/multisig remain future.
+
 ---
 
 # 2. Core Product Principles
@@ -421,7 +432,11 @@ V1 policy scope:
 - replay protection;
 - nonce/recent blockhash handling.
 
-Do NOT implement session keys yet.
+Do NOT implement session keys yet. (V4 status, 2026-09-16: session keys have
+since shipped **on EVM only** as scoped permissions — ADR 009,
+`contracts/V4_PERMISSIONS.md`. SVM status, 2026-09-17: gameplay sessions have
+since shipped **on Solana** as PDA-isolated sessions — ADR-010,
+`contracts/SVM_SESSIONS.md`, a separate design.)
 
 ---
 
@@ -1824,6 +1839,15 @@ Gas sponsorship is not part of V1.
 ---
 
 # 31. Future Architecture — Explicitly Deferred
+
+> **V4 status (2026-09-16, ADR 009):** the first, second, and fifth rungs below
+> have landed **on EVM only** (sponsored relayer, scoped session keys, EVM smart
+> accounts with constrained ERC-7579). Recovery/guardians, multi-device
+> policies, and additional chains remain deferred.
+>
+> **SVM sessions status (2026-09-17, ADR-010):** session keys have additionally
+> landed **on Solana** as PDA-isolated gameplay sessions (structurally different
+> boundary — `contracts/SVM_SESSIONS.md`), not as a port of the EVM layer.
 
 After V1 is stable, the architecture must be able to add:
 

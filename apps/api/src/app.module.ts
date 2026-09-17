@@ -8,9 +8,11 @@ import { CredentialModule } from "./credentials/credential.module";
 import { IdentityModule } from "./identity/identity.module";
 import { IntentModule } from "./intent/intent.module";
 import { OpenApiModule } from "./openapi/openapi.module";
+import { PermissionsModule } from "./permissions/permissions.module";
 import { ProfileModule } from "./profile/profile.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { SecurityModule } from "./security/security-event.module";
+import { SessionKeysModule } from "./session-keys/session-keys.module";
 import { WalletModule } from "./wallet/wallet.module";
 import { HealthModule } from "./health/health.module";
 
@@ -28,6 +30,8 @@ import { HealthModule } from "./health/health.module";
     AdminModule,
     CredentialModule,
     IntentModule,
+    PermissionsModule,
+    SessionKeysModule,
     SecurityModule,
     OpenApiModule,
   ],

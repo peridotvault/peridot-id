@@ -36,6 +36,10 @@ pub const DOMAIN_V2: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v2";
 /// V2 signatures can never verify as V3: the domain differs. V3 drops all
 /// amount fields from payloads — only the fee-policy version is bound.
 pub const DOMAIN_V3: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v3";
+/// Domain separator for session-grant payloads (ADR-010). Disjoint from every
+/// `SMART_ACCOUNT` domain so an owner signature can never verify as a session
+/// grant and vice versa — the same separation the EVM `DOMAIN_PERM` provides.
+pub const DOMAIN_SESSION: &[u8] = b"PID|SOLANA|SESSION|v1";
 
 /// V2 operation tags (match the instruction discriminators in `instructions`).
 pub const OP_INITIALIZE: u8 = 0;
@@ -46,6 +50,11 @@ pub const OP_CLOSE: u8 = 4;
 pub const OP_ACTIVATE: u8 = 5;
 /// Generic CPI execution (discriminator 6) — fully generic + self-call deny-list.
 pub const OP_EXECUTE: u8 = 6;
+/// Session management (discriminators 7-10) under [`DOMAIN_SESSION`].
+pub const OP_REGISTER_SESSION: u8 = 7;
+pub const OP_SESSION_EXECUTE: u8 = 8;
+pub const OP_REVOKE_SESSION: u8 = 9;
+pub const OP_CLOSE_SESSION: u8 = 10;
 
 /// Maximum authorization lifetime in seconds, enforced on-chain alongside expiry.
 /// Bounds cross-cluster replay: the same PDA exists on every cluster by design,
@@ -82,6 +91,13 @@ pub fn payload_hash_v2(parts: &[&[u8]]) -> [u8; 32] {
 /// the fee-policy version but no amounts: network costs float with gas by design.
 pub fn payload_hash_v3(parts: &[&[u8]]) -> [u8; 32] {
     hash_with_domain(DOMAIN_V3, parts)
+}
+
+/// Domain-separated session-grant payload hash: `sha256(DOMAIN_SESSION ‖ parts...)`.
+/// Used for owner-signed session lifecycle ops (register/revoke/close). The
+/// first part MUST be the one-byte operation tag (`OP_*_SESSION`).
+pub fn payload_hash_session(parts: &[&[u8]]) -> [u8; 32] {
+    hash_with_domain(DOMAIN_SESSION, parts)
 }
 
 fn hash_with_domain(domain: &[u8], parts: &[&[u8]]) -> [u8; 32] {
@@ -255,6 +271,13 @@ pub fn check_expiry(expiry: i64) -> Result<(), ProgramError> {
     }
     Ok(())
 }
+
+/// Maximum session lifetime in seconds (24h), enforced at registration against
+/// the Clock sysvar. Bounds a stolen session key's usefulness.
+pub const SESSION_MAX_TTL_SECS: i64 = 86_400;
+/// Session inactivity timeout in seconds (30min). `session_execute` rejects
+/// when `now - last_used` exceeds this, then refreshes `last_used`.
+pub const SESSION_INACTIVITY_SECS: i64 = 1_800;
 
 #[cfg(test)]
 mod tests {

@@ -52,6 +52,24 @@ jobs:
             exit 1
           fi
 
+      - name: Delegatecall ban guard
+        run: |
+          # V4_PERMISSIONS.md: no delegatecall anywhere in first-party account code
+          # (contracts/evm/src only — vendored lib/ and prose comments excluded).
+          # Prose may name it; only actual usage `delegatecall(` fails the build.
+          if rg -n 'delegatecall\(' contracts/evm/src/; then
+            echo "::error::delegatecall usage in contracts/evm/src — permanently prohibited, see contracts/V4_PERMISSIONS.md"
+            exit 1
+          fi
+
+      - name: Foundry tests
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Forge test
+        run: forge test --root contracts/evm
+
       - name: Test
         run: pnpm test
 

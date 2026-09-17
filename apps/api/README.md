@@ -1,7 +1,8 @@
 # `@peridotvault/pid-api`
 
 PeridotID backend — a **NestJS** API handling authentication (Google OAuth + WebAuthn
-passkey), identity, profile, and non-custodial Solana smart-account wallets. Serverless-ready
+passkey), identity, profile, non-custodial smart-account wallets (Solana + EVM),
+and EVM permission grants. Serverless-ready
 for Vercel.
 
 **Private workspace package** — not published to npm.
@@ -34,9 +35,13 @@ for Vercel.
 - `profile` — profile read/update
 - `wallet` / `account` — smart-account creation, intents, withdrawals
 - `credentials` — WebAuthn registration/recovery, COSE parsing
+- `permissions` — EVM V4 grant validation (`grants/validate`, `denied-selectors`;
+  pure hygiene + canonical id/challenge, ADR 009)
+- `session-keys` — SVM session-grant validation (`grants/validate`, `constants`;
+  pure hygiene + canonical address/challenge, ADR-010)
 
 ## Test
 
 ```sh
-pnpm --filter @peridotvault/pid-api exec jest   # 185 tests, incl. route authz
+pnpm --filter @peridotvault/pid-api exec jest   # 259 tests, incl. route authz
 ```

@@ -29,6 +29,7 @@ async function getIdentity(): Promise<Identity | ApiError> {
 | Wallet / accounts | `Wallet`, `WalletCreate`, `ChainAccount`, `WalletTransaction` |
 | Authority (passkey) | `Authority` |
 | Intents | `Intent`, `IntentType`, `IntentPayload`, `IntentCreate` |
+| Permissions (EVM V4) | `PermissionKind`, `PermissionGrant`, `PermissionRecord` |
 | WebAuthn | `RegisterStart` |
 | Errors | `ApiError` |
 

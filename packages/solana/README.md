@@ -18,6 +18,22 @@ ED25519 keypair. This adapter wires browser WebAuthn assertions to Solana `secp2
 precompile instructions so a passkey can authorize SOL/token transfers and authority
 changes — fully non-custodial.
 
+## Sessions (ADR-010)
+
+Gameplay sessions use Ed25519 session keys in isolated PDAs — one owner P-256
+ceremony at registration, then envelope signatures + on-chain record checks.
+Builders: `deriveSessionAddress`, `deriveProgramDataAddress`,
+`buildRegisterSessionPayload`, `buildRevokeSessionPayload`,
+`buildCloseSessionPayload`, `serializeSessionMetas`,
+`buildRegisterSessionInstruction`, `buildSessionExecuteInstruction`,
+`buildRevokeSessionInstruction`, `buildCloseSessionInstruction`
+(`src/instructions.ts`, layouts match the program exactly).
+
+Scope note: this adapter is Solana-only. The EVM V4 permission layer (scoped
+session keys, ERC-7579, ERC-1271 — ADR 009) lives in `@peridotvault/pid-evm`
+and `contracts/evm`; nothing in it ports to Solana (structurally different
+boundary).
+
 ## Usage
 
 ```ts

@@ -4,8 +4,12 @@ use pinocchio::error::ProgramError;
 
 pub mod activate;
 pub mod close;
+pub mod close_session;
 pub mod execute;
 pub mod initialize;
+pub mod register_session;
+pub mod revoke_session;
+pub mod session_execute;
 pub mod update_authority;
 pub mod withdraw_sol;
 pub mod withdraw_token;
@@ -20,6 +24,10 @@ pub enum Instruction {
     Close = 4,
     Activate = 5,
     Execute = 6,
+    RegisterSession = 7,
+    SessionExecute = 8,
+    RevokeSession = 9,
+    CloseSession = 10,
 }
 
 impl TryFrom<u8> for Instruction {
@@ -34,6 +42,10 @@ impl TryFrom<u8> for Instruction {
             4 => Ok(Self::Close),
             5 => Ok(Self::Activate),
             6 => Ok(Self::Execute),
+            7 => Ok(Self::RegisterSession),
+            8 => Ok(Self::SessionExecute),
+            9 => Ok(Self::RevokeSession),
+            10 => Ok(Self::CloseSession),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }

@@ -97,6 +97,17 @@ it would be speculative infrastructure (PRD §15). Recorded explicitly so later 
 re-litigate: **AA is out of scope for V3, no AA dependency, no AA-specific API.** Revisit only
 when a custody model and on-chain interaction exist.
 
+> **V4 amendment (2026-09-16, EVM only — ADR 009):** the revisit happened. EVM
+> counterfactual accounts shipped with a constrained ERC-7579 surface
+> (`execute`/`executeFromExecutor`/validator+executor modules only — no
+> delegatecall/batch/fallback/hook) and P-256 session keys as scoped
+> capabilities. The Solana program and this ADR's V3 reasoning are unchanged.
+>
+> **SVM sessions amendment (2026-09-17 — ADR-010):** the revisit happened on
+> Solana too, as PDA-isolated Ed25519 gameplay sessions (discs 7–10) — a
+> separate design sharing only vocabulary with ADR 009, not code or trust
+> assumptions.
+
 ### 4. Creation timing — explicit user action
 
 PRD §8 lists four possibilities; PRD §12 forbids silent creation for existing users. Given

@@ -54,6 +54,16 @@ tags:
       Signing authorities (secp256r1 passkeys, ADR 005). Google OAuth proves identity; a
       passkey authorizes the wallet. The first credential registers freely; each additional
       credential requires approval by an existing credential (ADR 006 §4).
+  - name: permissions
+    description: |
+      EVM permission grants (scoped P-256 session keys, ADR 009). Validation is pure
+      hygiene + canonical id/challenge computation; submission-time account binding
+      is enforced by the relay path.
+  - name: session-keys
+    description: |
+      SVM gameplay sessions (Ed25519 session keys in isolated PDAs, ADR 010).
+      Validation is pure hygiene + canonical address/challenge computation;
+      submission-time vault binding is enforced by the relay path.
   - name: openapi
     description: Machine-readable API specification
 
@@ -1092,6 +1102,109 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /permissions/grants/validate:
+    post:
+      tags: [permissions]
+      summary: Validate a permission grant and return its canonical id + owner challenge
+      description: |
+        Pure scope-hygiene check mirroring `grantPermission` (kind rules, denylist,
+        30d TTL, caps) plus the canonical `permissionId` and the owner challenge
+        (what the passkey signs). Authenticated; submission-time pid→account
+        binding is enforced by the relay path.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantPermission"
+      responses:
+        "200":
+          description: Canonical permission id + owner challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidatedGrant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /permissions/denied-selectors:
+    get:
+      tags: [permissions]
+      summary: Selectors a nonfinancial permission may never invoke
+      description: Mirror of the on-chain `_deniedSelector` list (second layer only —
+        exact target+selector scope is the first).
+      responses:
+        "200":
+          description: The denied-selector list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [selectors]
+                properties:
+                  selectors:
+                    type: array
+                    items:
+                      type: string
+
+  /session-keys/grants/validate:
+    post:
+      tags: [session-keys]
+      summary: Validate a session grant and return its canonical address + owner challenge
+      description: |
+        Pure scope-hygiene check mirroring `register_session` (24h TTL, game binding,
+        upgrade snapshot shape) plus the canonical session PDA and the owner
+        challenge (what the passkey signs). Authenticated; submission-time
+        pid→vault binding is enforced by the relay path.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterSession"
+      responses:
+        "200":
+          description: Canonical session address + owner challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidatedSessionGrant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /session-keys/constants:
+    get:
+      tags: [session-keys]
+      summary: Session bounds mirror of the on-chain constants
+      description: 24h max TTL, 30min inactivity timeout, 205-byte record.
+      responses:
+        "200":
+          description: The session bounds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [maxTtlSecs, inactivitySecs, stateLen]
+                properties:
+                  maxTtlSecs:
+                    type: integer
+                  inactivitySecs:
+                    type: integer
+                  stateLen:
+                    type: integer
+
   /credentials:
     get:
       tags: [credentials]
@@ -1873,6 +1986,122 @@ components:
             clientDataJSON:
               type: string
               description: "base64url clientDataJSON (challenge = V3 activation payload)"
+
+    GrantPermission:
+      type: object
+      required: [kind, target, selector, token, to, perTxCap, totalLimit, nftId, sessionX, sessionY, validAfter, validUntil, salt, deadline, chainId, account, nonce, factory]
+      properties:
+        kind:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: "1 = nonfinancial, 2 = ETH, 3 = ERC-20, 4 = ERC-721, 5 = ERC-1155"
+        target:
+          type: string
+          description: "Nonfinancial: exact allowed target (never the account/factory)"
+        selector:
+          type: string
+          description: "Nonfinancial: exact allowed selector (0x + 8 hex chars, never denylisted)"
+        token:
+          type: string
+          description: "Financial: token contract (zero address = native ETH)"
+        to:
+          type: string
+          description: "Financial: explicit recipient"
+        perTxCap:
+          type: string
+          description: "Financial: max per execution, raw units"
+        totalLimit:
+          type: string
+          description: "Financial: lifetime cap in the same units"
+        nftId:
+          type: string
+          description: "ERC-721/1155: token id"
+        sessionX:
+          type: string
+          description: "Session P-256 key x (0x + 64 hex chars)"
+        sessionY:
+          type: string
+          description: "Session P-256 key y (0x + 64 hex chars)"
+        validAfter:
+          type: integer
+          description: "Grant start (unix seconds)"
+        validUntil:
+          type: integer
+          description: "Grant expiry (unix seconds, ≤ 30d out)"
+        salt:
+          type: string
+          description: "Owner-chosen uniqueness salt (0x + 64 hex chars)"
+        deadline:
+          type: integer
+          description: "Owner-authorization deadline (unix seconds, TTL ≤ 600s)"
+        chainId:
+          type: integer
+        account:
+          type: string
+        nonce:
+          type: string
+          description: "Owner nonce the grant consumes"
+        factory:
+          type: string
+          description: "Deploying factory (blocked as a permission target)"
+
+    ValidatedGrant:
+      type: object
+      required: [permissionId, grantPayload]
+      properties:
+        permissionId:
+          type: string
+          description: "Canonical permission id (0x + 64 hex chars)"
+        grantPayload:
+          type: string
+          description: "Owner challenge — what the passkey signs (0x + 64 hex chars)"
+
+    RegisterSession:
+      type: object
+      required: [vault, accountId, sessionPubkey, allowedProgram, expiresAt, recordedHasAuthority, recordedSlot, deadline, nonce]
+      properties:
+        vault:
+          type: string
+          description: "Vault PDA the session attaches to (base58)"
+        accountId:
+          type: string
+          description: "sha256(pid) account id (0x + 64 hex chars)"
+        sessionPubkey:
+          type: string
+          description: "Ed25519 session keypair pubkey (base58)"
+        allowedProgram:
+          type: string
+          description: "The one allowlisted game program (base58)"
+        expiresAt:
+          type: integer
+          description: "Session hard expiry (unix seconds, ≤ 24h out)"
+        recordedHasAuthority:
+          type: boolean
+          description: "Whether the game program currently has an upgrade authority"
+        recordedAuthority:
+          type: string
+          description: "Upgrade authority at registration (base58, required when recordedHasAuthority)"
+        recordedSlot:
+          type: string
+          description: "ProgramData slot at registration"
+        deadline:
+          type: integer
+          description: "Owner-authorization deadline (unix seconds, TTL ≤ 600s)"
+        nonce:
+          type: string
+          description: "Owner nonce the registration consumes"
+
+    ValidatedSessionGrant:
+      type: object
+      required: [sessionAddress, registerPayload]
+      properties:
+        sessionAddress:
+          type: string
+          description: "Canonical session PDA (base58)"
+        registerPayload:
+          type: string
+          description: "Owner challenge — what the passkey signs (0x + 64 hex chars)"
 
     WithdrawQuote:
       type: object

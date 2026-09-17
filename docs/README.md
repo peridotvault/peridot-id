@@ -42,7 +42,7 @@ packages/pid-react  Hosted "Sign in with PeridotID" React flow
 - [API_SPEC.md](API_SPEC.md) — endpoint list
 - [SECURITY.md](SECURITY.md) — auth, sessions, wallet threat model
 - [ROADMAP.md](ROADMAP.md) — Foundation → Social → Gaming → Ecosystem
-- [adr/](adr/) — accepted decisions 002–008 · [tasks/](tasks/README.md) — pre-mainnet hardening
+- [adr/](adr/) — accepted decisions 002–010 · [tasks/](tasks/README.md) — pre-mainnet hardening
 
 ## Quick start
 

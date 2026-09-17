@@ -34,7 +34,9 @@ only ever received an already-resolved id. No query needed plural rows.
 ## Consequences
 
 - Passkeys authorize the identity's wallet (`authorities.pid`); per-wallet key scoping
-  is gone because there is only one wallet.
+  is gone because there is only one wallet. (V4 note, 2026-09-16, ADR 009: the
+  single wallet remains, but scoped keys reappear *inside* it on EVM —
+  `sessions[permissionId]` with kind/target/caps/expiry — not as extra wallets.)
 - Devnet/test-fund addresses derived from UUID seeds go stale (no real funds at risk).
 - Migration `20260915000000_remove_pid_accounts` backfills `pid` through the old hub,
   so the rename is lossless on populated databases.

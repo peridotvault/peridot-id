@@ -18,9 +18,9 @@ import {
   getAssociatedTokenAddress,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { concat, u16le, u64le, i64le, fromAscii, serializeExecuteCall } from "@peridotvault/pid-core";
-import type { Bytes, ExecuteMeta } from "@peridotvault/pid-core";
-import { IX, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE } from "@peridotvault/pid-core";
+import { concat, u16le, u64le, i64le, fromAscii, serializeExecuteCall, serializeSessionMetas } from "@peridotvault/pid-core";
+import type { Bytes, ExecuteMeta, SessionMeta } from "@peridotvault/pid-core";
+import { IX, IX_SESSION, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
 
 /** Build the passkey-signed `initialize(account_id, authority, clientDataJSON)` instruction (disc 0). */
 export function buildInitializeInstruction(
@@ -534,3 +534,189 @@ export async function buildDepositTokenInstruction(
 
 export type { Bytes };
 export { fromAscii };
+
+/**
+ * Session PDA creation is program-side (`registerSession` does the system
+ * `create_account` CPI signed with the session seeds — a PDA cannot sign a
+ * client-side create). There is intentionally no client builder for it.
+ */
+
+/**
+ * Owner-signed `registerSession` (disc 7): binds an Ed25519 session key + one
+ * allowlisted game program (+ its verified upgrade snapshot) to a fresh
+ * session PDA. The program creates the PDA itself (exact rent-exempt minimum,
+ * floated by `payer`); consumes the vault's owner nonce. One P-256 ceremony
+ * per session lifetime — never per gameplay action.
+ * `gameProgramData` is the game's ProgramData for upgradeable games, or the
+ * game program itself for immutable ones (native/deprecated loader).
+ */
+export function buildRegisterSessionInstruction(
+  vault: PublicKey,
+  sessionPda: PublicKey,
+  gameProgramData: PublicKey,
+  gameProgram: PublicKey,
+  payer: PublicKey,
+  nonce: bigint,
+  sessionPubkey: PublicKey,
+  allowedProgram: PublicKey,
+  expiresAt: number,
+  recordedHasAuthority: boolean,
+  recordedAuthority: Uint8Array,
+  recordedSlot: bigint,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (recordedAuthority.length !== 32) throw new Error("recordedAuthority must be 32 bytes");
+  if (allowedProgram.equals(programId)) throw new Error("session game cannot be the smart-account program");
+  if (!allowedProgram.equals(gameProgram)) throw new Error("game program account must equal the allowlisted program");
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: vault, isSigner: false, isWritable: true },
+      { pubkey: sessionPda, isSigner: false, isWritable: true },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+      { pubkey: gameProgramData, isSigner: false, isWritable: false },
+      { pubkey: gameProgram, isSigner: false, isWritable: false },
+      { pubkey: payer, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat(
+      [IX_SESSION.registerSession],
+      u64le(nonce),
+      sessionPubkey.toBytes(),
+      allowedProgram.toBytes(),
+      i64le(expiresAt),
+      [recordedHasAuthority ? 1 : 0],
+      recordedAuthority,
+      u64le(recordedSlot),
+      i64le(expiry),
+      u16le(clientDataJSON.length),
+      clientDataJSON,
+    ) as unknown as Buffer,
+  });
+}
+
+/**
+ * Session-signed `sessionExecute` (disc 8): one gameplay CPI authorized by the
+ * session keypair (tx envelope signer) + on-chain record (seq, expiry,
+ * inactivity). The vault PDA must not appear anywhere — enforced here
+ * fail-fast and on-chain. No `remaining_accounts`: `gameAccounts` must cover
+ * every non-session meta exactly once, in order.
+ */
+export function buildSessionExecuteInstruction(
+  sessionPda: PublicKey,
+  gameProgram: PublicKey,
+  gameProgramData: PublicKey,
+  sessionSigner: PublicKey,
+  vault: PublicKey,
+  seq: bigint,
+  gameData: Uint8Array,
+  metas: SessionMeta[],
+  gameAccounts: { address: PublicKey; writable: boolean }[],
+  protectedAccounts: PublicKey[],
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (gameProgram.equals(programId)) throw new Error("session target cannot be the smart-account program");
+  const sessionStr = sessionPda.toBase58();
+  const vaultStr = vault.toBase58();
+  let sessionSigns = false;
+  const forwarded: { address: PublicKey; writable: boolean }[] = [];
+  for (const m of metas) {
+    if (m.address.toBase58() === vaultStr) throw new Error("vault PDA must never enter a session CPI");
+    if (m.sessionSigner) {
+      if (m.address.toBase58() !== sessionStr) throw new Error("only the session PDA carries the session-signer bit");
+      sessionSigns = true;
+    } else {
+      forwarded.push({ address: m.address, writable: m.writable });
+    }
+  }
+  if (!sessionSigns) throw new Error("at least one meta must carry the session-PDA signer");
+  if (forwarded.length !== gameAccounts.length) throw new Error("gameAccounts must cover every non-session meta exactly once");
+  forwarded.forEach((f, i) => {
+    if (!f.address.equals(gameAccounts[i].address)) throw new Error(`game account ${i} out of order`);
+    if (f.address.toBase58() === vaultStr) throw new Error("vault PDA must never enter a session CPI");
+  });
+  if (protectedAccounts.length > MAX_PROTECTED) throw new Error(`too many protected accounts (${protectedAccounts.length})`);
+  for (const p of protectedAccounts) {
+    if (!metas.some((m) => m.address.equals(p))) throw new Error("protected accounts must be a subset of the metas");
+  }
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: sessionPda, isSigner: false, isWritable: true },
+      { pubkey: gameProgram, isSigner: false, isWritable: false },
+      { pubkey: gameProgramData, isSigner: false, isWritable: false },
+      { pubkey: sessionSigner, isSigner: true, isWritable: false },
+      ...gameAccounts.map((a) => ({ pubkey: a.address, isSigner: false, isWritable: a.writable })),
+    ],
+    programId,
+    data: concat(
+      [IX_SESSION.sessionExecute],
+      u64le(seq),
+      u16le(gameData.length),
+      gameData,
+      serializeSessionMetas(metas),
+      [protectedAccounts.length & 0xff],
+      ...protectedAccounts.map((p) => p.toBytes()),
+    ) as unknown as Buffer,
+  });
+}
+
+/** Owner-signed `revokeSession` (disc 9): immediate, consumes the owner nonce. */
+export function buildRevokeSessionInstruction(
+  vault: PublicKey,
+  sessionPda: PublicKey,
+  nonce: bigint,
+  sessionPubkey: PublicKey,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: vault, isSigner: false, isWritable: true },
+      { pubkey: sessionPda, isSigner: false, isWritable: true },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat(
+      [IX_SESSION.revokeSession],
+      u64le(nonce),
+      sessionPubkey.toBytes(),
+      i64le(expiry),
+      u16le(clientDataJSON.length),
+      clientDataJSON,
+    ) as unknown as Buffer,
+  });
+}
+
+/** Owner-signed `closeSession` (disc 10): revoked/expired only, rent to `destination`. */
+export function buildCloseSessionInstruction(
+  vault: PublicKey,
+  sessionPda: PublicKey,
+  destination: PublicKey,
+  nonce: bigint,
+  sessionPubkey: PublicKey,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (destination.equals(sessionPda)) throw new Error("close destination must differ from the session PDA");
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: vault, isSigner: false, isWritable: true },
+      { pubkey: sessionPda, isSigner: false, isWritable: true },
+      { pubkey: destination, isSigner: false, isWritable: true },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat(
+      [IX_SESSION.closeSession],
+      u64le(nonce),
+      sessionPubkey.toBytes(),
+      i64le(expiry),
+      u16le(clientDataJSON.length),
+      clientDataJSON,
+    ) as unknown as Buffer,
+  });
+}

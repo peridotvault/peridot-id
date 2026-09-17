@@ -38,3 +38,6 @@ Notes:
   refresh-on-401 pattern cannot recurse.
 - The wallet is **record-only**: no key material is stored, generated, or returned. `me()`
   returns an `ApiError` (`404`) when the PID has no wallet yet.
+- EVM permissions (ADR 009) live in `@peridotvault/pid-evm` + `@peridotvault/pid-core`
+  (`buildPermissionId`, grant/revoke/exec payloads, calldata builders) and the
+  `v1/permissions` API — not in `sdk-js` wallet-client calls yet.

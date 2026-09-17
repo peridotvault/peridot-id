@@ -365,4 +365,158 @@ export async function buildExecutePayloadV3(
   ]);
 }
 
+// ================= Session layer (ADR-010, EVM V4 counterpart) =================
+//
+// Session keys are Ed25519: the P-256 passkey authorizes registration once via
+// the precompile, then gameplay authorization is the session keypair signing
+// the transaction envelope plus on-chain record checks. Layouts MUST match
+// `contracts/svm/smart-account/src/instructions/{register_session,session_execute,revoke_session,close_session}.rs`.
+
+/** Session-grant domain (canonical). Disjoint from every SMART_ACCOUNT domain. */
+export const DOMAIN_SESSION = fromAscii("PID|SOLANA|SESSION|v1");
+
+/** Session operation tags (match program discriminators 7-10). */
+export const OP_SESSION = {
+  registerSession: 7,
+  sessionExecute: 8,
+  revokeSession: 9,
+  closeSession: 10,
+} as const;
+
+/** Session instruction discriminators (must match `src/instructions/mod.rs`). */
+export const IX_SESSION = {
+  registerSession: 7,
+  sessionExecute: 8,
+  revokeSession: 9,
+  closeSession: 10,
+} as const;
+
+/** Session record length — match `state.rs::SESSION_STATE_LEN`. */
+export const SESSION_STATE_LEN = 205;
+/** Maximum session lifetime, seconds (24h) — match `auth::SESSION_MAX_TTL_SECS`. */
+export const SESSION_MAX_TTL_SECS = 86_400;
+/** Session inactivity timeout, seconds (30min) — match `auth::SESSION_INACTIVITY_SECS`. */
+export const SESSION_INACTIVITY_SECS = 1_800;
+
+/** Session-execute meta flags (bit 0 = writable, bit 1 = session-PDA-signer). */
+export const SESSION_FLAG = { writable: 1, sessionSigner: 2 } as const;
+
+/** Session-execute bounds — match `session_execute.rs` (tx size binds first). */
+export const MAX_SESSION_METAS = 32;
+export const MAX_SESSION_DATA = 1_024;
+export const MAX_PROTECTED = 8;
+
+/** BPF upgradeable loader (ProgramData derivation + owner check). */
+export const BPF_LOADER_UPGRADEABLE = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
+
+/** Derive the session PDA: seeds ["peridot_id", "session", account_id, session_pubkey]. */
+export function deriveSessionAddress(
+  accountId32: Uint8Array,
+  sessionPubkey: PublicKey,
+  programId: PublicKey = PID_PROGRAM_ID,
+): { address: PublicKey; bump: number } {
+  if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
+  const [address, bump] = PublicKey.findProgramAddressSync(
+    [Buffer.from("peridot_id"), Buffer.from("session"), accountId32 as unknown as Buffer, sessionPubkey.toBytes() as unknown as Buffer],
+    programId,
+  );
+  return { address, bump };
+}
+
+/** Derive a game's ProgramData address: PDA [program_id] under the upgradeable loader. */
+export function deriveProgramDataAddress(programId: PublicKey): { address: PublicKey; bump: number } {
+  const [address, bump] = PublicKey.findProgramAddressSync(
+    [programId.toBytes() as unknown as Buffer],
+    BPF_LOADER_UPGRADEABLE,
+  );
+  return { address, bump };
+}
+
+/** Session-grant payload hash: `sha256(DOMAIN_SESSION ‖ opTag ‖ parts…)` (challenge). */
+export async function buildSessionPayload(opTag: number, parts: Uint8Array[]): Promise<Uint8Array> {
+  return hashSha256(concat(DOMAIN_SESSION, new Uint8Array([opTag & 0xff]), ...parts));
+}
+
+function u8le(v: number): Uint8Array {
+  return new Uint8Array([v & 0xff]);
+}
+
+/** REGISTER_SESSION payload: op ‖ account ‖ nonce ‖ session_key ‖ program ‖ expires_at ‖ rec. */
+export async function buildRegisterSessionPayload(args: {
+  accountId32: Uint8Array;
+  nonce: bigint;
+  sessionPubkey: PublicKey;
+  allowedProgram: PublicKey;
+  expiresAt: number;
+  recordedHasAuthority: boolean;
+  recordedAuthority: Uint8Array;
+  recordedSlot: bigint;
+  expiry: number;
+}): Promise<Uint8Array> {
+  if (args.recordedAuthority.length !== 32) throw new Error("recordedAuthority must be 32 bytes");
+  return buildSessionPayload(OP_SESSION.registerSession, [
+    args.accountId32,
+    u64le(args.nonce),
+    args.sessionPubkey.toBytes(),
+    args.allowedProgram.toBytes(),
+    i64le(args.expiresAt),
+    u8le(args.recordedHasAuthority ? 1 : 0),
+    args.recordedAuthority,
+    u64le(args.recordedSlot),
+    i64le(args.expiry),
+  ]);
+}
+
+/** REVOKE_SESSION payload: op ‖ account ‖ session_key ‖ nonce ‖ expiry. */
+export async function buildRevokeSessionPayload(args: {
+  accountId32: Uint8Array;
+  sessionPubkey: PublicKey;
+  nonce: bigint;
+  expiry: number;
+}): Promise<Uint8Array> {
+  return buildSessionPayload(OP_SESSION.revokeSession, [
+    args.accountId32,
+    args.sessionPubkey.toBytes(),
+    u64le(args.nonce),
+    i64le(args.expiry),
+  ]);
+}
+
+/** CLOSE_SESSION payload: op ‖ account ‖ session_key ‖ destination ‖ nonce ‖ expiry. */
+export async function buildCloseSessionPayload(args: {
+  accountId32: Uint8Array;
+  sessionPubkey: PublicKey;
+  destination: PublicKey;
+  nonce: bigint;
+  expiry: number;
+}): Promise<Uint8Array> {
+  return buildSessionPayload(OP_SESSION.closeSession, [
+    args.accountId32,
+    args.sessionPubkey.toBytes(),
+    args.destination.toBytes(),
+    u64le(args.nonce),
+    i64le(args.expiry),
+  ]);
+}
+
+/** One bound account of a session gameplay call. */
+export interface SessionMeta {
+  address: PublicKey;
+  writable: boolean;
+  /** True only for the session PDA itself (the delegation proof). */
+  sessionSigner: boolean;
+}
+
+/** Serialize session-execute metas: `meta_count u8 ‖ metas(addr32 ‖ flags u8)`. */
+export function serializeSessionMetas(metas: SessionMeta[]): Uint8Array {
+  if (metas.length === 0 || metas.length > MAX_SESSION_METAS) {
+    throw new Error(`session metas must be 1..${MAX_SESSION_METAS}`);
+  }
+  const parts: (Uint8Array | number[])[] = [[metas.length & 0xff]];
+  for (const m of metas) {
+    parts.push(m.address.toBytes(), [(m.writable ? SESSION_FLAG.writable : 0) | (m.sessionSigner ? SESSION_FLAG.sessionSigner : 0)]);
+  }
+  return concat(...parts);
+}
+
 export { Bytes };

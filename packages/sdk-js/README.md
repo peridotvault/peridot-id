@@ -45,6 +45,10 @@ const available = await peridot.auth.pidAvailable('ifal'); // { available, pid }
 | Passkey credentials | `peridot.passkey` | `list()`, `register()`, `revoke(id)` |
 | Wallet | `peridot.wallet` | smart-account balance, history, deposit, withdraw (see `PeridotWallet`) |
 
+EVM permissions (ADR 009) are not SDK-wrapped yet: use `@peridotvault/pid-evm`
+(payload + calldata builders) with the `v1/permissions` API directly
+(`POST grants/validate`, `GET denied-selectors`).
+
 ## Auth
 
 ### Google (default)

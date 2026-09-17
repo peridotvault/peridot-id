@@ -7,6 +7,9 @@ ceremonies, and client key custody. No redirects, no hosts, no app flow.
 
 - **`pid-core`** (this package) — primitives both layers share.
 - **`@peridotvault/pid-solana`** — Solana chain adapter + instruction builders on top.
+- **`@peridotvault/pid-evm`** — EVM adapter + V4 permission payload/calldata builders
+  (`src/evm.ts`: `DOMAIN_EVM_PERM`, `OP_PERM`, `PERM_KIND`, `MODULE_TYPE`,
+  `DENIED_SELECTORS`, canonical transfer builders).
 - **`@peridotvault/pid-sdk-js`** — direct PeridotID API client (first-party and
   third-party backends alike).
 - **`@peridotvault/pid-react`** — public "Sign in with PeridotID" login UX

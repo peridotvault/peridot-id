@@ -27,6 +27,9 @@ Tables:
 - `authorities` — signing authorities for the wallet (ADR 005). `pid` FK; `type`
   (`secp256r1` passkey for V1), `publicKey` (bytea), `credentialId` (WebAuthn), `status`.
   **Public material only** — the secret never leaves the client authenticator.
+  (EVM V4 session keys are NOT stored here: they live in on-chain
+  `sessions[permissionId]` records, granted/revoked by owner-signed transactions;
+  the backend's grant validation is pure — no permission tables by design, ADR 009.)
 - `wallet_fee_payers` — user-controlled fee payer (ADR 006). `chainAccountId` FK;
   `address` only — the key never leaves the client.
 - `transactions` — `pid`, `chainAccountId`, `intentId` (nullable — deposits have no
@@ -59,6 +62,13 @@ Invariants:
 - An identity always keeps at least one credential (unlink of the last one is rejected).
 - One identity owns exactly one personal wallet (ADR-008) — wallet rows hang off
   `identities.pid` directly; there is no account hub table.
+- EVM V4 permissions add scoped keys *inside* that one wallet
+  (`sessions[permissionId]`: kind/target/caps/expiry/`seq`/revocation, ≤30d TTL)
+  without new tables: persistence is the on-chain record; the backend computes
+  ids/challenges purely (`POST /v1/permissions/grants/validate`). SVM sessions
+  (ADR-010) likewise add no tables: session PDAs live on-chain, validated via
+  `POST /v1/session-keys/grants/validate`. The `sessions`
+  table below is cookie refresh-token state — unrelated to on-chain session keys.
 - At most one `smart_account` chain account per chain (unique constraint);
   `linked_address` rows may coexist (legacy V3 records).
 - The PID is the only source of truth — changing email, displayName, avatar, or linking/unlinking

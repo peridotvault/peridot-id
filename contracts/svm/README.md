@@ -8,10 +8,17 @@ introspection (ADR 005 Option B).
 - `smart-account/` — the program crate (`peridot-smart-account`; package name is
   load-bearing: `.so` + keypair filenames derive from it, do not rename lightly)
   - `src/` — `lib.rs`, `state.rs`, `auth.rs`, `fee.rs`, `secp256r1.rs`, `sha256.rs`,
-    `errors.rs`, `instructions/` (V2 authorization schema — `contracts/V2_AUTHORIZATION.md`)
+    `errors.rs`, `programdata.rs`, `instructions/` (V2 authorization schema — `contracts/V2_AUTHORIZATION.md`;
+    session layer discs 7–10 — `contracts/SVM_SESSIONS.md`, ADR-010)
   - `tests/integration.mjs` — adversarial cases incl. squat, non-canonical-vault,
     over-attested-fee policy checks (formula + drift + TTL),
     cross-account replay and TTL cases (task 005)
+  - `tests/session.mjs` — session adversarial suite (24 cases: PDA isolation,
+    forwarding bounds, protected invariants, replay, lifecycle; needs the mock
+    forwarder below)
+- `mock-forwarder/` — adversarial test helper ONLY (never deployed beyond
+  localnet): forwards received signer bits to a third program, proving what
+  signer forwarding can and cannot move
 
 ## Prereqs
 
@@ -54,7 +61,12 @@ solana config set --url http://127.0.0.1:8899 && solana airdrop 5
 cd smart-account
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot_smart_account-keypair.json
-node tests/integration.mjs <program-id>   # 34 cases (PID_BACKEND + PID_TREASURY test-key build)
+node tests/integration.mjs <program-id>   # 37 cases (PID_BACKEND + PID_TREASURY test-key build)
+# Session suite (needs the mock forwarder deployed; forwarder id passed as argv[3]):
+solana-keygen new -o /tmp/forwarder-keypair.json --no-bip39-passphrase
+solana program deploy ../mock-forwarder/target/deploy/peridot_mock_forwarder.so \
+  --program-id /tmp/forwarder-keypair.json
+node tests/session.mjs <program-id> <forwarder-id>   # 24 session cases (ADR-010)
 ```
 No deploy key handy (the declared id's keypair is secret)? Load the binary at its
 declared address instead — program-id check passes, upgrades don't apply locally:

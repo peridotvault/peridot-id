@@ -84,7 +84,18 @@ it is needed for devnet iteration — so it is deliberately one late task, not s
 
 ## Out of Scope
 
-- Post-mainnet features (sponsorship, session keys, guardians, EVM, additional OAuth
+> **V4 status (2026-09-16, ADR 009):** sponsorship, session keys, and EVM have
+> shipped (pre-audit) and move from out-of-scope to audit surface: the
+> adversarial suite (65 forge tests), the delegatecall-ban guard, reentrancy,
+> 1271, TTL/seq/revocation, and the denylist are hardening inputs to this task,
+> not future work.
+>
+> **SVM sessions status (2026-09-17, ADR-010):** Solana gameplay sessions have
+> shipped (pre-audit) and join the audit surface: PDA isolation, forwarding
+> bounds, protected invariants, loader-class handling, seq/expiry/revocation
+> (27 host unit + 24 validator session cases).
+
+- Post-mainnet features (guardians, additional OAuth
   providers, Chrome extension — PRD_v4 §31, PRD_v5 §10).
 - Bug-bounty program setup (recommend, don't implement).
 

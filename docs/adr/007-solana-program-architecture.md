@@ -75,6 +75,13 @@ transfer** from the smart account / its ATAs (PRD_v5 expands V1 to SPL withdrawa
 Arbitrary CPI is explicitly prevented (PRD_v4 §24): the program validates target program
 id and account set per instruction; no generic "call any program with any data" path.
 
+> **V4 scope note (2026-09-16, ADR 009):** this allowlist rule is SVM-only and
+> unchanged. EVM V4 intentionally calls untrusted targets — contained instead by
+> exact target+selector scope, the financial-selector denylist, no standing
+> approvals, a reentrancy mutex, and a permanent delegatecall ban
+> (`contracts/V4_PERMISSIONS.md` §5). The SVM "arbitrary-CPI generic executor"
+> rejection below stays in force.
+
 ### 5. Domain separation & replay
 
 - Signed/executed payload is domain-separated (PRD_v4 §25):
@@ -106,6 +113,10 @@ rotation procedure are documented in task 013 before mainnet.
   (getLatestBlockhash/sendTransaction/getTransaction/getBalance). V1 ships `SolanaAdapter`
   only; `EvmAdapter` is a future implementation of the same interface, not scaffolding built
   now (YAGNI).
+
+> **V4 note (2026-09-16):** `packages/evm` (`EvmAdapter`/`EvmRpc` + V4 permission
+> builders) and `PeridotPermissionExecutor` have since shipped (ADR 009). Nothing
+> in this ADR's Solana reasoning changes.
 - Config via env: `SOLANA_RPC_URL`, `SOLANA_WS_URL`, `SOLANA_NETWORK` (PRD_v4 §19).
   No RPC vendor is hardcoded into business logic; production provider is replaceable config.
 - The API/intent layer talks to the adapter, never to web3.js directly (PRD_v4 §2 P6).

@@ -15,14 +15,16 @@ every Peridot product.
 ## Repo layout
 
 ```
-apps/api            NestJS API (auth, identity, profile, wallet)
+apps/api            NestJS API (auth, identity, profile, wallet, permissions)
 apps/wallet         Expo wallet client (web + iOS + Android)
 apps/web            Public docs site (Fumadocs + Next.js)
 contracts/svm       Pinocchio smart-account program (Rust)
-contracts/evm       Counterfactual smart accounts (Solidity/Foundry)
+contracts/evm       Counterfactual smart accounts + V4 permission layer (Solidity/Foundry, ADR 009)
 packages/sdk-js     Browser SDK
 packages/types      Shared TypeScript types
 packages/openapi    OpenAPI 3.0 specification (source of truth)
+packages/evm        EVM adapter + permission builders
+packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
 ```
 
 ## Quick start

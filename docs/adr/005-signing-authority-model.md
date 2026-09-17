@@ -120,6 +120,12 @@ Rationale, confirmed by the stakeholder:
 4. **Chain longevity:** the same passkey model carries to future EVM smart accounts
    (secp256r1 verification, RIP-7212-style) — one credential across chains (PRD_v5 §6).
 
+> **V4 amendment (2026-09-16, EVM only — ADR 009):** on EVM the authority model
+> now has two key slots sharing one curve: the OWNER passkey and P-256
+> PERMISSION session keys (`sessions[permissionId]`). Separation is
+> `PID|EVM|PERMISSION|v1` + op tags `0x10..0x16` + stored key-slot checks, never
+> the curve. Solana keeps the single-authority model.
+
 The fallback trigger above stays in effect as the only remaining open risk.
 
 ## Consequences (either option)
@@ -144,6 +150,8 @@ The fallback trigger above stays in effect as the only remaining open risk.
   a compromised Peridot API cannot sign in either model (§23).
 - **Both:** the signed payload is domain-separated (`PERIDOT/SOLANA/SMART_ACCOUNT/v1`,
   PRD_v4 §25) so a signature cannot be replayed across contexts.
+  (EVM V4 domains: `PID|EVM|SMART_ACCOUNT|v3` for owner ops,
+  `PID|EVM|PERMISSION|v1` + `0x10..0x16` for permission ops — ADR 009.)
 
 ## Migration considerations
 

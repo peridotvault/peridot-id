@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Script, console} from "forge-std/Script.sol";
 import {PeridotAccount} from "../src/PeridotAccount.sol";
 import {PeridotFactory} from "../src/PeridotFactory.sol";
+import {PeridotPermissionExecutor} from "../src/PeridotPermissionExecutor.sol";
 
 /// @notice Deploy implementation + factory. Env: IMPLEMENTATION (optional reuse),
 /// RELAYER (required — the only address allowed to submit deployAndInit),
@@ -24,9 +25,11 @@ contract Deploy is Script {
             implementation = address(new PeridotAccount());
         }
         PeridotFactory factory = new PeridotFactory(implementation, relayer, admins);
+        PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
         vm.stopBroadcast();
         console.log("IMPLEMENTATION=%s", implementation);
         console.log("FACTORY=%s", address(factory));
+        console.log("EXECUTOR=%s", address(executor));
         console.log("INIT_CODE_HASH=%s", vm.toString(factoryCreationCodeHash(implementation)));
     }
 

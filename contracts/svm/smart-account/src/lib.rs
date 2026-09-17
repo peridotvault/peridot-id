@@ -25,6 +25,7 @@ pub mod auth;
 pub mod errors;
 pub mod fee;
 pub mod instructions;
+pub mod programdata;
 pub mod secp256r1;
 pub mod sha256;
 pub mod state;
@@ -73,5 +74,9 @@ pub fn process_instruction(
             Instruction::Close => instructions::close::process(program_id, accounts, &instruction_data),
             Instruction::Activate => instructions::activate::process(program_id, accounts, &instruction_data),
             Instruction::Execute => instructions::execute::process(program_id, accounts, &instruction_data),
+            Instruction::RegisterSession => instructions::register_session::process(program_id, accounts, &instruction_data),
+            Instruction::SessionExecute => instructions::session_execute::process(program_id, accounts, &instruction_data),
+            Instruction::RevokeSession => instructions::revoke_session::process(program_id, accounts, &instruction_data),
+            Instruction::CloseSession => instructions::close_session::process(program_id, accounts, &instruction_data),
         }
 }

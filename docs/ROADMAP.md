@@ -25,5 +25,11 @@ Inventory, Achievements, Cloud Save
 - Passkey-authority refinement as Pinocchio introspection matures
 - Session keys, guardians (multisig arrives as a separate wallet model — ADR-008)
 
+> **V4 status (2026-09-16, ADR 009):** session keys have shipped **on EVM only**
+> as scoped permissions (pre-audit). Guardians/multisig remain future.
+>
+> **SVM sessions status (2026-09-17, ADR-010):** gameplay sessions have shipped
+> **on Solana** as PDA-isolated sessions (pre-audit, separate design).
+
 ## Ecosystem
 Partner SDKs, Developer Portal

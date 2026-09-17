@@ -2,13 +2,27 @@
 export {
   pidToSalt32,
   addressToBytes,
+  beUint,
+  build1271Challenge,
+  buildErc1155SafeTransferFrom,
+  buildErc20Transfer,
+  buildErc721TransferFrom,
   buildEvmAuthorizationPayload,
   buildEvmAuthorizationPayloadV2,
   buildEvmAuthorizationPayloadV3,
+  buildEvmPermissionPayload,
+  buildExec7579Payload,
+  buildGrantPayload,
+  buildModulePayload,
+  buildPermExecPayload,
+  buildPermissionId,
+  buildRevokePayload,
   compressedToX,
   concat,
+  DENIED_SELECTORS,
   deriveEvmSmartAccountAddress,
   DOMAIN_EVM,
+  DOMAIN_EVM_PERM,
   DOMAIN_EVM_V2,
   DOMAIN_EVM_V3,
   EVM_CHAINS,
@@ -17,12 +31,17 @@ export {
   getCreate2Address,
   keccak256,
   minimalProxyInitCode,
+  MODULE_TYPE,
   OP_EVM,
+  OP_PERM,
+  paddedAddress,
+  PERM_KIND,
   splitRawXy,
   toChecksumAddress,
   toHex,
 } from "@peridotvault/pid-core/dist/evm";
-export type { Bytes, EvmChain } from "@peridotvault/pid-core/dist/evm";
+export type { Bytes, EvmChain, PermissionScope } from "@peridotvault/pid-core/dist/evm";
 export { EvmRpc } from "./rpc";
 export type { EvmRpcLike } from "./rpc";
 export { EvmAdapter, buildViewCalldata } from "./adapter";
+export type { AbiValue, Exec7579Tuple, PermExecTuple } from "./adapter";

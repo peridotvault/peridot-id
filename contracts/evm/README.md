@@ -4,6 +4,10 @@ Counterfactual smart accounts (CREATE2) — the EVM counterpart of the Solana
 smart-account program. Salt = `sha256(pid)`, so one identity owns one address per
 `(factory, implementation)` and rotation never moves it.
 
+V4 adds the permission layer (`contracts/V4_PERMISSIONS.md`, canonical): scoped
+P-256 session keys + constrained ERC-7579 + owner-only ERC-1271, with V3 payloads
+frozen. Nothing in V4 ports to Solana.
+
 ## Contracts
 
 - `src/PeridotAccount.sol` — passkey-owned account, V3 authorization + fee schema
@@ -15,6 +19,18 @@ smart-account program. Salt = `sha256(pid)`, so one identity owns one address pe
   gas (`GasAnomaly`), recomputes `protocolFee` from policy, and splits relayerFee →
   `msg.sender`, protocolFee → factory vault; `initialize` does the same for
   activation (SVM `activate` parity, pre-funded counterfactual).
+  V4 adds, under `DOMAIN_PERM = "PID|EVM|PERMISSION|v1"` (ops `0x10..0x16`):
+  owner-signed `grantPermission` / `revokePermission` (consume the owner nonce,
+  ≤30d grant TTL), session-signed single-call `executeWithPermission` (strict
+  per-permission `seq`, exact scope match, spend caps), owner-gated
+  `installModule` / `uninstallModule` (validator/executor types only),
+  ERC-7579 `execute` (auth inside `executionCalldata`) /
+  `executeFromExecutor` (`onlyExecutorModule`), and owner-only `isValidSignature`
+  with account+chain defensive rehash. A transient `_locked` mutex covers every
+  untrusted-call path. There is intentionally NO `delegatecall` anywhere in this
+  file (CI-enforced); `supportsExecutionMode` is true for single `call` only.
+- `src/PeridotPermissionExecutor.sol` — ERC-7579 type-2 module, thin forwarder to
+  `executeFromExecutor` (enforces nothing itself; installed by the owner).
 - `src/PeridotFactory.sol` — EIP-1167 proxy factory (`deployAndInit` / `predict`;
   there is intentionally NO bare `deploy` — a deployed-but-uninitialized proxy is a
   squat vector) AND canonical revenue vault (`receive()` accumulates protocol fees;

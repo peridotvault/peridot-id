@@ -3,6 +3,11 @@
 PeridotID wallet client — an **Expo / React Native** app (web + iOS + Android) that
 demonstrates the passkey-driven smart-account wallet on top of `@peridotvault/pid-sdk-js`.
 
+EVM support status: passkey-owned counterfactual accounts are live on-chain, but
+this wallet has no EVM permission/session-key UX yet — no session-key flows,
+grant screens, or `v1/permissions` calls exist here. EVM permission UX is planned
+follow-up work, not silently missing.
+
 **Private workspace package** — not published to npm.
 
 ## Scripts

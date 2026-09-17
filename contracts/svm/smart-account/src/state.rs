@@ -191,3 +191,260 @@ pub fn verify_nonce(account: &SmartAccount, nonce: u64) -> Result<(), ProgramErr
     }
     Ok(())
 }
+
+// ================= Session records (V4 permission layer, ADR-010) =================
+//
+// A session record lives in its own PDA (`["peridot_id", "session", account_id,
+// session_pubkey]`) and authorizes gameplay CPIs signed by that PDA — never the
+// vault PDA. The session PDA holds rent-exempt minimum only; lamports safety
+// even under signer forwarding follows from the runtime (only THIS program can
+// `invoke_signed` for its own PDAs).
+//
+// Layout (205 bytes, v1):
+// `version u8 ‖ status u8 ‖ session_pubkey[32] ‖ account_id[32] ‖ expires_at i64LE ‖
+//  last_used i64LE ‖ seq u64LE ‖ allowed_program[32] ‖ recorded_authority[32] ‖
+//  recorded_has_authority u8 ‖ recorded_slot u64LE ‖ last_seen_authority[32] ‖
+//  last_seen_has_authority u8 ‖ last_seen_slot u64LE ‖ bump u8`
+//
+// `recorded_*` is the game program's upgrade authority + ProgramData slot,
+// verified at registration. `last_seen_*` is refreshed on every execution so
+// backend indexers can detect post-trust upgrades (record-and-log: no
+// enforcement, ADR-010 §4).
+
+/// Session record length (fixed).
+pub const SESSION_STATE_LEN: usize = 205;
+/// Session record version.
+pub const SESSION_VERSION: u8 = 1;
+
+pub const SESSION_STATUS_ACTIVE: u8 = 0;
+pub const SESSION_STATUS_REVOKED: u8 = 1;
+
+const S_OFF_VERSION: usize = 0;
+const S_OFF_STATUS: usize = 1;
+const S_OFF_SESSION_KEY: usize = 2; // [u8; 32] Ed25519
+const S_OFF_ACCOUNT_ID: usize = 34; // [u8; 32]
+const S_OFF_EXPIRES_AT: usize = 66; // i64 LE
+const S_OFF_LAST_USED: usize = 74; // i64 LE
+const S_OFF_SEQ: usize = 82; // u64 LE
+const S_OFF_PROGRAM: usize = 90; // [u8; 32]
+const S_OFF_REC_AUTH: usize = 122; // [u8; 32]
+const S_OFF_REC_HAS_AUTH: usize = 154; // u8
+const S_OFF_REC_SLOT: usize = 155; // u64 LE
+const S_OFF_SEEN_AUTH: usize = 163; // [u8; 32]
+const S_OFF_SEEN_HAS_AUTH: usize = 195; // u8
+const S_OFF_SEEN_SLOT: usize = 196; // u64 LE
+const S_OFF_BUMP: usize = 204; // u8
+
+/// Session record. Read-only views borrow the account data.
+#[derive(Clone, Copy)]
+pub struct SessionAccount<'data> {
+    data: &'data [u8],
+}
+
+impl<'data> SessionAccount<'data> {
+    pub fn try_from_bytes(data: &'data [u8]) -> Result<Self, ProgramError> {
+        if data.len() != SESSION_STATE_LEN || data[S_OFF_VERSION] != SESSION_VERSION {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        Ok(Self { data })
+    }
+
+    pub fn status(&self) -> u8 {
+        self.data[S_OFF_STATUS]
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.data[S_OFF_STATUS] == SESSION_STATUS_ACTIVE
+    }
+
+    pub fn session_key(&self) -> [u8; 32] {
+        self.data[S_OFF_SESSION_KEY..S_OFF_SESSION_KEY + 32]
+            .try_into()
+            .expect("slice is 32 bytes")
+    }
+
+    pub fn account_id(&self) -> [u8; 32] {
+        self.data[S_OFF_ACCOUNT_ID..S_OFF_ACCOUNT_ID + 32]
+            .try_into()
+            .expect("slice is 32 bytes")
+    }
+
+    pub fn expires_at(&self) -> i64 {
+        i64::from_le_bytes(
+            self.data[S_OFF_EXPIRES_AT..S_OFF_EXPIRES_AT + 8]
+                .try_into()
+                .expect("slice is 8 bytes"),
+        )
+    }
+
+    pub fn last_used(&self) -> i64 {
+        i64::from_le_bytes(
+            self.data[S_OFF_LAST_USED..S_OFF_LAST_USED + 8]
+                .try_into()
+                .expect("slice is 8 bytes"),
+        )
+    }
+
+    pub fn seq(&self) -> u64 {
+        u64::from_le_bytes(
+            self.data[S_OFF_SEQ..S_OFF_SEQ + 8]
+                .try_into()
+                .expect("slice is 8 bytes"),
+        )
+    }
+
+    pub fn allowed_program(&self) -> [u8; 32] {
+        self.data[S_OFF_PROGRAM..S_OFF_PROGRAM + 32]
+            .try_into()
+            .expect("slice is 32 bytes")
+    }
+
+    pub fn recorded_authority(&self) -> ([u8; 32], bool) {
+        (
+            self.data[S_OFF_REC_AUTH..S_OFF_REC_AUTH + 32]
+                .try_into()
+                .expect("slice is 32 bytes"),
+            self.data[S_OFF_REC_HAS_AUTH] != 0,
+        )
+    }
+
+    pub fn recorded_slot(&self) -> u64 {
+        u64::from_le_bytes(
+            self.data[S_OFF_REC_SLOT..S_OFF_REC_SLOT + 8]
+                .try_into()
+                .expect("slice is 8 bytes"),
+        )
+    }
+}
+
+/// Mutable session record — writes into the account data.
+pub struct SessionAccountMut<'data> {
+    data: &'data mut [u8],
+}
+
+impl<'data> SessionAccountMut<'data> {
+    pub fn try_from_bytes(data: &'data mut [u8]) -> Result<Self, ProgramError> {
+        if data.len() != SESSION_STATE_LEN {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        Ok(Self { data })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn initialize(
+        &mut self,
+        session_key: [u8; 32],
+        account_id: [u8; 32],
+        expires_at: i64,
+        now: i64,
+        allowed_program: [u8; 32],
+        recorded_authority: [u8; 32],
+        recorded_has_authority: bool,
+        recorded_slot: u64,
+        bump: u8,
+    ) {
+        self.data[S_OFF_VERSION] = SESSION_VERSION;
+        self.data[S_OFF_STATUS] = SESSION_STATUS_ACTIVE;
+        self.data[S_OFF_SESSION_KEY..S_OFF_SESSION_KEY + 32].copy_from_slice(&session_key);
+        self.data[S_OFF_ACCOUNT_ID..S_OFF_ACCOUNT_ID + 32].copy_from_slice(&account_id);
+        self.data[S_OFF_EXPIRES_AT..S_OFF_EXPIRES_AT + 8].copy_from_slice(&expires_at.to_le_bytes());
+        self.data[S_OFF_LAST_USED..S_OFF_LAST_USED + 8].copy_from_slice(&now.to_le_bytes());
+        self.data[S_OFF_SEQ..S_OFF_SEQ + 8].copy_from_slice(&0u64.to_le_bytes());
+        self.data[S_OFF_PROGRAM..S_OFF_PROGRAM + 32].copy_from_slice(&allowed_program);
+        self.data[S_OFF_REC_AUTH..S_OFF_REC_AUTH + 32].copy_from_slice(&recorded_authority);
+        self.data[S_OFF_REC_HAS_AUTH] = u8::from(recorded_has_authority);
+        self.data[S_OFF_REC_SLOT..S_OFF_REC_SLOT + 8].copy_from_slice(&recorded_slot.to_le_bytes());
+        // last_seen_* starts as the registration snapshot.
+        self.data[S_OFF_SEEN_AUTH..S_OFF_SEEN_AUTH + 32].copy_from_slice(&recorded_authority);
+        self.data[S_OFF_SEEN_HAS_AUTH] = u8::from(recorded_has_authority);
+        self.data[S_OFF_SEEN_SLOT..S_OFF_SEEN_SLOT + 8].copy_from_slice(&recorded_slot.to_le_bytes());
+        self.data[S_OFF_BUMP] = bump;
+    }
+
+    pub fn revoke(&mut self) {
+        self.data[S_OFF_STATUS] = SESSION_STATUS_REVOKED;
+    }
+
+    pub fn advance(&mut self, now: i64) {
+        let seq = u64::from_le_bytes(
+            self.data[S_OFF_SEQ..S_OFF_SEQ + 8]
+                .try_into()
+                .expect("slice is 8 bytes"),
+        );
+        self.data[S_OFF_SEQ..S_OFF_SEQ + 8].copy_from_slice(&(seq + 1).to_le_bytes());
+        self.data[S_OFF_LAST_USED..S_OFF_LAST_USED + 8].copy_from_slice(&now.to_le_bytes());
+    }
+
+    pub fn record_seen(&mut self, authority: [u8; 32], has_authority: bool, slot: u64) {
+        self.data[S_OFF_SEEN_AUTH..S_OFF_SEEN_AUTH + 32].copy_from_slice(&authority);
+        self.data[S_OFF_SEEN_HAS_AUTH] = u8::from(has_authority);
+        self.data[S_OFF_SEEN_SLOT..S_OFF_SEEN_SLOT + 8].copy_from_slice(&slot.to_le_bytes());
+    }
+}
+
+/// Pure session-liveness check against the chain clock `now`: hard expiry plus
+/// inactivity window. Host-testable (the validator clock cannot be warped, so
+/// the live suite covers expiry with a short TTL and revocation directly).
+/// Both bounds fail closed as `SessionExpired`.
+pub fn check_session_time(expires_at: i64, last_used: i64, now: i64) -> Result<(), crate::errors::PeridotError> {
+    if now > expires_at {
+        return Err(crate::errors::PeridotError::SessionExpired);
+    }
+    if now - last_used > crate::auth::SESSION_INACTIVITY_SECS {
+        return Err(crate::errors::PeridotError::SessionExpired);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod session_time_tests {
+    use super::*;
+
+    #[test]
+    fn usable_inside_window() {
+        assert!(check_session_time(2000, 1000, 1500).is_ok());
+    }
+
+    #[test]
+    fn expired_at_hard_expiry() {
+        assert!(check_session_time(2000, 1999, 2001).is_err());
+    }
+
+    #[test]
+    fn inactive_session_rejected() {
+        // last_used 1801s ago with a live hard expiry still fails.
+        assert!(check_session_time(10_000, 1000, 1000 + 1801).is_err());
+    }
+
+    #[test]
+    fn inactivity_boundary_is_inclusive() {
+        // Exactly 1800s idle still passes (`>` comparison, fail-open nowhere).
+        assert!(check_session_time(10_000, 1000, 1000 + 1800).is_ok());
+    }
+}
+
+/// Verify the session PDA against seeds
+/// `["peridot_id", "session", account_id, session_pubkey]` and return the bump.
+pub fn verify_session_pda(
+    session: &pinocchio::AccountView,
+    program_id: &pinocchio::Address,
+    account_id: [u8; 32],
+    session_key: [u8; 32],
+) -> Result<u8, ProgramError> {
+    #[cfg(any(target_os = "solana", target_arch = "bpf"))]
+    {
+        let (expected, bump) = pinocchio::Address::find_program_address(
+            &[b"peridot_id", b"session", &account_id, &session_key],
+            program_id,
+        );
+        if session.address() != &expected {
+            return Err(crate::errors::PeridotError::InvalidPda.into());
+        }
+        Ok(bump)
+    }
+    #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
+    {
+        let _ = (session, program_id, account_id, session_key);
+        Ok(255)
+    }
+}
