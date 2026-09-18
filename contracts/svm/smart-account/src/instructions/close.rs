@@ -1,5 +1,5 @@
 //! Close the smart account, V3 authorization (authorized by the secp256r1 passkey).
-//! Not exposed by any V1 API (ADR 004 lifecycle: a DB delete must never close an
+//! Not exposed by any V1 API (lifecycle rule: a DB delete must never close an
 //! on-chain account); exists in the program for teardown.
 //!
 //! The V3 payload binds op-tag ‖ account_id ‖ nonce ‖ destination ‖ expiry, so a

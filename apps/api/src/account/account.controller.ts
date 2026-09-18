@@ -8,7 +8,7 @@ import { EvmActivationService, EvmActivationView } from "./evm-activation.servic
 import { ActivateDto } from "./dto/activate.dto";
 import { EvmActivateDto } from "./dto/evm-activate.dto";
 
-// ADR-008: 1 identity = 1 personal wallet. No account ids anywhere — the owner
+// 1 identity = 1 personal wallet. No account ids anywhere — the owner
 // always comes from the JWT, the wallet is resolved from it.
 @Controller("v1/account")
 @UseGuards(ThrottlerGuard)

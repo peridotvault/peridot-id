@@ -4,14 +4,14 @@ Counterfactual smart accounts (CREATE2) — the EVM counterpart of the Solana
 smart-account program. Salt = `sha256(pid)`, so one identity owns one address per
 `(factory, implementation)` and rotation never moves it.
 
-V4 adds the permission layer (`contracts/V4_PERMISSIONS.md`, canonical): scoped
+V4 adds the permission layer (`contracts/WHITEPAPER.md` §10, canonical): scoped
 P-256 session keys + constrained ERC-7579 + owner-only ERC-1271, with V3 payloads
 frozen. Nothing in V4 ports to Solana.
 
 ## Contracts
 
 - `src/PeridotAccount.sol` — passkey-owned account, V3 authorization + fee schema
-  (`contracts/V2_AUTHORIZATION.md`, canonical): the `secp256r1` authority is set on
+  (`contracts/WHITEPAPER.md` §§2–3, canonical): the `secp256r1` authority is set on
   the passkey-bound `initialize`; `execute` / `updateAuthority` verify a WebAuthn
   assertion whose challenge is the V3 domain-separated payload (op-tagged, account-
   and chain-bound, policy-bound, no amounts). `execute` mirrors SVM `withdraw_sol`:

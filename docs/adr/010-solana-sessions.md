@@ -2,11 +2,11 @@
 
 Status: accepted (SVM-only; pre-audit engineering — see §7).
 
-Amends for SVM: ADR 003 §3 (AA/session keys out of scope) and the PRD_v4
+Amends for SVM: the AA/session-keys deferral and the PRD_v4
 §1.2/§5.5/§31 + PRD_v5 §10 deferrals, for gameplay sessions only. ADR 009
 (EVM permission layer) is the sibling, not the template: nothing is ported —
 the designs share vocabulary, never code, keys, nonces, or trust assumptions
-(`contracts/SVM_SESSIONS.md` §7).
+(`contracts/WHITEPAPER.md` §12).
 
 ## Context
 
@@ -69,7 +69,7 @@ External human audit required before mainnet or authority burn.
 
 ## References
 
-- `contracts/SVM_SESSIONS.md` (canonical), `contracts/svm/smart-account/src/`
+- `contracts/WHITEPAPER.md` §11 (canonical), `contracts/svm/smart-account/src/`
   (`state.rs`, `programdata.rs`, `instructions/{register_session,
   session_execute,revoke_session,close_session}.rs`),
   `contracts/svm/mock-forwarder/` (adversarial helper, localnet-only),
@@ -78,6 +78,4 @@ External human audit required before mainnet or authority burn.
   Asymmetric Research "Invocation Security" (2025-04-23), Neodyme Squads v4
   ND-SQD1-M1, Anchor `remaining_accounts` docs, Token/Token-2022 instruction
   source, loader_upgradeable source.
-- ADR 003 (scope — amended for SVM sessions), ADR 007 (SVM executor rejection
-  stays; sessions are not a generic executor), ADR 008 (one wallet; scoping
-  reappears *inside* it via sessions), ADR 009 (EVM sibling).
+- WHITEPAPER.md §§1, 11–12 (scope, executor constraint, one wallet with inside-scoping), ADR-009 (EVM sibling).

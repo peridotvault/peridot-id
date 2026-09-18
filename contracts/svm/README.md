@@ -3,13 +3,13 @@
 Pinocchio smart-account program — the on-chain half of the PeridotID personal
 wallet. One identity owns one PDA, seeded `["peridot_id", "account", sha256(pid)]`,
 authorized by a secp256r1 passkey verified via the precompile + instruction
-introspection (ADR 005 Option B).
+introspection (secp256r1 owner passkey).
 
 - `smart-account/` — the program crate (`peridot-smart-account`; package name is
   load-bearing: `.so` + keypair filenames derive from it, do not rename lightly)
   - `src/` — `lib.rs`, `state.rs`, `auth.rs`, `fee.rs`, `secp256r1.rs`, `sha256.rs`,
-    `errors.rs`, `programdata.rs`, `instructions/` (V2 authorization schema — `contracts/V2_AUTHORIZATION.md`;
-    session layer discs 7–10 — `contracts/SVM_SESSIONS.md`, ADR-010)
+    `errors.rs`, `programdata.rs`, `instructions/` (V3 authorization schema — `contracts/WHITEPAPER.md` §§2, 6;
+    session layer discs 7–10 — `contracts/WHITEPAPER.md` §11, ADR-010)
   - `tests/integration.mjs` — adversarial cases incl. squat, non-canonical-vault,
     over-attested-fee policy checks (formula + drift + TTL),
     cross-account replay and TTL cases (task 005)
@@ -116,7 +116,7 @@ everywhere (the id is part of the PDA derivation). Procedure, not values:
 1. Reuse the canonical program keypair. Never generate a fresh one per env.
 2. Fund a deployer, deploy, verify the id on-chain.
 3. Transfer the upgrade authority to a **stakeholder-held hardware/multisig key**
-   before launch (see `docs/tasks/012-production-hardening.md` for the full checklist).
+   before launch (see `contracts/WHITEPAPER.md` §12 for the audit gate).
 4. Set `SOLANA_NETWORK=mainnet-beta` + 2+ production RPCs in deploy env.
 
 One keypair everywhere = one blast radius: the multisig is the single guard.

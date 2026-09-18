@@ -10,8 +10,7 @@ Tables:
   `pid` column (`pid_apps` uses `ownerPid`); the JWT `sub` claim carries it opaquely.
 - `identity_credentials` — one row per way to log in (Google, Discord, Apple, email+password,
   passkey, ...). `(provider, providerUserId)` is unique — the source of truth. A non-null
-  `email` is unique across all credentials (one email = one PID); see
-  `docs/adr/002-email-uniqueness.md`.
+  `email` is unique across all credentials (one email = one PID); see the email-uniqueness rule (ADR deleted; history in git).
 - `profiles` — mutable labels only: `displayName`, `avatarUrl`, `locale`.
   Strict 1:1 with `identities` via shared primary key (`profiles.pid`).
   (The old surrogate `id` and `username`/`usernameChangedAt` columns were removed when
@@ -22,15 +21,15 @@ Tables:
   `smart_account`, user-supplied for `linked_address`);
   `accountType ∈ {smart_account, linked_address}`.
   `@@unique([pid, chainId, accountType])` — one smart account per chain.
-  **No key-material columns, ever.** (ADR-008 removed the `pid_accounts` hub;
+  **No key-material columns, ever.** (The old `pid_accounts` hub was removed;
   every wallet-owned row references the PID directly.)
-- `authorities` — signing authorities for the wallet (ADR 005). `pid` FK; `type`
+- `authorities` — signing authorities for the wallet (secp256r1 passkeys). `pid` FK; `type`
   (`secp256r1` passkey for V1), `publicKey` (bytea), `credentialId` (WebAuthn), `status`.
   **Public material only** — the secret never leaves the client authenticator.
   (EVM V4 session keys are NOT stored here: they live in on-chain
   `sessions[permissionId]` records, granted/revoked by owner-signed transactions;
   the backend's grant validation is pure — no permission tables by design, ADR 009.)
-- `wallet_fee_payers` — user-controlled fee payer (ADR 006). `chainAccountId` FK;
+- `wallet_fee_payers` — user-controlled fee payer. `chainAccountId` FK;
   `address` only — the key never leaves the client.
 - `transactions` — `pid`, `chainAccountId`, `intentId` (nullable — deposits have no
   intent), `chain`, `network`, `txHash`, `status`, `confirmedAt`, `errorCode/Message`.
@@ -58,9 +57,9 @@ Invariants:
 
 - `(provider, providerUserId)` is unique.
 - A non-null `email` is unique across `identity_credentials` (one email = one PID; enforced by
-  a partial unique index plus the login-path check — ADR 002).
+  a partial unique index plus the login-path check — email-uniqueness rule).
 - An identity always keeps at least one credential (unlink of the last one is rejected).
-- One identity owns exactly one personal wallet (ADR-008) — wallet rows hang off
+- One identity owns exactly one personal wallet — wallet rows hang off
   `identities.pid` directly; there is no account hub table.
 - EVM V4 permissions add scoped keys *inside* that one wallet
   (`sessions[permissionId]`: kind/target/caps/expiry/`seq`/revocation, ≤30d TTL)
@@ -74,7 +73,7 @@ Invariants:
 - The PID is the only source of truth — changing email, displayName, avatar, or linking/unlinking
   providers never changes the PID or the wallet.
 
-## Wallet lifecycle (ADR 003/004)
+## Wallet lifecycle
 
 - **Creation** — explicit user action only. `POST /v1/account` ensures the Solana
   `smart_account` chain row (PDA derived from the PID) plus EVM counterfactuals.
@@ -83,21 +82,21 @@ Invariants:
   the user's first on-chain top-up (PRD_v5 §3). No silent creation, no backfill.
 - **Retrieval** — `GET /v1/account` returns the wallet's chain rows (`404`
   when none). The `smart_account` address is deterministically resolvable before on-chain
-  initialization (ADR-008 §seeds).
+  initialization (WHITEPAPER.md §1 seeds).
 - **Persistence** — accounts hang off `identities`, so they survive OAuth provider changes,
   credential unlinking, logins from another device, and session expiration.
 - **Deletion** — no wallet-deletion endpoint in V1. A DB delete cannot close an on-chain
   account; the program's `close` instruction is the only on-chain teardown and is not exposed
-  by any V1 API (ADR 004).
+  by any V1 API.
 - **PID deletion** — PID deletion is soft (`status = deleted`, `deletedAt`; no endpoint yet).
   Accounts soft-delete with the PID; an on-chain account has its own lifecycle and must not be
   silently destroyed by a DB delete.
 
 ## Migration (wallets → chain_accounts)
 
-The `wallets` table (V3, ADR 003) was migrated into `chain_accounts` as
+The `wallets` table (V3) was migrated into `chain_accounts` as
 `account_type = 'linked_address'`, `chain_namespace = 'solana'`,
 `chain_reference = '4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z'` (mainnet-beta genesis-hash prefix),
 under each wallet-holding identity's default `pid_accounts` row. The migration verifies
 the copy before dropping `wallets`. Smart-account creation is **not** backfilled — explicit
-user action only (ADR 004 §4).
+user action only.

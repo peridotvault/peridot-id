@@ -5,7 +5,7 @@
 //! recomputes `protocol_fee` from the immutable policy table and enforces the split:
 //! relayerFee (`= network_fee`) → fee payer, protocolFee → canonical revenue vault.
 //! Rates live here — never at call sites, never in per-call fields.
-//! See `contracts/V2_AUTHORIZATION.md` §§1, 4–5.
+//! See `contracts/WHITEPAPER.md` §2.
 
 use crate::errors::PeridotError;
 use pinocchio::error::ProgramError;

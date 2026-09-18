@@ -2,7 +2,7 @@
 
 PeridotID Solana adapter — passkey-based smart-account authority, built on
 `@peridotvault/pid-core` primitives. Only `pid-core` and `pid-solana` may import
-`@solana/web3.js` (ADR 007 §8). Pure functions and adapters for
+`@solana/web3.js` (web3.js layering rule). Pure functions and adapters for
 building, signing, and submitting smart-account transactions without a wallet.
 
 ## Install

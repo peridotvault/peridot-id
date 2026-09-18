@@ -3,7 +3,7 @@
 > Reading note: the architecture base below still stands, with two supersessions —
 > identities are now user-chosen `<handle>@pid` (not generated), and the `PidAccount`
 > hub is removed (1 identity = 1 wallet, rows reference the PID directly) per
-> [ADR-008](../adr/008-remove-pid-account.md). PDA seeds are `sha256(pid)`.
+> [WHITEPAPER.md §1](../../contracts/WHITEPAPER.md). PDA seeds are `sha256(pid)`.
 
 **Version:** 4.0  
 **Status:** Implementation PRD  
@@ -135,7 +135,7 @@ These can be future phases.
 >
 > **SVM sessions status (2026-09-17, ADR-010):** scoped gameplay sessions have
 > since shipped **on Solana** as PDA-isolated Ed25519 session keys
-> (`contracts/SVM_SESSIONS.md`) — a separate design from the EVM layer, not a
+> (`contracts/WHITEPAPER.md` §11) — a separate design from the EVM layer, not a
 > port. Guardians/multisig remain future.
 
 ---
@@ -434,9 +434,9 @@ V1 policy scope:
 
 Do NOT implement session keys yet. (V4 status, 2026-09-16: session keys have
 since shipped **on EVM only** as scoped permissions — ADR 009,
-`contracts/V4_PERMISSIONS.md`. SVM status, 2026-09-17: gameplay sessions have
+`contracts/WHITEPAPER.md` §10. SVM status, 2026-09-17: gameplay sessions have
 since shipped **on Solana** as PDA-isolated sessions — ADR-010,
-`contracts/SVM_SESSIONS.md`, a separate design.)
+`contracts/WHITEPAPER.md` §11, a separate design.)
 
 ---
 
@@ -1847,7 +1847,7 @@ Gas sponsorship is not part of V1.
 >
 > **SVM sessions status (2026-09-17, ADR-010):** session keys have additionally
 > landed **on Solana** as PDA-isolated gameplay sessions (structurally different
-> boundary — `contracts/SVM_SESSIONS.md`), not as a port of the EVM layer.
+> boundary — `contracts/WHITEPAPER.md` §11), not as a port of the EVM layer.
 
 After V1 is stable, the architecture must be able to add:
 

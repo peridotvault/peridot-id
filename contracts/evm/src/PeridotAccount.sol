@@ -11,7 +11,7 @@ import {Base64Url} from "./Base64Url.sol";
 /// every chain that shares the factory. The passkey signs
 /// `authenticatorData ‖ sha256(clientDataJSON)` with the domain-separated V3 payload
 /// as the WebAuthn challenge — the same binding as `auth.rs::verify_secp256r1_v2`.
-/// @dev V3 invariants (see `contracts/V2_AUTHORIZATION.md`):
+/// @dev V3 invariants (see `contracts/WHITEPAPER.md` §2):
 /// - The user authorizes the transaction intent plus a `feePolicyVersion` — never
 ///   amounts. The submitter attests `networkFee`; the contract recomputes
 ///   `protocolFee` from the immutable policy table and enforces the split:
@@ -47,7 +47,7 @@ contract PeridotAccount {
     /// @dev Maximum authorization lifetime (seconds). Bounds cross-context replay.
     uint64 internal constant MAX_TTL = 600;
 
-    // ---- V4 permission layer (see `contracts/V4_PERMISSIONS.md`, canonical) ----
+    // ---- V4 permission layer (see `contracts/WHITEPAPER.md` §10, canonical) ----
     /// @dev Permission domain. Deliberately DIFFERENT from DOMAIN_V3 so an owner
     /// signature can never verify as a permission signature and vice versa —
     /// this is the load-bearing OWNER vs PERMISSION distinction (both use P-256).
@@ -81,7 +81,7 @@ contract PeridotAccount {
     uint256 public constant MODULE_TYPE_HOOK = 4;
 
     /// @dev The ONLY execution mode this account supports: single `call`.
-    /// Delegatecall and batch modes are permanently unsupported — see V4_PERMISSIONS.md.
+    /// Delegatecall and batch modes are permanently unsupported — see WHITEPAPER.md §10.
     /// Mode encoding follows ERC-7579 (CallType 0x00 = call, ExecType 0x00 = default).
     bytes32 public constant MODE_SINGLE_DEFAULT = bytes32(0);
 
@@ -500,7 +500,7 @@ contract PeridotAccount {
         return type(uint256).max;
     }
 
-    // ============ V4 permission layer + ERC-7579 (see V4_PERMISSIONS.md) ============
+    // ============ V4 permission layer + ERC-7579 (see WHITEPAPER.md §10) ============
     // The account stays the permanent asset-owning account. Permissions are scoped
     // capabilities enforced HERE (single audit point), never a second wallet.
     // There is intentionally NO delegatecall anywhere in this file: untrusted code

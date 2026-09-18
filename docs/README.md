@@ -35,14 +35,14 @@ packages/pid-react  Hosted "Sign in with PeridotID" React flow
 
 - [prds/PRD_v5.md](prds/PRD_v5.md) — current product spec (smart wallet)
 - [prds/PRD_v4.md](prds/PRD_v4.md) — architecture base (note: its `PidAccount` model is
-  superseded by [adr/008-remove-pid-account.md](adr/008-remove-pid-account.md))
+  superseded (1 identity = 1 personal wallet; see [WHITEPAPER.md §1](../contracts/WHITEPAPER.md)))
 - [ARCHITECTURE.md](ARCHITECTURE.md) — modules and repo layout
 - [TECH_STACK.md](TECH_STACK.md) — NestJS, PostgreSQL, Prisma, JWT, Passport
 - [DATABASE.md](DATABASE.md) — tables, ERD, invariants
 - [API_SPEC.md](API_SPEC.md) — endpoint list
 - [SECURITY.md](SECURITY.md) — auth, sessions, wallet threat model
 - [ROADMAP.md](ROADMAP.md) — Foundation → Social → Gaming → Ecosystem
-- [adr/](adr/) — accepted decisions 002–010 · [tasks/](tasks/README.md) — pre-mainnet hardening
+- [adr/](adr/) — accepted decisions 009–010 (WHITEPAPER.md §12 gates mainnet)
 
 ## Quick start
 

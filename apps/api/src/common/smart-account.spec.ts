@@ -1,7 +1,7 @@
 import { deriveSmartAccountAddress, pidToSeed32 } from "./smart-account";
 
 // Reference vectors generated with @solana/web3.js v1 findProgramAddressSync
-// (ADR-008: seeds are sha256(pid); packages/solana revalidates task 006).
+// (seeds are sha256(pid)).
 const PROGRAM_ID = "9LCZEdXdmLeEyU8Fik2721R28K4xWXTrVd76r4tczNZY";
 
 describe("deriveSmartAccountAddress", () => {

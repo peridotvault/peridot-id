@@ -3,7 +3,7 @@
 //! Vendored from `pinocchio-secp256r1-instruction` (MIT, Dean Little / Blueshift) and
 //! adapted to pinocchio 0.10's re-exports (`error::ProgramError`, `address::Address`).
 //! Enables the instruction-sysvar introspection pattern for passkey (secp256r1) authority
-//! verification (ADR 005 Option B).
+//! verification (owner passkey model).
 
 #![allow(clippy::missing_safety_doc)]
 

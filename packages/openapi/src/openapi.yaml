@@ -46,14 +46,14 @@ tags:
     description: |
       The user's wallet, associated with their PID. **Deprecated (V3 surface)** — preserved
       for existing clients, backed by `linked_address` chain accounts. Use `/account` and
-      the smart account instead (ADR-008).
+      the smart account instead.
   - name: account
     description: PeridotID account — owns chain accounts (smart account PDA, legacy linked address)
   - name: credentials
     description: |
-      Signing authorities (secp256r1 passkeys, ADR 005). Google OAuth proves identity; a
+      Signing authorities (secp256r1 passkeys). Google OAuth proves identity; a
       passkey authorizes the wallet. The first credential registers freely; each additional
-      credential requires approval by an existing credential (ADR 006 §4).
+      credential requires approval by an existing credential (existing-credential approval rule).
   - name: permissions
     description: |
       EVM permission grants (scoped P-256 session keys, ADR 009). Validation is pure
@@ -732,7 +732,7 @@ paths:
       summary: Create the wallet
       description: |
         Creates the wallet for the authenticated PID with a user-supplied Solana address.
-        The chain is fixed to `solana` for V3 (single-chain MVP, ADR 003).
+        The chain is fixed to `solana` for V3 (single-chain MVP).
 
         A PID has at most one wallet: creating again returns the existing wallet. Custody is
         record-only — Peridot does not generate, hold, or return any key material.
@@ -933,8 +933,7 @@ paths:
       tags: [account]
       summary: Ensure the identity's personal wallet
       description: |
-        Idempotent wallet setup for the authenticated PID (ADR-008: 1 identity =
-        1 personal wallet): ensures the Solana `smart_account` chain row whose
+        Idempotent wallet setup for the authenticated PID (1 identity = 1 personal wallet): ensures the Solana `smart_account` chain row whose
         address is deterministically derived from the PID (PDA) and resolvable
         before any on-chain initialization, plus EVM counterfactuals.
         Smart-account initialization happens on the user's first on-chain top-up
@@ -1211,7 +1210,7 @@ paths:
       summary: List signing authorities (passkeys)
       description: |
         Returns the authenticated PID's active passkey authorities for their account.
-        Public fields only — credential ID, last-used; never key material (ADR 006).
+        Public fields only — credential ID, last-used; never key material.
       security:
         - cookieAuth: []
       responses:
@@ -1233,7 +1232,7 @@ paths:
       description: |
         Returns WebAuthn registration options. When the account already has a credential,
         `isAdditional` is true and an `approval` challenge is included — the client must
-        assert with an existing credential to authorize adding the new one (ADR 006 §4).
+        assert with an existing credential to authorize adding the new one (existing-credential approval rule).
       security:
         - cookieAuth: []
       responses:
@@ -1335,7 +1334,7 @@ paths:
       summary: Revoke a signing authority
       description: |
         Revokes a passkey. The account must keep at least one active authority — revoking
-        the last one is rejected (ADR 006 §5).
+        the last one is rejected (last-credential guard).
       security:
         - cookieAuth: []
       parameters:
@@ -1851,7 +1850,7 @@ components:
         type:
           type: string
           enum: [secp256r1]
-          description: "Passkey authority model (ADR 005 Option B)"
+          description: "Passkey authority model (secp256r1 owner passkey)"
         credentialId:
           type: string
           nullable: true

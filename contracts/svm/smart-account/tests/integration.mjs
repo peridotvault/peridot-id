@@ -1,7 +1,7 @@
 // PeridotID smart-account program — V3 integration suite.
 //
 // Runs against a local `solana-test-validator`. Covers the V3 authorization + fee
-// schema (contracts/V2_AUTHORIZATION.md, canonical): op-tagged + account-bound
+// schema (contracts/WHITEPAPER.md §2, canonical): op-tagged + account-bound
 // payloads with policy-only fee binding, attested networkFee + fixed protocol %,
 // canonical revenue vault, RP-ID/UV parity with EVM, TTL caps, plus the adversarial
 // list (squat, replay, substitution, rotation, close, tokens, rounding).
@@ -94,7 +94,7 @@ const u64 = (v) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(v)); r
 const i64 = (v) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); return b; };
 const u16 = (v) => { const b = Buffer.alloc(2); b.writeUInt16LE(v); return b; };
 
-// ---- V3 payload builders (mirror contracts/V2_AUTHORIZATION.md §§2, 4) ----
+// ---- V3 payload builders (mirror contracts/WHITEPAPER.md §§2, 6) ----
 const initPayloadV3 = (accountId32, authorityComp, rpId) =>
   sha256(Buffer.concat([DOMAIN_V3, Buffer.from([OP.initialize]), accountId32, authorityComp, rpId]));
 const activatePayloadV3 = (accountId32, authorityComp, rpId, policy, expiry) =>

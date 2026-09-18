@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-// PDA derivation for the Peridot smart account (ADR 004 §5, ADR 007 §2, ADR-008).
+// PDA derivation for the Peridot smart account (WHITEPAPER.md §§1, 6).
 //
 // Seeds: ["peridot_id", "account", sha256(pid)] — one identity owns exactly one
 // personal wallet, so the permanent PID *is* the seed. The program id is
@@ -135,7 +135,7 @@ export function findProgramAddress(seeds: Buffer[], programId: string): { addres
   return null;
 }
 
-/** Derive the smart-account PDA address for a PID (ADR-008: 1 identity = 1 wallet). */
+/** Derive the smart-account PDA address for a PID (1 identity = 1 wallet). */
 export function deriveSmartAccountAddress(pid: string, programId: string): SmartAccountAddress {
   const found = findProgramAddress([Buffer.from("peridot_id"), Buffer.from("account"), pidToSeed32(pid)], programId);
   if (!found) throw new Error("failed to derive an off-curve PDA address");

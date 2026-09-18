@@ -16,5 +16,5 @@ ceremonies, and client key custody. No redirects, no hosts, no app flow.
   (hosted redirects, prod defaults). Third-party apps only — the wallet never
   imports it.
 
-Only `pid-core` and `pid-solana` may import `@solana/web3.js` (ADR 007 §8);
+Only `pid-core` and `pid-solana` may import `@solana/web3.js` (web3.js layering rule);
 everything else goes through their surfaces.

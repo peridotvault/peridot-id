@@ -96,7 +96,7 @@ export class AccountService {
   /**
    * Idempotent wallet setup for the token identity: ensures the Solana
    * smart-account row (derived PDA) plus EVM counterfactuals, then returns
-   * every chain row. ADR-008: 1 identity = 1 personal wallet.
+   * every chain row. 1 identity = 1 personal wallet.
    */
   async ensureAccount(pid: string): Promise<ChainAccountView[]> {
     // Read env before any DB write so a missing PID_PROGRAM_ID can't orphan rows.

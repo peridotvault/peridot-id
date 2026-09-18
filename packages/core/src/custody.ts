@@ -1,4 +1,4 @@
-// Fee payer management (ADR 006 §2): a client-held Ed25519 keypair that pays transaction
+// Fee payer management (fee-payer model): a client-held Ed25519 keypair that pays transaction
 // fees. The secret never leaves the device's secure storage. Blast radius = fee SOL only.
 
 import { Keypair } from "@solana/web3.js";

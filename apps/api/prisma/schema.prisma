@@ -134,13 +134,13 @@ model Session {
   @@map("sessions")
 }
 
-// ADR-008: 1 identity = 1 personal wallet. The PidAccount hub is gone — every
+// 1 identity = 1 personal wallet. The PidAccount hub is gone — every
 // wallet-owned row references Identity.pid directly. (A future multisig product
 // will be a separate wallet model shared by many identities, not this one.)
 
-// ADR 005: single-use, expiring WebAuthn ceremony state. No secret material — the challenge
+// Single-use, expiring WebAuthn ceremony state. No secret material — the challenge
 // is a random nonce (PRD_v4 §22: replay protection). `approvalChallenge` carries the
-// existing-credential approval required to add a second credential (ADR 006 §4).
+// existing-credential approval required to add a second credential.
 model CredentialChallenge {
   id                String           @id @default(uuid())
   pid               String?
@@ -157,12 +157,12 @@ model CredentialChallenge {
   @@map("credential_challenges")
 }
 
-// ADR-008: one row per chain account of the identity's single personal wallet.
+// One row per chain account of the identity's single personal wallet.
 // `account_type` = smart_account (program PDA) or linked_address (migrated V3
 // record-only). The unique constraint encodes one smart account per chain.
 // The chain is a single `chainId` FK — namespace/reference live once on `chains` and
 // are read back through the join (never duplicated here).
-// No key-material columns, ever (ADR 003 rule carried).
+// No key-material columns, ever (long-standing rule).
 model ChainAccount {
   id                 String            @id @default(uuid())
   pid                String
@@ -185,7 +185,7 @@ model ChainAccount {
   @@map("chain_accounts")
 }
 
-// ADR-008: signing authority for the identity's personal wallet. Public material
+// Signing authority for the identity's personal wallet. Public material
 // only — the secret never leaves the client authenticator (passkey/secp256r1).
 model Authority {
   id           String          @id @default(uuid())
@@ -202,7 +202,7 @@ model Authority {
   @@map("authorities")
 }
 
-// ADR 006: user-controlled fee payer — address only; the key never leaves the client.
+// User-controlled fee payer — address only; the key never leaves the client.
 model WalletFeePayer {
   id             String         @id @default(uuid())
   chainAccountId String
@@ -215,7 +215,7 @@ model WalletFeePayer {
   @@map("wallet_fee_payers")
 }
 
-// ADR 004/PRD_v4 §5.4: application expresses a desired action; validated, policy-checked,
+// PRD_v4 §5.4: application expresses a desired action; validated, policy-checked,
 // and given an expiry before anything is signed.
 model Intent {
   id        String         @id @default(uuid())
@@ -261,7 +261,7 @@ model Transaction {
   @@map("transactions")
 }
 
-// ADR 004/PRD_v4 §22: audit log written by auth, credential, wallet, and program-facing
+// PRD_v4 §22: audit log written by auth, credential, wallet, and program-facing
 // flows. Metadata is JSONB; never contains secrets.
 model SecurityEvent {
   id         String           @id @default(uuid())

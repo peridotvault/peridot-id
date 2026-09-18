@@ -56,7 +56,7 @@ export class WalletService {
       });
       return toView(created);
     } catch (err) {
-      // ADR 004: one linked_address per identity. A concurrent duplicate hits the
+      // One linked_address per identity. A concurrent duplicate hits the
       // unique index — return the existing row instead of failing (P2002, as before).
       if (isP2002(err)) {
         const existing2 = await this.prisma.chainAccount.findFirst({

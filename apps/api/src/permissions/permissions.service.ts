@@ -26,7 +26,7 @@ export interface ValidatedGrant {
 export class PermissionsService {
   /**
    * Validate a permission grant request against the on-chain scope rules
-   * (mirrors `grantPermission` hygiene + `V4_PERMISSIONS.md` §scope) and
+   * (mirrors `grantPermission` hygiene + `WHITEPAPER.md` §10 scope kinds) and
    * return the canonical permission id + owner challenge. Pure: no DB, no chain.
    * Submission-time ownership (pid → account) is enforced by the relay path.
    */

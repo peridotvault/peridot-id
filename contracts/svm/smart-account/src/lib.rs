@@ -1,7 +1,7 @@
 //! PeridotID smart account program.
 //!
 //! A non-custodial Solana smart account (PDA) that owns the user's assets. The asset
-//! controlling authority is a secp256r1 (P-256) WebAuthn passkey (ADR 005 Option B):
+//! controlling authority is a secp256r1 (P-256) WebAuthn passkey (owner authority):
 //! the SDK places a Secp256r1 precompile instruction immediately after this
 //! program's instruction and the program verifies it via the Instructions sysvar
 //! (`auth.rs::verify_secp256r1_v2`), enforcing stored-authority match, RP-ID hash,
@@ -9,7 +9,7 @@
 //! message binding, and equality of the WebAuthn challenge with the V2
 //! domain-separated authorization payload recomputed from instruction args.
 //!
-//! V2 authorization schema (`contracts/V2_AUTHORIZATION.md`, canonical): every
+//! V3 authorization schema (`contracts/WHITEPAPER.md` §2, canonical): every
 //! payload starts with `DOMAIN_V2 ‖ op-tag ‖ account_id`, the user authorizes an
 //! absolute `max_fee` (never an exact fee), and reimbursement splits base →
 //! relayer (fee payer) and markup → canonical treasury per the signed

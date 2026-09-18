@@ -139,7 +139,7 @@ export async function buildWebAuthnMessage(authenticatorData: Uint8Array, client
 }
 
 // ---------------------------------------------------------------------------
-// V2 builders (canonical — see contracts/V2_AUTHORIZATION.md §3).
+// V2 builders (frozen legacy — see contracts/WHITEPAPER.md §2).
 // Every payload starts with the one-byte op-tag followed by the 32-byte
 // account_id, so cross-account and cross-operation replay is impossible.
 // `maxFee` is the user-signed absolute cap; `fee` itself travels unattested in
@@ -233,7 +233,7 @@ export async function buildClosePayloadV2(
 }
 
 // ---------------------------------------------------------------------------
-// V3 builders (canonical — see contracts/V2_AUTHORIZATION.md §§2, 4).
+// V3 builders (canonical — see contracts/WHITEPAPER.md §§2, 6).
 // Same account/op binding as V2, but fee amounts are gone from payloads: the
 // user authorizes the intent plus a `feePolicyVersion` only. The backend attests
 // `networkFee` at submit time; the program recomputes `protocolFee` from the

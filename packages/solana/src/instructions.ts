@@ -2,7 +2,7 @@
 // The byte layouts MUST match `contracts/svm/smart-account/src/instructions/*`.
 // Browser-safe: Uint8Array only (no Buffer).
 //
-// V2 (canonical — see contracts/V2_AUTHORIZATION.md): every builder takes the
+// V2 (frozen legacy — see contracts/WHITEPAPER.md §2): every builder takes the
 // program id explicitly (no silent derivation/submission split) and builds the V2
 // layouts with `max_fee` + `fee_policy_version` + attested `fee`. V1 builders are
 // kept frozen for legacy verification only.

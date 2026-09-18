@@ -1,14 +1,13 @@
 # Security
 
 Posture: non-custodial personal wallet (smart account) owned by a secp256r1
-passkey (ADR 005 Option B, ADR-009 for the EVM permission layer). 1 identity =
-1 wallet (ADR-008). The server holds only public material (addresses,
+passkey (secp256r1 owner passkey; ADR-009 for the EVM permission layer). 1 identity =
+1 wallet. The server holds only public material (addresses,
 compressed passkey pubkeys, credential IDs, intents, transaction metadata). The
 owner passkey signs the domain-separated authorization payload on-chain; on EVM
 V4 the owner may additionally register scoped P-256 **session keys**
-(`sessions[permissionId]`, `contracts/V4_PERMISSIONS.md`) that sign executions
-inside owner-set scope only. A client-held Ed25519 fee payer pays Solana fees
-(ADR 006); EVM submission is relayer-sponsored (`networkFee + protocolFee`).
+(`sessions[permissionId]`, `contracts/WHITEPAPER.md` §10) that sign executions
+inside owner-set scope only. A client-held Ed25519 fee payer pays Solana fees; EVM submission is relayer-sponsored (`networkFee + protocolFee`).
 No key material is stored, generated, or returned — ever.
 
 Controls: cookie sessions (`pid_access` 15m + rotating `pid_refresh` 30d),
@@ -19,12 +18,12 @@ credential approval for new passkeys, last-credential unlink/revoke guard.
 
 ## Threat model dispositions (PRD_v4 §23)
 
-1. **Database compromise** — mitigated: no key material by structure (ADR 006); a dump
+1. **Database compromise** — mitigated: no key material by structure; a dump
    exposes public addresses + passkey pubkeys only; on-chain authority is verified by
    the precompile, so the DB alone cannot move funds.
 2. **OAuth account takeover** — mitigated: Google grants a session, never signing
    authority; a fresh login alone cannot register a passkey (existing-credential
-   approval) nor sign (passkey ceremony required). Email-collision rejection per ADR 002.
+   approval) nor sign (passkey ceremony required). Email-collision rejection per the email-uniqueness rule.
 3. **Session theft** — mitigated: rotating refresh tokens, HttpOnly secure cookies,
    per-request `status === "active"` check; cookie sessions grant no on-chain
    authority. (Separate concern: on-chain **session keys** — EVM V4 scoped
@@ -37,7 +36,7 @@ credential approval for new passkeys, last-credential unlink/revoke guard.
    blast radius = fee SOL only (assets live in the smart account).
 7. **Lost device** — mitigated: revoke the lost credential (last-credential guard keeps
    ≥1); platform passkey sync covers cross-device; all-credentials-lost is an accepted,
-   surfaced dead end (ADR 006 §5). On EVM V4, permissions outlive any single device
+   surfaced dead end (last-credential guard). On EVM V4, permissions outlive any single device
    only inside their owner-set `validUntil` (≤ 30d) and die immediately on
    owner-signed `revokePermission`.
 8. **Credential theft** — mitigated: non-extractable passkey; on-chain verification
@@ -59,10 +58,10 @@ credential approval for new passkeys, last-credential unlink/revoke guard.
     scope, replay, and revocation are enforced on-chain (threat 18).
 13. **Smart-contract bugs** — mitigated: adversarial EVM suite (65 forge tests incl.
     33 permission/adversarial + anvil V4 loop) and SVM adversarial suite + planned
-    external audit before mainnet (task 012). V4 is pre-audit engineering: no
-    mainnet deploy or immutability action on this basis alone (V4_PERMISSIONS.md §7).
+    external audit before mainnet (WHITEPAPER.md §12). V4 is pre-audit engineering: no
+    mainnet deploy or immutability action on this basis alone (WHITEPAPER.md §12).
 14. **Upgrade-authority compromise** — mitigated: upgrade authority held off developer
-    machines, moved to a stakeholder hardware/multisig key before mainnet (task 012).
+    machines, moved to a stakeholder hardware/multisig key before mainnet (WHITEPAPER.md §12).
 15. **Phishing** — mitigated: passkey origin binding + WebAuthn user verification; UI
     surfaces the exact transaction being approved.
 16. **OAuth provider compromise** — mitigated: provider compromise grants a session
@@ -71,7 +70,7 @@ credential approval for new passkeys, last-credential unlink/revoke guard.
 17. **Recovery abuse** — mitigated: no OAuth-only recovery path; every new credential
     needs existing-credential approval; verified by `credential.recovery.spec.ts`.
 18. **Session-key / permission abuse (EVM V4)** — mitigated by construction, proven
-    by the adversarial suite (`contracts/V4_PERMISSIONS.md` §5): a stolen session
+    by the adversarial suite (`contracts/WHITEPAPER.md` §10): a stolen session
     key spends only inside its grant (exact target+selector or canonical
     transfer-shape, per-tx + lifetime caps, expiry) and cannot create approvals,
     call the account itself, reenter privileged paths, use `delegatecall` (banned
@@ -83,7 +82,7 @@ credential approval for new passkeys, last-credential unlink/revoke guard.
     theft spends up to the grant's remaining caps until expiry/revocation — keep
     grants narrow and short-lived.
 19. **Session-key / gameplay abuse (SVM sessions, ADR-010)** — mitigated by
-    construction, proven by the validator suite (`contracts/SVM_SESSIONS.md`
+    construction, proven by the validator suite (`contracts/WHITEPAPER.md` §11
     §5): the vault PDA never enters game CPIs, so a stolen session key or a
     malicious game (even forwarding the lent signer onward) cannot move vault
     SOL, SPL/Token-2022 tokens, or NFTs — the honest forwarding residual is
@@ -100,7 +99,7 @@ credential approval for new passkeys, last-credential unlink/revoke guard.
 
 > Can a compromised Peridot API steal user assets? **No, not by database/API compromise.**
 > There is no key material to steal, and the program/contract verifies the passkey
-> cryptographically on-chain (PRD_v4 §23; ADR 005/006/007/009/010). The residual server-side
+> cryptographically on-chain (PRD_v4 §23; WHITEPAPER.md). The residual server-side
 > risk is availability/integrity (censoring/misreporting), not theft. On EVM V4 the
 > same holds for permissions: grants are owner-signed, and the backend never holds
 > session keys — theft of a session key is a client-side event bounded by threat 18.
@@ -114,4 +113,4 @@ API suite (`credential.*`, `intent.*`, `account.*`, `wallet.*`, `permissions.*`,
 SVM adversarial suites (37 integration + 24 session cases), adapter/SDK e2e
 (V3 + V4 anvil loops). Run: `pnpm --filter @peridotvault/pid-api
 exec jest` (259 tests) and `forge test --root contracts/evm` (65 tests).
-Pre-mainnet: external audit + task 012 hardening.
+Pre-mainnet: external audit + pre-mainnet hardening (WHITEPAPER.md §12).

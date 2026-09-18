@@ -1,13 +1,13 @@
 # PRD v5 — PeridotID Smart Wallet
 
 **Version:** 5.0
-**Status:** Implemented (wallet live on devnet; pre-mainnet hardening in tasks/012)
+**Status:** Implemented (wallet live on devnet; pre-mainnet hardening per WHITEPAPER.md §12)
 **Supersedes:** PRD_v4 where they conflict (program framework, instruction set)
-**Builds on:** ADR 003–008, `apps/api` wallet module, `packages/sdk-js`
+**Builds on:** WHITEPAPER.md, `apps/api` wallet module, `packages/sdk-js`
 
 **Naming:** the project is **PeridotID** (repo/package scope `peridot-id`), short name
 **`pid`** — the permanent ecosystem identity format (`<handle>@pid`, e.g. `ifal@pid`;
-1 identity = 1 personal wallet per ADR-008). Use "PeridotID" in
+1 identity = 1 personal wallet). Use "PeridotID" in
 product copy; "Peridot" alone refers to the wider ecosystem.
 
 ---
@@ -46,7 +46,7 @@ Fee Payer (separate)       ← device-held Ed25519 keypair, pays transaction fee
 Authority (separate)       ← secp256r1 passkey, authorizes withdrawals
 ```
 
-Four things never collapse into one (PRD_v4 §8, ADR 005/006):
+Four things never collapse into one (PRD_v4 §8):
 
 ```text
 OAuth Identity ≠ Signing Authority ≠ Smart Account ≠ Fee Payer
@@ -140,8 +140,8 @@ to BONK and any other SPL token.
 
 Create a custom Solana Program using **Pinocchio**.
 
-> Framework note: ADR 007 originally locked Anchor. The stakeholder overrode this to
-> Pinocchio (recorded as an ADR 007 amendment): the instruction surface is tiny
+> Framework note: Anchor was originally specified. The stakeholder overrode this to
+> Pinocchio (amended; history in git): the instruction surface is tiny
 > (initialize + withdrawals + authority rotation), Pinocchio's minimal compute-unit
 > footprint matters at gaming transaction volume, and Anchor's account-validation
 > machinery is not needed at this size.
@@ -156,14 +156,14 @@ The program supports exactly:
 - `withdraw_token(mint, amount)` — move SPL tokens out of the Smart Account. Requires
   passkey authorization (§6).
 - `update_authority(new_authority)` — authority rotation/revocation; authorized by a
-  current valid authority (ADR 006).
+  current valid authority.
 
 **No `topup` instructions exist** — deposits are plain transfers (§4).
 
 The program must:
 
 - initialize the Smart Account using a deterministic PDA
-  (seeds: `["peridot_id", "account", account_id]`, ADR 004/007);
+  (seeds: `["peridot_id", "account", account_id]`, WHITEPAPER.md §1);
 - associate the Smart Account with the user's PeridotID;
 - verify secp256r1 passkey authorization on every withdrawal via the native secp256r1
   precompile, with the WebAuthn challenge bound to the domain-separated payload
@@ -178,7 +178,7 @@ The program must:
 
 ## 6. Authorization
 
-**Resolved — ADR 005 Option B, stakeholder decision.** This section replaces v5's earlier
+**Resolved — secp256r1 owner passkey, stakeholder decision.** This section replaces v5's earlier
 "to be defined" placeholder.
 
 ### Authority: secp256r1 passkey
@@ -200,14 +200,14 @@ the withdrawal authorization.
 
 A passkey cannot pay Solana transaction fees — fees require an Ed25519 signer. Each device
 therefore generates a separate **Ed25519 fee-payer keypair**, stored in platform secure
-storage (ADR 006):
+storage:
 
 - it pays transaction fees and holds only fee SOL;
 - it is user-controlled — never a Peridot treasury, never sponsored;
 - **blast radius of compromise is fee SOL only** — assets sit in the Smart Account, gated
   by the passkey authority, not by the fee payer.
 
-### V1 on-chain verification — secp256r1 passkey (ADR 005 Option B)
+### V1 on-chain verification — secp256r1 owner passkey
 
 The asset-controlling authority is verified **on-chain as a secp256r1 passkey**: the SDK
 places a Solana Secp256r1 precompile instruction right after the program instruction; the
@@ -216,9 +216,9 @@ equals the registered authority, that the signed message binds the exact `client
 and that its WebAuthn challenge equals the domain-separated authorization payload
 (nonce ‖ action ‖ expiry). Expiry + on-chain nonce give replay protection, and the
 challenge binding prevents transaction substitution. The program was initially built with
-an Ed25519 signer fallback (ADR 005's documented fallback), then **reverted to full passkey
+an Ed25519 signer fallback (the documented fallback), then **reverted to full passkey
 verification** when the `pinocchio-secp256r1-instruction` crate made the precompile
-introspection pattern available in Pinocchio (recorded in ADR 005 / task 004).
+introspection pattern available in Pinocchio (history in git).
 
 ### Login: Google OAuth — unchanged
 
@@ -241,7 +241,7 @@ Same pid, same Smart Account — each device gets its own session
 ```
 
 - **Login** on a new device = normal Google OAuth. No limit on devices per account.
-- **Wallet authority** on a new device comes from (ADR 006 §4):
+- **Wallet authority** on a new device comes from (existing-credential approval rule):
   1. **platform passkey sync** (iCloud/Google) — the primary path, no Peridot machinery;
   2. **registering an additional passkey** on the new device, approved by an existing
      valid credential — for cross-platform cases sync doesn't cover.
@@ -263,11 +263,11 @@ adapters absorb the differences (PRD_v4 §5.6).
 > passkey stays the one credential across chains; EVM additionally supports
 > owner-registered scoped session keys (P-256, `PID|EVM|PERMISSION|v1` domain)
 > plus a constrained ERC-7579 surface and owner-only ERC-1271 — see
-> `contracts/V4_PERMISSIONS.md`. The Solana program surface in §5 above is unchanged.
+> `contracts/WHITEPAPER.md` §10. The Solana program surface in §5 above is unchanged.
 >
 > **SVM sessions status (2026-09-17, ADR-010):** Solana additionally supports
 > owner-registered Ed25519 gameplay sessions in isolated PDAs — see
-> `contracts/SVM_SESSIONS.md` (separate design, not a port).
+> `contracts/WHITEPAPER.md` §11 (separate design, not a port).
 
 ---
 
@@ -279,8 +279,7 @@ In V1:
 - the user's fee-payer address is shown in the wallet UI before activation;
 - the user funds it from an external source (exchange, friend, another wallet) — V1 has
   no fiat on-ramp and no sponsorship;
-- insufficient fee-payer SOL → the transaction fails honestly, with a visible message
-  (ADR 006 §3).
+- insufficient fee-payer SOL → the transaction fails honestly, with a visible message.
 
 Because the Smart Account PDA is deterministic, it can also *receive* funds before
 initialization; initialization then claims the address and records the authority in the
@@ -294,7 +293,7 @@ Peridot must never hold the user's private key.
 
 The Smart Account is designed so that Peridot cannot unilaterally move or withdraw user
 assets: the server stores only public material (addresses, passkey public keys and
-credential IDs, account IDs, transaction metadata — ADR 006 §1).
+credential IDs, account IDs, transaction metadata).
 
 The Peridot backend must not have direct access to user funds.
 
@@ -361,7 +360,7 @@ for debugging and security audits (PRD_v4 §17).
 - SPL token deposits (plain transfer + on-demand idempotent ATA creation)
 - SOL withdrawals (`withdraw_sol`, passkey-authorized)
 - SPL token withdrawals (`withdraw_token`, passkey-authorized)
-- secp256r1 passkey authority (ADR 005 Option B) + Ed25519 device fee payer (ADR 006)
+- secp256r1 passkey authority + Ed25519 device fee payer
 - Google OAuth login with device-saved sessions; multi-device login on one account
 - One Expo client serving web + iOS + Android, built on the `@peridotvault/pid-sdk-js` core
 - Authorization and security validation
@@ -377,7 +376,7 @@ for debugging and security audits (PRD_v4 §17).
 > providers, and the external audit remain not-required.
 >
 > **SVM sessions status (2026-09-17, ADR-010):** Solana gameplay sessions have
-> shipped (pre-audit) as PDA-isolated sessions — see `contracts/SVM_SESSIONS.md`.
+> shipped (pre-audit) as PDA-isolated sessions — see `contracts/WHITEPAPER.md` §11.
 
 - Multi-chain support (EVM and others via future adapters)
 - Social recovery / guardians
@@ -446,8 +445,5 @@ accounts; passkeys authorize; the fee payer pays; the blockchain owns the final 
 ## References
 
 - PRD_v4 (base architecture, security model, threat model)
-- ADR 003 (custody & record-only wallet history)
-- ADR 004 (account model, PDA derivation)
-- ADR 005 (signing authority — **accepted: secp256r1 passkey**)
-- ADR 006 (fee payer, no sponsorship, recovery)
-- ADR 007 (Solana program — **amended: Pinocchio**)
+- WHITEPAPER.md (canonical contracts spec)
+- ADR-009/010 (permission/session layers)

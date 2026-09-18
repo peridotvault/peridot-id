@@ -2,7 +2,7 @@
 
 Status: accepted (EVM-only; pre-audit engineering — see §7).
 
-Supersedes, for EVM only: ADR 003 §3 (AA/session keys out of scope), PRD_v4
+Supersedes, for EVM only: the AA/session-keys deferral, PRD_v4
 §1.2/§5.5/§31 and PRD_v5 §10 (session keys + EVM deferred). The SVM program is
 unchanged: its PDA/CPI model needs a structurally different boundary, so
 nothing here ports to Solana.
@@ -15,7 +15,7 @@ signs `execute`") would hand the session full owner power. The permission
 layer therefore redesigns the boundary before delegating anything: the account
 stays the permanent asset-owning account, and permissions are scoped
 capabilities enforced inside the account (single audit point), never a second
-wallet. Canonical spec: `contracts/V4_PERMISSIONS.md`.
+wallet. Canonical spec: `contracts/WHITEPAPER.md` §10 (merged 2026-09-17; history in git).
 
 ## Decision
 
@@ -36,7 +36,7 @@ wallet. Canonical spec: `contracts/V4_PERMISSIONS.md`.
    (type-2 only) is a thin forwarder; every check runs in the account.
 3. **Single call per permission execution (v1).** No batch path, so smuggling a
    financial sub-call inside a benign batch is structurally impossible.
-4. **Five scope kinds** (V4_PERMISSIONS.md §3): nonfinancial (exact
+4. **Five scope kinds** (WHITEPAPER.md §10): nonfinancial (exact
    target+selector + financial-selector denylist, `value == 0`) and bounded
    financial (ETH / ERC-20 / ERC-721 / ERC-1155 via account-built canonical
    calls with per-tx + lifetime caps). Financial grants emit transfers, never
@@ -74,11 +74,9 @@ cover these before any mainnet deploy or immutability action.
 
 ## References
 
-- `contracts/V4_PERMISSIONS.md` (canonical), `contracts/evm/src/PeridotAccount.sol`,
+- `contracts/WHITEPAPER.md` §10 (canonical), `contracts/evm/src/PeridotAccount.sol`,
   `contracts/evm/src/PeridotPermissionExecutor.sol`,
   `contracts/evm/test/PeridotPermission.t.sol`,
   `contracts/evm/test/anvil-v4-perm-e2e.mjs`.
 - ERC-4337 / ERC-7579 / ERC-7715+7710 / ERC-1271 / ERC-7739 (primary sources).
-- ADR 003 (AA scope — amended for EVM), ADR 005 (authority model — two slots on
-  EVM), ADR 007 (SVM executor rejection stays; EVM carve-out), ADR 008 (one
-  wallet; scoping reintroduced *inside* it via permissions).
+- WHITEPAPER.md §§1–2, 10 (scope, authority model, executor constraint, one wallet with inside-scoping).

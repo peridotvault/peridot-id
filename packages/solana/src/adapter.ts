@@ -1,4 +1,4 @@
-// Solana adapter (PRD_v4 §5.6, ADR 007 §8) — the only package that talks to @solana/web3.js
+// Solana adapter (PRD_v4 §5.6, web3.js layering rule) — the only package that talks to @solana/web3.js
 // (via the ChainRpc abstraction). Builds and submits smart-account transactions.
 // Browser-safe: no Buffer / node:crypto.
 
@@ -45,7 +45,7 @@ export interface TransactionStatus {
 const DEFAULT_EXPIRY_TTL_SECONDS = 300;
 
 /**
- * Smart-account operations. The fee payer is a client-held Ed25519 keypair (ADR 006 §2);
+ * Smart-account operations. The fee payer is a client-held Ed25519 keypair (fee-payer model);
  * the passkey signer is the platform WebAuthn implementation. `authorityCompressed` is the
  * registered passkey's 33-byte compressed public key (from the credential API — task 003).
  */

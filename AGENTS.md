@@ -15,7 +15,7 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   `PID|SOLANA|SMART_ACCOUNT|v1`; program id `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
 - **Identity:** PID = `<handle>@pid` (e.g. `ifal@pid`) — permanent Antigane-ecosystem
   identity, user-chosen once at onboarding; immutable, never reused or reassigned.
-  1 identity = 1 personal wallet (ADR-008, no account hub). Identity credentials
+  1 identity = 1 personal wallet (no account hub). Identity credentials
   key on `(provider, providerUserId)`. `pid` (not `peridot`) is
   the ecosystem namespace in identifiers (cookies `pid_access`/`pid_refresh`, env
   `PID_*`, codes `pid_code`/`pidapp_`/`pidsk_`).
@@ -30,7 +30,7 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   path explicitly for `cargo build-sbf`.
 - **Pinocchio** pinned to **0.10.2** (+ `solana-address =2.1.0`) because newer needs
   rustc 1.89. MSRV constraint is a hard build requirement.
-- `packages/solana` is the only package allowed to import `@solana/web3.js` (ADR 007 §8).
+- `packages/solana` is the only package allowed to import `@solana/web3.js` (web3.js layering rule).
 
 ## Run book (local)
 
@@ -63,7 +63,7 @@ prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
   Never point local dev at the prod callback and never add localhost URIs to the
   prod Google client — create a dev client instead.
 - Only `pid-core` (primitives) and `pid-solana` (chain adapter) may import
-  `@solana/web3.js` (ADR 007 §8, CI-enforced).
+  `@solana/web3.js` (web3.js layering rule, CI-enforced).
 
 ## Verification
 

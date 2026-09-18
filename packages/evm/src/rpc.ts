@@ -1,4 +1,4 @@
-// Minimal EVM JSON-RPC client (mirrors SolanaRpc failover shape, ADR 007 §8).
+// Minimal EVM JSON-RPC client (mirrors SolanaRpc failover shape).
 // Plain fetch — no viem/ethers. Reads only in phase 1 (balance/code); the
 // relayer deploys via the forge script until the API signer lands.
 

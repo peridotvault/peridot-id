@@ -1,4 +1,4 @@
-//! secp256r1 passkey authorization verification (ADR 005 Option B — Tier B).
+//! secp256r1 passkey authorization verification (owner passkey model).
 //!
 //! The wallet authority is a WebAuthn passkey (secp256r1 / P-256). Its assertion signature
 //! covers `authenticatorData ‖ sha256(clientDataJSON)`. The SDK builds a Secp256r1

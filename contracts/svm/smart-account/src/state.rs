@@ -17,7 +17,7 @@ pub const STATE_LEN_V1: usize = 80;
 pub const STATE_LEN_V2: usize = 112;
 
 pub const AUTHORITY_TYPE_ED25519: u8 = 0; // legacy — unused in V1
-pub const AUTHORITY_TYPE_SECP256R1: u8 = 1; // passkey authority (ADR 005 Option B)
+pub const AUTHORITY_TYPE_SECP256R1: u8 = 1; // passkey owner authority
 
 pub const STATUS_ACTIVE: u8 = 0;
 pub const STATUS_CLOSED: u8 = 1;

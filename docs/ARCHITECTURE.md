@@ -26,14 +26,14 @@ Modules:
 - permissions (EVM grant validation + denied selectors, ADR 009)
 - wallet (deprecated V3 record-only surface)
 
-Non-custodial wallet model (ADR 004–007, 009):
+Non-custodial wallet model (WHITEPAPER.md, ADR-009/010):
 - Smart Account = a program PDA seeded `["peridot_id","account",sha256(pid)]`; authority is the
   user's secp256r1 passkey, verified on-chain via the Secp256r1 precompile + instruction
-  introspection (ADR 005 Option B).
+  introspection (secp256r1 owner passkey).
 - EVM counterpart = CREATE2 `PeridotAccount` (same passkey model, RIP-7212-style verify)
   with V4 scoped P-256 session keys + constrained ERC-7579 + owner-only ERC-1271 (ADR 009).
   Nothing in the permission layer ports to Solana (structurally different boundary).
-- Fee payer = client-held Ed25519 keypair (ADR 006) on Solana; sponsored relayer on EVM.
+- Fee payer = client-held Ed25519 keypair on Solana; sponsored relayer on EVM.
   The server holds no key material.
 
 Repo:
@@ -47,4 +47,4 @@ packages/openapi / types / sdk-js / solana / evm / core
 ```
 
 Environments: local (solana-test-validator) · devnet (staging) · mainnet (production).
-`packages/solana` is the only package allowed to import `@solana/web3.js` (ADR 007 §8).
+`packages/solana` is the only package allowed to import `@solana/web3.js` (web3.js layering rule).

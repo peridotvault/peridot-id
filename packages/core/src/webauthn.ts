@@ -86,7 +86,7 @@ export async function registerPasskey(api: {
   if (isApiError(start)) throw new Error((start as { message: string }).message);
 
   // First credential: plain create. Additional credential: also assert with an existing
-  // passkey (approval) — ADR 006 §4.
+  // passkey (approval) — existing-credential approval rule.
   let approval: unknown;
   let credential: PublicKeyCredential;
   const publicKey = toCreationOptions(start.options as Record<string, unknown>);

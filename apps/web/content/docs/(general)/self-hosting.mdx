@@ -86,7 +86,7 @@ pnpm --filter @peridotvault/pid-api start
 ## Legacy-database migration notes
 
 Migrations are **additive** where possible, but the PID renames (`identityId` → `pid`,
-`PidAccount` removal per ADR-008) rewrite identity-linked tables. For a **fresh**
+`PidAccount` removal (1 identity = 1 wallet) rewrite identity-linked tables. For a **fresh**
 database just run `db:deploy` + seed. For a database with existing rows from older
 releases:
 

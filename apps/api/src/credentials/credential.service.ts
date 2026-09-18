@@ -17,7 +17,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { coseToCompressedBase64url } from "./cose";
 
-const SECP256R1_ALG = -7; // ES256 = ECDSA P-256 (secp256r1) — ADR 005 Option B
+const SECP256R1_ALG = -7; // ES256 = ECDSA P-256 (secp256r1) — owner passkey alg
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // PRD_v4 §22: challenge TTL ≤ 5 min, single use
 
 // Structural subset of the simplewebauthn JSON types (matches the API DTO); the verification
@@ -103,7 +103,7 @@ export class CredentialService {
   }
 
   /**
-   * The token identity, verified active. ADR-008: 1 identity = 1 personal
+   * The token identity, verified active. 1 identity = 1 personal
    * wallet, so the pid itself is the wallet scope.
    */
   private async resolveAccount(pid: string): Promise<string> {
@@ -171,7 +171,7 @@ export class CredentialService {
 
     let approval = null;
     if (isAdditional) {
-      // ADR 006 §4: adding a credential requires approval by an existing valid credential.
+      // Existing-credential approval rule: adding a credential requires approval by an existing valid credential.
       approval = await generateAuthenticationOptions({
         rpID: this.rpId(),
         challenge: randomBytes(32),
@@ -394,7 +394,7 @@ export class CredentialService {
     if (!authority) throw new NotFoundException("Credential not found");
 
     const activeCount = await this.prisma.authority.count({ where: { pid, status: "active" } });
-    // ADR 006 §5: the account must keep ≥1 valid authority (mirrors identity guard).
+    // Last-credential guard: the account must keep ≥1 valid authority (mirrors identity guard).
     if (activeCount <= 1) throw new BadRequestException("The last credential cannot be revoked");
 
     const updated = await this.prisma.authority.update({

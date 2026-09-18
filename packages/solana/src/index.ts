@@ -1,5 +1,5 @@
 // Peridot Solana adapter — chain adapter and instruction builders on top of
-// @peridotvault/pid-core primitives (ADR 007 §8).
+// @peridotvault/pid-core primitives (web3.js layering rule).
 
 export {
   buildActivatePayload,

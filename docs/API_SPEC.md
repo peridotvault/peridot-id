@@ -14,13 +14,13 @@ GET /v1/auth/sessions · DELETE /v1/auth/sessions/:id · DELETE /v1/auth/session
 GET /v1/identity/me · GET /v1/identity/credentials · DELETE /v1/identity/credentials/:id · DELETE /v1/identity/me
 GET /v1/profile/me · PATCH /v1/profile
 
-## Account — the identity's personal wallet (ADR-008, singular routes)
+## Account — the identity's personal wallet (singular routes)
 
 POST /v1/account · GET /v1/account · GET /v1/account/chains
 GET /v1/account/activation · POST /v1/account/activate
 GET /v1/account/evm/:chainRef/activation · POST /v1/account/evm/:chainRef/activate
 
-## Credentials (passkey authority, ADR 005 B)
+## Credentials (secp256r1 passkey authority)
 
 GET /v1/credentials
 POST /v1/credentials/register/start · POST /v1/credentials/register/finish

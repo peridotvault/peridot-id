@@ -5,7 +5,7 @@ const HEX4 = /^0x[0-9a-fA-F]{8}$/;
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
 const UINT = /^\d+$/;
 
-/** Owner-signed permission grant (mirrors `PeridotAccount.GrantArgs`; see V4_PERMISSIONS.md). */
+/** Owner-signed permission grant (mirrors `PeridotAccount.GrantArgs`; see WHITEPAPER.md §10). */
 export class GrantPermissionDto {
   /** 1 = nonfinancial, 2 = ETH, 3 = ERC-20, 4 = ERC-721, 5 = ERC-1155. */
   @IsInt()
