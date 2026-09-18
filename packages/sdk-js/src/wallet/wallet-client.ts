@@ -4,14 +4,20 @@ import { PublicKey } from "@peridotvault/pid-core";
 import { b64url, b64urlToBytes, buildActivatePayload, buildActivatePayloadV2, buildActivatePayloadV3, buildExecutePayloadV3, buildUpdateAuthorityPayloadV2, buildUpdateAuthorityPayloadV3, buildWithdrawPayload, buildWithdrawPayloadV2, buildWithdrawPayloadV3, buildWithdrawTokenPayload, buildWithdrawTokenPayloadV2, buildWithdrawTokenPayloadV3, executeCallHash, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import type { ParsedTx, PasskeySigner, TokenBalance, TransactionStatus } from "@peridotvault/pid-solana";
 import type { ApiError, Authority, ChainAccount, WalletTransaction } from "@peridotvault/pid-types";
-import { BrowserPasskeySigner } from "@peridotvault/pid-core";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
 
 export interface PeridotWalletOptions {
   solanaRpcUrl: string | string[];
   feePayerStore?: SecretStore;
+  /**
+   * Inline passkey signer — first-party PeridotID origin only. Omitted on
+   * third-party origins: trust-critical methods then delegate to a popup on
+   * `popupBaseUrl` (visible address bar) instead of signing in the dev DOM.
+   */
   passkeySigner?: PasskeySigner;
+  /** Popup host for delegated ceremonies (no prod default — caller-supplied). */
+  popupBaseUrl?: string;
   historyStore?: HistoryStore;
 }
 
@@ -41,6 +47,8 @@ export interface ExecuteInput {
 interface ApiLike {
   get<T>(path: string): Promise<{ ok: boolean; data: T | ApiError }>;
   post<T>(path: string, body?: unknown): Promise<{ ok: boolean; data: T | ApiError }>;
+  /** Popup delegation (present on PeridotClient; absent on bare mocks). */
+  popupRequest?<T>(action: string, payload?: unknown): Promise<T>;
 }
 
 export type ActivationStatus =
@@ -79,7 +87,7 @@ function isApiError(v: unknown): v is ApiError {
 export class PeridotWallet {
   private readonly adapter: SolanaAdapter;
   private readonly feePayer: FeePayerManager;
-  private readonly passkeySigner: PasskeySigner;
+  private readonly passkeySigner: PasskeySigner | undefined;
   private readonly historyStore: HistoryStore;
 
   constructor(
@@ -88,8 +96,32 @@ export class PeridotWallet {
   ) {
     this.adapter = new SolanaAdapter(new SolanaRpc(options.solanaRpcUrl));
     this.feePayer = new FeePayerManager(options.feePayerStore);
-    this.passkeySigner = options.passkeySigner ?? new BrowserPasskeySigner();
+    // No silent inline default: an explicit signer means "this IS the trusted
+    // origin" (first-party wallet / hosted popup page). Otherwise trust-critical
+    // methods delegate to the popup (viaPopup throws without popupRequest).
+    this.passkeySigner = options.passkeySigner;
     this.historyStore = options.historyStore ?? new LocalHistoryStore();
+  }
+
+  /** Inline signer — throws a routable error when the caller runs popup-mode. */
+  private signer(): PasskeySigner {
+    if (!this.passkeySigner) {
+      throw new Error(
+        "No passkey signer configured — signing inline is first-party-origin only. " +
+          "Pass popupBaseUrl to delegate to the PeridotID popup, or pass an explicit passkeySigner.",
+      );
+    }
+    return this.passkeySigner;
+  }
+
+  /** Delegate one trust-critical action to the PeridotID popup. */
+  private viaPopup<T>(action: string, payload?: unknown): Promise<T> {
+    if (!this.api.popupRequest) {
+      throw new Error(
+        `Cannot ${action} without a passkey signer or popup — pass popupBaseUrl (popup flow) or passkeySigner (first-party origin).`,
+      );
+    }
+    return this.api.popupRequest<T>(action, payload);
   }
 
   private cachedPid: string | null = null;
@@ -160,6 +192,7 @@ export class PeridotWallet {
    * uninitialized address just funds it for later activation.
    */
   async topup(input: TopupInput): Promise<{ signature: string }> {
+    if (!this.passkeySigner) return this.viaPopup("topup", input);
     const pid = await this.pid();
     const feePayer = await this.feePayer.getOrCreate();
     const lamports = BigInt(input.amount);
@@ -179,6 +212,7 @@ export class PeridotWallet {
    * reference; the server re-quotes once if fees moved beyond the drift bound.
    */
   async withdraw(input: WithdrawInput): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
+    if (!this.passkeySigner) return this.viaPopup("withdraw", input);
     const pid = await this.pid();
     const amount = BigInt(input.amount);
     const destination = new PublicKey(input.to);
@@ -210,7 +244,7 @@ export class PeridotWallet {
               quote.feePolicyVersion,
               await this.adapter.tokenAta(pid, new PublicKey(input.asset)),
             );
-      const a = await this.passkeySigner.sign(p, {});
+      const a = await this.signer().sign(p, {});
       const res = await this.api.post<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }>("/v1/wallet/withdraw", {
         asset: input.asset,
         to: input.to,
@@ -261,6 +295,7 @@ export class PeridotWallet {
    * the fee policy; the server re-quotes once if fees moved beyond the drift bound.
    */
   async execute(input: ExecuteInput): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
+    if (!this.passkeySigner) return this.viaPopup("execute", input);
     const pid = await this.pid();
     const accountId = pidToSeed32(pid);
     const target = new PublicKey(input.target);
@@ -283,7 +318,7 @@ export class PeridotWallet {
       const expiry = Math.floor(quote.chainTime) + 300;
       const callHash = await executeCallHash(target, metas, data);
       const p = await buildExecutePayloadV3(accountId, n, expiry, quote.feePolicyVersion, callHash);
-      const a = await this.passkeySigner.sign(p, {});
+      const a = await this.signer().sign(p, {});
       const res = await this.api.post<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }>("/v1/wallet/execute", {
         target: input.target,
         metas: input.metas,
@@ -351,6 +386,7 @@ export class PeridotWallet {
    * Reads the live view first for policy + chain time.
    */
   async activate(): Promise<ActivationView | ApiError> {
+    if (!this.passkeySigner) return this.viaPopup("activate");
     const pid = await this.pid();
     const viewRes = await this.activation();
     if (isApiError(viewRes)) return viewRes;
@@ -364,7 +400,7 @@ export class PeridotWallet {
       viewRes.feePolicyVersion,
       expiry,
     );
-    const a = await this.passkeySigner.sign(payload, {});
+    const a = await this.signer().sign(payload, {});
     const res = await this.api.post<ActivationView>(`/v1/account/activate`, {
       expiry,
       feePolicyVersion: viewRes.feePolicyVersion,
@@ -386,6 +422,7 @@ export class PeridotWallet {
    * the chain confirms the new authority.
    */
   async rotate(input: RotateInput): Promise<{ signature: string; status: "confirmed" | "pending" }> {
+    if (!this.passkeySigner) return this.viaPopup("rotate", input);
     const pid = await this.pid();
     const credsRes = await this.api.get<Authority[]>("/v1/credentials");
     if (!credsRes.ok || isApiError(credsRes.data) || !Array.isArray(credsRes.data)) {
@@ -403,7 +440,7 @@ export class PeridotWallet {
     const chainTime = await this.adapter.chainTime();
     const expiry = Math.floor(chainTime) + 300;
     const payload = await buildUpdateAuthorityPayloadV3(pidToSeed32(pid), nonce, newKey, expiry);
-    const a = await this.passkeySigner.sign(payload, { allowCredentialId: oldCred.credentialId });
+    const a = await this.signer().sign(payload, { allowCredentialId: oldCred.credentialId });
     const res = await this.api.post<{ signature: string; status: "confirmed" | "pending" }>("/v1/wallet/rotate", {
       oldCredentialId: oldCred.credentialId,
       newCredentialId: newCred.credentialId,

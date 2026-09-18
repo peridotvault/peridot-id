@@ -28,7 +28,7 @@ export class SessionKeysService {
 
   /**
    * Validate a session grant against the on-chain scope rules (mirrors
-   * `register_session` hygiene + ADR-010) and return the canonical session
+   * `register_session` hygiene (WHITEPAPER.md §11) and return the canonical session
    * address + owner challenge. Pure: no DB, no chain. Submission-time
    * ownership (pid → vault) is enforced by the relay path.
    */

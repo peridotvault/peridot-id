@@ -3,10 +3,11 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-nati
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  Banknote,
   Coins,
   ChevronRight,
-  LayoutGrid,
   Link2,
+  ReceiptText,
 } from "../icons";
 import type { Authority, ChainAccount, Identity, Profile } from "@peridotvault/pid-types";
 import type { TokenBalance } from "@peridotvault/pid-solana";
@@ -34,7 +35,8 @@ interface HomeScreenProps {
   goSend: () => void;
   goReceive: () => void;
   goSwap: () => void;
-  goItems: () => void;
+  goTopup: () => void;
+  goFiatHistory: () => void;
   goActivation: () => void;
   goPasskeys: () => void;
   goAppConnections: () => void;
@@ -44,7 +46,8 @@ export function HomeScreen({
   goSend,
   goReceive,
   goSwap,
-  goItems,
+  goTopup,
+  goFiatHistory,
   goActivation,
   goPasskeys,
   goAppConnections,
@@ -54,6 +57,7 @@ export function HomeScreen({
   const [profile, setProfile] = useState<Profile | null>(null);
   const [pid, setPid] = useState<string | null>(null);
   const [solLamports, setSolLamports] = useState<number>(0);
+  const [idrBalance, setIdrBalance] = useState("0");
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
   const [passkeys, setPasskeys] = useState<Authority[]>([]);
   const [activation, setActivation] = useState<ActivationView | null>(null);
@@ -96,6 +100,11 @@ export function HomeScreen({
         setTokens([]);
       }
       try {
+        setIdrBalance((await peridot.fiat.balance()).availableIdr);
+      } catch {
+        setIdrBalance("0");
+      }
+      try {
         const creds = await peridot.passkey.list();
         setPasskeys(Array.isArray(creds) ? (creds as Authority[]) : []);
       } catch {
@@ -123,6 +132,7 @@ export function HomeScreen({
 
   const coins: Coin[] = [
     { key: "sol", symbol: "SOL", amount: fmtBalance(String(solLamports), 9), raw: String(solLamports), decimals: 9 },
+    { key: "idr", symbol: "IDR", amount: Number(idrBalance).toLocaleString("id-ID"), raw: idrBalance, decimals: 0 },
     ...tokens.map((t) => ({
       key: t.mint,
       symbol: KNOWN_MINTS[t.mint] ?? shortMint(t.mint),
@@ -178,7 +188,11 @@ export function HomeScreen({
         <ActionButton icon={ArrowUpRight} label="Send" onPress={goSend} disabled={!activated} />
         <ActionButton icon={ArrowDownLeft} label="Receive" onPress={goReceive} />
         <ActionButton icon={Coins} label="Swap" onPress={goSwap} />
-        <ActionButton icon={LayoutGrid} label="Items" onPress={goItems} />
+        <ActionButton icon={Banknote} label="Buy" onPress={goTopup} />
+      </View>
+
+      <View style={styles.actions}>
+        <ActionButton icon={ReceiptText} label="IDR History" onPress={goFiatHistory} />
       </View>
 
       {error && <Text style={s.error}>{error}</Text>}
@@ -198,11 +212,15 @@ export function HomeScreen({
       {coins.map((coin) => (
         <View key={coin.key} style={styles.coinRow}>
           <View style={styles.coinIcon}>
-            <Coins size={18} color={theme.colors.foreground} />
+            {coin.key === "idr"
+              ? <Banknote size={18} color={theme.colors.foreground} />
+              : <Coins size={18} color={theme.colors.foreground} />}
           </View>
           <View style={styles.coinMeta}>
             <Text style={styles.coinSymbol}>{coin.symbol}</Text>
-            {coin.symbol !== "SOL" && <Text style={styles.coinMint}>{coin.key.slice(0, 4)}…{coin.key.slice(-4)}</Text>}
+            {coin.key === "idr"
+              ? <Text style={styles.coinMint}>Indonesian Rupiah</Text>
+              : coin.symbol !== "SOL" && <Text style={styles.coinMint}>{coin.key.slice(0, 4)}…{coin.key.slice(-4)}</Text>}
           </View>
           <Text style={styles.coinAmount}>{coin.amount}</Text>
         </View>

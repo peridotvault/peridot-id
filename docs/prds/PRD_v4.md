@@ -127,13 +127,13 @@ DO NOT implement:
 
 These can be future phases.
 
-> **V4 status (2026-09-16, ADR 009):** several items above have since shipped
+> **V4 status (2026-09-16):** several items above have since shipped
 > **on EVM only** — gas sponsorship (relayer `networkFee` + protocol-fee policy),
 > session keys (scoped P-256 permissions), and the EVM smart account with a
 > constrained ERC-7579 surface. Social recovery/MPC/multisig/bridges remain
 > unbuilt everywhere.
 >
-> **SVM sessions status (2026-09-17, ADR-010):** scoped gameplay sessions have
+> **SVM sessions status (2026-09-17):** scoped gameplay sessions have
 > since shipped **on Solana** as PDA-isolated Ed25519 session keys
 > (`contracts/WHITEPAPER.md` §11) — a separate design from the EVM layer, not a
 > port. Guardians/multisig remain future.
@@ -433,9 +433,9 @@ V1 policy scope:
 - nonce/recent blockhash handling.
 
 Do NOT implement session keys yet. (V4 status, 2026-09-16: session keys have
-since shipped **on EVM only** as scoped permissions — ADR 009,
+since shipped **on EVM only** as scoped permissions,
 `contracts/WHITEPAPER.md` §10. SVM status, 2026-09-17: gameplay sessions have
-since shipped **on Solana** as PDA-isolated sessions — ADR-010,
+since shipped **on Solana** as PDA-isolated sessions,
 `contracts/WHITEPAPER.md` §11, a separate design.)
 
 ---
@@ -1840,12 +1840,12 @@ Gas sponsorship is not part of V1.
 
 # 31. Future Architecture — Explicitly Deferred
 
-> **V4 status (2026-09-16, ADR 009):** the first, second, and fifth rungs below
+> **V4 status (2026-09-16):** the first, second, and fifth rungs below
 > have landed **on EVM only** (sponsored relayer, scoped session keys, EVM smart
 > accounts with constrained ERC-7579). Recovery/guardians, multi-device
 > policies, and additional chains remain deferred.
 >
-> **SVM sessions status (2026-09-17, ADR-010):** session keys have additionally
+> **SVM sessions status (2026-09-17):** session keys have additionally
 > landed **on Solana** as PDA-isolated gameplay sessions (structurally different
 > boundary — `contracts/WHITEPAPER.md` §11), not as a port of the EVM layer.
 

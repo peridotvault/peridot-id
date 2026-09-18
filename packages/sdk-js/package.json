@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@peridotvault/pid-core": "workspace:*",
+    "@peridotvault/pid-payments": "workspace:*",
     "@peridotvault/pid-solana": "workspace:*",
     "@peridotvault/pid-types": "workspace:*"
   },

@@ -36,7 +36,7 @@ pub const DOMAIN_V2: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v2";
 /// V2 signatures can never verify as V3: the domain differs. V3 drops all
 /// amount fields from payloads — only the fee-policy version is bound.
 pub const DOMAIN_V3: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v3";
-/// Domain separator for session-grant payloads (ADR-010). Disjoint from every
+/// Domain separator for session-grant payloads (WHITEPAPER.md §11). Disjoint from every
 /// `SMART_ACCOUNT` domain so an owner signature can never verify as a session
 /// grant and vice versa — the same separation the EVM `DOMAIN_PERM` provides.
 pub const DOMAIN_SESSION: &[u8] = b"PID|SOLANA|SESSION|v1";

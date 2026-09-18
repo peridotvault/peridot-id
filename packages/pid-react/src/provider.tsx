@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from "react";
 import { Peridot } from "@peridotvault/pid-sdk-js";
 import type { ApiError, ExchangeResult, PeridotClient } from "@peridotvault/pid-sdk-js";
+import { forwardPopupLoginCode, openLoginPopup, PopupBlockedError } from "@peridotvault/pid-sdk-js";
 import { PeridotLoginModal } from "./modal.js";
 import type { LoginMethod, PeridotProviderProps, UsePeridotApi } from "./types.js";
 
@@ -59,6 +60,7 @@ export function PeridotProvider({
     clientRef.current = Peridot({
       baseUrl: baseUrl ?? PROD_BASE_URL,
       solanaRpcUrl: solanaRpcUrl ?? DEFAULT_SOLANA_RPC,
+      popupBaseUrl: hostedLoginUrl ?? HOSTED_LOGIN_URL,
     });
   }
   const client = clientRef.current;
@@ -102,9 +104,12 @@ export function PeridotProvider({
   );
 
   // Returning from PeridotID with ?pid_code= — exchange once, then clean the URL.
+  // Inside a login popup (OAuth redirect landed on the dapp URL in the popup),
+  // forward the code to the opener instead and close.
   useEffect(() => {
     const code = readPidCode();
     if (!code) return;
+    if (typeof window !== "undefined" && window.opener && forwardPopupLoginCode()) return;
     let cancelled = false;
     setLoading(true);
     doExchange(code)
@@ -132,40 +137,59 @@ export function PeridotProvider({
   }, [busyMethod]);
 
   /**
-   * All login ceremonies run on the hosted PeridotID page — Google OAuth needs the
-   * redirect round-trip and WebAuthn legally requires a PeridotID origin (rpId), so no
-   * ceremony can run in-page on a third-party site. The hosted page returns to
-   * redirectUri with ?pid_code=, which the mount effect exchanges. Pure navigation:
-   * no API calls, no CORS involved.
+   * All login ceremonies run on the hosted PeridotID page inside a popup, so the
+   * browser address bar stays visible as the trust signal and the dapp keeps its
+   * state. Google OAuth needs the redirect round-trip and WebAuthn legally
+   * requires a PeridotID origin (rpId), so no ceremony can run in-page on a
+   * third-party site. The popup returns with ?pid_code=, which is exchanged
+   * here. Pure navigation fallback when popups are blocked: no API calls, no
+   * CORS involved.
    */
-  const goHosted = useCallback(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams({ redirect_uri: returnTo || window.location.origin });
-    if (clientId) params.set("client_id", clientId);
-    window.location.assign(`${hostedLoginUrl ?? HOSTED_LOGIN_URL}?${params.toString()}`);
-  }, [returnTo, clientId, hostedLoginUrl]);
+  const openPopupLogin = useCallback(
+    async (method: LoginMethod) => {
+      if (typeof window === "undefined") return;
+      const popupBase = hostedLoginUrl ?? HOSTED_LOGIN_URL;
+      const selfOrigin = window.location.origin;
+      const params: Record<string, string> = {
+        redirect_uri: returnTo || selfOrigin,
+        origin: selfOrigin,
+        popup: "login",
+        method,
+      };
+      if (clientId) params.client_id = clientId;
+      setError(null);
+      setBusyMethod(method);
+      try {
+        const { pidCode } = await openLoginPopup({ popupBaseUrl: popupBase, params });
+        setModalOpen(false);
+        if (!pidCode) throw new Error("Sign-in failed — try again.");
+        await doExchange(pidCode);
+      } catch (err) {
+        if (err instanceof PopupBlockedError) {
+          // Fall back to the honest full-page round-trip (address bar is real,
+          // the SPA just loses its state).
+          const fallback = new URLSearchParams({ redirect_uri: returnTo || selfOrigin });
+          if (clientId) fallback.set("client_id", clientId);
+          window.location.assign(`${popupBase}?${fallback.toString()}`);
+          return;
+        }
+        fail(err);
+      } finally {
+        setBusyMethod(null);
+      }
+    },
+    [returnTo, clientId, hostedLoginUrl, doExchange, fail],
+  );
 
   const handleGoogle = useCallback(() => {
-    setError(null);
-    goHosted();
-  }, [goHosted]);
+    void openPopupLogin("google");
+  }, [openPopupLogin]);
 
-  const handlePasskey = useCallback(async (): Promise<void> => {
-    setError(null);
-    // WebAuthn needs a secure context; the ceremony itself always runs on the
-    // hosted page (rpId law), so this only guards, then navigates like Google.
-    if (typeof window !== "undefined" && (!window.isSecureContext || !navigator.credentials)) {
-      const where = window.location.origin;
-      const err = new Error(
-        `Passkeys need a secure origin — you're on ${where}. Open this page via localhost or https, ` +
-          `or use Continue with Google.`,
-      );
-      setError(err.message);
-      onError?.(err);
-      return;
-    }
-    goHosted();
-  }, [goHosted, onError]);
+  const handlePasskey = useCallback(() => {
+    // No secure-context guard: the ceremony runs in the popup on the PeridotID
+    // origin, never on this page — any http(s) dapp can offer it.
+    void openPopupLogin("passkey");
+  }, [openPopupLogin]);
 
   const logout = useCallback(async () => {
     await client.auth.logout();

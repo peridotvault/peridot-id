@@ -32,9 +32,11 @@ function SignInButton() {
 ```
 
 `openLogin()` opens a small modal (Google / passkey chooser) rendered in a portal at
-maximum z-index with a blurred backdrop — always in front of your UI. After login,
-PeridotID redirects back with a one-time `pid_code`, the provider exchanges it, and
-`user` is set.
+maximum z-index with a blurred backdrop — always in front of your UI. Choosing a
+method opens a popup on the PeridotID origin (address bar visible — the trust
+signal); after login the popup returns a one-time `pid_code`, the provider
+exchanges it, and `user` is set. When popups are blocked it falls back to the
+full-page round-trip.
 
 ## Props
 
@@ -67,10 +69,11 @@ const res = await peridot.post('/v1/apps', {
 
 ## How it works
 
-All login ceremonies run on the hosted PeridotID page — Google OAuth needs the
+All login ceremonies run in a popup on the hosted PeridotID page — Google OAuth needs the
 redirect round-trip and WebAuthn legally requires a PeridotID origin, so no ceremony
-can run inside your page. The modal is a branded chooser; both buttons navigate to
-the hosted page, which returns to `redirectUri?pid_code=...`:
+can run inside your page. The modal is a branded chooser; both buttons open the
+popup, which returns `?pid_code=...` (posted back to your page, or via redirect +
+forward when OAuth leaves the popup):
 
 1. User clicks your button → `openLogin()` → modal (Google / Passkey).
 2. Either choice navigates to the hosted login (your `clientId` travels along).

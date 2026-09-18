@@ -49,6 +49,19 @@ enum ChainAccountStatus {
   insufficient
 }
 
+enum FiatTopupStatus {
+  pending
+  paid
+  expired
+  failed
+}
+
+enum FiatWithdrawStatus {
+  pending
+  settled
+  rejected
+}
+
 model Identity {
   // Permanent ecosystem PID: `<handle>@pid` (e.g. `ifal@pid`). App-supplied,
   // user-chosen once at onboarding. Immutable (PK), never reused or reassigned
@@ -72,6 +85,8 @@ model Identity {
   challenges    CredentialChallenge[]
   securityEvents  SecurityEvent[]
   pidApps PidApp[]
+  fiatTopups FiatTopup[]
+  fiatWithdraws FiatWithdraw[]
 
   @@map("identities")
 }
@@ -371,6 +386,44 @@ model ChainContract {
 
   @@unique([chainId, type])
   @@map("chain_contracts")
+}
+
+// Fiat-only IDR ledger (DOKU Checkout). No on-chain conversion yet — top-ups
+// record an off-chain IDR balance per pid; withdraws are manual-settlement
+// requests until the DOKU Payouts product is wired.
+model FiatTopup {
+  id            String         @id @default(uuid())
+  pid           String
+  identity      Identity       @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  invoiceNumber String         @unique
+  amountIdr     BigInt
+  currency      String         @default("IDR")
+  provider      String         @default("doku")
+  status        FiatTopupStatus @default(pending)
+  paymentUrl    String?
+  providerResponse Json?
+  paidAt        DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([pid])
+  @@map("fiat_topups")
+}
+
+model FiatWithdraw {
+  id          String             @id @default(uuid())
+  pid         String
+  identity    Identity           @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  amountIdr   BigInt
+  currency    String             @default("IDR")
+  destination Json?
+  status      FiatWithdrawStatus @default(pending)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([pid])
+  @@map("fiat_withdraws")
 }
 
 // Registered third-party apps ("Sign in with PeridotID"). Any developer registers an

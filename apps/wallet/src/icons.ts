@@ -7,6 +7,7 @@ export { default as ArrowDownLeft } from "lucide-react-native/icons/arrow-down-l
 export { default as ArrowDownUp } from "lucide-react-native/icons/arrow-down-up";
 export { default as ArrowLeft } from "lucide-react-native/icons/arrow-left";
 export { default as ArrowUpRight } from "lucide-react-native/icons/arrow-up-right";
+export { default as Banknote } from "lucide-react-native/icons/banknote";
 export { default as Check } from "lucide-react-native/icons/check";
 export { default as ChevronRight } from "lucide-react-native/icons/chevron-right";
 export { default as Coins } from "lucide-react-native/icons/coins";
@@ -20,6 +21,7 @@ export { default as LogOut } from "lucide-react-native/icons/log-out";
 export { default as Monitor } from "lucide-react-native/icons/monitor";
 export { default as Plus } from "lucide-react-native/icons/plus";
 export { default as RefreshCw } from "lucide-react-native/icons/refresh-cw";
+export { default as ReceiptText } from "lucide-react-native/icons/receipt-text";
 export { default as Rocket } from "lucide-react-native/icons/rocket";
 export { default as Settings } from "lucide-react-native/icons/settings";
 export { default as Trash2 } from "lucide-react-native/icons/trash-2";

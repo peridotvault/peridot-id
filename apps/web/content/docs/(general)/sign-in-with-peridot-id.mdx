@@ -55,15 +55,17 @@ function SignInButton() {
 ```
 
 `openLogin()` opens a small chooser modal (Google / Passkey) on a blurred backdrop at
-maximum z-index — always in front of your UI. Both buttons navigate to the hosted
-PeridotID login, where every ceremony runs (Google needs the redirect round-trip,
-WebAuthn legally requires a PeridotID origin). No `baseUrl` needed: it defaults to
-production. No API calls happen before login, so there is nothing CORS-related to
-configure.
+maximum z-index — always in front of your UI. Both buttons open a popup on the
+hosted PeridotID login, where every ceremony runs with the address bar visible
+(Google needs the redirect round-trip, WebAuthn legally requires a PeridotID
+origin). No `baseUrl` needed: it defaults to production. When popups are blocked
+it falls back to the full-page round-trip. No API calls happen before login, so
+there is nothing CORS-related to configure.
 
 ## 3. Handle the login
 
-After login, PeridotID redirects back to your `redirectUri` with a one-time `pid_code`.
+After login, the popup returns a one-time `pid_code` (full-page fallback: PeridotID
+redirects back to your `redirectUri` with it).
 The provider exchanges it automatically and sets `user`
 (`{ pid, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }`;
 `identityId` is also present as a deprecated one-release shim).
@@ -103,5 +105,7 @@ const identity = await r.json(); // single-use code, 5-minute expiry
 - Passkey login always runs on a PeridotID-hosted page (browsers bind WebAuthn to our
   domain) and returns with `pid_code` like Google does.
 - Codes are single-use, expire in ~5 minutes, and are bound to your `client_id`.
-- No framework? Use `@peridotvault/pid-sdk-js` directly: `login({ clientId, returnTo })`,
-  `loginWithPasskey({ clientId, returnTo })`, `exchange(code, clientId)`.
+- No framework? Use `@peridotvault/pid-sdk-js` directly with `popupBaseUrl`:
+  `login({ clientId, returnTo })` resolves the login URL (you navigate),
+  `loginWithPasskey({ clientId, returnTo })` and wallet methods delegate to the
+  popup automatically, `exchange(code, clientId)`.

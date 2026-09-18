@@ -5,7 +5,8 @@ import { useFonts, Geist_400Regular, Geist_500Medium, Geist_600SemiBold, Geist_7
 import { SourceSerif4_400Regular } from "@expo-google-fonts/source-serif-4";
 import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import { SafeAreaView, StyleSheet, View } from "react-native";
-import { Peridot } from "@peridotvault/pid-sdk-js";
+import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
+import { readPopupParams } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
 import { AppContext } from "./src/AppContext";
 import { theme } from "./src/theme";
@@ -13,10 +14,12 @@ import { LoginScreen } from "./src/screens/LoginScreen";
 import { LoadingScreen } from "./src/components/LoadingScreen";
 import { readSsoParams } from "./src/sso";
 import { HomeScreen } from "./src/screens/HomeScreen";
+import { ApproveScreen } from "./src/screens/ApproveScreen";
 import { SendScreen } from "./src/screens/SendScreen";
 import { ReceiveScreen } from "./src/screens/ReceiveScreen";
 import { SwapScreen } from "./src/screens/SwapScreen";
-import { ItemsScreen } from "./src/screens/ItemsScreen";
+import { TopupScreen } from "./src/screens/TopupScreen";
+import { FiatHistoryScreen } from "./src/screens/FiatHistoryScreen";
 import { PasskeyScreen } from "./src/screens/PasskeyScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
@@ -36,7 +39,8 @@ type Screen =
   | "send"
   | "receive"
   | "swap"
-  | "items"
+  | "topup"
+  | "fiat-history"
   | "passkey"
   | "settings"
   | "profile"
@@ -56,6 +60,9 @@ export default function App() {
     Peridot({
       baseUrl: API_BASE_URL,
       solanaRpcUrl: SOLANA_RPC_URL,
+      // First-party origin: inline ceremonies are legitimate here (this IS the
+      // trusted DOM). Third-party dapps omit the signer and use the popup.
+      passkeySigner: new BrowserPasskeySigner(),
       onUnauthorized: () => {
         setStepUp(false);
         setScreen("login");
@@ -99,6 +106,13 @@ export default function App() {
   // in (consent flow) — otherwise a logged-in user landing here would sit on HomeScreen
   // with the request silently ignored.
   const [ssoRequest] = useState(readSsoParams);
+  // Popup sign request (`?popup=<action>&origin=…` opened by a dapp): the
+  // approval screen takes over the whole app — never the normal wallet flow.
+  // (`?popup=login` stays on the normal flow; LoginScreen delivers via popup.)
+  const [popupRequest] = useState(() => {
+    const p = readPopupParams();
+    return p && p.action !== "login" ? p : null;
+  });
   const [activityTx, setActivityTx] = useState<WalletTransaction | null>(null);
   const [passkeyReturn, setPasskeyReturn] = useState<Screen>("settings");
 
@@ -188,7 +202,11 @@ export default function App() {
   return (
     <AppContext.Provider value={{ peridot }}>
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.colors.background }]}>
-        {(screen === "login" || ssoRequest) && (
+        {popupRequest ? (
+          <ApproveScreen popup={popupRequest} />
+        ) : (
+          <>
+            {(screen === "login" || ssoRequest) && (
           <LoginScreen
             onLoggedIn={() => {
               setStepUp(false);
@@ -202,7 +220,8 @@ export default function App() {
             goSend={() => go("send")}
             goReceive={() => go("receive")}
             goSwap={() => go("swap")}
-            goItems={() => go("items")}
+            goTopup={() => go("topup")}
+            goFiatHistory={() => go("fiat-history")}
             goActivation={() => go("activation")}
             goPasskeys={() => openPasskey("settings")}
             goAppConnections={() => go("app-connections")}
@@ -211,7 +230,8 @@ export default function App() {
         {screen === "send" && <SendScreen onDone={goHome} />}
         {screen === "receive" && <ReceiveScreen onDone={goHome} />}
         {screen === "swap" && <SwapScreen onDone={goHome} />}
-        {screen === "items" && <ItemsScreen onDone={goHome} />}
+        {screen === "topup" && <TopupScreen onDone={goHome} goHistory={() => go("fiat-history")} />}
+        {screen === "fiat-history" && <FiatHistoryScreen onDone={goHome} />}
         {screen === "passkey" && <PasskeyScreen onDone={() => setScreen(passkeyReturn)} />}
         {screen === "activation" && <ActivationScreen onDone={goHome} goPasskey={() => openPasskey("activation")} />}
         {screen === "settings" && (
@@ -237,6 +257,8 @@ export default function App() {
         {screen === "activity-detail" && activityTx && <ActivityDetailScreen tx={activityTx} onDone={() => go("activity")} />}
         {(screen === "home" || screen === "activity" || screen === "profile") && (
           <TabBar current={screen} go={go} />
+        )}
+          </>
         )}
         <StatusBar style="light" />
       </SafeAreaView>

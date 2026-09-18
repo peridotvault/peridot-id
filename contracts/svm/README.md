@@ -9,7 +9,7 @@ introspection (secp256r1 owner passkey).
   load-bearing: `.so` + keypair filenames derive from it, do not rename lightly)
   - `src/` — `lib.rs`, `state.rs`, `auth.rs`, `fee.rs`, `secp256r1.rs`, `sha256.rs`,
     `errors.rs`, `programdata.rs`, `instructions/` (V3 authorization schema — `contracts/WHITEPAPER.md` §§2, 6;
-    session layer discs 7–10 — `contracts/WHITEPAPER.md` §11, ADR-010)
+    session layer discs 7–10 — `contracts/WHITEPAPER.md` §11)
   - `tests/integration.mjs` — adversarial cases incl. squat, non-canonical-vault,
     over-attested-fee policy checks (formula + drift + TTL),
     cross-account replay and TTL cases (task 005)
@@ -66,7 +66,7 @@ node tests/integration.mjs <program-id>   # 37 cases (PID_BACKEND + PID_TREASURY
 solana-keygen new -o /tmp/forwarder-keypair.json --no-bip39-passphrase
 solana program deploy ../mock-forwarder/target/deploy/peridot_mock_forwarder.so \
   --program-id /tmp/forwarder-keypair.json
-node tests/session.mjs <program-id> <forwarder-id>   # 24 session cases (ADR-010)
+node tests/session.mjs <program-id> <forwarder-id>   # 24 session cases (WHITEPAPER.md §11)
 ```
 No deploy key handy (the declared id's keypair is secret)? Load the binary at its
 declared address instead — program-id check passes, upgrades don't apply locally:

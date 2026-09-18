@@ -19,13 +19,33 @@ import type {
   UpsertContractInput,
 } from "@peridotvault/pid-types";
 import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client.js";
+import { PeridotFiat } from "./fiat/fiat-client.js";
 import { authenticatePasskey, registerPasskey, BrowserPasskeySigner, PasskeyHostedRequiredError } from "@peridotvault/pid-core";
+import type { PasskeySigner } from "@peridotvault/pid-core";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
+import { openLoginPopup, openPeridotPopup } from "./popup.js";
+import { PopupClosedError, PopupUnavailableError } from "./popup.js";
 
 export { PeridotWallet, type PeridotWalletOptions };
+export { PeridotFiat, type FiatBalance, type TopupView, type WithdrawView } from "./fiat/fiat-client.js";
 export type { ActivationView, ActivationStatus } from "./wallet/wallet-client.js";
 export { authenticatePasskey, BrowserPasskeySigner, PasskeyHostedRequiredError, registerPasskey } from "@peridotvault/pid-core";
+export type { PasskeySigner } from "@peridotvault/pid-core";
+export {
+  awaitPopupRequest,
+  forwardPopupLoginCode,
+  openLoginPopup,
+  openPeridotPopup,
+  parsePopupOrigin,
+  postPopupReady,
+  postPopupResult,
+  readPopupParams,
+  PopupBlockedError,
+  PopupClosedError,
+  PopupUnavailableError,
+} from "./popup.js";
+export type { PopupParams, PopupResult } from "./popup.js";
 export { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 export { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
 
@@ -35,6 +55,14 @@ export interface PeridotOptions {
   solanaRpcUrl: string | string[];
   /** Fee-payer secure storage (defaults to an in-memory store). */
   feePayerStore?: SecretStore;
+  /**
+   * Inline passkey signer — first-party PeridotID origin only. Omit on
+   * third-party origins (with `popupBaseUrl` set): trust-critical methods then
+   * delegate to the PeridotID popup instead of signing in the dev DOM.
+   */
+  passkeySigner?: PasskeySigner;
+  /** Popup host for delegated ceremonies, e.g. https://app.pid.peridotvault.com (no prod default). */
+  popupBaseUrl?: string;
   /** On-chain activity cache (defaults to localStorage-backed). */
   historyStore?: HistoryStore;
   onUnauthorized?: () => void;
@@ -49,10 +77,10 @@ export class PeridotAuth {
    * logging in on behalf of a registered third-party app (binds the code to the app).
    * New credentials land on the PID picker (claim flow) — handles are only ever
    * chosen there, never up front.
-   * Resolves true when the browser leaves for Google, false when the login URL
-   * could not be obtained (caller stays put and shows an error).
+   * Resolves the Google login URL (the caller navigates — headless client never
+   * navigates itself), or null when the login URL could not be obtained.
    */
-  async login(opts?: { returnTo?: string; clientId?: string }): Promise<boolean> {
+  async login(opts?: { returnTo?: string; clientId?: string }): Promise<string | null> {
     const body =
       opts?.returnTo || opts?.clientId
         ? {
@@ -61,15 +89,48 @@ export class PeridotAuth {
           }
         : undefined;
     const res = await this.client.post<LoginResponse>("/v1/auth/login", body);
-    if (!res.ok) return false;
-    window.location.assign((res.data as LoginResponse).url);
-    return true;
+    if (!res.ok) return null;
+    return (res.data as LoginResponse).url;
+  }
+
+  /** Popup params shared by the login delegation below (redirect + app binding). */
+  private loginPopupParams(opts?: { returnTo?: string; clientId?: string }): Record<string, string | undefined> {
+    if (typeof window === "undefined") return {};
+    return {
+      redirect_uri: opts?.returnTo ?? window.location.origin,
+      origin: window.location.origin,
+      popup: "login",
+      ...(opts?.clientId ? { client_id: opts.clientId } : {}),
+    };
+  }
+
+  /** Popup login result mapped onto the inline `{ ok, pidCode }` shape. */
+  private async loginViaPopup(
+    opts?: { returnTo?: string; clientId?: string },
+    extra?: Record<string, string | undefined>,
+  ): Promise<{ ok: boolean; pidCode?: string }> {
+    if (!this.client.popupBaseUrl) throw new PopupUnavailableError("Passkey sign-in needs the PeridotID origin — pass popupBaseUrl or run on it.");
+    try {
+      const data = await openLoginPopup({
+        popupBaseUrl: this.client.popupBaseUrl,
+        params: { ...this.loginPopupParams(opts), ...extra },
+      });
+      return { ok: true, pidCode: data.pidCode };
+    } catch (e) {
+      // User said no (deny / close) ≈ inline cancel: resolve, don't throw.
+      if (e instanceof PopupClosedError || (e instanceof Error && /denied|cancelled|closed|rejected/i.test(e.message))) {
+        return { ok: false };
+      }
+      throw e;
+    }
   }
 
   /**
    * Sign in with a discoverable passkey (WebAuthn get). With `returnTo`, the server issues
    * a one-time pid_code for SSO (see `exchange`). Resolves `{ ok: false }` ONLY when the
    * WebAuthn ceremony is cancelled by the user; genuine errors throw.
+   * On a foreign origin the ceremony cannot legally run here (rpId law) — it
+   * delegates to the PeridotID popup instead of failing cryptically.
    */
   async loginWithPasskey(opts?: { returnTo?: string; clientId?: string }): Promise<{ ok: boolean; pidCode?: string }> {
     try {
@@ -91,6 +152,9 @@ export class PeridotAuth {
       });
       return finish;
     } catch (e) {
+      if (e instanceof PasskeyHostedRequiredError && this.client.popupBaseUrl) {
+        return this.loginViaPopup(opts, { method: "passkey" });
+      }
       if (e instanceof Error && /cancelled/i.test(e.message)) return { ok: false };
       throw e;
     }
@@ -261,17 +325,24 @@ export class PeridotPasskey {
   }
 
   async register(): Promise<Authority> {
-    return registerPasskey({
-      registerStart: async () => {
-        const res = await this.client.post<RegisterStart>("/v1/credentials/register/start");
-        if (!res.ok) throw new Error("Failed to start passkey registration");
-        return res.data as RegisterStart;
-      },
-      registerFinish: async (input) => {
-        const res = await this.client.post<Authority>("/v1/credentials/register/finish", input);
-        return res.data;
-      },
-    });
+    try {
+      return await registerPasskey({
+        registerStart: async () => {
+          const res = await this.client.post<RegisterStart>("/v1/credentials/register/start");
+          if (!res.ok) throw new Error("Failed to start passkey registration");
+          return res.data as RegisterStart;
+        },
+        registerFinish: async (input) => {
+          const res = await this.client.post<Authority>("/v1/credentials/register/finish", input);
+          return res.data;
+        },
+      });
+    } catch (e) {
+      if (e instanceof PasskeyHostedRequiredError) {
+        return this.client.popupRequest<Authority>("register");
+      }
+      throw e;
+    }
   }
 
   async revoke(id: string): Promise<Authority | ApiError> {
@@ -311,14 +382,20 @@ class PeridotClient {
   readonly profile: PeridotProfile;
   readonly passkey: PeridotPasskey;
   readonly wallet: PeridotWallet;
+  readonly fiat: PeridotFiat;
   readonly admin: PeridotAdmin;
 
-  constructor(private baseUrl: string, walletOptions: PeridotWalletOptions, private onUnauthorized?: () => void) {
+  constructor(
+    private baseUrl: string,
+    private walletOptions: PeridotWalletOptions,
+    private onUnauthorized?: () => void,
+  ) {
     this.auth = new PeridotAuth(this);
     this.identity = new PeridotIdentity(this);
     this.profile = new PeridotProfile(this);
     this.passkey = new PeridotPasskey(this);
     this.wallet = new PeridotWallet(this, walletOptions);
+    this.fiat = new PeridotFiat(this);
     this.admin = new PeridotAdmin(this);
   }
 
@@ -364,6 +441,24 @@ class PeridotClient {
   delete<T>(path: string) {
     return this.request<T>(path, { method: "DELETE" });
   }
+
+  /** Popup host for delegated trust-critical actions (absent = first-party inline mode). */
+  get popupBaseUrl(): string | undefined {
+    return this.walletOptions.popupBaseUrl;
+  }
+
+  /**
+   * Run one trust-critical action inside the PeridotID popup (handshake flow).
+   * Throws PopupUnavailableError without a popupBaseUrl or off-browser.
+   */
+  async popupRequest<T>(action: string, payload?: unknown): Promise<T> {
+    if (!this.popupBaseUrl) {
+      throw new PopupUnavailableError(
+        `Cannot ${action} here — pass popupBaseUrl to delegate to the PeridotID popup, or passkeySigner for first-party inline use.`,
+      );
+    }
+    return openPeridotPopup<T>({ popupBaseUrl: this.popupBaseUrl, params: { popup: action }, request: { action, payload } });
+  }
 }
 
 export { PeridotClient };
@@ -380,7 +475,13 @@ export type {
 export function Peridot(options: PeridotOptions): PeridotClient {
   return new PeridotClient(
     options.baseUrl,
-    { solanaRpcUrl: options.solanaRpcUrl, feePayerStore: options.feePayerStore, historyStore: options.historyStore },
+    {
+      solanaRpcUrl: options.solanaRpcUrl,
+      feePayerStore: options.feePayerStore,
+      passkeySigner: options.passkeySigner,
+      popupBaseUrl: options.popupBaseUrl,
+      historyStore: options.historyStore,
+    },
     options.onUnauthorized,
   );
 }

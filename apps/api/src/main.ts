@@ -9,10 +9,16 @@ import { APP_ORIGINS_TTL_MS, isOriginAllowed, parseEnvOrigins } from "./common/c
 import { PrismaService } from "./prisma/prisma.service";
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
   const config = app.get(ConfigService);
 
   app.use(cookieParser());
+  // DOKU signs the exact raw bytes — keep them for the notify route (req.rawBody).
+  app.useBodyParser("json", {
+    verify: (req: unknown, _res: unknown, buf: Buffer) => {
+      (req as { rawBody?: string }).rawBody = buf.toString("utf8");
+    },
+  });
   app.set("trust proxy", 1);
 
   const successUrl = config.get<string>("CLIENT_SUCCESS_URL", "http://localhost:5173");

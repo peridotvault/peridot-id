@@ -365,7 +365,7 @@ export async function buildExecutePayloadV3(
   ]);
 }
 
-// ================= Session layer (ADR-010, EVM V4 counterpart) =================
+// ================= Session layer (WHITEPAPER.md §11; EVM counterpart: §10) =================
 //
 // Session keys are Ed25519: the P-256 passkey authorizes registration once via
 // the precompile, then gameplay authorization is the session keypair signing

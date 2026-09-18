@@ -11,7 +11,7 @@
 - Solana program: Rust + Pinocchio (`contracts/svm/smart-account`, WHITEPAPER.md §§5–7)
 - Solana client: `@solana/web3.js` in `packages/solana` only (web3.js layering rule)
 - Signing: secp256r1 passkey authority (WebAuthn) + Ed25519 device fee payer
-- EVM (V4, ADR 009): Solidity `PeridotAccount` + `PeridotPermissionExecutor`
+- EVM (V4, WHITEPAPER.md §10): Solidity `PeridotAccount` + `PeridotPermissionExecutor`
   (constrained ERC-7579, owner-only ERC-1271, scoped P-256 session keys);
   `packages/evm` adapter + `packages/core` permission builders; `v1/permissions` API
 - Client: Expo (one codebase → web + iOS + Android, PRD_v5 §9); Chrome extension later over the sdk-js core

@@ -49,6 +49,9 @@ importers:
       '@peridotvault/pid-evm':
         specifier: workspace:*
         version: link:../../packages/evm
+      '@peridotvault/pid-payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
       '@peridotvault/pid-solana':
         specifier: workspace:*
         version: link:../../packages/solana
@@ -318,6 +321,12 @@ importers:
 
   packages/openapi: {}
 
+  packages/payments:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
   packages/pid-react:
     dependencies:
       '@peridotvault/pid-sdk-js':
@@ -345,6 +354,9 @@ importers:
       '@peridotvault/pid-core':
         specifier: workspace:*
         version: link:../core
+      '@peridotvault/pid-payments':
+        specifier: workspace:*
+        version: link:../payments
       '@peridotvault/pid-solana':
         specifier: workspace:*
         version: link:../solana

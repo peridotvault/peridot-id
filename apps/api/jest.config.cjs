@@ -10,5 +10,6 @@ module.exports = {
   moduleNameMapper: {
     "^@peridotvault/pid-types$": "<rootDir>/../../packages/types/src",
     "^@peridotvault/pid-solana$": "<rootDir>/../../packages/solana/src",
+    "^@peridotvault/pid-payments$": "<rootDir>/../../packages/payments/src",
   },
 };

@@ -19,7 +19,7 @@ apps/api            NestJS API (auth, identity, profile, wallet, permissions)
 apps/wallet         Expo wallet client (web + iOS + Android)
 apps/web            Public docs site (Fumadocs + Next.js)
 contracts/svm       Pinocchio smart-account program (Rust)
-contracts/evm       Counterfactual smart accounts + V4 permission layer (Solidity/Foundry, ADR 009)
+contracts/evm       Counterfactual smart accounts + V4 permission layer (Solidity/Foundry, WHITEPAPER.md §10)
 packages/sdk-js     Browser SDK
 packages/types      Shared TypeScript types
 packages/openapi    OpenAPI 3.0 specification (source of truth)
@@ -57,11 +57,15 @@ const peridot = Peridot({
   solanaRpcUrl: 'https://api.devnet.solana.com',
   onUnauthorized: async () => {
     const ok = await peridot.auth.refresh();
-    if (!ok) await peridot.auth.login();
+    if (!ok) {
+      const url = await peridot.auth.login();
+      if (url) window.location.assign(url);
+    }
   },
 });
 
-await peridot.auth.login({ handle: 'ifal' }); // first sign-up claims ifal@pid
+const loginUrl = await peridot.auth.login(); // Google OAuth URL — navigate to it
+if (loginUrl) window.location.assign(loginUrl); // first sign-up claims ifal@pid
 const me = await peridot.identity.me();       // { pid: 'ifal@pid', ... }
 await peridot.profile.update({ displayName: 'PeridotPlayer' });
 const rows = await peridot.wallet.createAccount(); // wallet chain rows

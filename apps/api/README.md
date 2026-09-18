@@ -36,9 +36,9 @@ for Vercel.
 - `wallet` / `account` — smart-account creation, intents, withdrawals
 - `credentials` — WebAuthn registration/recovery, COSE parsing
 - `permissions` — EVM V4 grant validation (`grants/validate`, `denied-selectors`;
-  pure hygiene + canonical id/challenge, ADR 009)
+  pure hygiene + canonical id/challenge, WHITEPAPER.md §10)
 - `session-keys` — SVM session-grant validation (`grants/validate`, `constants`;
-  pure hygiene + canonical address/challenge, ADR-010)
+  pure hygiene + canonical address/challenge, WHITEPAPER.md §11)
 
 ## Test
 

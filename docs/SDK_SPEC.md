@@ -9,11 +9,15 @@ const peridot = Peridot({
   solanaRpcUrl: "https://api.devnet.solana.com",
   onUnauthorized: async () => {
     const ok = await peridot.auth.refresh();
-    if (!ok) await peridot.auth.login();
+    if (!ok) {
+      const url = await peridot.auth.login();
+      if (url) window.location.assign(url);
+    }
   },
 });
 
-await peridot.auth.login({ handle: "ifal" }); // first sign-up claims ifal@pid
+const loginUrl = await peridot.auth.login(); // Google OAuth URL — navigate to it
+if (loginUrl) window.location.assign(loginUrl); // first sign-up claims ifal@pid
 await peridot.auth.logout();
 await peridot.auth.refresh(); // true | "step-up" | false
 
@@ -38,6 +42,6 @@ Notes:
   refresh-on-401 pattern cannot recurse.
 - The wallet is **record-only**: no key material is stored, generated, or returned. `me()`
   returns an `ApiError` (`404`) when the PID has no wallet yet.
-- EVM permissions (ADR 009) live in `@peridotvault/pid-evm` + `@peridotvault/pid-core`
+- EVM permissions (WHITEPAPER.md §10) live in `@peridotvault/pid-evm` + `@peridotvault/pid-core`
   (`buildPermissionId`, grant/revoke/exec payloads, calldata builders) and the
   `v1/permissions` API — not in `sdk-js` wallet-client calls yet.

@@ -85,6 +85,12 @@ export async function registerPasskey(api: {
   const start = await api.registerStart();
   if (isApiError(start)) throw new Error((start as { message: string }).message);
 
+  // Same rpId law as sign-in: a foreign origin can never use this rpId's store.
+  // Fail fast with the catchable error so callers route to the hosted page.
+  const startOpts = start.options as Record<string, unknown>;
+  const regRpId = startOpts.rpId ?? (startOpts.rp as { id?: unknown } | undefined)?.id;
+  if (typeof regRpId === "string") assertCeremonyOrigin({ rpId: regRpId });
+
   // First credential: plain create. Additional credential: also assert with an existing
   // passkey (approval) — existing-credential approval rule.
   let approval: unknown;

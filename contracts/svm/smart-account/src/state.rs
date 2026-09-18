@@ -192,7 +192,7 @@ pub fn verify_nonce(account: &SmartAccount, nonce: u64) -> Result<(), ProgramErr
     Ok(())
 }
 
-// ================= Session records (V4 permission layer, ADR-010) =================
+// ================= Session records (WHITEPAPER.md §11) =================
 //
 // A session record lives in its own PDA (`["peridot_id", "session", account_id,
 // session_pubkey]`) and authorizes gameplay CPIs signed by that PDA — never the
@@ -209,7 +209,7 @@ pub fn verify_nonce(account: &SmartAccount, nonce: u64) -> Result<(), ProgramErr
 // `recorded_*` is the game program's upgrade authority + ProgramData slot,
 // verified at registration. `last_seen_*` is refreshed on every execution so
 // backend indexers can detect post-trust upgrades (record-and-log: no
-// enforcement, ADR-010 §4).
+// enforcement, WHITEPAPER.md §11).
 
 /// Session record length (fixed).
 pub const SESSION_STATE_LEN: usize = 205;

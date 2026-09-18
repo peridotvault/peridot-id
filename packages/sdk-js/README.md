@@ -23,13 +23,18 @@ import { Peridot } from '@peridotvault/pid-sdk-js';
 const peridot = Peridot({
   baseUrl: 'https://api.pid.peridotvault.com',
   solanaRpcUrl: 'https://api.devnet.solana.com', // for smart-account txs
+  popupBaseUrl: 'https://app.pid.peridotvault.com', // trust-critical actions open here
   onUnauthorized: async () => {
     const ok = await peridot.auth.refresh();
-    if (!ok) await peridot.auth.login();
+    if (!ok) {
+      const url = await peridot.auth.login();
+      if (url) window.location.assign(url);
+    }
   },
 });
 
-await peridot.auth.login();                    // redirect to Google (new users land on the PID picker)
+const loginUrl = await peridot.auth.login(); // Google OAuth URL — navigate to it
+if (loginUrl) window.location.assign(loginUrl); // (new users land on the PID picker)
 const me = await peridot.identity.me();        // Identity { pid, ... }
 await peridot.profile.update({ displayName: 'PeridotPlayer' });
 const available = await peridot.auth.pidAvailable('ifal'); // { available, pid }
@@ -45,7 +50,7 @@ const available = await peridot.auth.pidAvailable('ifal'); // { available, pid }
 | Passkey credentials | `peridot.passkey` | `list()`, `register()`, `revoke(id)` |
 | Wallet | `peridot.wallet` | smart-account balance, history, deposit, withdraw (see `PeridotWallet`) |
 
-EVM permissions (ADR 009) are not SDK-wrapped yet: use `@peridotvault/pid-evm`
+EVM permissions (WHITEPAPER.md §10) are not SDK-wrapped yet: use `@peridotvault/pid-evm`
 (payload + calldata builders) with the `v1/permissions` API directly
 (`POST grants/validate`, `GET denied-selectors`).
 
@@ -54,7 +59,8 @@ EVM permissions (ADR 009) are not SDK-wrapped yet: use `@peridotvault/pid-evm`
 ### Google (default)
 
 ```ts
-await peridot.auth.login(); // redirects to Google, returns to CLIENT_SUCCESS_URL
+const url = await peridot.auth.login(); // Google OAuth URL — navigate to it
+if (url) window.location.assign(url); // returns to CLIENT_SUCCESS_URL
 ```
 
 ### Passkey
@@ -72,7 +78,8 @@ A relying party that needs to create/link its own user from a PeridotID login ca
 
 ```ts
 // Start login and request to be returned to your own origin with a pid_code.
-await peridot.auth.login({ returnTo: 'https://live2dev.com/auth/callback' });
+const url = await peridot.auth.login({ returnTo: 'https://live2dev.com/auth/callback' });
+if (url) window.location.assign(url);
 // (or) await peridot.auth.loginWithPasskey({ returnTo: 'https://live2dev.com/auth/callback' });
 ```
 
@@ -94,13 +101,36 @@ then pass it on every login — the issued code is bound to your app and only ex
 with the same `clientId`:
 
 ```ts
-await peridot.auth.login({ clientId: 'pidapp_...', returnTo: 'https://mygame.dev/callback' });
+const url = await peridot.auth.login({ clientId: 'pidapp_...', returnTo: 'https://mygame.dev/callback' });
+if (url) window.location.assign(url);
 const res = await peridot.auth.loginWithPasskey({ clientId: 'pidapp_...', returnTo: 'https://mygame.dev/callback' });
 const identity = await peridot.auth.exchange(code, 'pidapp_...');
 ```
 
 For React apps, use `@peridotvault/pid-react` (`PeridotProvider` + login modal) instead
 of wiring this manually.
+
+## Popup flow (third-party origins)
+
+Trust-critical actions — connect, passkey sign-in/registration, `withdraw`,
+`execute`, `activate`, `rotate`, `topup` — never run in the developer's DOM.
+With `popupBaseUrl` set (and no inline `passkeySigner`), they open a popup on
+the PeridotID origin, where the user approves with the address bar visible:
+
+```ts
+const peridot = Peridot({
+  baseUrl: 'https://api.pid.peridotvault.com',
+  solanaRpcUrl: 'https://api.devnet.solana.com',
+  popupBaseUrl: 'https://app.pid.peridotvault.com',
+});
+
+await peridot.wallet.withdraw({ amount: '5000000', asset: 'SOL', to: '...' });
+// ^ opens the popup; resolves with { signature, … } after user approval.
+```
+
+Read-only calls (`getBalance()`, `tokens()`, `history()`, `activity()`, `me()`,
+`activation()`) always run inline — there is nothing to exploit there.
+`openPeridotPopup` / `openLoginPopup` are exported for custom flows.
 
 ## Low-level / server-side helpers
 
@@ -118,6 +148,8 @@ entry point.
 |---|---|---|
 | `baseUrl` | `string` | PeridotID API base URL |
 | `solanaRpcUrl` | `string \| string[]` | Solana RPC for smart-account txs |
+| `passkeySigner` | `PasskeySigner` | optional; inline signer — first-party PeridotID origin only. Omit on third-party origins (with `popupBaseUrl`): `withdraw`/`execute`/`activate`/`rotate`/`topup` then delegate to the popup |
+| `popupBaseUrl` | `string` | optional; popup host for delegated ceremonies, e.g. `https://app.pid.peridotvault.com` (no prod default) |
 | `feePayerStore` | `SecretStore` | optional; defaults to in-memory |
 | `historyStore` | `HistoryStore` | optional; defaults to localStorage-backed |
 | `onUnauthorized` | `() => void` | called on `401` (except `/v1/auth/*`) |

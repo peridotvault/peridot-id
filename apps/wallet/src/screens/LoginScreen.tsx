@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { postPopupResult, readPopupParams } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
 import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
 import { theme, styles as s } from "../theme";
@@ -14,6 +15,13 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sso] = useState(readSsoParams);
+  // Popup login (`?popup=login&origin=…` opened by a dapp): results go back via
+  // postMessage to the opener instead of navigation.
+  const [popup] = useState(() => {
+    const p = readPopupParams();
+    return p && p.action === "login" ? p : null;
+  });
+  const autoStarted = useRef(false);
   // Post-auth PID creation: the handle becomes the permanent `<handle>@pid`
   // identity (never changeable, reused, or reassigned). The user must tick the
   // permanence acknowledgement before continuing.
@@ -127,6 +135,13 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     return false;
   };
 
+  /** Popup delivery: post the code to the opener instead of navigating. True when delivered. */
+  const deliver = (pidCode: string): boolean => {
+    if (!popup || typeof window === "undefined" || !window.opener) return false;
+    postPopupResult(popup.origin, { ok: true, data: { pidCode } });
+    return true;
+  };
+
   const claimSignOut = async () => {
     setBusy(true);
     try {
@@ -159,6 +174,7 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
         window.location.assign(withPidCode(res.redirectTo, res.pidCode));
         return;
       }
+      if (res.pidCode && deliver(res.pidCode)) return;
       if (finishSso(res.pidCode)) return;
       onLoggedIn();
     } catch (e) {
@@ -179,6 +195,7 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
         setError("Sign-in was cancelled — try again.");
         return;
       }
+      if (res.pidCode && deliver(res.pidCode)) return;
       if (finishSso(res.pidCode)) return;
       onLoggedIn();
     } catch (e) {
@@ -200,8 +217,10 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
       // (= this wallet's origin) with the session cookie — or, for a new credential,
       // on the PID claim screen (the only place handles are chosen).
       // Never navigate on success here: the browser leaves for Google, and the
-      // return bootstrap lands home. On failure (!ok/throw) stay on login.
-      const ok = await peridot.auth.login(
+      // return bootstrap lands home. On failure (null/throw) stay on login.
+      // Popup mode navigates too — the OAuth round-trip returns to the dapp URL
+      // inside this popup, which forwards the code to the opener itself.
+      const url = await peridot.auth.login(
         sso
           ? {
               ...(sso.redirectUri ? { returnTo: sso.redirectUri } : {}),
@@ -209,7 +228,11 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
             }
           : undefined,
       );
-      if (!ok) setError("Couldn't reach Google — try again.");
+      if (!url) {
+        setError("Couldn't reach Google — try again.");
+        return;
+      }
+      if (typeof window !== "undefined") window.location.assign(url);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -224,6 +247,7 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     try {
       // Mint a code for the CURRENT session — no re-authentication needed.
       const { pidCode } = await peridot.auth.authorize({ returnTo: sso.redirectUri, clientId: sso.clientId });
+      if (deliver(pidCode)) return;
       window.location.assign(withPidCode(sso.redirectUri, pidCode));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -233,9 +257,26 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
   };
 
   const denyApp = () => {
-    if (!sso || typeof window === "undefined") return;
+    if (typeof window === "undefined") return;
+    if (popup) {
+      postPopupResult(popup.origin, { ok: false, error: "access_denied" });
+      return;
+    }
+    if (!sso) return;
     window.location.assign(withDenied(sso.redirectUri));
   };
+
+  // Popup opened from a method button: auto-start that method once the login
+  // form is showing (not on the claim/consent screens).
+  useEffect(() => {
+    if (!popup?.method || autoStarted.current) return;
+    if (claim !== null) return;
+    if (sso && session !== null) return;
+    autoStarted.current = true;
+    if (popup.method === "passkey") void signInWithPasskey();
+    else void continueWithGoogle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [popup, claim, sso, session]);
 
   // SSO check in flight: branded loader, so the login form never flashes
   // before the consent modal resolves.

@@ -28,7 +28,7 @@ Tables:
   **Public material only** — the secret never leaves the client authenticator.
   (EVM V4 session keys are NOT stored here: they live in on-chain
   `sessions[permissionId]` records, granted/revoked by owner-signed transactions;
-  the backend's grant validation is pure — no permission tables by design, ADR 009.)
+  the backend's grant validation is pure — no permission tables by design.)
 - `wallet_fee_payers` — user-controlled fee payer. `chainAccountId` FK;
   `address` only — the key never leaves the client.
 - `transactions` — `pid`, `chainAccountId`, `intentId` (nullable — deposits have no
@@ -65,8 +65,8 @@ Invariants:
   (`sessions[permissionId]`: kind/target/caps/expiry/`seq`/revocation, ≤30d TTL)
   without new tables: persistence is the on-chain record; the backend computes
   ids/challenges purely (`POST /v1/permissions/grants/validate`). SVM sessions
-  (ADR-010) likewise add no tables: session PDAs live on-chain, validated via
-  `POST /v1/session-keys/grants/validate`. The `sessions`
+  likewise add no tables: session PDAs live on-chain, validated via
+  `POST /v1/session-keys/grants/validate` (WHITEPAPER.md §11). The `sessions`
   table below is cookie refresh-token state — unrelated to on-chain session keys.
 - At most one `smart_account` chain account per chain (unique constraint);
   `linked_address` rows may coexist (legacy V3 records).

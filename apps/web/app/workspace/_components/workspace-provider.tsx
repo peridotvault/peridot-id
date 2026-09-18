@@ -77,10 +77,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = useCallback(() => {
     setBusy(true);
     setError(null);
-    client.auth.login({ returnTo: cleanReturnTo() }).catch((e: unknown) => {
-      setError(e instanceof Error ? e.message : "Google sign-in failed");
-      setBusy(false);
-    });
+    client.auth
+      .login({ returnTo: cleanReturnTo() })
+      .then((url) => {
+        if (url) window.location.assign(url);
+        else {
+          setError("Couldn't reach Google — try again.");
+          setBusy(false);
+        }
+      })
+      .catch((e: unknown) => {
+        setError(e instanceof Error ? e.message : "Google sign-in failed");
+        setBusy(false);
+      });
   }, [client, cleanReturnTo]);
 
   const signInWithPasskey = useCallback(async () => {

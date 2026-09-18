@@ -1,7 +1,7 @@
 # Security
 
 Posture: non-custodial personal wallet (smart account) owned by a secp256r1
-passkey (secp256r1 owner passkey; ADR-009 for the EVM permission layer). 1 identity =
+passkey (secp256r1 owner passkey; WHITEPAPER.md §10 for the EVM permission layer). 1 identity =
 1 wallet. The server holds only public material (addresses,
 compressed passkey pubkeys, credential IDs, intents, transaction metadata). The
 owner passkey signs the domain-separated authorization payload on-chain; on EVM
@@ -81,7 +81,7 @@ credential approval for new passkeys, last-credential unlink/revoke guard.
     re-checks the full permission inside the account. Residual risk: session-key
     theft spends up to the grant's remaining caps until expiry/revocation — keep
     grants narrow and short-lived.
-19. **Session-key / gameplay abuse (SVM sessions, ADR-010)** — mitigated by
+19. **Session-key / gameplay abuse (SVM sessions, WHITEPAPER.md §11)** — mitigated by
     construction, proven by the validator suite (`contracts/WHITEPAPER.md` §11
     §5): the vault PDA never enters game CPIs, so a stolen session key or a
     malicious game (even forwarding the lent signer onward) cannot move vault

@@ -19,11 +19,13 @@ import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
   baseUrl: 'https://api.pid.peridotvault.com',
+  popupBaseUrl: 'https://app.pid.peridotvault.com', // trust-critical actions open here
   onUnauthorized: async () => {
     // Access token expired — try to refresh silently before redirecting to login
     const ok = await peridot.auth.refresh();
     if (!ok) {
-      await peridot.auth.login(); // redirects the browser to Google
+      const url = await peridot.auth.login(); // Google OAuth URL — navigate to it
+      if (url) window.location.assign(url);
     }
   },
 });
@@ -31,14 +33,15 @@ const peridot = Peridot({
 
 ## Sign in
 
-`auth.login()` redirects the browser to Google. The user signs in and is sent back to
+`auth.login()` resolves the Google OAuth URL — navigate to it. The user signs in and is sent back to
 `CLIENT_SUCCESS_URL` with the session cookies already set — or, for a new credential,
 to the PID picker (`?claim=1`), where they choose the permanent `<handle>@pid`
 (check `auth.pidAvailable(handle)` first; the handle can never be changed, reused,
 or reassigned):
 
 ```ts
-await peridot.auth.login();
+const url = await peridot.auth.login();
+if (url) window.location.assign(url);
 const { available, pid } = await peridot.auth.pidAvailable("ifal");
 // { available: true, pid: "ifal@pid" }
 const status = await peridot.auth.claimStatus();

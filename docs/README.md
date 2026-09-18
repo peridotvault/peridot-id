@@ -42,7 +42,7 @@ packages/pid-react  Hosted "Sign in with PeridotID" React flow
 - [API_SPEC.md](API_SPEC.md) — endpoint list
 - [SECURITY.md](SECURITY.md) — auth, sessions, wallet threat model
 - [ROADMAP.md](ROADMAP.md) — Foundation → Social → Gaming → Ecosystem
-- [adr/](adr/) — accepted decisions 009–010 (WHITEPAPER.md §12 gates mainnet)
+- [WHITEPAPER.md](../contracts/WHITEPAPER.md) — canonical contracts spec (§12 gates mainnet)
 
 ## Quick start
 

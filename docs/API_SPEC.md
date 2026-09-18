@@ -27,7 +27,7 @@ POST /v1/credentials/register/start · POST /v1/credentials/register/finish
 POST /v1/credentials/authenticate/start · POST /v1/credentials/authenticate/finish
 DELETE /v1/credentials/:id
 
-## Permissions (EVM scoped session keys, ADR 009)
+## Permissions (EVM scoped session keys)
 
 POST /v1/permissions/grants/validate · GET /v1/permissions/denied-selectors
 

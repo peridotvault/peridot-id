@@ -1,4 +1,4 @@
-//! Gameplay execution authorized by an Ed25519 session key (ADR-010).
+//! Gameplay execution authorized by an Ed25519 session key (WHITEPAPER.md §11).
 //!
 //! Security boundary (structurally different from the EVM executor — nothing
 //! is ported): the vault PDA that holds economic value NEVER appears in the
@@ -14,7 +14,7 @@
 //! exactly, so the Neodyme `remaining_accounts` substitution class cannot
 //! occur. Upgrade visibility is record-and-log: the game's ProgramData
 //! authority + slot refresh `last_seen_*` every execution for backend
-//! indexers; there is deliberately no enforcement (ADR-010 §4).
+//! indexers; there is deliberately no enforcement (WHITEPAPER.md §11).
 
 use crate::{
     auth,
@@ -208,7 +208,7 @@ pub fn process(
     // execution. Upgradeable games: parse the verified ProgramData.
     // Immutable games (native/deprecated loader): no upgrade record exists —
     // the evidence account must be the game program itself. Record-and-log
-    // only — no enforcement (ADR-010 §4, owner-accepted risk).
+    // only — no enforcement (WHITEPAPER.md §11, owner-accepted risk).
     let (seen_slot, seen_auth, seen_has_auth) = match programdata::classify_loader(
         &programdata::owner_bytes(game_program),
     ) {

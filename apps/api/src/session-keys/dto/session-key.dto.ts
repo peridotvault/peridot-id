@@ -4,7 +4,7 @@ const PUBKEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const HEX32 = /^0x[0-9a-fA-F]{64}$/;
 const UINT = /^\d+$/;
 
-/** Owner-approved gameplay session grant (mirrors `register_session`; see ADR-010). */
+/** Owner-approved gameplay session grant (mirrors `register_session`; see WHITEPAPER.md §11). */
 export class RegisterSessionDto {
   /** Vault PDA the session attaches to (base58). */
   @Matches(PUBKEY, { message: "vault must be a base58 pubkey" })

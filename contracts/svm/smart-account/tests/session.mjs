@@ -1,4 +1,4 @@
-// PeridotID session layer — adversarial integration suite (ADR-010).
+// PeridotID session layer — adversarial integration suite (WHITEPAPER.md §11).
 //
 // Runs against a local `solana-test-validator` with the smart-account program
 // AND the mock-forwarder program deployed. Proves the PDA-signer-isolation

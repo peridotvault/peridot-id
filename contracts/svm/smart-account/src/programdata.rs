@@ -1,4 +1,4 @@
-//! Upgradeable-loader and token-account parsing for the session layer (ADR-010).
+//! Upgradeable-loader and token-account parsing for the session layer (WHITEPAPER.md §11).
 //!
 //! All addresses below are system constants — verified end-to-end by the
 //! integration suite (registration passes a chain-read ProgramData account and

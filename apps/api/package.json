@@ -26,6 +26,7 @@
     "@nestjs/throttler": "^6.4.0",
     "@peridotvault/pid-core": "workspace:*",
     "@peridotvault/pid-evm": "workspace:*",
+    "@peridotvault/pid-payments": "workspace:*",
     "@peridotvault/pid-solana": "workspace:*",
     "@peridotvault/pid-types": "workspace:*",
     "@prisma/client": "^6.2.0",

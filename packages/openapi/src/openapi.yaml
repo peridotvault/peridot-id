@@ -49,6 +49,12 @@ tags:
       the smart account instead.
   - name: account
     description: PeridotID account — owns chain accounts (smart account PDA, legacy linked address)
+  - name: fiat
+    description: |
+      Fiat-only IDR ledger via a hosted-page gateway (DOKU today, Xendit/Stripe
+      later — the provider is selected server-side). No on-chain conversion yet:
+      top-ups credit an off-chain IDR balance; withdraws are manual-settlement
+      requests until provider payouts are wired.
   - name: credentials
     description: |
       Signing authorities (secp256r1 passkeys). Google OAuth proves identity; a
@@ -56,12 +62,12 @@ tags:
       credential requires approval by an existing credential (existing-credential approval rule).
   - name: permissions
     description: |
-      EVM permission grants (scoped P-256 session keys, ADR 009). Validation is pure
+      EVM permission grants (scoped P-256 session keys, WHITEPAPER.md §10). Validation is pure
       hygiene + canonical id/challenge computation; submission-time account binding
       is enforced by the relay path.
   - name: session-keys
     description: |
-      SVM gameplay sessions (Ed25519 session keys in isolated PDAs, ADR 010).
+      SVM gameplay sessions (Ed25519 session keys in isolated PDAs, WHITEPAPER.md §11).
       Validation is pure hygiene + canonical address/challenge computation;
       submission-time vault binding is enforced by the relay path.
   - name: openapi
@@ -1101,6 +1107,199 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /fiat/topup:
+    post:
+      tags: [fiat]
+      summary: Create an IDR top-up invoice (gateway hosted page)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FiatTopupCreate"
+      responses:
+        "200":
+          description: Invoice with the hosted payment page URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatTopup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    get:
+      tags: [fiat]
+      summary: Top-up history (newest first)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Top-up list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FiatTopup"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/topup/{id}:
+    get:
+      tags: [fiat]
+      summary: Top-up status by id (poll while pending)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Top-up detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatTopup"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/withdraw:
+    post:
+      tags: [fiat]
+      summary: Request an IDR withdraw (guarded by the available balance)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FiatWithdrawCreate"
+      responses:
+        "200":
+          description: Withdraw request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatWithdraw"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    get:
+      tags: [fiat]
+      summary: Withdraw request history (newest first)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Withdraw list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FiatWithdraw"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/balance:
+    get:
+      tags: [fiat]
+      summary: Spendable IDR balance (paid top-ups minus pending + settled withdraws)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatBalance"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/withdraw/{id}/settle:
+    post:
+      tags: [fiat]
+      summary: Settle a withdraw request (admin — manual payout tracking)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [settled, rejected]
+      responses:
+        "200":
+          description: Withdraw request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatWithdraw"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /fiat/webhook/{provider}:
+    post:
+      tags: [fiat]
+      summary: Gateway webhook (gateway-signed, public)
+      description: |
+        Authenticity comes from the gateway signature header over the raw body,
+        not JWT. 200 = processed or idempotent replay; 400 = rejected (the gateway retries).
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Gateway id (e.g. doku)
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   /permissions/grants/validate:
     post:
       tags: [permissions]
@@ -1520,6 +1719,15 @@ components:
           example:
             statusCode: 401
             message: "Unauthorized"
+    Forbidden:
+      description: Authenticated but lacking the required role (e.g. admin)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 403
+            message: "Admin access required"
     NotFound:
       description: The identity or profile does not exist
       content:
@@ -2149,10 +2357,96 @@ components:
         assertion:
           $ref: "#/components/schemas/PasskeyAssertion"
 
+    FiatTopupCreate:
+      type: object
+      required: [amountIdr]
+      properties:
+        amountIdr:
+          type: string
+          description: "Whole IDR (min 10000)"
+          example: "50000"
+
+    FiatTopup:
+      type: object
+      required: [id, invoiceNumber, amountIdr, currency, provider, status, createdAt]
+      properties:
+        id:
+          type: string
+        invoiceNumber:
+          type: string
+        amountIdr:
+          type: string
+        currency:
+          type: string
+          enum: [IDR]
+        provider:
+          type: string
+          example: doku
+        status:
+          type: string
+          enum: [pending, paid, expired, failed]
+        paymentUrl:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    FiatWithdrawCreate:
+      type: object
+      required: [amountIdr]
+      properties:
+        amountIdr:
+          type: string
+          description: "Whole IDR (min 10000)"
+          example: "50000"
+        bankCode:
+          type: string
+        accountNumber:
+          type: string
+        accountName:
+          type: string
+
+    FiatWithdraw:
+      type: object
+      required: [id, amountIdr, currency, status, createdAt]
+      properties:
+        id:
+          type: string
+        amountIdr:
+          type: string
+        currency:
+          type: string
+          enum: [IDR]
+        status:
+          type: string
+          enum: [pending, settled, rejected]
+        createdAt:
+          type: string
+          format: date-time
+
+    FiatBalance:
+      type: object
+      required: [availableIdr, currency]
+      properties:
+        availableIdr:
+          type: string
+          example: "70000"
+        currency:
+          type: string
+          enum: [IDR]
+
     SponsoredWithdrawResult:
       type: object
-      required: [signature, networkFeeLamports, protocolFeeLamports, status]
-      properties:
+      required: [signature, networkFeeLamports, protocolFeeLamports, status]properties:
         signature:
           type: string
         networkFeeLamports:

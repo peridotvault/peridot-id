@@ -1,7 +1,7 @@
 // Replaceable Solana RPC abstraction (PRD_v4 §19, web3.js layering rule). The API/SDK talks to this,
 // never to @solana/web3.js directly. Provider is config, not code.
 //
-// Multi-endpoint failover (task 012): `SolanaRpc` accepts one or more RPC URLs; the
+// Multi-endpoint failover: `SolanaRpc` accepts one or more RPC URLs; the
 // current endpoint is health-checked and, on a failed call, the client rotates to the next
 // endpoint. A malicious/lying RPC can misreport but cannot forge execution — confirmation
 // is read against cluster state (commitment), not a single node's word.
