@@ -3,8 +3,8 @@
 // Layering (web3.js layering rule): pid-core owns dependency-free primitives plus the key
 // types both layers share. pid-solana (chain adapter/instructions) and pid-sdk-js
 // (direct API client) build on top. The public login UX (redirects, hosted login,
-// prod defaults) lives in pid-react and must never leak down here: no navigation,
-// no hosts, no app flow.
+// prod defaults) lives outside this package (docs / caller config) and must never
+// leak down here: no navigation, no hosts, no app flow.
 
 export {
   buildActivatePayload,

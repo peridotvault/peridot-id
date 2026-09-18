@@ -37,9 +37,10 @@ Point the SDK at a local API (`apps/api` on `:3301`) and ensure
 This wallet is the **first-party** client: it talks to the API directly
 (`@peridotvault/pid-sdk-js`) and uses the primitives in `@peridotvault/pid-core`
 (hash payloads, WebAuthn ceremonies, key custody) via the SDK and
-`@peridotvault/pid-solana`. It must **never** import `@peridotvault/pid-react` —
-that package is the public "Sign in with PeridotID" flow for third-party apps
-(hosted login on `app.pid.peridotvault.com`, prod defaults). CI enforces this split.
+`@peridotvault/pid-solana`. It signs inline with an explicit passkey signer — this
+origin IS the trusted DOM — and must **never** use the popup/hosted flow
+(`popupBaseUrl`, `openLoginPopup`) reserved for third-party apps
+(hosted login on `app.pid.peridotvault.com`). CI enforces this split.
 
 Dev and prod run the identical auth code paths — only credentials differ:
 

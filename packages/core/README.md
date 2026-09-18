@@ -11,10 +11,8 @@ ceremonies, and client key custody. No redirects, no hosts, no app flow.
   (`src/evm.ts`: `DOMAIN_EVM_PERM`, `OP_PERM`, `PERM_KIND`, `MODULE_TYPE`,
   `DENIED_SELECTORS`, canonical transfer builders).
 - **`@peridotvault/pid-sdk-js`** — direct PeridotID API client (first-party and
-  third-party backends alike).
-- **`@peridotvault/pid-react`** — public "Sign in with PeridotID" login UX
-  (hosted redirects, prod defaults). Third-party apps only — the wallet never
-  imports it.
+  third-party apps alike; third parties delegate trust-critical actions to the
+  hosted popup).
 
 Only `pid-core` and `pid-solana` may import `@solana/web3.js` (web3.js layering rule);
 everything else goes through their surfaces.

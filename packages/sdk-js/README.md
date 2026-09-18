@@ -7,7 +7,8 @@ PeridotID API: **auth** (Google + passkey), **identity**, **profile**, and the
 Layering: primitives (hashes, WebAuthn ceremonies, key custody) live in
 `@peridotvault/pid-core`, the chain adapter in `@peridotvault/pid-solana` — this
 package only calls the API directly (no hosts, no prod defaults; `baseUrl` is
-caller-supplied). The hosted public login UX is `@peridotvault/pid-react`.
+caller-supplied). Third-party apps delegate trust-critical actions to the
+hosted popup on the PeridotID origin (see "Popup flow" below).
 
 ## Install
 
@@ -107,8 +108,9 @@ const res = await peridot.auth.loginWithPasskey({ clientId: 'pidapp_...', return
 const identity = await peridot.auth.exchange(code, 'pidapp_...');
 ```
 
-For React apps, use `@peridotvault/pid-react` (`PeridotProvider` + login modal) instead
-of wiring this manually.
+For React apps, wrap the popup flow in your own button + hook: `openLoginPopup()`
+for sign-in, `peridot.auth.exchange(code)` for the identity (see
+"Sign in with PeridotID" in the docs).
 
 ## Popup flow (third-party origins)
 

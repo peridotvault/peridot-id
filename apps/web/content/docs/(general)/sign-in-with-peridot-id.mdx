@@ -18,7 +18,7 @@ const peridot = Peridot({ baseUrl: 'https://api.pid.peridotvault.com' });
 // Register with just a name — allowed origins are managed after, in the dashboard
 // at pid.peridotvault.com/workspace (or PATCH /v1/apps).
 const res = await peridot.post('/v1/apps', { name: 'My Game' });
-// res.data.clientId → "pidapp_..." — put it in <PeridotProvider clientId="...">
+// res.data.clientId → "pidapp_..." — pass it as client_id in step 2
 ```
 
 Then add your websites under **Allowed origins** (bare `https://…` origins, no paths).
@@ -30,65 +30,60 @@ Your redirect URI origins are automatically allowed for browser API calls (withi
 always allowed — arbitrary production hosts are never accepted without registration
 (an open redirect would let anyone steal users' login codes).
 
-## 2. Add the provider + login modal
+## 2. Open the login popup
 
 ```bash
-npm install @peridotvault/pid-react
+npm install @peridotvault/pid-sdk-js
 ```
 
-```tsx
-import { PeridotProvider, usePeridot } from '@peridotvault/pid-react';
+```ts
+import { Peridot, openLoginPopup } from '@peridotvault/pid-sdk-js';
 
-export default function App() {
-  return (
-    <PeridotProvider clientId="pidapp_...">
-      <YourApp />
-    </PeridotProvider>
-  );
-}
+const peridot = Peridot({
+  baseUrl: 'https://api.pid.peridotvault.com',
+  solanaRpcUrl: 'https://api.devnet.solana.com',
+  popupBaseUrl: 'https://app.pid.peridotvault.com',
+});
 
-function SignInButton() {
-  const { user, openLogin, logout } = usePeridot();
-  if (user) return <button onClick={logout}>Sign out</button>;
-  return <button onClick={openLogin}>Sign in with PeridotID</button>;
+async function signIn() {
+  const { pidCode } = await openLoginPopup({
+    popupBaseUrl: 'https://app.pid.peridotvault.com',
+    params: {
+      redirect_uri: window.location.origin,
+      origin: window.location.origin,
+      popup: 'login',
+      client_id: 'pidapp_...',
+    },
+  });
+  if (pidCode) {
+    const identity = await peridot.auth.exchange(pidCode, 'pidapp_...');
+    // { pid, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }
+  }
 }
 ```
 
-`openLogin()` opens a small chooser modal (Google / Passkey) on a blurred backdrop at
-maximum z-index — always in front of your UI. Both buttons open a popup on the
-hosted PeridotID login, where every ceremony runs with the address bar visible
-(Google needs the redirect round-trip, WebAuthn legally requires a PeridotID
-origin). No `baseUrl` needed: it defaults to production. When popups are blocked
-it falls back to the full-page round-trip. No API calls happen before login, so
+Both Google and passkey ceremonies run inside the popup on the hosted PeridotID
+login with the address bar visible — Google needs the redirect round-trip,
+WebAuthn legally requires a PeridotID origin, so no ceremony can run inside your
+page. When popups are blocked, fall back to navigating to the hosted login
+directly (same params as the URL query). No API calls happen before login, so
 there is nothing CORS-related to configure.
+
+In React, wrap the same two calls in your own button + hook — there is no
+provider component to install.
 
 ## 3. Handle the login
 
-After login, the popup returns a one-time `pid_code` (full-page fallback: PeridotID
-redirects back to your `redirectUri` with it).
-The provider exchanges it automatically and sets `user`
-(`{ pid, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }`;
-`identityId` is also present as a deprecated one-release shim).
+After login the popup returns a one-time `pid_code` (full-page fallback:
+PeridotID redirects back to your `redirect_uri` with it). Exchange it as above
+— directly, or via your backend, which then mints your app's own session.
 
 Already logged in? The hosted page shows a one-tap consent screen asking to allow
 your website to sign in with the visitor's PeridotID — instead of another login.
 Denying returns to your `redirectUri` with `?error=access_denied`.
 
-Prefer to mint your own session? Exchange server-side instead:
-
-```tsx
-<PeridotProvider
-  clientId="pidapp_..."
-  onExchange={async (code) => {
-    const res = await fetch('/api/auth/peridot', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    });
-    if (!res.ok) throw new Error('exchange failed');
-  }}
->
-```
+Prefer to mint your own session? Exchange server-side instead of calling
+`peridot.auth.exchange` in the browser:
 
 ```ts
 // your backend: verify the code against PeridotID, then create your session
@@ -105,7 +100,6 @@ const identity = await r.json(); // single-use code, 5-minute expiry
 - Passkey login always runs on a PeridotID-hosted page (browsers bind WebAuthn to our
   domain) and returns with `pid_code` like Google does.
 - Codes are single-use, expire in ~5 minutes, and are bound to your `client_id`.
-- No framework? Use `@peridotvault/pid-sdk-js` directly with `popupBaseUrl`:
-  `login({ clientId, returnTo })` resolves the login URL (you navigate),
-  `loginWithPasskey({ clientId, returnTo })` and wallet methods delegate to the
-  popup automatically, `exchange(code, clientId)`.
+- No framework? The snippet in step 2 is already framework-free: `openLoginPopup`,
+  `loginWithPasskey({ clientId, returnTo })` (auto-delegates to the popup),
+  `exchange(code, clientId)`.

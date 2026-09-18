@@ -31,10 +31,11 @@ jobs:
 
       - name: Login split guard
         run: |
-          # First-party wallet must never use the public login flow (pid-react / hosted login).
-          # Docs (*.md) may name the package — only code is checked.
-          if rg -n 'pid-react|HOSTED_LOGIN_URL|PROD_BASE_URL' apps/wallet --glob '!*.md'; then
-            echo "::error::apps/wallet must not use the public login flow — see apps/wallet README"
+          # First-party wallet must never use the popup / hosted flow (third-party only).
+          # Docs (*.md) may name it — only code is checked. window.opener (answering
+          # a popup) is fine; window.open (opening one) is banned.
+          if rg -n 'popupBaseUrl|openLoginPopup|HOSTED_LOGIN_URL|PROD_BASE_URL|window\.open\b' apps/wallet --glob '!*.md'; then
+            echo "::error::apps/wallet must not use the popup/hosted flow — see apps/wallet README"
             exit 1
           fi
           # Canonical prod host is api.pid.peridotvault.com (Vercel peridot-id hosts retired).

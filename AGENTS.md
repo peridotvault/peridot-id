@@ -55,9 +55,10 @@ prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
 
 ## Login split (first-party wallet vs public flow)
 
-- Wallet (`apps/wallet`) uses `sdk-js` direct calls + `pid-core`/`pid-solana`
-  primitives only — never `pid-react` / hosted login (CI guard in `ci.yml` fails
-  the build otherwise).
+- Wallet (`apps/wallet`) uses `sdk-js` direct calls with an explicit inline
+  passkey signer + `pid-core`/`pid-solana` primitives only — never the popup /
+  hosted flow (`popupBaseUrl`, `openLoginPopup`, `HOSTED_LOGIN_URL`,
+  `PROD_BASE_URL`, `window.open`; CI guard in `ci.yml` fails the build otherwise).
 - Dev and prod run the identical OAuth code path with identical key names; only
   values differ per env.
   Never point local dev at the prod callback and never add localhost URIs to the

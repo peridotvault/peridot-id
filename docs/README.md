@@ -28,7 +28,6 @@ packages/openapi    OpenAPI 3.0 specification (source of truth)
 packages/solana     Solana chain adapter (@solana/web3.js lives here only)
 packages/evm        EVM adapter
 packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
-packages/pid-react  Hosted "Sign in with PeridotID" React flow
 ```
 
 ## Core docs

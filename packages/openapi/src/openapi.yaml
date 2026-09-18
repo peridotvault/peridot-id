@@ -2446,7 +2446,8 @@ components:
 
     SponsoredWithdrawResult:
       type: object
-      required: [signature, networkFeeLamports, protocolFeeLamports, status]properties:
+      required: [signature, networkFeeLamports, protocolFeeLamports, status]
+      properties:
         signature:
           type: string
         networkFeeLamports:

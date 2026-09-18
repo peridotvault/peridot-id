@@ -5,7 +5,8 @@
 //   - hosted side (wallet app on the PeridotID origin): readPopupParams,
 //     postPopupReady, awaitPopupRequest, postPopupResult
 // No prod hosts here — every function takes an explicit base URL / origin
-// (layering: prod defaults live in pid-react only). Import-safe on native:
+// (layering: no prod defaults in this package — caller-supplied; see the docs
+// for the production hosts). Import-safe on native:
 // window is only touched inside functions, which throw PopupUnavailableError
 // off-browser.
 
