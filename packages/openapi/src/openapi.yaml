@@ -1107,10 +1107,13 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
-  /fiat/topup:
+  /fiat/sub-accounts/accounts:
     post:
       tags: [fiat]
-      summary: Create an IDR top-up invoice (gateway hosted page)
+      summary: Register (or resume) the caller's DOKU Sub-Account (1 PID → 1 Sub-Account)
+      description: |
+        Peridot is identity/orchestration; DOKU Sub-Account V2 is the authoritative ledger.
+        Server-side register (no OTP) — returns profileId + IDR account + static BRI VA. Idempotent per pid.
       security:
         - cookieAuth: []
       requestBody:
@@ -1118,65 +1121,106 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/FiatTopupCreate"
+              $ref: "#/components/schemas/SubAccountCreate"
       responses:
         "200":
-          description: Invoice with the hosted payment page URL
+          description: Sub-account
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FiatTopup"
+                $ref: "#/components/schemas/SubAccount"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "429":
           $ref: "#/components/responses/RateLimited"
-    get:
-      tags: [fiat]
-      summary: Top-up history (newest first)
-      security:
-        - cookieAuth: []
-      responses:
-        "200":
-          description: Top-up list
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/FiatTopup"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
 
-  /fiat/topup/{id}:
+  /fiat/sub-accounts/accounts/me:
     get:
       tags: [fiat]
-      summary: Top-up status by id (poll while pending)
+      summary: Sub-account status (creating/active/suspended)
       security:
         - cookieAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
       responses:
         "200":
-          description: Top-up detail
+          description: Sub-account
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FiatTopup"
+                $ref: "#/components/schemas/SubAccount"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /fiat/withdraw:
+  /fiat/sub-accounts/deposit-va:
+    get:
+      tags: [fiat]
+      summary: Static BRI VA + IDR account for deposits
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Deposit info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vaNumber:
+                    type: string
+                    nullable: true
+                  accountNo:
+                    type: string
+                    nullable: true
+                  profileId:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/sub-accounts/deposit-channels:
+    get:
+      tags: [fiat]
+      summary: Bank-agnostic money-in channels (Checkout groups + static BRI VA)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Channel list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    label:
+                      type: string
+                    via:
+                      type: string
+                      enum: [checkout, bri_va]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/sub-accounts/deposits/checkout:
     post:
       tags: [fiat]
-      summary: Request an IDR withdraw (guarded by the available balance)
+      summary: Create a Checkout deposit intent (DOKU-hosted page, all channels)
+      description: |
+        netAmountIdr is the NET credited to the user (minimum Rp100.000,
+        API-enforced — no DOKU minimum). fee = flat 5% of net (no cap),
+        gross = net + fee, quoted upfront and snapshotted on the row.
+        The page is routed to the caller's sub-account. The customer is
+        charged gross; fiat settles 100% to the user IDR account as points
+        backing. On verified payment the backend issues NET points (user)
+        + FEE points (Treasury) on the Unified Ledger — the Saldo is usable
+        in seconds without waiting for fiat settlement. The API never debits
+        a fee after settlement.
       security:
         - cookieAuth: []
       requestBody:
@@ -1184,41 +1228,27 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/FiatWithdrawCreate"
+              type: object
+              required: [netAmountIdr]
+              properties:
+                netAmountIdr:
+                  type: string
       responses:
         "200":
-          description: Withdraw request
+          description: Checkout deposit intent
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FiatWithdraw"
+                $ref: "#/components/schemas/CheckoutDeposit"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "429":
-          $ref: "#/components/responses/RateLimited"
-    get:
-      tags: [fiat]
-      summary: Withdraw request history (newest first)
-      security:
-        - cookieAuth: []
-      responses:
-        "200":
-          description: Withdraw list
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/FiatWithdraw"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
 
-  /fiat/balance:
+  /fiat/sub-accounts/balance:
     get:
       tags: [fiat]
-      summary: Spendable IDR balance (paid top-ups minus pending + settled withdraws)
+      summary: Live Sub-Account balance from DOKU (authoritative)
       security:
         - cookieAuth: []
       responses:
@@ -1227,14 +1257,134 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FiatBalance"
+                $ref: "#/components/schemas/SubBalance"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
-  /fiat/withdraw/{id}/settle:
+  /fiat/sub-accounts/transactions:
+    get:
+      tags: [fiat]
+      summary: Authoritative transaction history from DOKU
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: accountNo
+          in: query
+          schema:
+            type: string
+        - name: fromDateTime
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: toDateTime
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: pageSize
+          in: query
+          schema:
+            type: string
+        - name: pageNumber
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: History items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/sub-accounts/ledger:
+    get:
+      tags: [fiat]
+      summary: Local transaction references (providerRef log, not a balance)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Ledger rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SubTx"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/sub-accounts/fee-policy:
+    get:
+      tags: [fiat]
+      summary: Active platform service-fee policy
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Fee policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeePolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/sub-accounts/transfers/inquiry:
     post:
       tags: [fiat]
-      summary: Settle a withdraw request (admin — manual payout tracking)
+      summary: Internal transfer step 1 — POINT P2P inquiry, moves no money
+      description: |
+        Recipient is addressed by PID and resolved server-side to their POINT
+        account. Creates the idempotent row first; the SAME partnerReferenceNo
+        is reused by the confirm step (DOKU requirement). Returns the verified
+        holder name plus the gross/fee/net quote. Bank/e-wallet payouts deferred.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, amountIdr, beneficiaryPid]
+              properties:
+                type:
+                  type: string
+                  enum: [DOKU_SUB_ACCOUNT]
+                amountIdr:
+                  type: string
+                  description: Gross requested in points (whole IDR units, 1:1 peg)
+                beneficiaryPid:
+                  type: string
+                  description: Recipient identity, e.g. rani@pid
+                remark:
+                  type: string
+      responses:
+        "200":
+          description: Verified holder name for user confirmation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubTransferInquiry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/sub-accounts/transfers/{id}/confirm:
+    post:
+      tags: [fiat]
+      summary: Internal transfer step 2 — NET points to recipient, FEE points to Treasury
       security:
         - cookieAuth: []
       parameters:
@@ -1249,43 +1399,233 @@ paths:
           application/json:
             schema:
               type: object
-              required: [decision]
+              required: [beneficiaryAccountName]
               properties:
-                decision:
+                beneficiaryAccountName:
                   type: string
-                  enum: [settled, rejected]
+                  description: Name from the inquiry step (required by DOKU)
+                expectedName:
+                  type: string
+                  description: Re-verify the holder name matches the inquiry
       responses:
         "200":
-          description: Withdraw request
+          description: Transfer transaction
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FiatWithdraw"
+                $ref: "#/components/schemas/SubTx"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
-        "429":
-          $ref: "#/components/responses/RateLimited"
 
-  /fiat/webhook/{provider}:
+  /fiat/sub-accounts/transfers/{id}/retry:
     post:
       tags: [fiat]
-      summary: Gateway webhook (gateway-signed, public)
-      description: |
-        Authenticity comes from the gateway signature header over the raw body,
-        not JWT. 200 = processed or idempotent replay; 400 = rejected (the gateway retries).
+      summary: Safe retry of a failed transfer (reuses providerRef)
+      security:
+        - cookieAuth: []
       parameters:
-        - name: provider
+        - name: id
           in: path
           required: true
           schema:
             type: string
-          description: Gateway id (e.g. doku)
+      responses:
+        "200":
+          description: Transfer transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubTx"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/sub-accounts/transactions/{id}/sync:
+    post:
+      tags: [fiat]
+      summary: Reconcile a created/processing row via DOKU transactions-status
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubTx"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/sub-accounts/transactions/{id}/cancel:
+    post:
+      tags: [fiat]
+      summary: Cancel a created (not yet executed) transaction
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubTx"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/sub-accounts/reconcile:
+    post:
+      tags: [fiat]
+      summary: Reconcile local rows against DOKU history over a window
+      description: |
+        Matches on partnerReferenceNo; backfills missed inbound CREDIT+SUCCESS
+        rows as deposits and completes their point issuance; marks fiat
+        settlement (backing only, never a credit); reports pending issuance,
+        PG-observed totals, replay-based backing (per-PID gap is info-only),
+        and drift.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fromDateTime, toDateTime]
+              properties:
+                fromDateTime:
+                  type: string
+                toDateTime:
+                  type: string
+      responses:
+        "200":
+          description: Reconciliation report
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/sub-accounts/drift:
+    get:
+      tags: [fiat]
+      summary: Live-vs-cached balance drift check (live wins, cache refreshes)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Drift report
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/sub-accounts/debits:
+    post:
+      tags: [fiat]
+      summary: Programmatic deduction from the sub-account (PURCHASE)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountIdr]
+              properties:
+                amountIdr:
+                  type: string
+                description:
+                  type: string
+      responses:
+        "200":
+          description: Debit transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubTx"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/sub-accounts/debits/{id}/cancel:
+    post:
+      tags: [fiat]
+      summary: Reverse a debit in full or part (REFUND_PURCHASE)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refundAmountIdr]
+              properties:
+                refundAmountIdr:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Debit-cancel transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubTx"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/sub-accounts/webhook:
+    post:
+      tags: [fiat]
+      summary: Sub-Account notification inbox (persist-first, corroborated before apply)
+      description: |
+        No published V2 webhook signing contract — events persist on X-EXTERNAL-ID
+        and apply only after DOKU transactions-status corroboration. Public; always 200 after persist.
+      parameters:
+        - name: X-EXTERNAL-ID
+          in: header
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: Acknowledged
@@ -1297,8 +1637,257 @@ paths:
                   ok:
                     type: boolean
                     example: true
+
+  /fiat/sub-accounts/admin/webhooks:
+    get:
+      tags: [fiat]
+      summary: Webhook inbox read-model (admin)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Inbox events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/sub-accounts/admin/split-rules:
+    post:
+      tags: [fiat]
+      summary: Create an automated split rule (admin, RESERVED — not wired to payments)
+      description: |
+        Passthrough for future fiat-side use only. Fees move as Treasury
+        POINTS at issuance; wiring a fiat split on top would double-charge.
+        No payment flow sends split_rule_id.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transactionType, rules]
+              properties:
+                transactionType:
+                  type: string
+                rules:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "200":
+          description: Split rule
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/sub-accounts/admin/sweep:
+    post:
+      tags: [fiat]
+      summary: Sweep outstanding point issuance + backing report (admin, cron-driven)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                take:
+                  type: integer
+                skip:
+                  type: integer
+      responses:
+        "200":
+          description: Sweep report
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/sub-accounts/admin/backfill:
+    post:
+      tags: [fiat]
+      summary: Backfill makeup points for settled deposits missing issuance (admin)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pid:
+                  type: string
+                take:
+                  type: integer
+      responses:
+        "200":
+          description: Backfill report
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/sub-accounts/admin/clawback:
+    post:
+      tags: [fiat]
+      summary: Claw back issued points after failed/charged-back payment (admin)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transactionId, amountIdr]
+              properties:
+                transactionId:
+                  type: string
+                amountIdr:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Clawback transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubTx"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/sub-accounts/admin/backfill-mirrors:
+    post:
+      tags: [fiat]
+      summary: Reconstruct historical recipient mirrors (admin, authoritative-or-review)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                take:
+                  type: integer
+      responses:
+        "200":
+          description: Mirrored refs plus manual-review queue
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/sub-accounts/admin/journal/{pid}:
+    get:
+      tags: [fiat]
+      summary: Immutable journal export + replay verdict for one PID (admin)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: pid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Journal rows plus replay projection
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/sub-accounts/admin/replay:
+    get:
+      tags: [fiat]
+      summary: Platform-wide replay projection (admin, bounded to recent rows)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Owner projection plus replay errors
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/sub-accounts/admin/fee-policy:
+    post:
+      tags: [fiat]
+      summary: Publish a new fee-policy version (admin, deactivates previous)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [percentBps, minIdr, maxIdr]
+              properties:
+                percentBps:
+                  type: integer
+                minIdr:
+                  type: string
+                maxIdr:
+                  type: string
+      responses:
+        "200":
+          description: Fee policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeePolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /permissions/grants/validate:
     post:
@@ -2357,92 +2946,209 @@ components:
         assertion:
           $ref: "#/components/schemas/PasskeyAssertion"
 
-    FiatTopupCreate:
+    SubAccountCreate:
       type: object
-      required: [amountIdr]
+      required: [name, email]
       properties:
-        amountIdr:
+        name:
           type: string
-          description: "Whole IDR (min 10000)"
-          example: "50000"
+          maxLength: 128
+        email:
+          type: string
+          maxLength: 25
 
-    FiatTopup:
+    SubAccount:
       type: object
-      required: [id, invoiceNumber, amountIdr, currency, provider, status, createdAt]
+      required: [status, currency]
       properties:
-        id:
+        status:
           type: string
-        invoiceNumber:
-          type: string
-        amountIdr:
-          type: string
+          enum: [creating, active, suspended]
         currency:
           type: string
           enum: [IDR]
-        provider:
+        profileId:
           type: string
-          example: doku
-        status:
+          nullable: true
+          description: V2 profileId (1 PID → 1 Sub-Account)
+        accountNo:
           type: string
-          enum: [pending, paid, expired, failed]
+          nullable: true
+          description: IDR cash account (fiat backing, admin/debug)
+        pointAccountNo:
+          type: string
+          nullable: true
+          description: POINT account (spendable Saldo ledger)
+        vaNumber:
+          type: string
+          nullable: true
+          description: Static BRI VA for deposits
+        phoneNo:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        lastBalanceIdr:
+          type: string
+          nullable: true
+          description: Timestamped read cache only — DOKU is the ledger
+        lastBalanceAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    SubBalance:
+      type: object
+      required: [pointsAvailableIdr, pointsReservedIdr, availableIdr, reservedIdr, pendingIdr, currency, cachedAt]
+      properties:
+        pointsAvailableIdr:
+          type: string
+          description: Spendable Saldo — live DOKU Unified Ledger POINT balance (1:1 IDR peg)
+        pointsReservedIdr:
+          type: string
+        availableIdr:
+          type: string
+          description: Fiat IDR backing, available (admin/debug — not spendable)
+        reservedIdr:
+          type: string
+        pendingIdr:
+          type: string
+          description: Fiat pending settlement (backing in transit)
+        currency:
+          type: string
+          enum: [IDR]
+        cachedAt:
+          type: string
+          format: date-time
+
+    SubTx:
+      type: object
+      required: [id, kind, providerRef, providerStatus, grossIdr, currency, createdAt]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: deposit | payout_bank | payout_wallet | transfer_internal | debit | debit_cancel | fee | points_issue | points_fee | points_clawback
+        providerRef:
+          type: string
+          description: Idempotency key (partnerReferenceNo at DOKU)
+        providerStatus:
+          type: string
+          enum: [created, processing, settled, failed, cancelled, refunded]
+        grossIdr:
+          type: string
+          description: Gross movement (Checkout deposit = customer-paid net + fee; transfer = requested gross, beneficiary gets gross minus fee)
+        feeIdr:
+          type: string
+          nullable: true
+          description: Platform service fee quote, snapshotted at intent time (legacy fee rows remain for history)
+        netIdr:
+          type: string
+          nullable: true
+          description: Net user effect (gross minus fee)
         paymentUrl:
           type: string
           nullable: true
-        expiresAt:
+          description: DOKU-hosted payment page for unpaid Checkout deposits
+        feeStatus:
           type: string
-          format: date-time
           nullable: true
-        paidAt:
+          description: Legacy fee-leg status ({ref}-FEE row), read-only
+        currency:
           type: string
-          format: date-time
-          nullable: true
+          enum: [IDR]
         createdAt:
           type: string
           format: date-time
 
-    FiatWithdrawCreate:
+    SubTransferInquiry:
       type: object
-      required: [amountIdr]
-      properties:
-        amountIdr:
-          type: string
-          description: "Whole IDR (min 10000)"
-          example: "50000"
-        bankCode:
-          type: string
-        accountNumber:
-          type: string
-        accountName:
-          type: string
-
-    FiatWithdraw:
-      type: object
-      required: [id, amountIdr, currency, status, createdAt]
+      required: [id, providerRef, transferType, accountNumber, inquiryReferenceNo, grossIdr, feeIdr, netIdr, feePolicyVersion]
       properties:
         id:
           type: string
-        amountIdr:
+        providerRef:
           type: string
-        currency:
+        transferType:
           type: string
-          enum: [IDR]
-        status:
+          enum: [DOKU_SUB_ACCOUNT]
+        accountNumber:
           type: string
-          enum: [pending, settled, rejected]
+          description: Resolved recipient POINT account (server-side, never user-supplied)
+        beneficiaryPid:
+          type: string
+          description: Recipient identity, e.g. rani@pid
+        accountName:
+          type: string
+          nullable: true
+        inquiryReferenceNo:
+          type: string
+          description: DOKU referenceNo — must be reused by the confirm step
+        grossIdr:
+          type: string
+          description: Requested amount (gross)
+        feeIdr:
+          type: string
+          description: Quoted platform fee under the snapshotted policy
+        netIdr:
+          type: string
+          description: Amount the beneficiary will receive
+        feePolicyVersion:
+          type: integer
+
+    CheckoutDeposit:
+      type: object
+      required: [id, providerRef, paymentUrl, tokenId, grossIdr, feeIdr, netIdr, feePolicyVersion, providerStatus, createdAt]
+      properties:
+        id:
+          type: string
+        providerRef:
+          type: string
+          description: Invoice number at DOKU (idempotency key)
+        paymentUrl:
+          type: string
+          description: DOKU-hosted payment page (all banks, QRIS, e-money, cards)
+        tokenId:
+          type: string
+        expiredDate:
+          type: string
+          nullable: true
+        grossIdr:
+          type: string
+          description: Gross charged at DOKU (net + fee)
+        feeIdr:
+          type: string
+          description: Fee quoted on the entered net (honored at settlement)
+        netIdr:
+          type: string
+          description: Net credited to the user (the entered amount)
+        feePolicyVersion:
+          type: integer
+        providerStatus:
+          type: string
         createdAt:
           type: string
           format: date-time
 
-    FiatBalance:
+    FeePolicy:
       type: object
-      required: [availableIdr, currency]
+      required: [version, percentBps, minIdr, maxIdr, active]
       properties:
-        availableIdr:
+        version:
+          type: integer
+        percentBps:
+          type: integer
+          description: Basis points, e.g. 500 = 5%
+        minIdr:
           type: string
-          example: "70000"
-        currency:
+          description: Unused, always 0 (flat percent — no floor)
+        maxIdr:
           type: string
-          enum: [IDR]
+          description: Unused, always 0 = uncapped (flat percent — no cap)
+        active:
+          type: boolean
 
     SponsoredWithdrawResult:
       type: object

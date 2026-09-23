@@ -53,6 +53,15 @@ prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
 `WEBAUTHN_ORIGINS` includes `http://localhost:8081`, `CLIENT_SUCCESS_URL=http://localhost:8081`,
 `CORS_ORIGINS=http://localhost:8081`. Restart the API after `.env` changes (`nest --watch` does not reload env).
 
+Fiat env (same key names every env): `DOKU_MODE/CLIENT_ID/SECRET_KEY/PRIVATE_KEY`,
+`DOKU_USERS_PARENT_PROFILE_ID`, `DOKU_TREASURY_PROFILE_ID`,
+`DOKU_TREASURY_POINT_ACCOUNT_NO`, `DOKU_SYSTEM_POINT_ACCOUNT_NO` (Unified Ledger
+activation + SYSTEM_POINT verified before issuance works), `DOKU_WEBHOOK_URL`.
+Users/Treasury are provisioned once via the DOKU dashboard. Spendable Saldo =
+DOKU POINT balance; points issue only inside the API after DOKU corroboration
+(CI-guarded — no route/SDK/wallet issuance). Sweep cadence: cron
+`POST /v1/fiat/sub-accounts/admin/sweep` (admin).
+
 ## Login split (first-party wallet vs public flow)
 
 - Wallet (`apps/wallet`) uses `sdk-js` direct calls with an explicit inline
@@ -68,7 +77,7 @@ prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
 
 ## Verification
 
-- API: `pnpm --filter @peridotvault/pid-api exec jest` (259 tests).
+- API: `pnpm --filter @peridotvault/pid-api exec jest` (309 tests).
 - EVM: `forge test --root contracts/evm` (65: 32 V3 + 33 V4 permission/adversarial);
   anvil loops `test/anvil-v3-e2e.mjs` + `test/anvil-v4-perm-e2e.mjs`.
 - Program: `cargo test` (27) + `tests/integration.mjs` (37 cases) +

@@ -44,6 +44,23 @@ jobs:
             exit 1
           fi
 
+      - name: Points issuance guard
+        run: |
+          # Spendable points must ONLY be issued inside FiatSubAccountService
+          # after server-side DOKU corroboration. No SDK method or wallet
+          # screen may issue/mint/credit points or touch the top-up/void
+          # primitives — user input creates invoices, never credits. The only
+          # sanctioned entry is the admin-guarded clawback route, which calls
+          # the service (never DOKU directly). Docs (*.md) may name them.
+          if rg -n 'issuePointsForDeposit|executePointTopup|clawbackPoints|topupVoid|DOKU_NON_FIAT' apps/wallet packages/sdk-js --glob '!*.md'; then
+            echo "::error::points issuance outside FiatSubAccountService corroborated paths — see docs/FIAT_SUBACCOUNT.md"
+            exit 1
+          fi
+          if rg -n 'issuePointsForDeposit|executePointTopup|topupVoid|DOKU_NON_FIAT' apps/api/src/fiat/fiat-subaccount.controller.ts; then
+            echo "::error::controller must never issue points directly — see docs/FIAT_SUBACCOUNT.md"
+            exit 1
+          fi
+
       - name: Import boundaries guard
         run: |
           # ADR 007 §8: only pid-core (primitives) and pid-solana (chain adapter) may

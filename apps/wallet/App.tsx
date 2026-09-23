@@ -9,6 +9,7 @@ import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
 import { readPopupParams } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
 import { AppContext } from "./src/AppContext";
+import { needsProvisioning } from "./src/fiat-ensure";
 import { theme } from "./src/theme";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { LoadingScreen } from "./src/components/LoadingScreen";
@@ -19,7 +20,7 @@ import { SendScreen } from "./src/screens/SendScreen";
 import { ReceiveScreen } from "./src/screens/ReceiveScreen";
 import { SwapScreen } from "./src/screens/SwapScreen";
 import { TopupScreen } from "./src/screens/TopupScreen";
-import { FiatHistoryScreen } from "./src/screens/FiatHistoryScreen";
+import { ProvisioningScreen } from "./src/screens/ProvisioningScreen";
 import { PasskeyScreen } from "./src/screens/PasskeyScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { ProfileScreen } from "./src/screens/ProfileScreen";
@@ -29,9 +30,11 @@ import { ConnectedAccountsScreen } from "./src/screens/ConnectedAccountsScreen";
 import { AppConnectionsScreen } from "./src/screens/AppConnectionsScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { ActivityDetailScreen } from "./src/screens/ActivityDetailScreen";
+import { FiatDetailScreen } from "./src/screens/FiatDetailScreen";
 import { TabBar } from "./src/components/TabBar";
 import { ActivationScreen } from "./src/screens/ActivationScreen";
 import type { WalletTransaction } from "@peridotvault/pid-types";
+import type { FiatItem } from "./src/screens/ActivityScreen";
 
 type Screen =
   | "login"
@@ -40,7 +43,7 @@ type Screen =
   | "receive"
   | "swap"
   | "topup"
-  | "fiat-history"
+  | "provisioning"
   | "passkey"
   | "settings"
   | "profile"
@@ -50,6 +53,7 @@ type Screen =
   | "app-connections"
   | "activity"
   | "activity-detail"
+  | "fiat-detail"
   | "activation";
 
 export default function App() {
@@ -114,10 +118,29 @@ export default function App() {
     return p && p.action !== "login" ? p : null;
   });
   const [activityTx, setActivityTx] = useState<WalletTransaction | null>(null);
+  const [fiatItem, setFiatItem] = useState<FiatItem | null>(null);
   const [passkeyReturn, setPasskeyReturn] = useState<Screen>("settings");
 
   const goHome = useCallback(() => setScreen("home"), []);
   const go = useCallback((s: Screen) => setScreen(s), []);
+
+  // Post-auth landing: show the stepper only when something actually needs
+  // provisioning (fresh account, failed/skipped setup); returning users go
+  // straight home. The check is read-only — never traps at login.
+  const routeAfterAuth = useCallback(async () => {
+    let need = false;
+    try {
+      need = await needsProvisioning(peridot);
+    } catch {
+      need = false;
+    }
+    setScreen(need ? "provisioning" : "home");
+  }, [peridot]);
+
+  const handleLoggedIn = useCallback(() => {
+    setStepUp(false);
+    void routeAfterAuth();
+  }, [routeAfterAuth]);
 
   const openPasskey = useCallback((from: Screen) => {
     setPasskeyReturn(from);
@@ -127,6 +150,11 @@ export default function App() {
   const openActivityDetail = useCallback((tx: WalletTransaction) => {
     setActivityTx(tx);
     setScreen("activity-detail");
+  }, []);
+
+  const openFiatDetail = useCallback((item: FiatItem) => {
+    setFiatItem(item);
+    setScreen("fiat-detail");
   }, []);
 
   // After a Google OAuth redirect returns, detect the existing session and go straight home.
@@ -152,7 +180,13 @@ export default function App() {
           me = await peridot.identity.me();
         }
       }
-      if (alive && me && !("statusCode" in me)) setScreen("home");
+      if (alive && me && !("statusCode" in me)) {
+        try {
+          setScreen((await needsProvisioning(peridot)) ? "provisioning" : "home");
+        } catch {
+          setScreen("home");
+        }
+      }
     } catch {
       // not logged in — stay on login
     } finally {
@@ -171,7 +205,7 @@ export default function App() {
       clearTimeout(timer);
       if (alive) setBootstrapping(false);
     }
-  }, []);
+  }, [peridot]);
 
   useEffect(() => {
     bootstrap();
@@ -208,10 +242,7 @@ export default function App() {
           <>
             {(screen === "login" || ssoRequest) && (
           <LoginScreen
-            onLoggedIn={() => {
-              setStepUp(false);
-              goHome();
-            }}
+            onLoggedIn={handleLoggedIn}
             stepUp={stepUp}
           />
         )}
@@ -220,8 +251,7 @@ export default function App() {
             goSend={() => go("send")}
             goReceive={() => go("receive")}
             goSwap={() => go("swap")}
-            goTopup={() => go("topup")}
-            goFiatHistory={() => go("fiat-history")}
+            goBuy={() => go("topup")}
             goActivation={() => go("activation")}
             goPasskeys={() => openPasskey("settings")}
             goAppConnections={() => go("app-connections")}
@@ -230,8 +260,8 @@ export default function App() {
         {screen === "send" && <SendScreen onDone={goHome} />}
         {screen === "receive" && <ReceiveScreen onDone={goHome} />}
         {screen === "swap" && <SwapScreen onDone={goHome} />}
-        {screen === "topup" && <TopupScreen onDone={goHome} goHistory={() => go("fiat-history")} />}
-        {screen === "fiat-history" && <FiatHistoryScreen onDone={goHome} />}
+        {screen === "topup" && <TopupScreen onDone={goHome} />}
+        {screen === "provisioning" && <ProvisioningScreen onContinue={goHome} />}
         {screen === "passkey" && <PasskeyScreen onDone={() => setScreen(passkeyReturn)} />}
         {screen === "activation" && <ActivationScreen onDone={goHome} goPasskey={() => openPasskey("activation")} />}
         {screen === "settings" && (
@@ -253,8 +283,9 @@ export default function App() {
         {screen === "sessions" && <SessionsScreen onDone={() => go("settings")} />}
         {screen === "connected" && <ConnectedAccountsScreen onDone={() => go("settings")} />}
         {screen === "app-connections" && <AppConnectionsScreen onDone={goHome} />}
-        {screen === "activity" && <ActivityScreen onSelect={openActivityDetail} />}
+        {screen === "activity" && <ActivityScreen onSelect={openActivityDetail} onSelectFiat={openFiatDetail} />}
         {screen === "activity-detail" && activityTx && <ActivityDetailScreen tx={activityTx} onDone={() => go("activity")} />}
+        {screen === "fiat-detail" && fiatItem && <FiatDetailScreen item={fiatItem} onDone={() => go("activity")} />}
         {(screen === "home" || screen === "activity" || screen === "profile") && (
           <TabBar current={screen} go={go} />
         )}

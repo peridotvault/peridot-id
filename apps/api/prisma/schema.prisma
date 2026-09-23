@@ -49,19 +49,6 @@ enum ChainAccountStatus {
   insufficient
 }
 
-enum FiatTopupStatus {
-  pending
-  paid
-  expired
-  failed
-}
-
-enum FiatWithdrawStatus {
-  pending
-  settled
-  rejected
-}
-
 model Identity {
   // Permanent ecosystem PID: `<handle>@pid` (e.g. `ifal@pid`). App-supplied,
   // user-chosen once at onboarding. Immutable (PK), never reused or reassigned
@@ -85,8 +72,8 @@ model Identity {
   challenges    CredentialChallenge[]
   securityEvents  SecurityEvent[]
   pidApps PidApp[]
-  fiatTopups FiatTopup[]
-  fiatWithdraws FiatWithdraw[]
+  fiatProviderAccounts FiatProviderAccount[]
+  fiatProviderTransactions FiatProviderTransaction[]
 
   @@map("identities")
 }
@@ -388,42 +375,136 @@ model ChainContract {
   @@map("chain_contracts")
 }
 
-// Fiat-only IDR ledger (DOKU Checkout). No on-chain conversion yet — top-ups
-// record an off-chain IDR balance per pid; withdraws are manual-settlement
-// requests until the DOKU Payouts product is wired.
-model FiatTopup {
-  id            String         @id @default(uuid())
-  pid           String
-  identity      Identity       @relation(fields: [pid], references: [pid], onDelete: Cascade)
-  invoiceNumber String         @unique
-  amountIdr     BigInt
-  currency      String         @default("IDR")
-  provider      String         @default("doku")
-  status        FiatTopupStatus @default(pending)
-  paymentUrl    String?
-  providerResponse Json?
-  paidAt        DateTime?
-  expiresAt     DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+// DOKU Sub-Account V2 mapping (1 PID → 1 Sub-Account). DOKU is the
+// authoritative ledger — these rows store identity mapping, provider status,
+// cached reads, transaction references and fee snapshots only.
+// Local `lastBalance` is a read cache, never a ledger.
+model FiatProviderAccount {
+  id                String   @id @default(uuid())
+  pid               String
+  identity          Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  provider          String   @default("doku-sub-account")
+  /** V2 profileId (1 PID → 1 Sub-Account). */
+  profileId         String?  @unique
+  /** IDR cash account number (DOKU_MERCHANT_IDR, withdrawable). */
+  providerAccountId String?
+  /** All V2 accounts [{type, currency, accountNo}] incl. pending/points. */
+  accounts          Json?
+  /** Static BRI VA for deposits (when DOKU returns it). */
+  vaNumber          String?
+  /** POINT account number (DOKU_MERCHANT_POINT, spendable ledger). */
+  pointAccountId    String?
+  /** Contact snapshot from registration (no OTP lifecycle in V2). */
+  phoneNo           String?
+  email             String?
+  accountStatus     String   @default("creating")
+  currency          String   @default("IDR")
+  lastBalance       String?
+  lastBalanceAt     DateTime?
+  /** Cached POINT spendable balance (read projection only — DOKU is truth). */
+  lastPointBalance  String?
+  lastPointBalanceAt DateTime?
+  registerRef       String?  @unique
+  providerResponse  Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  @@index([pid])
-  @@map("fiat_topups")
+  @@unique([pid, provider])
+  @@index([providerAccountId])
+  @@map("fiat_provider_accounts")
 }
 
-model FiatWithdraw {
-  id          String             @id @default(uuid())
-  pid         String
-  identity    Identity           @relation(fields: [pid], references: [pid], onDelete: Cascade)
-  amountIdr   BigInt
-  currency    String             @default("IDR")
-  destination Json?
-  status      FiatWithdrawStatus @default(pending)
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+model FiatProviderTransaction {
+  id               String   @id @default(uuid())
+  pid              String
+  identity         Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  accountId        String?
+  kind             String
+  providerRef      String   @unique
+  providerStatus   String   @default("created")
+  /** Gross movement amount, whole IDR. Checkout deposits: what the customer
+   *  paid (net + fee). Internal transfers: the requested amount, GROSS-in
+   *  (beneficiary receives gross − fee). */
+  amountIdr        BigInt
+  currency         String   @default("IDR")
+  /** Platform service fee quote, snapshotted at intent time. DOKU settles
+   *  fees natively (NET → user + FEE → Treasury) — the API never moves them.
+   *  Legacy `kind = fee` rows remain for history only. */
+  feeIdr           BigInt?
+  /** Net effect on the user, whole IDR (gross − fee once known). */
+  netIdr           BigInt?
+  feePolicyVersion Int?
+  counterparty     Json?
+  providerResponse Json?
+  /** DOKU ledger operation for this movement, if any (Unified Ledger).
+   *  partnerReferenceNo of the DOKU_NON_FIAT top-up / POINT P2P / POINT
+   *  debit — the idempotency key at DOKU. Null when no ledger movement
+   *  was (or will be) issued for this row. */
+  ledgerRef        String?
+  /** Ledger credit status, tracked SEPARATELY from payment status:
+   *  pending | issued | failed | blocked | clawed_back. */
+  ledgerStatus     String?
+  /** Fiat settlement status, tracked SEPARATELY from payment/ledger:
+   *  pending | settled. Settlement is a backing event, never a balance. */
+  settlementStatus String?
+  /** Double-entry direction of this row relative to `pid` (immutable
+   *  journal): in = credit to pid, out = debit from pid. Fiat-intent rows
+   *  (deposit parents) carry null — they move no PTS. */
+  direction        String?
+  /** DOKU account number debited by this movement (audit/source leg). */
+  sourceAccount    String?
+  /** DOKU account number credited by this movement (audit/dest leg). */
+  destAccount      String?
+  /** Groups the legs of one logical movement (e.g. a P2P transfer's
+   *  sender-out + recipient-in + treasury-fee legs). */
+  entryGroup       String?
+  /** Deterministic replay order (autoincrement — never reuse createdAt).
+   *  Replay folds rows in replaySeq order. */
+  replaySeq        BigInt?  @default(autoincrement())
+  /** True once PTS units are permanently extinguished (redemption burn).
+   *  Extinguished rows never count toward outstanding, forever. */
+  extinguished     Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@index([pid])
-  @@map("fiat_withdraws")
+  @@index([accountId])
+  @@index([pid, kind, providerStatus])
+  @@map("fiat_provider_transactions")
+}
+
+// Webhook inbox: every DOKU push is persisted BEFORE processing.
+// `externalId` (DOKU X-EXTERNAL-ID, unique per notification) is the replay key.
+model FiatWebhookEvent {
+  id         String   @id @default(uuid())
+  provider   String   @default("doku-sub-account")
+  externalId String   @unique
+  eventType  String
+  payload    Json
+  status     String   @default("received")
+  createdAt  DateTime @default(now())
+
+  @@map("fiat_webhook_events")
+}
+
+// Versioned platform service-fee policy. Exactly one row is active; every
+// money movement snapshots {feeIdr, netIdr, feePolicyVersion} at intent time
+// so policy changes never rewrite history.
+// fee = round-half-up(amount * percentBps / 10_000) — flat 5%, no floor,
+// no cap. minIdr/maxIdr are retained for schema compat only (0/0 = uncapped)
+// and are NOT applied by the formula.
+// Checkout top-ups additionally enforce a Rp100.000 NET minimum in API code
+// (no DOKU-side minimum). Internal transfers stay GROSS-in.
+// Settlement is DOKU-native per payment (static PERCENTAGE split rule).
+model FiatFeePolicy {
+  version       Int      @id
+  percentBps    Int      @default(500)
+  minIdr        BigInt   @default(0)
+  maxIdr        BigInt   @default(25000)
+  active        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@map("fiat_fee_policies")
 }
 
 // Registered third-party apps ("Sign in with PeridotID"). Any developer registers an

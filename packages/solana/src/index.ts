@@ -99,7 +99,8 @@ export {
   smartAccountAta,
 } from "./instructions";
 export { SolanaRpc } from "./rpc";
-export type { ChainRpc, ParsedTx, TokenBalance } from "./rpc";
+export type { ChainRpc, NftItem, ParsedTx, TokenBalance } from "./rpc";
+export { getNftsOf, parseMetadataString, parseMetadataUri } from "./rpc";
 export { SolanaAdapter } from "./adapter";
 export type { TransactionStatus } from "./adapter";
 export type { PasskeyAssertion, PasskeySigner } from "@peridotvault/pid-core";

@@ -1,29 +1,45 @@
 import { Module } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { DokuProvider } from "@peridotvault/pid-payments";
-import { FiatController } from "./fiat.controller";
-import { FiatService } from "./fiat.service";
-import { PAYMENT_PROVIDER } from "./payment-provider.token";
+import { DokuCheckoutClient, DokuSubAccountProvider } from "@peridotvault/pid-payments";
+import { SecurityModule } from "../security/security-event.module";
+import { CHECKOUT_CLIENT } from "./checkout-client.token";
+import { FiatSubAccountController } from "./fiat-subaccount.controller";
+import { FiatSubAccountService } from "./fiat-subaccount.service";
+import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
 
 @Module({
-  controllers: [FiatController],
+  imports: [SecurityModule],
+  controllers: [FiatSubAccountController],
   providers: [
-    // Single switch point for the fiat gateway: set PAYMENTS_PROVIDER and add
-    // the provider class here. Everything downstream speaks PaymentProvider.
+    // DOKU Sub-Account V2 provider. Reuses the DOKU merchant credentials;
+    // the RSA key signs B2B token requests. Missing keys fail at call time
+    // with a clear error so non-fiat setups still boot.
     {
-      provide: PAYMENT_PROVIDER,
+      provide: SUBACCOUNT_PROVIDER,
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const name = config.get<string>("PAYMENTS_PROVIDER", "doku");
-        if (name !== "doku") throw new Error(`Unknown PAYMENTS_PROVIDER=${name}`);
-        return new DokuProvider({
+        return new DokuSubAccountProvider({
+          mode: config.get<string>("DOKU_MODE", "sandbox") === "production" ? "production" : "sandbox",
+          clientId: config.get<string>("DOKU_CLIENT_ID", ""),
+          secretKey: config.get<string>("DOKU_SECRET_KEY", ""),
+          privateKey: config.get<string>("DOKU_PRIVATE_KEY", ""),
+        });
+      },
+    },
+    // DOKU Checkout (money-in) client. Same merchant credentials, non-SNAP
+    // HMAC-SHA256 request signing. Missing keys fail at call time.
+    {
+      provide: CHECKOUT_CLIENT,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        return new DokuCheckoutClient({
           mode: config.get<string>("DOKU_MODE", "sandbox") === "production" ? "production" : "sandbox",
           clientId: config.get<string>("DOKU_CLIENT_ID", ""),
           secretKey: config.get<string>("DOKU_SECRET_KEY", ""),
         });
       },
     },
-    FiatService,
+    FiatSubAccountService,
   ],
 })
 export class FiatModule {}

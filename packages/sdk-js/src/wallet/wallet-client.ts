@@ -2,7 +2,7 @@
 
 import { PublicKey } from "@peridotvault/pid-core";
 import { b64url, b64urlToBytes, buildActivatePayload, buildActivatePayloadV2, buildActivatePayloadV3, buildExecutePayloadV3, buildUpdateAuthorityPayloadV2, buildUpdateAuthorityPayloadV3, buildWithdrawPayload, buildWithdrawPayloadV2, buildWithdrawPayloadV3, buildWithdrawTokenPayload, buildWithdrawTokenPayloadV2, buildWithdrawTokenPayloadV3, executeCallHash, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
-import type { ParsedTx, PasskeySigner, TokenBalance, TransactionStatus } from "@peridotvault/pid-solana";
+import type { NftItem, ParsedTx, PasskeySigner, TokenBalance, TransactionStatus } from "@peridotvault/pid-solana";
 import type { ApiError, Authority, ChainAccount, WalletTransaction } from "@peridotvault/pid-types";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
@@ -377,6 +377,11 @@ export class PeridotWallet {
   /** SPL token balances held by the smart account (with their account/ATA addresses). */
   async tokens(): Promise<TokenBalance[]> {
     return this.adapter.getTokenBalancesOf(await this.smartAccountAddress());
+  }
+
+  /** Heuristic NFT inventory (SPL 0-decimal ×1; misses Token-2022/cNFTs — no DAS). */
+  async nfts(): Promise<NftItem[]> {
+    return this.adapter.getNftsOf(await this.smartAccountAddress());
   }
 
   /**

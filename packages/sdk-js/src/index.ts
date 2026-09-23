@@ -28,7 +28,7 @@ import { openLoginPopup, openPeridotPopup } from "./popup.js";
 import { PopupClosedError, PopupUnavailableError } from "./popup.js";
 
 export { PeridotWallet, type PeridotWalletOptions };
-export { PeridotFiat, type FiatBalance, type TopupView, type WithdrawView } from "./fiat/fiat-client.js";
+export { PeridotFiat, type CheckoutDepositView, type DepositChannelView, type FeePolicyView, type SacTransferType, type SubAccountView, type SubBalanceView, type SubHistoryItem, type SubTransferInquiryView, type SubTxView } from "./fiat/fiat-client.js";
 export type { ActivationView, ActivationStatus } from "./wallet/wallet-client.js";
 export { authenticatePasskey, BrowserPasskeySigner, PasskeyHostedRequiredError, registerPasskey } from "@peridotvault/pid-core";
 export type { PasskeySigner } from "@peridotvault/pid-core";

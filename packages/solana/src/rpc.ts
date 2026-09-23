@@ -61,6 +61,97 @@ export interface TokenBalance {
   account: string;
 }
 
+export interface NftItem {
+  mint: string;
+  name?: string;
+  image?: string;
+  uri?: string;
+}
+
+// Canonical id from mpl-token-metadata programs/token-metadata/program/src/lib.rs.
+const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+const NFT_SCAN_LIMIT = 20;
+const METADATA_URI_MAX = 200;
+const OFFCHAIN_JSON_MAX = 256_000;
+const OFFCHAIN_TIMEOUT_MS = 8000;
+
+/** Read a Metaplex Borsh string (u32 LE len + utf8, null-padded) with bounds checks. */
+export function parseMetadataString(buf: Buffer, offset: number, max: number): { value: string; next: number } | null {
+  if (offset + 4 > buf.length) return null;
+  const len = buf.readUInt32LE(offset);
+  if (len > max) return null;
+  const start = offset + 4;
+  if (start + max > buf.length) return null;
+  const value = buf.subarray(start, start + Math.min(len, max)).toString("utf8").replace(/\0+$/g, "").trim();
+  return { value, next: start + max };
+}
+
+/**
+ * Extract the offchain JSON uri from a Metaplex Token Metadata account.
+ * Layout: key(1) + updateAuthority(32) + mint(32) + name(4+32) + symbol(4+10) + uri(4+200).
+ */
+export function parseMetadataUri(data: Buffer): string | undefined {
+  const name = parseMetadataString(data, 1 + 32 + 32, 32);
+  if (!name) return undefined;
+  const symbol = parseMetadataString(data, name.next, 10);
+  if (!symbol) return undefined;
+  const uri = parseMetadataString(data, symbol.next, METADATA_URI_MAX);
+  const value = uri?.value;
+  if (!value || !/^https?:\/\//i.test(value)) return undefined;
+  return value;
+}
+
+async function fetchOffchainMeta(uri: string): Promise<{ name?: string; image?: string } | undefined> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), OFFCHAIN_TIMEOUT_MS);
+  try {
+    const res = await fetch(uri, { signal: ctrl.signal, headers: { accept: "application/json" } });
+    if (!res.ok) return undefined;
+    const bytes = await res.arrayBuffer();
+    if (bytes.byteLength > OFFCHAIN_JSON_MAX) return undefined;
+    const j = JSON.parse(Buffer.from(bytes).toString("utf8")) as Record<string, unknown>;
+    const name = typeof j.name === "string" ? j.name.slice(0, 128) : undefined;
+    const image = typeof j.image === "string" && /^https?:\/\//i.test(j.image) ? j.image.slice(0, 512) : undefined;
+    return { name, image };
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * Heuristic NFT discovery (classic SPL only — misses Token-2022 and cNFTs,
+ * which need DAS). Candidates: decimals 0 + balance 1. Offchain JSON is
+ * untrusted: timeouts, size caps, mint fallback on any failure.
+ */
+export async function getNftsOf(rpc: ChainRpc, owner: PublicKey, limit = NFT_SCAN_LIMIT): Promise<NftItem[]> {
+  const balances = await rpc.getTokenAccountsByOwner(owner);
+  const candidates = balances.filter((b) => b.decimals === 0 && b.amount === "1").slice(0, limit);
+  const out: NftItem[] = [];
+  for (const c of candidates) {
+    let mint: PublicKey;
+    try {
+      mint = new PublicKey(c.mint);
+    } catch {
+      continue;
+    }
+    const [pda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("metadata"), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+      METADATA_PROGRAM_ID,
+    );
+    const info = await rpc.getAccountInfo(pda).catch(() => null);
+    const uri = info?.data ? parseMetadataUri(info.data) : undefined;
+    if (!uri) {
+      out.push({ mint: c.mint });
+      continue;
+    }
+    const meta = await fetchOffchainMeta(uri);
+    out.push({ mint: c.mint, uri, name: meta?.name, image: meta?.image });
+  }
+  return out;
+}
+
 const DEFAULT_COMMITMENT: Finality = "confirmed";
 
 export class SolanaRpc implements ChainRpc {

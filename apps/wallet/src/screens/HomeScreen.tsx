@@ -7,13 +7,14 @@ import {
   Coins,
   ChevronRight,
   Link2,
-  ReceiptText,
 } from "../icons";
-import type { Authority, ChainAccount, Identity, Profile } from "@peridotvault/pid-types";
-import type { TokenBalance } from "@peridotvault/pid-solana";
+import type { Authority, Identity, Profile } from "@peridotvault/pid-types";
+import type { TokenBalance, NftItem } from "@peridotvault/pid-solana";
 import type { ActivationView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
+import { UIButton } from "../components/UIButton";
+import { ensureSubAccount } from "../fiat-ensure";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -35,8 +36,7 @@ interface HomeScreenProps {
   goSend: () => void;
   goReceive: () => void;
   goSwap: () => void;
-  goTopup: () => void;
-  goFiatHistory: () => void;
+  goBuy: () => void;
   goActivation: () => void;
   goPasskeys: () => void;
   goAppConnections: () => void;
@@ -46,19 +46,22 @@ export function HomeScreen({
   goSend,
   goReceive,
   goSwap,
-  goTopup,
-  goFiatHistory,
+  goBuy,
   goActivation,
   goPasskeys,
   goAppConnections,
 }: HomeScreenProps) {
   const { peridot } = usePeridot();
-  const [chains, setChains] = useState<ChainAccount[] | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [pid, setPid] = useState<string | null>(null);
   const [solLamports, setSolLamports] = useState<number>(0);
-  const [idrBalance, setIdrBalance] = useState("0");
+  // null = failed load (error shown separately). "0" means no wallet yet
+  // (web3-only user) or a real zero from the API.
+  const [idrBalance, setIdrBalance] = useState<string | null>(null);
+  const [idrError, setIdrError] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
+  const [nfts, setNfts] = useState<NftItem[]>([]);
+  const [assetTab, setAssetTab] = useState<"tokens" | "items">("tokens");
   const [passkeys, setPasskeys] = useState<Authority[]>([]);
   const [activation, setActivation] = useState<ActivationView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -74,8 +77,6 @@ export function HomeScreen({
         const detail = Array.isArray(acc.message) ? acc.message.join(" ") : acc.message;
         throw new Error(`Failed to create account (${acc.statusCode}${detail ? `: ${detail}` : ""})`);
       }
-      const rows = acc as ChainAccount[];
-      setChains(rows);
 
       try {
         const p = await peridot.profile.me();
@@ -100,9 +101,43 @@ export function HomeScreen({
         setTokens([]);
       }
       try {
-        setIdrBalance((await peridot.fiat.balance()).availableIdr);
+        setNfts(await peridot.wallet.nfts());
       } catch {
-        setIdrBalance("0");
+        setNfts([]);
+      }
+      try {
+        // Saldo = live DOKU Unified Ledger (POINT) balance. Fiat/pending
+        // details stay backend-only; this screen never shows them.
+        setIdrBalance((await peridot.fiat.balance()).pointsAvailableIdr);
+        setIdrError(null);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/not registered/i.test(msg)) {
+          // No sub-account yet (web3-only user) — IDR is simply 0, not an error.
+          setIdrBalance("0");
+          setIdrError(null);
+        } else if (/is creating|is failed/i.test(msg)) {
+          // Dead creating/failed row (missed provisioning) — heal once, then read.
+          try {
+            await ensureSubAccount(peridot);
+            setIdrBalance((await peridot.fiat.balance()).pointsAvailableIdr);
+            setIdrError(null);
+          } catch (e2) {
+            setIdrBalance(null);
+            setIdrError(e2 instanceof Error ? e2.message : String(e2));
+          }
+        } else {
+          setIdrBalance(null);
+          // Distinct causes, distinct guidance: 401 = session gone, 404 = stale
+          // API without sub-account routes, anything else = DOKU/gateway verbatim.
+          setIdrError(
+            /401|Unauthorized/i.test(msg)
+              ? "Session expired — log in again."
+              : /404|Not Found|Cannot GET|Cannot POST/i.test(msg)
+                ? "API server is outdated — restart it."
+                : msg,
+          );
+        }
       }
       try {
         const creds = await peridot.passkey.list();
@@ -127,12 +162,10 @@ export function HomeScreen({
     load();
   }, [load]);
 
-  const smart = chains?.find((c) => c.accountType === "smart_account");
   const solBalance = solLamports / LAMPORTS_PER_SOL;
 
   const coins: Coin[] = [
     { key: "sol", symbol: "SOL", amount: fmtBalance(String(solLamports), 9), raw: String(solLamports), decimals: 9 },
-    { key: "idr", symbol: "IDR", amount: Number(idrBalance).toLocaleString("id-ID"), raw: idrBalance, decimals: 0 },
     ...tokens.map((t) => ({
       key: t.mint,
       symbol: KNOWN_MINTS[t.mint] ?? shortMint(t.mint),
@@ -142,6 +175,8 @@ export function HomeScreen({
     })),
   ];
 
+  const fiatAmount = idrBalance === null ? null : `Rp${Number(idrBalance).toLocaleString("id-ID")}`;
+
   const st = activation?.status;
   const activated = st === "active";
   const balanceColor = activated ? theme.colors.foreground : theme.colors.danger;
@@ -150,13 +185,8 @@ export function HomeScreen({
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <View style={styles.topRow}>
         <View style={styles.identity}>
-          <Text style={styles.pid}>@{pid ?? "…"}</Text>
+          <Text style={styles.pid}>{pid ?? "…"}</Text>
           {profile?.displayName ? <Text style={styles.displayName}>{profile.displayName}</Text> : null}
-          {smart && (
-            <Text selectable style={styles.address}>
-              {smart.address.slice(0, 6)}…{smart.address.slice(-6)}
-            </Text>
-          )}
         </View>
         <TouchableOpacity style={styles.connBtn} onPress={goAppConnections} accessibilityLabel="App connections">
           <Link2 size={18} color={theme.colors.foreground} />
@@ -164,8 +194,7 @@ export function HomeScreen({
       </View>
 
       <View style={styles.balanceBlock}>
-        <Text style={[styles.balance, { color: balanceColor }]}>◎ {solBalance.toLocaleString("en-US", { maximumFractionDigits: 4 })}</Text>
-        <Text style={styles.balanceLabel}>Wallet balance</Text>
+        <Text style={[styles.balance, { color: balanceColor }]}>$ {solBalance.toLocaleString("en-US", { maximumFractionDigits: 4 })}</Text>
       </View>
 
       {!activated && !busy && (
@@ -188,16 +217,10 @@ export function HomeScreen({
         <ActionButton icon={ArrowUpRight} label="Send" onPress={goSend} disabled={!activated} />
         <ActionButton icon={ArrowDownLeft} label="Receive" onPress={goReceive} />
         <ActionButton icon={Coins} label="Swap" onPress={goSwap} />
-        <ActionButton icon={Banknote} label="Buy" onPress={goTopup} />
-      </View>
-
-      <View style={styles.actions}>
-        <ActionButton icon={ReceiptText} label="IDR History" onPress={goFiatHistory} />
+        <ActionButton icon={Banknote} label="Buy" onPress={goBuy} />
       </View>
 
       {error && <Text style={s.error}>{error}</Text>}
-
-      {!activated && !busy && <Text style={s.hint}>Send is available after your account is activated on-chain.</Text>}
 
       {activated && passkeys.length === 0 && !busy && (
         <TouchableOpacity style={styles.passkeyWarn} onPress={goPasskeys}>
@@ -205,26 +228,55 @@ export function HomeScreen({
         </TouchableOpacity>
       )}
 
-      <Text style={styles.sectionLabel}>Assets</Text>
-      {coins.length === 0 && !busy && (
-        <Text style={s.hint}>No assets yet — receive SOL to your address to get started.</Text>
+      <View style={s.card}>
+        <Text style={styles.fiatLabel}>Saldo</Text>
+        {idrError ? (
+          <>
+            <Text style={s.error}>{idrError}</Text>
+            <UIButton title="Retry" onPress={load} />
+          </>
+        ) : (
+          <Text style={styles.fiatAmount}>{busy && fiatAmount === null ? "…" : (fiatAmount ?? "—")}</Text>
+        )}
+      </View>
+
+      <View style={styles.plainTabs}>
+        <TabButton label="Tokens" active={assetTab === "tokens"} onPress={() => setAssetTab("tokens")} />
+        <TabButton label="Items" active={assetTab === "items"} onPress={() => setAssetTab("items")} />
+      </View>
+      {assetTab === "tokens" ? (
+        <>
+          {coins.length === 0 && !busy && (
+            <Text style={s.hint}>No assets yet — receive SOL to your address to get started.</Text>
+          )}
+          {coins.map((coin) => (
+            <View key={coin.key} style={styles.coinRow}>
+              <View style={styles.coinMeta}>
+                <Text style={styles.coinSymbol}>{coin.symbol}</Text>
+                {coin.symbol !== "SOL" && <Text style={styles.coinMint}>{coin.key.slice(0, 4)}…{coin.key.slice(-4)}</Text>}
+              </View>
+              <Text style={styles.coinAmount}>{coin.amount}</Text>
+            </View>
+          ))}
+        </>
+      ) : (
+        <>
+          {nfts.length === 0 && !busy && (
+            <Text style={s.hint}>No items yet — SPL collectibles in this wallet appear here.</Text>
+          )}
+          {nfts.map((nft) => (
+            <View key={nft.mint} style={styles.coinRow}>
+              <View style={styles.coinMeta}>
+                <Text style={styles.coinSymbol}>{nft.name ?? "Unnamed item"}</Text>
+                <Text style={styles.coinMint}>{nft.mint.slice(0, 4)}…{nft.mint.slice(-4)}</Text>
+              </View>
+            </View>
+          ))}
+          {nfts.length > 0 && (
+            <Text style={s.hint}>SPL collectibles only — Token-2022 and compressed NFTs need a DAS RPC.</Text>
+          )}
+        </>
       )}
-      {coins.map((coin) => (
-        <View key={coin.key} style={styles.coinRow}>
-          <View style={styles.coinIcon}>
-            {coin.key === "idr"
-              ? <Banknote size={18} color={theme.colors.foreground} />
-              : <Coins size={18} color={theme.colors.foreground} />}
-          </View>
-          <View style={styles.coinMeta}>
-            <Text style={styles.coinSymbol}>{coin.symbol}</Text>
-            {coin.key === "idr"
-              ? <Text style={styles.coinMint}>Indonesian Rupiah</Text>
-              : coin.symbol !== "SOL" && <Text style={styles.coinMint}>{coin.key.slice(0, 4)}…{coin.key.slice(-4)}</Text>}
-          </View>
-          <Text style={styles.coinAmount}>{coin.amount}</Text>
-        </View>
-      ))}
     </ScrollView>
   );
 }
@@ -245,6 +297,14 @@ function ActionButton({ icon: Icon, label, onPress, disabled }: { icon: typeof A
   );
 }
 
+function TabButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <TouchableOpacity onPress={onPress} accessibilityState={{ selected: active }}>
+      <Text style={[styles.plainTabLabel, active && styles.plainTabLabelActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 interface Coin {
   key: string;
   symbol: string;
@@ -260,7 +320,6 @@ const styles = StyleSheet.create({
   identity: { flex: 1, gap: 4 },
   pid: { fontSize: 20, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
   displayName: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  address: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.mono },
   connBtn: {
     width: 40,
     height: 40,
@@ -273,7 +332,6 @@ const styles = StyleSheet.create({
   },
   balanceBlock: { gap: 4 },
   balance: { fontSize: 40, fontWeight: "400", fontFamily: theme.fonts.serif },
-  balanceLabel: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   actions: { flexDirection: "row", gap: 12 },
   actionBtn: {
     flex: 1,
@@ -323,14 +381,6 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   passkeyWarnText: { color: theme.colors.mutedForeground, fontSize: 13, textAlign: "center", fontFamily: theme.fonts.sans },
-  sectionLabel: {
-    fontSize: 12,
-    color: theme.colors.mutedForeground,
-    fontWeight: "600",
-    fontFamily: theme.fonts.sansSemiBold,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
   coinRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -339,18 +389,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
   },
-  coinIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   coinMeta: { flex: 1 },
   coinSymbol: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
   coinMint: { fontSize: 11, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
+  fiatLabel: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
+  fiatAmount: { fontSize: 24, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
   coinAmount: { fontSize: 15, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
+  plainTabs: { flexDirection: "row", gap: 20, paddingVertical: 6 },
+  plainTabLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.mutedForeground, fontFamily: theme.fonts.sansMedium, paddingBottom: 4 },
+  plainTabLabelActive: { color: theme.colors.foreground, borderBottomWidth: 1, borderBottomColor: theme.colors.foreground },
 });

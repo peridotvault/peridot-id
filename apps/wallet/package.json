@@ -22,10 +22,12 @@
     "expo": "~57.0.18",
     "expo-font": "^57.0.3",
     "expo-status-bar": "~3.0.0",
+    "libphonenumber-js": "^1.13.13",
     "lucide-react-native": "^1.39.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-native": "0.81.0",
+    "react-native-country-picker-modal": "^3.0.0",
     "react-native-qrcode-svg": "^6.3.21",
     "react-native-web": "^0.21.0"
   },

@@ -32,7 +32,8 @@ import {
   buildWithdrawSolInstructionV3,
   buildWithdrawTokenInstructionV3,
 } from "./instructions";
-import type { ParsedTx, SolanaRpc, TokenBalance } from "./rpc";
+import type { NftItem, ParsedTx, SolanaRpc, TokenBalance } from "./rpc";
+import { getNftsOf } from "./rpc";
 import type { PasskeyAssertion, PasskeySigner } from "@peridotvault/pid-core";
 
 export interface TransactionStatus {
@@ -700,6 +701,12 @@ export class SolanaAdapter {
   /** SPL token balances held by the smart account (raw units + decimals per mint). */
   async getTokenBalances(pid: string): Promise<TokenBalance[]> {
     return this.rpc.getTokenAccountsByOwner(this.getAddress(pid));
+  }
+
+  /** Heuristic NFT inventory (SPL 0-decimal ×1; misses Token-2022/cNFTs — no DAS). */
+  async getNftsOf(address: string | PublicKey): Promise<NftItem[]> {
+    const pub = typeof address === "string" ? new PublicKey(address) : address;
+    return getNftsOf(this.rpc, pub);
   }
 }
 
