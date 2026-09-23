@@ -3,7 +3,7 @@
 // (+ integration-guide for per-endpoint OpenAPI).
 //
 // Only endpoints + fields documented there are implemented. Deliberately NOT
-// implemented (no V2 contract — see docs/FIAT_SUBACCOUNT.md blockers):
+// implemented (no V2 contract — see docs/prds/PRD_v6.md §9):
 // per-channel Direct API schemas, split-rule list/get/update/delete,
 // KYC/tiers, limits/fees numbers, webhook signing, DOKU_WALLET specifics.
 // Bank-agnostic money-in runs through DOKU Checkout (see ./checkout.ts).
@@ -177,10 +177,9 @@ export function mapSacStatus(code: string | undefined | null): "settled" | "proc
  *  amount: fee = round-half-up(amount * percentBps / 10_000). No floor, no
  *  cap. minIdr/maxIdr are retained as schema/policy fields but are NOT
  *  applied (both must be 0).
- *  Peridot computes the QUOTE only. Settlement of the fee itself happens
- *  natively at DOKU via a static PERCENTAGE split rule (NET remainder → user
- *  sub-account, percent → Treasury); the API never debits a fee after
- *  settlement. See docs/FIAT_SUBACCOUNT.md. */
+ *  Peridot computes the QUOTE only. The fee moves as Treasury POINTS at
+ *  issuance, never as a post-settlement fiat debit. See docs/prds/PRD_v6.md
+ *  §3. */
 export interface FeePolicy {
   version: number;
   percentBps: number;

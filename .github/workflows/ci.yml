@@ -53,11 +53,11 @@ jobs:
           # sanctioned entry is the admin-guarded clawback route, which calls
           # the service (never DOKU directly). Docs (*.md) may name them.
           if rg -n 'issuePointsForDeposit|executePointTopup|clawbackPoints|topupVoid|DOKU_NON_FIAT' apps/wallet packages/sdk-js --glob '!*.md'; then
-            echo "::error::points issuance outside FiatSubAccountService corroborated paths — see docs/FIAT_SUBACCOUNT.md"
+            echo "::error::points issuance outside FiatSubAccountService corroborated paths — see docs/prds/PRD_v6.md §3"
             exit 1
           fi
           if rg -n 'issuePointsForDeposit|executePointTopup|topupVoid|DOKU_NON_FIAT' apps/api/src/fiat/fiat-subaccount.controller.ts; then
-            echo "::error::controller must never issue points directly — see docs/FIAT_SUBACCOUNT.md"
+            echo "::error::controller must never issue points directly — see docs/prds/PRD_v6.md §3"
             exit 1
           fi
 
