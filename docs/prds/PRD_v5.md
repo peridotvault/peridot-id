@@ -445,5 +445,6 @@ accounts; passkeys authorize; the fee payer pays; the blockchain owns the final 
 ## References
 
 - PRD_v4 (base architecture, security model, threat model)
+- PRD_v6 (fiat money layer — deposits, Saldo, transfers, withdrawals; on-chain balances stay here in v5)
 - WHITEPAPER.md (canonical contracts spec)
 - WHITEPAPER.md §§10–11 (permission/session layers)

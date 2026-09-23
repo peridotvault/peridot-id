@@ -33,6 +33,7 @@ packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
 ## Core docs
 
 - [prds/PRD_v5.md](prds/PRD_v5.md) — current product spec (smart wallet)
+- [prds/PRD_v6.md](prds/PRD_v6.md) — fiat money layer (on-chain balances live in v5; fiat lives here)
 - [prds/PRD_v4.md](prds/PRD_v4.md) — architecture base (note: its `PidAccount` model is
   superseded (1 identity = 1 personal wallet; see [WHITEPAPER.md §1](../contracts/WHITEPAPER.md)))
 - [ARCHITECTURE.md](ARCHITECTURE.md) — modules and repo layout
@@ -40,10 +41,7 @@ packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
 - [DATABASE.md](DATABASE.md) — tables, ERD, invariants
 - [API_SPEC.md](API_SPEC.md) — endpoint list
 - [SECURITY.md](SECURITY.md) — auth, sessions, wallet threat model
-- [FIAT_SUBACCOUNT.md](FIAT_SUBACCOUNT.md) — DOKU ledger-first fiat/PTS architecture
-- [DOKU_ACTIVATION_DOSSIER.md](DOKU_ACTIVATION_DOSSIER.md) — forwardable Unified Ledger activation request (gating withdrawals)
-- [SANDBOX_VERIFICATION_MATRIX.md](SANDBOX_VERIFICATION_MATRIX.md) — real-DOKU verification steps + evidence checklist
-- [REDEMPTION_ACCEPTANCE_MATRIX.md](REDEMPTION_ACCEPTANCE_MATRIX.md) — withdrawal enablement criteria + reconciliation policy
+- [prds/PRD_v6.md](prds/PRD_v6.md) — fiat money layer: DOKU ledger-first PTS architecture, activation dossier, verification matrix, acceptance rows
 - [ROADMAP.md](ROADMAP.md) — Foundation → Social → Gaming → Ecosystem
 - [WHITEPAPER.md](../contracts/WHITEPAPER.md) — canonical contracts spec (§12 gates mainnet)
 
