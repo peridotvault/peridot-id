@@ -84,9 +84,9 @@ login (Google/passkey, existing) → POST /v1/fiat/sub-accounts/accounts {name,e
   `ledgerStatus` (pending/issued/partial/failed/blocked/clawed_back),
   `settlementStatus` (pending/settled).
 - **Backing invariant:** redeemable outstanding points (user + Treasury) vs
-  fiat (IDR + pending). The gap ≈ cumulative DOKU PG channel fees (taken
-  pre-settlement); recon reports `gap`, `pgObserved`, and alerts on drift
-  beyond tolerance. Treasury points are first-class redeemable balances.
+  fiat (IDR + pending), reconciled per `REDEMPTION_ACCEPTANCE_MATRIX.md`:
+  every nonzero gap must map to an explicit adjustment row; unexplained gaps
+  stop redemption. Treasury points are first-class redeemable balances.
 - **Transfers are POINT P2P**, addressed by recipient PID (resolved
   server-side). GROSS-in points; NET to recipient, FEE to Treasury
   (`{ref}-PTFEE`, sweep-retryable).
@@ -188,11 +188,15 @@ use):
 Two invariants, checked separately:
 1. **Ledger integrity (EXACT):** `replay(journal) == live DOKU POINT
    balances`, per PID and platform-wide. Any mismatch is a P0 alert.
-2. **Aggregate backing (tolerance-banded):** total outstanding redeemable
-   PTS vs total fiat (`available + pending`, all user + Treasury accounts)
-   plus explicit adjustments (observed SETTLEMENT_FEE PG rows, reserves).
-   Tolerance = 1% of outstanding (min Rp10.000): bounds leg-settlement /
-   history-visibility skew, calibrated from sandbox PG observations.
+2. **Aggregate backing (explained-difference only — see
+   `REDEMPTION_ACCEPTANCE_MATRIX.md`):** total outstanding redeemable PTS
+   vs total fiat (`available + pending`, all user + Treasury accounts) plus
+   an explicit adjustment ledger (documented PG fees, reserves, refunds,
+   chargebacks). Every nonzero gap must map to an adjustment row; the only
+   allowance is documented per-leg rounding (`|gap| ≤ Rp1 × legs since last
+   clean close`, each use citing the DOKU behavior). Unexplained difference
+   → alert and stop redemption. No percentage tolerance — it would scale
+   permitted error with volume and mask real breaks.
    Per-PID fiat gaps are info-only — P2P makes per-user PTS↔fiat equality
    invalid by construction.
 - Settlement (`pending → available`) flips `settlementStatus` only. Tests
@@ -200,52 +204,92 @@ Two invariants, checked separately:
 - Same-PID movements serialize via in-process pid locks (sender+recipient
   sorted for P2P); DOKU remains the final arbiter; every retry reuses refs.
 
-## Redemption design (resolved — implementation behind verification flag)
+## Redemption design (implemented — disabled by flag until verified)
 
 Resolutions to the Phase-3 design questions:
-1. **Phases 1–3 (journal/replay/locking/recon) land now; redemption stays
-   behind a feature flag** until DOKU `BANK_ACCOUNT` payout + liquidity
-   consolidation are sandbox-verified. No payout code ships before that.
-2. **No claimant-local fiat, ever.** Payout source is a Treasury/operating
-   liquidity pool (to be verified) or DOKU-supported just-in-time
-   consolidation transfers (each journaled/reconciled as real DOKU
-   movements). Bob redeems from pool liquidity because the replay says he
-   owns the claim — never because fiat sits in Bob's sub-account.
-3. **Tolerance is scaled, adjustments explicit** (see above) — no arbitrary
-   fixed number; every adjustment row is reported, never netted silently.
+1. **Journal/replay/locking/recon landed; redemption saga implemented but
+   unreachable** unless `PID_REDEMPTION_ENABLED=true` (`POST
+   /v1/fiat/redemptions` → 403 otherwise). Enable only after `BANK_ACCOUNT`
+   payout + consolidation pass in sandbox plus a zero-discrepancy recon.
+2. **No claimant-local fiat, ever.** Payout source is the Treasury/operating
+   IDR pool (`DOKU_TREASURY_ACCOUNT_NO`, else resolved from the Treasury
+   profile). `ensurePoolLiquidity` prefers claimant-local fiat only as the
+   cheapest first candidate, then journaled `fiat_consolidation`
+   (`DOKU_SUB_ACCOUNT` IDR transfers) from backing-rich accounts — real
+   DOKU movements, never simulated. David redeems while his fiat sits in
+   Alice's account because the replay says he owns the claim.
+3. **No percentage tolerance, adjustments explicit** — see
+   `REDEMPTION_ACCEPTANCE_MATRIX.md` for the binding formula; nothing netted
+   silently, unexplained gaps stop redemption.
 4. **Historical mirrors: authoritative-first.** `POST admin/backfill-mirrors`
    reconstructs from `transactions-status` (settled ⇒ mirror, flagged
    `source: mirror-backfill`); anything else joins the auditable
    `manualReview` queue — never invented.
 
-DOKU capability finding (docs, not yet sandbox-proven): an IDR debit
-credits the Level-1 merchant profile's `DOKU_MERCHANT_IDR`, which suggests
-a merchant-level operating balance exists — but **no documented endpoint
-sweeps user-sub-account IDR into it**, so a dedicated Treasury/operating
-pool or consolidation flow is UNCONFIRMED and stays a sandbox blocker.
-Target redemption saga (to build after verification):
-`deposit → PTS liability → arbitrary P2P → claimant from replay →
-PTS reserved/extinguished (POINT debit) → DOKU payout from pool liquidity
-→ redemption completed`, with crash-between-burn-and-payout auto-flagged
-critical by the sweep. UI stays simple throughout: Saldo, transfer and
-withdrawal statuses only.
+Implemented saga (`requestRedemption`, all journaled with deterministic
+refs): `redemption` parent (`requested`) → `points_redeem` burn leg
+(`{RD}-BURN`, POINT debit → SYSTEM_POINT, `extinguished=true` only when
+settled) → `fiat_payout` leg (`{RD}-PAY`, `BANK_ACCOUNT` from the pool) →
+`completed`. Crash between burn and payout resumes under the same payout
+ref via sweep (`recoverRedemptions`); requested-without-burn older than 15
+minutes expires and releases (nothing moved). Settlement never touches
+redemption rows (tested). Treasury points are first-class redeemable
+balances; Treasury fiat pool funds payouts.
+
+DOKU capability finding: an IDR debit credits the Level-1 merchant
+profile's `DOKU_MERCHANT_IDR`, which suggests a merchant-level operating
+balance exists — but **no documented endpoint sweeps user-sub-account IDR
+into it**, so pool funding runs through ordinary sub-account transfers
+(consolidation). Whether DOKU accepts this pattern at volume, plus the
+bank-code list, limits, and fees, is UNCONFIRMED — sandbox blocker 0b.
+UI stays simple throughout: Saldo, Deposit, Transfer, Withdraw statuses
+only (no Withdraw surface while the flag is off).
+
+## DOKU sandbox verification report (live, Sep 2026)
+
+Verified against `api-sandbox.doku.com` with the merchant credentials in
+`apps/api/.env` (sandbox). Scripts used are NOT committed (one-off probes).
+
+- Connectivity + B2B auth: OK (RSA key parses; token issued; API reachable).
+- Register: OK — `SAC-2637-1790154532137` created; response carries all
+  three accounts (`DOKU_MERCHANT_POINT`/`DOKU_MERCHANT_IDR`/
+  `DOKU_MERCHANT_PENDING_IDR`) each with `accountNo`. Every sub-account
+  provably owns a POINT account — the replay's per-PID live check is sound.
+- Balance inquiry: OK — returns available+reserved for all three accounts.
+- `vaNumber` absent from sandbox register responses: defensive
+  `vaNumber`/`virtualAccountNo` read confirmed correct (blocker #5 stands).
+- **`DOKU_NON_FIAT` top-up: BLOCKED — `4004203 Source account not
+  configured for TOPUP`.** The merchant has no Unified Ledger funding
+  source. Issuance cannot work until DOKU activates it. This is a VERIFIED
+  production blocker, not a docs inference. Code fails safe (deferred,
+  retryable, `DOKU_SYSTEM_POINT_ACCOUNT_NO` unset → clear 503).
+- NOT yet verifiable live (need funded test accounts + SYSTEM_POINT):
+  top-up payment end-to-end, POINT P2P/debit/void, Checkout split behavior,
+  BANK_ACCOUNT payout from a sub-account, bank-code list, limits, per-channel
+  PG schedule. No live write calls beyond register/inquiry were made.
 
 ## Exact blockers (stopped here, not guessed)
 
-0. **Unified Ledger activation + POINT sandbox verification.** The ledger
-    model needs the Unified Ledger service activated on the merchant account
-    and a `DOKU_SYSTEM_POINT` account (verify via merchant-profile
-    `balance-inquiries` before first issuance). Still to verify in sandbox:
-    (a) `DOKU_NON_FIAT` top-up `amount: {value, POINT}` acceptance +
-    `fromAccount` override behavior;
-    (b) `DOKU_SUB_ACCOUNT` + `POINT` P2P (incl. `beneficiaryBankCode`
-    omission) and POINT `PURCHASE` debit/retire;
-    (c) TOPUP/transfer/debit notification payload shapes for webhook
-    branching;
-    (d) the per-channel PG-fee schedule (explains the backing gap);
-    (e) `additional_info` casing for Checkout (camelCase in SAC guide vs
-    snake_case in Checkout schema — a test payment decides).
-    Until verified: sweep `pendingIssuance` is the safety net.
+0. **Unified Ledger activation (VERIFIED live blocker).** Sandbox
+    `DOKU_NON_FIAT` inquiry returns `4004203 Source account not configured
+    for TOPUP` — issuance is impossible until DOKU activates the funding
+    source (see verification report above). Forwardable request:
+    `DOKU_ACTIVATION_DOSSIER.md`. Verification order + evidence:
+    `SANDBOX_VERIFICATION_MATRIX.md`. Enablement criteria + reconciliation
+    policy: `REDEMPTION_ACCEPTANCE_MATRIX.md`. Still to verify live after
+    activation: top-up payment end-to-end, P2P without `beneficiaryBankCode`,
+    POINT debit retire, void semantics, TOPUP/transfer/debit notification
+    shapes, `additional_info` casing, per-channel PG schedule.
+0b. **Payout liquidity path (unverified — redemption stays flagged).**
+    `BANK_ACCOUNT` transfer-payment is documented for sub-account payouts,
+    but unverified live: bank-code list (behind Kirim docs), min/max, fees,
+    callbacks, and whether a Treasury/operating IDR pool (or JIT
+    consolidation via `DOKU_SUB_ACCOUNT` IDR transfers) is accepted practice.
+    No L1-sweep endpoint is documented — consolidation, if needed, is
+    ordinary sub-account-to-sub-account transfers (journaled). Redemption
+    (`POST /v1/fiat/redemptions`, `PID_REDEMPTION_ENABLED`) must stay
+    disabled until these pass in sandbox plus a full recon with zero
+    unexplained discrepancies.
 1. **Fiat split rule retired** — fees move as Treasury POINTS at issuance,
     so `DOKU_SPLIT_RULE_ID` is NOT passed on payments (it would double
     charge). The `admin/split-rules` passthrough remains for future

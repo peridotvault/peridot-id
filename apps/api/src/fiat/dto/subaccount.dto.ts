@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min } from "class-validator";
+import { IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min } from "class-validator";
 import { PID_REGEX } from "../../common/pid";
 
 export class CreateSubAccountDto {
@@ -176,4 +176,36 @@ export class AdminClawbackDto {
   @IsString()
   @MaxLength(128)
   reason?: string;
+}
+
+export class AdminHaltDto {
+  @IsBoolean()
+  halt!: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  reason?: string;
+}
+
+export class RedemptionRequestDto {
+  @Matches(/^\d+$/, { message: "Amount must be whole IDR (positive integer)" })
+  amountIdr!: string;
+
+  /** Destination bank code (DOKU-validated; unknown codes fail as failed payout). */
+  @IsString()
+  @MaxLength(16)
+  bankCode!: string;
+
+  @IsString()
+  @MaxLength(32)
+  bankAccountNumber!: string;
+
+  @IsString()
+  @MaxLength(256)
+  bankAccountName!: string;
+
+  @IsOptional()
+  @IsIn(["BI_FAST", "ONLINE"])
+  channel?: "BI_FAST" | "ONLINE";
 }

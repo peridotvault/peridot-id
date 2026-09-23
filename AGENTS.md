@@ -77,7 +77,7 @@ DOKU POINT balance; points issue only inside the API after DOKU corroboration
 
 ## Verification
 
-- API: `pnpm --filter @peridotvault/pid-api exec jest` (309 tests).
+- API: `pnpm --filter @peridotvault/pid-api exec jest` (318 tests).
 - EVM: `forge test --root contracts/evm` (65: 32 V3 + 33 V4 permission/adversarial);
   anvil loops `test/anvil-v3-e2e.mjs` + `test/anvil-v4-perm-e2e.mjs`.
 - Program: `cargo test` (27) + `tests/integration.mjs` (37 cases) +

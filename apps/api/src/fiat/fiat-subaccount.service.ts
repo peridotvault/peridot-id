@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import {
@@ -588,6 +588,14 @@ export class FiatSubAccountService {
         },
       }).catch(() => undefined);
       await this.security.log(pid, "fiat.subaccount.transfer", { providerRef: row.providerRef, gross: gross.toString(), fee: fee.toString() }).catch(() => undefined);
+      // Corroborate the P2P itself: parent AND mirror settle together, so
+      // replay sees the recipient credit exactly when DOKU confirms value.
+      // Processing legs stay open for the sweep to corroborate.
+      const corroborated = await this.withRetry(() => this.sac.txStatus(row.providerRef), "transfer status").catch(() => null);
+      const p2pStatus = corroborated ? mapSacStatus(corroborated.latestTransactionStatus) : "processing";
+      if (p2pStatus !== "processing") {
+        await this.markTx(row.id, p2pStatus, corroborated?.rawResponse ?? res.rawResponse);
+      }
       // Recipient mirror (points_credit, keyed by DOKU's referenceNo): without
       // this row the journal cannot reconstruct who owns the transferred PTS.
       // Written best-effort — the sweep backfills it from corroborated DOKU
@@ -600,14 +608,16 @@ export class FiatSubAccountService {
           create: {
             pid: recipientPid, accountId: String(cp.beneficiaryAccountNumber),
             kind: "points_credit", providerRef: mirrorRef, amountIdr: net,
-            feeIdr: null, netIdr: net, providerStatus: "processing",
+            feeIdr: null, netIdr: net, providerStatus: p2pStatus,
             direction: "in", sourceAccount: fromAccount,
             destAccount: String(cp.beneficiaryAccountNumber), entryGroup: row.providerRef,
-            ledgerRef: mirrorRef, ledgerStatus: "issued",
+            ledgerRef: mirrorRef, ledgerStatus: p2pStatus === "settled" ? "issued" : "pending",
             counterparty: { parentRef: row.providerRef, linkedRef: row.providerRef, currency: "POINT", source: "transfer" },
             providerResponse: json(res.rawResponse),
           },
-          update: {},
+          update: p2pStatus === "settled"
+            ? { providerStatus: "settled", ledgerStatus: "issued" }
+            : {},
         }).catch((err) => {
           this.logger.error(`mirror write failed for ${row.providerRef} — sweep must backfill: ${String(err)?.slice(0, 200)}`);
         });
@@ -617,6 +627,10 @@ export class FiatSubAccountService {
         await this.executePointFeeLeg(pid, fromAccount, `${row.providerRef}-PTFEE`, fee, row.providerRef).catch((err) => {
           this.logger.warn(`transfer treasury leg failed for ${row.providerRef}: ${String(err)?.slice(0, 200)}`);
         });
+      }
+      if (p2pStatus === "settled") {
+        const settled = await this.prisma.fiatProviderTransaction.findFirst({ where: { id, pid } });
+        if (settled) return (await this.attachFeeStatus([this.toTxView(settled)]))[0];
       }
       return this.toTxView(await this.markTx(row.id, "processing", res.rawResponse));
     } catch (err) {
@@ -959,6 +973,17 @@ export class FiatSubAccountService {
    * sweep to complete; the user leg is what unlocks the Saldo.
    */
   private async issuePointsForDeposit(rowId: string, source: string): Promise<void> {
+    const pre = await this.prisma.fiatProviderTransaction.findUnique({ where: { id: rowId } }).catch(() => null);
+    if (!pre || pre.kind !== "deposit") return;
+    // Serialize per depositor: concurrent webhooks/syncs for the same deposit
+    // must not interleave check-then-issue sequences (DOKU 409 would save us,
+    // but one top-up call is strictly better than two).
+    await this.withPidLocks([pre.pid], () => this.issuePointsForDepositInner(rowId, source)).catch((err) => {
+      this.logger.warn(`issuePointsForDeposit failed: ${String(err)?.slice(0, 200)}`);
+    });
+  }
+
+  private async issuePointsForDepositInner(rowId: string, source: string): Promise<void> {
     try {
       const row = await this.prisma.fiatProviderTransaction.findUnique({ where: { id: rowId } });
       if (!row || row.kind !== "deposit" || row.providerStatus !== "settled") return;
@@ -1108,6 +1133,344 @@ export class FiatSubAccountService {
       await this.markTx(clawRow.id, "failed", err);
       throw this.mapError(err, "clawback");
     }
+  }
+
+  // --- redemption saga (PTS→fiat, feature-flagged) ---
+  //
+  // Claimant = current PTS owner per journal replay. NEVER the original
+  // depositor, NEVER the holder of the original fiat. Flow:
+  //   request → burn PTS (POINT debit → SYSTEM_POINT, extinguished) →
+  //   ensure pool liquidity (consolidate if needed, all journaled) →
+  //   BANK_ACCOUNT payout from the Treasury/operating pool → completed.
+  // Crash safety: burn-without-payout is completed by the sweep (same payout
+  // ref); requested-without-burn expires and releases. Settlement never
+  // touches redemption rows. Disabled unless PID_REDEMPTION_ENABLED=true
+  // AND the BANK_ACCOUNT + consolidation path is sandbox-verified.
+
+  private redemptionEnabled(): boolean {
+    return this.config.get<string>("PID_REDEMPTION_ENABLED", "false") === "true";
+  }
+
+  /**
+   * Kill-switch for unexplained backing discrepancies. In-memory by design:
+   * restarts clear it, but every sweep re-evaluates the aggregate and
+   * re-halts on a persistent discrepancy — a restart can never silently
+   * bless a broken ledger. All transitions are security-logged.
+   */
+  private redemptionHalted = false;
+
+  setRedemptionHalt(halt: boolean, reason: string): { halted: boolean } {
+    this.redemptionHalted = halt;
+    this.logger[halt ? "error" : "warn"](`redemption halt ${halt ? "ENGAGED" : "cleared"}: ${reason.slice(0, 200)}`);
+    return { halted: this.redemptionHalted };
+  }
+
+  /** Treasury/operating IDR pool (payout liquidity). Env preferred, else
+   *  resolved from the Treasury profile (cached 5 min). */
+  private treasuryIdrCache: { value: string; exp: number } | null = null;
+  private async treasuryIdrAccount(): Promise<string> {
+    const env = this.config.get<string>("DOKU_TREASURY_ACCOUNT_NO", "");
+    if (env) return env;
+    if (this.treasuryIdrCache && Date.now() < this.treasuryIdrCache.exp) return this.treasuryIdrCache.value;
+    const profileId = this.config.get<string>("DOKU_TREASURY_PROFILE_ID", "");
+    if (!profileId) throw new ServiceUnavailableException("Treasury IDR pool not configured — set DOKU_TREASURY_ACCOUNT_NO");
+    let bal;
+    try {
+      bal = await this.withRetry(() => this.sac.balance(profileId), "treasury idr balance");
+    } catch (err) {
+      throw this.mapError(err, "treasury idr balance");
+    }
+    const idr = bal.accounts.find((a) => a.type === IDR_ACCOUNT)?.accountNo;
+    if (!idr) throw new ServiceUnavailableException("Treasury IDR account not found on its profile");
+    this.treasuryIdrCache = { value: idr, exp: Date.now() + 5 * 60_000 };
+    return idr;
+  }
+
+  async requestRedemption(pid: string, input: {
+    amountIdr: string; bankCode: string; bankAccountNumber: string; bankAccountName: string; channel?: "BI_FAST" | "ONLINE";
+  }): Promise<SubTxView> {
+    if (!this.redemptionEnabled()) throw new ForbiddenException("Withdrawals are disabled");
+    if (this.redemptionHalted) {
+      throw new ServiceUnavailableException("Withdrawals halted pending ops review of a backing discrepancy — try again later");
+    }
+    const amount = this.parseGross(input.amountIdr);
+    return this.withPidLocks([pid], () => this.redemptionInner(pid, amount, input));
+  }
+
+  private async redemptionInner(
+    pid: string, amount: bigint,
+    input: { bankCode: string; bankAccountNumber: string; bankAccountName: string; channel?: "BI_FAST" | "ONLINE" },
+  ): Promise<SubTxView> {
+    // Claimant check from REPLAY, not from any fiat location.
+    const owned = await this.replayedBalance(pid);
+    if (owned < amount) throw new BadRequestException(`Insufficient redeemable balance (owns ${owned}, requested ${amount})`);
+    const providerRef = buildInvoiceNumber("RD");
+    const parent = await this.prisma.fiatProviderTransaction.create({
+      data: {
+        pid, accountId: null, kind: "redemption", providerRef, amountIdr: amount,
+        feeIdr: null, netIdr: amount, providerStatus: "created",
+        ledgerStatus: "requested",
+        counterparty: {
+          bankCode: input.bankCode, bankAccountNumber: input.bankAccountNumber,
+          bankAccountName: input.bankAccountName, channel: input.channel ?? "BI_FAST",
+        },
+      },
+    });
+    try {
+      // 1. Burn: POINT debit retires the claim to SYSTEM_POINT. Extinguished
+      //    only when settled — a failed burn releases the request, nothing lost.
+      const userPoint = await this.pointAccountFor(pid, "Claimant");
+      const burnRef = `${providerRef}-BURN`;
+      const burnRow = await this.prisma.fiatProviderTransaction.create({
+        data: {
+          pid, accountId: userPoint, kind: "points_redeem", providerRef: burnRef, amountIdr: amount,
+          feeIdr: null, netIdr: amount, providerStatus: "created",
+          direction: "out", sourceAccount: userPoint, destAccount: this.systemPointAccount(), entryGroup: providerRef,
+          ledgerRef: burnRef, ledgerStatus: "pending", extinguished: false,
+          counterparty: { parentRef: providerRef, currency: "POINT" },
+        },
+      });
+      let burnStatus: string;
+      try {
+        const burn = await this.withRetry(
+          () => this.sac.debit({
+            partnerReferenceNo: burnRef, fromAccount: userPoint, amountIdr: amount,
+            currency: "POINT", description: `PID redemption burn for ${providerRef}`.slice(0, 128),
+          }),
+          "redemption burn",
+        );
+        burnStatus = mapSacStatus(burn.latestTransactionStatus ?? "03");
+      } catch (err) {
+        if (err instanceof ProviderError && err.httpStatus === 409) {
+          const st = await this.withRetry(() => this.sac.txStatus(burnRef), "burn status");
+          burnStatus = mapSacStatus(st.latestTransactionStatus);
+          await this.markTx(burnRow.id, burnStatus, st.rawResponse);
+        } else {
+          await this.markTx(burnRow.id, "failed", err);
+          await this.markTx(parent.id, "failed", err);
+          await this.prisma.fiatProviderTransaction.update({
+            where: { id: parent.id }, data: { ledgerStatus: "failed" },
+          }).catch(() => undefined);
+          throw this.mapError(err, "redemption burn");
+        }
+      }
+      if (burnStatus !== "settled") {
+        await this.markTx(parent.id, burnStatus === "failed" ? "failed" : "processing", { burnRef });
+        await this.prisma.fiatProviderTransaction.update({
+          where: { id: parent.id }, data: { ledgerStatus: burnStatus === "failed" ? "failed" : "burned" },
+        }).catch(() => undefined);
+        if (burnStatus === "failed") throw new ServiceUnavailableException("Redemption burn failed — request released, balance untouched");
+        return this.toTxView(await this.prisma.fiatProviderTransaction.findUnique({ where: { id: parent.id } }).then((r) => r!));
+      }
+      await this.markTx(burnRow.id, "settled", { extinguished: true });
+      await this.prisma.fiatProviderTransaction.update({
+        where: { id: burnRow.id }, data: { extinguished: true, ledgerStatus: "issued" },
+      }).catch(() => undefined);
+      await this.prisma.fiatProviderTransaction.update({
+        where: { id: parent.id }, data: { ledgerStatus: "burned" },
+      }).catch(() => undefined);
+      // 2. Liquidity, then payout. Crash between burn and payout is completed
+      //    by the sweep under the SAME payout ref — never re-burned.
+      await this.executeRedemptionPayout(parent.id);
+      const fresh = await this.prisma.fiatProviderTransaction.findUnique({ where: { id: parent.id } });
+      return this.toTxView(fresh ?? parent as never);
+    } catch (err) {
+      if (err instanceof BadRequestException || err instanceof ServiceUnavailableException || err instanceof ForbiddenException) throw err;
+      await this.markTx(parent.id, "failed", err);
+      throw this.mapError(err, "redemption");
+    }
+  }
+
+  /** Replay one PID's outstanding (claimant check). Live DOKU is NOT
+   *  consulted here — replay IS the ownership source; recon asserts equality. */
+  private async replayedBalance(pid: string): Promise<bigint> {
+    const rows = await this.prisma.fiatProviderTransaction.findMany({
+      where: { pid }, take: 5000, orderBy: { replaySeq: "asc" },
+    });
+    const replayed = replayJournal(rows.map((r) => ({
+      kind: r.kind, pid: r.pid, providerRef: r.providerRef, providerStatus: r.providerStatus,
+      amountIdr: r.amountIdr, direction: r.direction, entryGroup: r.entryGroup,
+      extinguished: r.extinguished, counterparty: (r.counterparty ?? null) as Record<string, unknown> | null,
+      replaySeq: r.replaySeq,
+    })));
+    return replayed.balances.get(pid) ?? 0n;
+  }
+
+  /**
+   * Ensure pool liquidity then execute the BANK_ACCOUNT payout for a burned
+   * redemption. Idempotent per payout ref; safe to re-run after a crash.
+   */
+  private async executeRedemptionPayout(parentId: string): Promise<void> {
+    const parent = await this.prisma.fiatProviderTransaction.findUnique({ where: { id: parentId } });
+    if (!parent || parent.kind !== "redemption") return;
+    const cp = (parent.counterparty ?? {}) as Record<string, any>;
+    const payoutRef = `${parent.providerRef}-PAY`;
+    const existing = await this.prisma.fiatProviderTransaction.findFirst({ where: { kind: "fiat_payout", providerRef: payoutRef } });
+    if (existing && ["settled", "processing"].includes(existing.providerStatus)) {
+      await this.prisma.fiatProviderTransaction.update({
+        where: { id: parent.id }, data: { ledgerStatus: "completed", providerStatus: existing.providerStatus },
+      }).catch(() => undefined);
+      return;
+    }
+    await this.ensurePoolLiquidity(parent.amountIdr);
+    const pool = await this.treasuryIdrAccount();
+    const legRow = existing ?? (await this.prisma.fiatProviderTransaction.create({
+      data: {
+        pid: parent.pid, accountId: pool, kind: "fiat_payout", providerRef: payoutRef, amountIdr: parent.amountIdr,
+        feeIdr: null, netIdr: parent.amountIdr, providerStatus: "created",
+        direction: "out", sourceAccount: pool, destAccount: `BANK:${cp.bankCode}:${cp.bankAccountNumber}`,
+        entryGroup: parent.providerRef, ledgerRef: payoutRef, ledgerStatus: "pending",
+        counterparty: { parentRef: parent.providerRef, bankCode: cp.bankCode, bankAccountNumber: cp.bankAccountNumber, bankAccountName: cp.bankAccountName, channel: cp.channel ?? "BI_FAST" },
+      },
+    }));
+    try {
+      const inquiry = await this.withRetry(
+        () => this.sac.transferInquiry({
+          partnerReferenceNo: payoutRef, type: "BANK_ACCOUNT", amountIdr: parent.amountIdr,
+          fromAccount: pool, beneficiaryAccountNumber: String(cp.bankAccountNumber),
+          beneficiaryBankCode: String(cp.bankCode), channel: (cp.channel ?? "BI_FAST") as "BI_FAST" | "ONLINE",
+          remark: `PID redemption ${parent.providerRef}`,
+        }),
+        "payout inquiry",
+      );
+      const paid = await this.withRetry(
+        () => this.sac.transferPayment({
+          partnerReferenceNo: payoutRef, referenceNo: inquiry.referenceNo, type: "BANK_ACCOUNT",
+          amountIdr: parent.amountIdr, fromAccount: pool,
+          beneficiaryAccountNumber: String(cp.bankAccountNumber),
+          beneficiaryAccountName: String(cp.bankAccountName ?? inquiry.beneficiaryAccountName ?? cp.bankAccountNumber),
+          beneficiaryBankCode: String(cp.bankCode), channel: (cp.channel ?? "BI_FAST") as "BI_FAST" | "ONLINE",
+        }),
+        "payout payment",
+      );
+      const st = await this.withRetry(() => this.sac.txStatus(payoutRef), "payout status").catch(() => null);
+      const status = st ? mapSacStatus(st.latestTransactionStatus) : "processing";
+      await this.markTx(legRow.id, status, paid.rawResponse);
+      await this.prisma.fiatProviderTransaction.update({
+        where: { id: parent.id },
+        data: {
+          providerStatus: status,
+          ledgerStatus: status === "settled" ? "completed" : status === "failed" ? "payout_failed" : "burned",
+        },
+      }).catch(() => undefined);
+      await this.security.log(parent.pid, "fiat.redemption.payout", { providerRef: payoutRef, status }).catch(() => undefined);
+    } catch (err) {
+      if (err instanceof ProviderError && err.httpStatus === 409) {
+        const st = await this.withRetry(() => this.sac.txStatus(payoutRef), "payout status");
+        const status = mapSacStatus(st.latestTransactionStatus);
+        await this.markTx(legRow.id, status, st.rawResponse);
+        await this.prisma.fiatProviderTransaction.update({
+          where: { id: parent.id },
+          data: { providerStatus: status, ledgerStatus: status === "settled" ? "completed" : "payout_failed" },
+        }).catch(() => undefined);
+        return;
+      }
+      await this.markTx(legRow.id, "failed", err);
+      await this.prisma.fiatProviderTransaction.update({
+        where: { id: parent.id }, data: { providerStatus: "failed", ledgerStatus: "payout_failed" },
+      }).catch(() => undefined);
+      throw err;
+    }
+  }
+
+  /**
+   * Pool liquidity: fast path when the Treasury/operating IDR pool already
+   * covers the payout; otherwise consolidate available IDR from backing-rich
+   * sub-accounts via journaled DOKU_SUB_ACCOUNT transfers (real DOKU
+   * movements, never simulated). Claimant-local fiat is only the cheapest
+   * first candidate — never a requirement.
+   */
+  private async ensurePoolLiquidity(amount: bigint): Promise<void> {
+    const pool = await this.treasuryIdrAccount();
+    const poolProfile = this.config.get<string>("DOKU_TREASURY_PROFILE_ID", "");
+    const poolLive = async (): Promise<bigint> => {
+      if (!poolProfile) {
+        const row = await this.prisma.fiatProviderAccount.findFirst({ where: { providerAccountId: pool } }).catch(() => null);
+        if (row?.lastBalance != null) { try { return parseIdrStrict(row.lastBalance, "pool cache"); } catch { /* fall through */ } }
+        throw new ServiceUnavailableException("Pool live balance unavailable — set DOKU_TREASURY_PROFILE_ID");
+      }
+      const bal = await this.withRetry(() => this.sac.balance(poolProfile), "pool balance");
+      const idr = bal.accounts.find((a) => a.type === IDR_ACCOUNT);
+      return parseIdrStrict(idr?.available ?? "0", "pool balance");
+    };
+    if (await poolLive().catch(() => 0n) >= amount) return;
+    // Consolidate from backing-rich accounts (cached balances first).
+    const candidates = await this.prisma.fiatProviderAccount.findMany({
+      where: { provider: PROVIDER, accountStatus: "active", providerAccountId: { not: pool } },
+      orderBy: { lastBalanceAt: "desc" }, take: 10,
+    });
+    let covered = 0n;
+    for (const c of candidates) {
+      if (covered >= amount) break;
+      if (!c.providerAccountId) continue;
+      const need = amount - covered;
+      const ref = buildInvoiceNumber("CN");
+      try {
+        const inquiry = await this.withRetry(
+          () => this.sac.transferInquiry({
+            partnerReferenceNo: ref, type: "DOKU_SUB_ACCOUNT", amountIdr: need,
+            fromAccount: c.providerAccountId as string, beneficiaryAccountNumber: pool,
+            remark: "PID liquidity consolidation",
+          }),
+          "consolidation inquiry",
+        );
+        const paid = await this.withRetry(
+          () => this.sac.transferPayment({
+            partnerReferenceNo: ref, referenceNo: inquiry.referenceNo, type: "DOKU_SUB_ACCOUNT",
+            amountIdr: need, fromAccount: c.providerAccountId as string, beneficiaryAccountNumber: pool,
+            beneficiaryAccountName: inquiry.beneficiaryAccountName ?? pool,
+          }),
+          "consolidation payment",
+        );
+        await this.prisma.fiatProviderTransaction.create({
+          data: {
+            pid: c.pid, accountId: c.providerAccountId, kind: "fiat_consolidation", providerRef: ref,
+            amountIdr: need, feeIdr: null, netIdr: need, providerStatus: "processing",
+            direction: "out", sourceAccount: c.providerAccountId, destAccount: pool, entryGroup: ref,
+            ledgerRef: ref, ledgerStatus: "issued", counterparty: { source: "consolidation", destination: "treasury-pool" },
+            providerResponse: json(paid.rawResponse),
+          },
+        }).catch(() => undefined);
+        covered += need;
+      } catch (err) {
+        this.logger.warn(`consolidation from ${c.pid} failed: ${String(err)?.slice(0, 160)}`);
+      }
+    }
+    if (await poolLive().catch(() => 0n) < amount) {
+      throw new ServiceUnavailableException("Insufficient pool liquidity — consolidation could not cover the payout");
+    }
+  }
+
+  /**
+   * Sweep recovery for the redemption saga: burned-without-payout resumes the
+   * payout under the same ref; requested-without-burn older than 15 minutes
+   * expires (releases the request — nothing moved). Returns counts.
+   */
+  private async recoverRedemptions(): Promise<{ resumed: number; expired: number }> {
+    let resumed = 0;
+    let expired = 0;
+    const open = await this.prisma.fiatProviderTransaction.findMany({
+      where: { kind: "redemption", providerStatus: { in: ["created", "processing"] } },
+      take: 50,
+    });
+    for (const r of open) {
+      const ageMs = Date.now() - new Date(r.createdAt).getTime();
+      if ((r.ledgerStatus ?? "") === "burned" || (r.ledgerStatus ?? "") === "payout_failed") {
+        try {
+          await this.executeRedemptionPayout(r.id);
+          resumed++;
+        } catch (err) {
+          this.logger.warn(`redemption resume failed for ${r.providerRef}: ${String(err)?.slice(0, 160)}`);
+        }
+      } else if (ageMs > 15 * 60_000) {
+        await this.markTx(r.id, "cancelled", { expired: true }).catch(() => undefined);
+        await this.prisma.fiatProviderTransaction.update({
+          where: { id: r.id }, data: { ledgerStatus: "expired" },
+        }).catch(() => undefined);
+        expired++;
+      }
+    }
+    return { resumed, expired };
   }
 
   // --- debits (programmatic deduction; credit side filled in by DOKU) ---
@@ -1413,15 +1776,45 @@ export class FiatSubAccountService {
   }
 
   /**
-   * Aggregate backing tolerance: 1% of outstanding (min Rp10.000). Derived,
-   * not arbitrary: bounds timing skew between leg settlement and history
-   * visibility plus per-channel PG variance, calibrated against sandbox
-   * PG observations (see FIAT_SUBACCOUNT.md). Every adjustment above the
-   * journal (PG observed, reserves) is reported explicitly, never netted.
+   * Invariant-2 enforcement (binding — see REDEMPTION_ACCEPTANCE_MATRIX.md):
+   * gap = outstanding − backing − adjustments must be zero after rounding.
+   * The ONLY allowance is documented per-leg rounding: Rp1 per settled
+   * points leg. No percentage tolerance exists anywhere — a percentage would
+   * scale permitted error with volume and mask real breaks. PG fees enter
+   * exclusively as observed SETTLEMENT_FEE rows; reserves enter exclusively
+   * via PID_REDEMPTION_RESERVE_IDR. Anything else unexplained → ALERT + halt.
    */
-  private aggregateTolerance(outstanding: bigint): bigint {
-    const pct = outstanding / 100n;
-    return pct > 10_000n ? pct : 10_000n;
+  private async pgObservedForIdrAccount(accountNo: string, fromDate: string, toDate: string): Promise<bigint> {
+    let total = 0n;
+    for (let page = 0; page < 2; page++) {
+      let items;
+      try {
+        const res = await this.sac.history({ accountNo, fromDateTime: fromDate, toDateTime: toDate, pageSize: "100", pageNumber: String(page) });
+        items = res.items;
+      } catch (err) {
+        this.logger.warn(`sweep PG scan failed for ${accountNo}: ${String(err)?.slice(0, 160)}`);
+        break;
+      }
+      for (const it of items) {
+        if (it.transactionType === "SETTLEMENT_FEE" && it.status === "SUCCESS" && it.amountIdr !== undefined) {
+          try {
+            total += parseIdrStrict(it.amountIdr, "pg amount");
+          } catch { /* unparseable PG row: counted as unexplained via gap, never assumed */ }
+        }
+      }
+      if (items.length < 100) break;
+    }
+    return total;
+  }
+
+  private redemptionReserveIdr(): bigint {
+    const raw = this.config.get<string>("PID_REDEMPTION_RESERVE_IDR", "0") || "0";
+    try {
+      return parseIdrStrict(raw, "reserve");
+    } catch {
+      this.logger.warn(`PID_REDEMPTION_RESERVE_IDR unparseable (${raw}) — treated as 0`);
+      return 0n;
+    }
   }
 
   /**
@@ -1480,6 +1873,29 @@ export class FiatSubAccountService {
               }
             }
           }
+          // Corroborate open transfer legs (parent + mirror) — replay only
+          // counts settled rows, so processing legs must converge here.
+          if (t.providerStatus === "processing") {
+            try {
+              const st = await this.withRetry(() => this.sac.txStatus(t.providerRef), "sweep transfer status");
+              const status = mapSacStatus(st.latestTransactionStatus);
+              if (status !== "processing") {
+                await this.markTx(t.id, status, st.rawResponse);
+                const mirror = await this.prisma.fiatProviderTransaction.findFirst({
+                  where: { kind: "points_credit", counterparty: { path: ["parentRef"], equals: t.providerRef } },
+                }).catch(() => null);
+                if (mirror && status === "settled") {
+                  await this.markTx(mirror.id, "settled", st.rawResponse);
+                  await this.prisma.fiatProviderTransaction.update({
+                    where: { id: mirror.id }, data: { ledgerStatus: "issued" },
+                  }).catch(() => undefined);
+                }
+                completed++;
+              }
+            } catch (err) {
+              this.logger.warn(`sweep transfer status failed for ${t.providerRef}: ${String(err)?.slice(0, 160)}`);
+            }
+          }
           const mirrorOutcome = await this.ensureTransferMirror(t as never).catch(() => "review" as const);
           if (mirrorOutcome === "mirrored") completed++;
         }
@@ -1518,7 +1934,40 @@ export class FiatSubAccountService {
     }
     const outstanding = aggReplayed + aggTreasury;
     const gap = outstanding - aggFiat;
-    const tolerance = this.aggregateTolerance(outstanding);
+    // Explicit adjustments ledger — every row cited, nothing netted silently:
+    // PG fees observed as SETTLEMENT_FEE history rows on swept IDR accounts,
+    // plus the configured platform reserve. Rounding allowance is Rp1 per
+    // settled points leg (representation drift bound, not error budget).
+    const toDate = new Date().toISOString().slice(0, 10);
+    const fromDate = new Date(Date.now() - 30 * 24 * 3600_000).toISOString().slice(0, 10);
+    let pgObserved = 0n;
+    const pgPerAccount: Array<{ accountNo: string; pgIdr: string }> = [];
+    for (const a of accounts) {
+      const row = await this.prisma.fiatProviderAccount.findUnique({
+        where: { pid_provider: { pid: a.pid, provider: PROVIDER } },
+      }).catch(() => null);
+      const idrNo = row?.providerAccountId ?? undefined;
+      if (!idrNo) continue;
+      const pg = await this.pgObservedForIdrAccount(idrNo, fromDate, toDate);
+      if (pg > 0n) pgPerAccount.push({ accountNo: idrNo, pgIdr: pg.toString() });
+      pgObserved += pg;
+    }
+    const reserve = this.redemptionReserveIdr();
+    const settledLegs = await this.prisma.fiatProviderTransaction.count({
+      where: {
+        pid: { in: accounts.map((a) => a.pid) },
+        kind: { in: ["points_issue", "points_fee", "points_credit", "points_clawback", "points_redeem"] },
+        providerStatus: "settled",
+      },
+    }).catch(() => 0);
+    const roundingAllowance = BigInt(settledLegs);
+    const adjustments = [
+      { kind: "pg_observed_settlement_fees", amountIdr: pgObserved.toString(), window: `${fromDate}..${toDate}`, perAccount: pgPerAccount },
+      { kind: "platform_reserve", amountIdr: reserve.toString(), source: "PID_REDEMPTION_RESERVE_IDR" },
+      { kind: "rounding_allowance", amountIdr: roundingAllowance.toString(), formula: "Rp1 x settled points legs", legs: settledLegs },
+    ];
+    const unexplained = gap - pgObserved - reserve;
+    const explained = unexplained < 0n ? -unexplained <= roundingAllowance : unexplained <= roundingAllowance;
     const aggregate = {
       sweptPids: accounts.length,
       livePointsIdr: (aggLive + BigInt(treasuryLive)).toString(),
@@ -1527,15 +1976,18 @@ export class FiatSubAccountService {
       treasuryLiveSource,
       fiatBackingIdr: aggFiat.toString(),
       gapIdr: gap.toString(),
-      toleranceIdr: tolerance.toString(),
-      verdict: gap < 0n
-        ? "info: over-backed (fees retained / not yet swept)"
-        : gap <= tolerance
-          ? "ok: gap within tolerance (channel PG + timing skew)"
-          : "ALERT: unbacked gap exceeds tolerance — investigate",
+      adjustments,
+      unexplainedIdr: unexplained.toString(),
+      verdict: explained
+        ? "ok: every nonzero difference maps to an explicit adjustment row"
+        : "ALERT: unexplained backing difference — redemption halted, investigate",
     };
-    if (aggregate.verdict.startsWith("ALERT")) this.logger.error(`sweep aggregate ${aggregate.verdict}: gap ${gap}`);
-    return { total, swept: results.length, skip, take, results, aggregate };
+    if (!explained) {
+      this.logger.error(`sweep aggregate ${aggregate.verdict}: unexplained ${unexplained}`);
+      this.setRedemptionHalt(true, `aggregate unexplained gap ${unexplained}`);
+    }
+    const recovery = this.redemptionEnabled() ? await this.recoverRedemptions().catch(() => ({ resumed: 0, expired: 0 })) : { resumed: 0, expired: 0, disabled: true };
+    return { total, swept: results.length, skip, take, results, aggregate, recovery, redemptionHalted: this.redemptionHalted };
   }
 
   /** Fallback Treasury-live estimate when no Treasury profile is configured:

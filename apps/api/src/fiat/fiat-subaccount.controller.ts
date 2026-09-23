@@ -5,7 +5,7 @@ import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { FiatSubAccountService } from "./fiat-subaccount.service";
-import { CheckoutDepositDto, AdminBackfillDto, AdminClawbackDto, AdminSweepDto, CreateFeePolicyDto, CreateSplitRuleDto, CreateSubAccountDto, DebitCancelDto, DebitDto, ReconcileDto, SubHistoryQueryDto, TransferConfirmDto, TransferInquiryDto } from "./dto/subaccount.dto";
+import { CheckoutDepositDto, AdminBackfillDto, AdminClawbackDto, AdminHaltDto, AdminSweepDto, CreateFeePolicyDto, CreateSplitRuleDto, CreateSubAccountDto, DebitCancelDto, DebitDto, ReconcileDto, RedemptionRequestDto, SubHistoryQueryDto, TransferConfirmDto, TransferInquiryDto } from "./dto/subaccount.dto";
 
 /**
  * DOKU Sub-Account V2 routes (1 PID → 1 Sub-Account). Peridot is
@@ -187,6 +187,20 @@ export class FiatSubAccountController {
   // (FiatSubAccountService private methods — CI guard fails the build if
   // any route, SDK method, or wallet screen touches them).
 
+  /**
+   * Request a PTS→fiat redemption (withdrawal). Claimant = current replayed
+   * PTS owner; payout comes from pool liquidity, never the original fiat
+   * location. Disabled (403) unless PID_REDEMPTION_ENABLED=true AND the
+   * BANK_ACCOUNT + consolidation path is sandbox-verified.
+   */
+  @Post("redemptions")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  redeem(@CurrentUser() user: AuthenticatedUser, @Body() dto: RedemptionRequestDto) {
+    return this.sac.requestRedemption(user.pid, dto);
+  }
+
   /** Admin: sweep outstanding issuance + backing report across accounts. */
   @Post("admin/sweep")
   @HttpCode(HttpStatus.OK)
@@ -221,6 +235,15 @@ export class FiatSubAccountController {
   @UseGuards(JwtAuthGuard, AdminGuard)
   clawback(@Body() dto: AdminClawbackDto) {
     return this.sac.clawbackPoints(dto);
+  }
+
+  /** Admin: engage/clear the redemption kill-switch (unexplained backing gap). */
+  @Post("admin/redemption-halt")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  redemptionHalt(@Body() dto: AdminHaltDto) {
+    return this.sac.setRedemptionHalt(dto.halt, dto.reason ?? "manual admin action");
   }
 
   /** Admin: inspect the webhook inbox (received vs applied). */

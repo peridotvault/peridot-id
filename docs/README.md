@@ -40,6 +40,10 @@ packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
 - [DATABASE.md](DATABASE.md) — tables, ERD, invariants
 - [API_SPEC.md](API_SPEC.md) — endpoint list
 - [SECURITY.md](SECURITY.md) — auth, sessions, wallet threat model
+- [FIAT_SUBACCOUNT.md](FIAT_SUBACCOUNT.md) — DOKU ledger-first fiat/PTS architecture
+- [DOKU_ACTIVATION_DOSSIER.md](DOKU_ACTIVATION_DOSSIER.md) — forwardable Unified Ledger activation request (gating withdrawals)
+- [SANDBOX_VERIFICATION_MATRIX.md](SANDBOX_VERIFICATION_MATRIX.md) — real-DOKU verification steps + evidence checklist
+- [REDEMPTION_ACCEPTANCE_MATRIX.md](REDEMPTION_ACCEPTANCE_MATRIX.md) — withdrawal enablement criteria + reconciliation policy
 - [ROADMAP.md](ROADMAP.md) — Foundation → Social → Gaming → Ecosystem
 - [WHITEPAPER.md](../contracts/WHITEPAPER.md) — canonical contracts spec (§12 gates mainnet)
 

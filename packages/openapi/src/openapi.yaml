@@ -1788,6 +1788,40 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /fiat/sub-accounts/admin/redemption-halt:
+    post:
+      tags: [fiat]
+      summary: Engage/clear the redemption kill-switch (admin)
+      description: |
+        Engaged automatically by the sweep on any unexplained backing gap;
+        cleared manually after ops review. In-memory: restarts clear it, but
+        every sweep re-evaluates and re-halts on persistent discrepancy.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [halt]
+              properties:
+                halt:
+                  type: boolean
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Halt state
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /fiat/sub-accounts/admin/backfill-mirrors:
     post:
       tags: [fiat]
@@ -1856,6 +1890,51 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /fiat/sub-accounts/redemptions:
+    post:
+      tags: [fiat]
+      summary: Request a PTS→fiat redemption (disabled unless PID_REDEMPTION_ENABLED)
+      description: |
+        Claimant is the current replayed PTS owner; payout comes from pool
+        liquidity, never the original fiat location. Burn-then-payout saga
+        with sweep recovery. Returns 403 while the feature flag is off.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountIdr, bankCode, bankAccountNumber, bankAccountName]
+              properties:
+                amountIdr:
+                  type: string
+                bankCode:
+                  type: string
+                bankAccountNumber:
+                  type: string
+                bankAccountName:
+                  type: string
+                channel:
+                  type: string
+                  enum: [BI_FAST, ONLINE]
+      responses:
+        "200":
+          description: Redemption transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubTx"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /fiat/sub-accounts/admin/fee-policy:
     post:

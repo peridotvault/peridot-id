@@ -52,6 +52,9 @@ const POINTS_OUT = new Set(["points_clawback", "points_redeem", "transfer_intern
 const FIAT_INTENT = new Set([
   "deposit", "debit", "debit_cancel", "fee",
   "payout_bank", "payout_wallet", "transfer_fee",
+  // Redemption/payout saga control rows: the value moves live in
+  // points_redeem (burn) and fiat_payout/fiat_consolidation legs.
+  "redemption", "fiat_payout", "fiat_consolidation",
 ]);
 
 function seqOf(r: JournalRow): bigint {

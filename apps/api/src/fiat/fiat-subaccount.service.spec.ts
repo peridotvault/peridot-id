@@ -56,6 +56,7 @@ function setup(store?: Record<string, string>) {
       findUnique: jest.fn(async () => null),
       findFirst: jest.fn(async () => null),
       findMany: jest.fn(async () => []),
+      count: jest.fn(async () => 0),
       create: jest.fn(async (args: any) => ({ id: "a1", accountStatus: "creating", profileId: null, providerAccountId: null, vaNumber: null, phoneNo: null, email: null, accounts: null, lastBalance: null, lastBalanceAt: null, providerResponse: {}, updatedAt: new Date(), ...args.data })),
       update: jest.fn(async (args: any) => ({
         id: "a1", accountStatus: "creating", profileId: null, providerAccountId: null, vaNumber: null, phoneNo: null, email: null, accounts: null, lastBalance: null, lastBalanceAt: null, providerResponse: {}, updatedAt: new Date(), ...args.data,
@@ -66,6 +67,7 @@ function setup(store?: Record<string, string>) {
       findFirst: jest.fn(async () => null),
       findUnique: jest.fn(async () => null),
       findMany: jest.fn(async () => []),
+      count: jest.fn(async () => 0),
       update: jest.fn(async (args: any) => ({ id: "t1", kind: "transfer_internal", providerRef: "ST1", amountIdr: 50000n, feeIdr: null, netIdr: null, createdAt: new Date(), ...args.data })),
       updateMany: jest.fn(async () => ({ count: 1 })),
       upsert: jest.fn(async (args: any) => ({ id: "t1", ...args.create })),
@@ -317,11 +319,12 @@ describe("FiatSubAccountService", () => {
       service.transferConfirm("ifal@pid", "t1", { beneficiaryAccountName: "RIA" }),
       service.transferConfirm("ifal@pid", "t1", { beneficiaryAccountName: "RIA" }),
     ]);
-    // Mirror upsert is idempotent on providerRef — both attempts converge.
+    // Mirror upsert is idempotent on providerRef — both attempts converge
+    // on the same ref (second finds the settled row and confirms it).
     const mirrorCalls = (prisma.fiatProviderTransaction.upsert as jest.Mock).mock.calls
       .filter((c) => c[0]?.where?.providerRef === "DOKU-P2P-1");
     expect(mirrorCalls.length).toBe(2);
-    expect(mirrorCalls[0][0].update).toEqual({});
+    expect(mirrorCalls[0][0].create.entryGroup).toBe("ST1");
   });
 
   it("withPidLocks serializes same-pid sections and orders cross-pid locks", async () => {
@@ -338,11 +341,18 @@ describe("FiatSubAccountService", () => {
 
   it("transferConfirm sends NET points P2P plus the Treasury fee leg", async () => {
     const { service, prisma, sac } = setup({ DOKU_TREASURY_POINT_ACCOUNT_NO: "2299999999" });
-    prisma.fiatProviderTransaction.findFirst.mockResolvedValue({
+    const createdRow = {
       id: "t1", pid: "ifal@pid", kind: "transfer_internal", providerRef: "ST1", providerStatus: "created",
       amountIdr: 100000n, feeIdr: 5000n, netIdr: 95000n, createdAt: new Date(),
       counterparty: { type: "DOKU_SUB_ACCOUNT", beneficiaryPid: "rani@pid", beneficiaryAccountNumber: "2211403402", feePolicyVersion: 3 },
       providerResponse: { referenceNo: "INQ1", beneficiaryAccountName: "RIA" },
+    };
+    let confirmReads = 0;
+    (prisma.fiatProviderTransaction.findFirst as jest.Mock).mockImplementation(async (args: any) => {
+      // Fee-leg existence checks find nothing (fresh world) — treasury leg runs.
+      if (args?.where?.kind === "points_fee") return null;
+      confirmReads++;
+      return confirmReads <= 2 ? createdRow : { ...createdRow, providerStatus: "settled" };
     });
     prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
     prisma.fiatProviderTransaction.create.mockImplementation(async (args: any) => ({ id: "f1", providerStatus: "created", createdAt: new Date(), ...args.data }));
@@ -362,7 +372,8 @@ describe("FiatSubAccountService", () => {
       partnerReferenceNo: "ST1-PTFEE", type: "DOKU_SUB_ACCOUNT",
       amountIdr: 5000n, currency: "POINT", beneficiaryAccountNumber: "2299999999",
     }));
-    expect(view.providerStatus).toBe("processing");
+    // P2P corroborated settled at confirm time (parent + mirror settle together).
+    expect(view.providerStatus).toBe("settled");
   });
 
   // NOTE: settleFee / fee-leg tests were removed with the API-side fee
@@ -566,8 +577,60 @@ describe("FiatSubAccountService", () => {
     expect(out.backing).toMatchObject({ livePointsIdr: "0" });
   });
 
-  it("backing gap is info-only per PID — only replay mismatch alerts", async () => {
-    const { service, prisma, sac } = setup();
+  it("fail-safe: SYSTEM_POINT unconfigured → no journal row, no DOKU call, parent stays pending", async () => {
+    const { service, prisma, sac } = setup(); // no DOKU_SYSTEM_POINT_ACCOUNT_NO
+    const settled = {
+      id: "d1", pid: "alice@pid", kind: "deposit", providerRef: "DP1", providerStatus: "settled",
+      amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, createdAt: new Date(),
+      ledgerStatus: "pending", settlementStatus: "pending",
+      counterparty: { channel: "checkout", feeQuote: "5000", netQuote: "100000", feePolicyVersion: 3 },
+      providerResponse: {},
+    };
+    prisma.fiatProviderTransaction.findUnique.mockResolvedValue(settled);
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    (sac.txStatus as jest.Mock).mockResolvedValue({
+      partnerReferenceNo: "DP1", latestTransactionStatus: "00", rawResponse: {},
+    });
+    await (service as any).issuePointsForDeposit("d1", "fail-safe");
+    // systemPointAccount() throws while building the leg-row args — before
+    // any journal write and before any DOKU call. Nothing spendable created.
+    expect(prisma.fiatProviderTransaction.create).not.toHaveBeenCalled();
+    expect(sac.transferInquiry).not.toHaveBeenCalled();
+    expect(sac.transferPayment).not.toHaveBeenCalled();
+    expect(prisma.fiatProviderTransaction.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "d1" } }),
+    );
+  });
+
+  it("fail-safe: 4004203 at inquiry → failed leg, retryable parent, no payment call", async () => {
+    const { service, prisma, sac } = setup({ DOKU_SYSTEM_POINT_ACCOUNT_NO: "9900000001" });
+    const { ProviderError } = await import("@peridotvault/pid-payments");
+    const settled = {
+      id: "d1", pid: "alice@pid", kind: "deposit", providerRef: "DP1", providerStatus: "settled",
+      amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, createdAt: new Date(),
+      ledgerStatus: "pending", settlementStatus: "pending",
+      counterparty: { channel: "checkout", feeQuote: "5000", netQuote: "100000", feePolicyVersion: 3 },
+      providerResponse: {},
+    };
+    prisma.fiatProviderTransaction.findUnique.mockResolvedValue(settled);
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    prisma.fiatProviderTransaction.create.mockImplementation(async (args: any) => ({ id: "leg1", providerStatus: "created", createdAt: new Date(), ...args.data }));
+    (sac.txStatus as jest.Mock).mockResolvedValue({
+      partnerReferenceNo: "DP1", latestTransactionStatus: "00", rawResponse: {},
+    });
+    (sac.transferInquiry as jest.Mock).mockRejectedValue(
+      new ProviderError(400, "DOKU Sub-Account transfer-inquiry (4004203): Source account not configured for TOPUP"),
+    );
+    await (service as any).issuePointsForDeposit("d1", "fail-safe");
+    // Leg row recorded as failed (auditable), parent left failed/retryable,
+    // and crucially no transferPayment was ever attempted.
+    expect(sac.transferPayment).not.toHaveBeenCalled();
+    expect(prisma.fiatProviderTransaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "d1" }, data: expect.objectContaining({ ledgerStatus: "failed" }) }),
+    );
+  });
+
+  it("backing gap is info-only per PID — only replay mismatch alerts", async () => {    const { service, prisma, sac } = setup();
     prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
     // Journal says Alice owns 60k; DOKU holds 60k; fiat backing is 105k
     // (over-backed after P2P) — no alert. Replay mismatch WOULD alert.
@@ -652,8 +715,9 @@ describe("FiatSubAccountService", () => {
     prisma.fiatProviderAccount.findMany.mockResolvedValue([{ ...ACTIVE }]);
     const created: any[] = [];
     prisma.fiatProviderTransaction.create.mockImplementation(async (args: any) => {
-      created.push(args.data);
-      return { id: `r${created.length}`, providerStatus: "created", createdAt: new Date(), ...args.data };
+      const id = `r${created.length + 1}`;
+      created.push({ __id: id, ...args.data });
+      return { id, providerStatus: "created", createdAt: new Date(), ...args.data };
     });
     // Mirrors are written via upsert — capture those creates too.
     prisma.fiatProviderTransaction.upsert.mockImplementation(async (args: any) => {
@@ -663,17 +727,20 @@ describe("FiatSubAccountService", () => {
     prisma.fiatProviderTransaction.update.mockImplementation(async (args: any) => ({
       id: "x", kind: "deposit", providerRef: "DP", amountIdr: 0n, createdAt: new Date(), ...args.data,
     }));
+    const settledDeposit = {
+      id: "d1", pid: "alice@pid", kind: "deposit", providerRef: "DP-ALICE", providerStatus: "settled",
+      amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, createdAt: new Date(),
+      ledgerStatus: "pending", settlementStatus: "pending",
+      counterparty: { channel: "checkout", feeQuote: "5000", netQuote: "100000", feePolicyVersion: 3 },
+      providerResponse: {},
+    };
     prisma.fiatProviderTransaction.findUnique.mockImplementation(async (args: any) => {
       const hit = created.find((c) => c.providerRef === args?.where?.providerRef);
       if (hit) return { id: "x", ...hit, providerStatus: "settled" };
       if (args?.where?.id) {
-        return {
-          id: args.where.id, pid: "alice@pid", kind: "deposit", providerRef: "DP-ALICE", providerStatus: "settled",
-          amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, createdAt: new Date(),
-          ledgerStatus: "pending", settlementStatus: "pending",
-          counterparty: { channel: "checkout", feeQuote: "5000", netQuote: "100000", feePolicyVersion: 3 },
-          providerResponse: {},
-        };
+        const byId = created.find((c) => c.__id === args.where.id);
+        if (byId) return { id: args.where.id, ...byId };
+        return { ...settledDeposit };
       }
       return null;
     });
@@ -708,7 +775,6 @@ describe("FiatSubAccountService", () => {
       (sac.transferPayment as jest.Mock).mockResolvedValueOnce({ referenceNo: dokuRef, rawResponse: {} });
       await service.transferConfirm(from, inq.id, { beneficiaryAccountName: to });
     }
-
     // 2. Chain: Alice→Bob 40k, Bob→Charlie 20k, Charlie→David 19k.
     await hop("alice@pid", "bob@pid", "40000", "DOKU-R1");
     await hop("bob@pid", "charlie@pid", "20000", "DOKU-R2");
@@ -763,8 +829,317 @@ describe("FiatSubAccountService", () => {
     );
   });
 
-  it("clawback debits issued points and marks the parent clawed_back when whole", async () => {
-    const { service, prisma, sac } = setup({ DOKU_SYSTEM_POINT_ACCOUNT_NO: "9900000001" });
+  it("redemption is forbidden while the feature flag is off (no DOKU calls)", async () => {
+    const { service, sac } = setup();
+    await expect(service.requestRedemption("ifal@pid", {
+      amountIdr: "50000", bankCode: "014", bankAccountNumber: "123", bankAccountName: "X",
+    })).rejects.toMatchObject({ status: 403 });
+    expect(sac.debit).not.toHaveBeenCalled();
+    expect(sac.transferPayment).not.toHaveBeenCalled();
+  });
+
+  it("lifecycle: deposit→chain→settle→David redeems→consolidate→payout, invariants hold", async () => {
+    const { service, prisma, sac } = setup({
+      DOKU_SYSTEM_POINT_ACCOUNT_NO: "9900000001",
+      DOKU_TREASURY_POINT_ACCOUNT_NO: "2299999999",
+      DOKU_TREASURY_ACCOUNT_NO: "2010000001",
+      PID_REDEMPTION_ENABLED: "true",
+    });
+    const { replayJournal, totalOutstanding } = await import("./ledger-replay");
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    prisma.fiatProviderAccount.findFirst.mockResolvedValue({ lastBalance: "1000000" });
+    const created: any[] = [];
+    const updatesById: Record<string, any> = {};
+    prisma.fiatProviderTransaction.create.mockImplementation(async (args: any) => {
+      const id = `r${created.length + 1}`;
+      created.push({ __id: id, ...args.data });
+      return { id, providerStatus: "created", createdAt: new Date(), ...args.data };
+    });
+    prisma.fiatProviderTransaction.upsert.mockImplementation(async (args: any) => {
+      if (args?.create?.kind === "points_credit") created.push(args.create);
+      return { id: "t1", ...args.create };
+    });
+    prisma.fiatProviderTransaction.update.mockImplementation(async (args: any) => {
+      if (args?.where?.id) {
+        updatesById[args.where.id] = { ...(updatesById[args.where.id] ?? {}), ...args.data };
+        // Write-through so id re-reads observe updated state (like real DB).
+        const target = created.find((c: any) => c.__id === args.where.id);
+        if (target) Object.assign(target, args.data);
+      }
+      return { id: "x", kind: "deposit", providerRef: "DP", amountIdr: 0n, createdAt: new Date(), ...args.data };
+    });
+    const settledDeposit = {
+      id: "d1", pid: "alice@pid", kind: "deposit", providerRef: "DP-ALICE", providerStatus: "settled",
+      amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, createdAt: new Date(),
+      ledgerStatus: "pending", settlementStatus: "pending",
+      counterparty: { channel: "checkout", feeQuote: "5000", netQuote: "100000", feePolicyVersion: 3 },
+      providerResponse: {},
+    };
+    prisma.fiatProviderTransaction.findUnique.mockImplementation(async (args: any) => {
+      const hit = created.find((c) => c.providerRef === args?.where?.providerRef);
+      if (hit) return { id: "x", ...hit, providerStatus: "settled" };
+      if (args?.where?.id) {
+        const byId = created.find((c) => c.__id === args.where.id);
+        if (byId) return { id: args.where.id, ...byId };
+        return { ...settledDeposit };
+      }
+      return null;
+    });
+    (sac.txStatus as jest.Mock).mockResolvedValue({
+      partnerReferenceNo: "x", latestTransactionStatus: "00",
+      amount: { value: "105000.00", currency: "IDR" }, rawResponse: {},
+    });
+    const replayOf = () => replayJournal(created.map((c, i) => {
+      const later = updatesById[`r${i + 1}`] ?? {};
+      const merged = { ...c, ...later } as any;
+      return {
+        kind: merged.kind, pid: merged.pid, providerRef: merged.providerRef,
+        providerStatus: later.providerStatus ?? "settled",
+        amountIdr: merged.amountIdr, direction: merged.direction ?? null, entryGroup: merged.entryGroup ?? null,
+        extinguished: merged.extinguished ?? false, counterparty: merged.counterparty ?? null, replaySeq: BigInt(i + 1),
+      };
+    }));
+
+    // Stage 1: issuance.
+    await (service as any).issuePointsForDeposit("d1", "e2e");
+    let r = replayOf();
+    expect(r.errors).toEqual([]);
+    expect(r.balances.get("alice@pid")).toBe(100_000n);
+    expect(totalOutstanding(r)).toBe(105_000n);
+
+    // Stage 2: Alice→Bob 40k while fiat still pending (no settlement yet).
+    prisma.fiatProviderTransaction.findFirst.mockImplementation(async (args: any) => {
+      // Leg-existence checks resolve against already-written legs (idempotent).
+      if (args?.where?.kind === "points_issue" || args?.where?.kind === "points_fee" || args?.where?.kind === "points_credit") {
+        const hit = created.find((c) => c.kind === args.where.kind && c.providerRef === args.where.providerRef);
+        return hit ? { ...hit, providerStatus: "settled" } : null;
+      }
+      // Echo the queried id so status updates land on the real created row.
+      const w = args?.where ?? {};
+      if (!w.id || !w.pid) return null;
+      return {
+        id: w.id, pid: w.pid, kind: "transfer_internal", providerRef: "ST-A",
+        providerStatus: "created", amountIdr: 40000n, feeIdr: 2000n, netIdr: 38000n, createdAt: new Date(),
+        counterparty: { type: "DOKU_SUB_ACCOUNT", beneficiaryPid: "bob@pid", beneficiaryAccountNumber: "2211403402", feePolicyVersion: 3, netQuote: "38000", feeQuote: "2000" },
+        providerResponse: { referenceNo: "INQ-A", beneficiaryAccountName: "B" },
+      };
+    });
+    (sac.transferPayment as jest.Mock).mockResolvedValue({ referenceNo: "DOKU-A", rawResponse: {} });
+    const inq = await service.transferInquiry("alice@pid", { type: "DOKU_SUB_ACCOUNT", amountIdr: "40000", beneficiaryPid: "bob@pid" });
+    await service.transferConfirm("alice@pid", inq.id, { beneficiaryAccountName: "bob@pid" });
+    r = replayOf();
+    expect(r.errors).toEqual([]);
+    expect(r.balances.get("alice@pid")).toBe(60_000n);
+    expect(r.balances.get("bob@pid")).toBe(38_000n);
+
+    // Stage 3: duplicate issuance attempt changes nothing (idempotent).
+    const legsBefore = created.filter((c) => String(c.kind).startsWith("points_")).length;
+    await (service as any).issuePointsForDeposit("d1", "e2e-dup");
+    expect(created.filter((c) => String(c.kind).startsWith("points_")).length).toBe(legsBefore);
+
+    // Stage 4: Bob redeems 38k to a bank account (his fiat is 0 — pool covers).
+    // replayedBalance reads the journal via findMany — serve written rows.
+    (prisma.fiatProviderTransaction.findMany as jest.Mock).mockImplementation(async (args: any) => {
+      if (args?.where?.pid) return created.filter((c: any) => c.pid === args.where.pid);
+      return [];
+    });
+    (sac.debit as jest.Mock).mockResolvedValue({ referenceNo: "DB-RD", latestTransactionStatus: "00", rawResponse: {} });
+    const redeemView = await service.requestRedemption("bob@pid", {
+      amountIdr: "38000", bankCode: "014", bankAccountNumber: "8880001", bankAccountName: "Bob",
+    });
+    expect(redeemView.providerStatus).toBe("settled");
+    r = replayOf();
+    expect(r.errors).toEqual([]);
+    expect(r.balances.get("bob@pid") ?? 0n).toBe(0n); // burned exactly once
+    expect(totalOutstanding(r)).toBe(105_000n - 38_000n);
+    // Payout went from the pool with the deterministic ref, once.
+    expect(sac.transferPayment).toHaveBeenCalledWith(expect.objectContaining({
+      type: "BANK_ACCOUNT", amountIdr: 38000n, beneficiaryAccountNumber: "8880001",
+    }));
+    const payoutCalls = (sac.transferPayment as jest.Mock).mock.calls.filter((c) => c[0]?.type === "BANK_ACCOUNT");
+    expect(payoutCalls.length).toBe(1);
+    expect(payoutCalls[0][0].partnerReferenceNo).toMatch(/-PAY$/);
+  });
+
+  it("concurrent duplicate issuance collapses to a single DOKU top-up", async () => {
+    const { service, prisma, sac } = setup({
+      DOKU_SYSTEM_POINT_ACCOUNT_NO: "9900000001",
+      DOKU_TREASURY_POINT_ACCOUNT_NO: "2299999999",
+    });
+    const settled = {
+      id: "d1", pid: "alice@pid", kind: "deposit", providerRef: "DP1", providerStatus: "settled",
+      amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, createdAt: new Date(),
+      ledgerStatus: "pending", settlementStatus: "pending",
+      counterparty: { channel: "checkout", feeQuote: "5000", netQuote: "100000", feePolicyVersion: 3 },
+      providerResponse: {},
+    };
+    const legs: any[] = [];
+    // Ledger-aware mocks: re-reads observe completed issuance (like real DB).
+    prisma.fiatProviderTransaction.findUnique.mockImplementation(async (args: any) => {
+      if (!args?.where?.id) return null;
+      const done = legs.some((l) => l.providerRef === "DP1-PTS" && l.__settled);
+      return { ...settled, ledgerStatus: done ? "issued" : "pending" };
+    });
+    (prisma.fiatProviderTransaction.findFirst as jest.Mock).mockImplementation(async (args: any) => {
+      if (args?.where?.kind === "points_issue" || args?.where?.kind === "points_fee") {
+        return legs.find((l) => l.kind === args.where.kind && l.providerRef === args.where.providerRef) ?? null;
+      }
+      return null;
+    });
+    prisma.fiatProviderTransaction.create.mockImplementation(async (args: any) => {
+      const row = { ...args.data };
+      legs.push(row);
+      return { id: `leg${legs.length}`, providerStatus: "created", createdAt: new Date(), ...args.data };
+    });
+    prisma.fiatProviderTransaction.update.mockImplementation(async (args: any) => {
+      // Write-through: settled legs stay settled for the racing caller.
+      if (args?.data?.providerStatus === "settled") {
+        legs.forEach((l) => { l.__settled = true; });
+      }
+      return { id: "x", ...args.data };
+    });
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    (sac.txStatus as jest.Mock).mockResolvedValue({
+      partnerReferenceNo: "x", latestTransactionStatus: "00",
+      amount: { value: "105000.00", currency: "IDR" }, rawResponse: {},
+    });
+    await Promise.all([
+      (service as any).issuePointsForDeposit("d1", "race-a"),
+      (service as any).issuePointsForDeposit("d1", "race-b"),
+    ]);
+    const userLegs = (sac.transferPayment as jest.Mock).mock.calls.filter((c) => c[0]?.partnerReferenceNo === "DP1-PTS");
+    expect(userLegs.length).toBe(1);
+  });
+
+  it("failed payout resumes under the same ref via sweep (no re-burn)", async () => {
+    const { service, prisma, sac } = setup({
+      DOKU_TREASURY_ACCOUNT_NO: "2010000001",
+      PID_REDEMPTION_ENABLED: "true",
+    });
+    const { ProviderError } = await import("@peridotvault/pid-payments");
+    const burnedParent = {
+      id: "rd1", pid: "bob@pid", kind: "redemption", providerRef: "RD-1", providerStatus: "processing",
+      amountIdr: 38000n, feeIdr: null, netIdr: 38000n, createdAt: new Date(),
+      ledgerStatus: "burned",
+      counterparty: { bankCode: "014", bankAccountNumber: "8880001", bankAccountName: "Bob", channel: "BI_FAST" },
+      providerResponse: {},
+    };
+    prisma.fiatProviderAccount.count.mockResolvedValue(1);
+    prisma.fiatProviderAccount.findMany.mockResolvedValue([{ pid: "bob@pid" }]);
+    prisma.fiatProviderAccount.findFirst.mockResolvedValue({ lastBalance: "1000000" });
+    (prisma.fiatProviderTransaction.findMany as jest.Mock).mockImplementation(async (args: any) => {
+      if (args?.where?.kind === "redemption") return [burnedParent];
+      return [];
+    });
+    prisma.fiatProviderTransaction.findUnique.mockImplementation(async (args: any) => {
+      if (args?.where?.id === "rd1") return { ...burnedParent };
+      return null;
+    });
+    prisma.fiatProviderTransaction.findFirst.mockResolvedValue(null);
+    prisma.fiatProviderTransaction.create.mockImplementation(async (args: any) => ({ id: "pay1", providerStatus: "created", createdAt: new Date(), ...args.data }));
+    (sac.transferInquiry as jest.Mock).mockResolvedValue({ referenceNo: "INQ-PAY", beneficiaryAccountName: "Bob", rawResponse: {} });
+    // Persistent gateway failure on sweep 1 (withRetry exhausts), success on sweep 2.
+    (sac.transferPayment as jest.Mock).mockRejectedValue(new ProviderError(502, "gateway down"));
+    (sac.txStatus as jest.Mock).mockResolvedValue({ partnerReferenceNo: "x", latestTransactionStatus: "00", rawResponse: {} });
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    const first = await service.adminSweep({ take: 5 });
+    expect(first.recovery).toMatchObject({ resumed: 0 });
+    (sac.transferPayment as jest.Mock).mockResolvedValue({ referenceNo: "BK-1", rawResponse: {} });
+    const second = await service.adminSweep({ take: 5 });
+    expect(second.recovery).toMatchObject({ resumed: 1 });
+    const pays = (sac.transferPayment as jest.Mock).mock.calls.filter((c) => c[0]?.type === "BANK_ACCOUNT");
+    expect(pays.length).toBe(4); // 3 retried attempts + 1 resume
+    expect(new Set(pays.map((c) => c[0].partnerReferenceNo))).toEqual(new Set(["RD-1-PAY"]));
+  });
+
+  function sweepWorld(opts: {
+    livePoints: string; fiatAvailable: string; journal: any[];
+    pgFees?: Array<{ amountIdr: string }>; legs?: number;
+  }) {
+    const { service, prisma, sac } = setup({ PID_REDEMPTION_ENABLED: "true" });
+    prisma.fiatProviderAccount.count.mockResolvedValue(1);
+    prisma.fiatProviderAccount.findMany.mockResolvedValue([{ pid: "alice@pid" }]);
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    (prisma.fiatProviderTransaction.findMany as jest.Mock).mockImplementation(async (args: any) => {
+      if (args?.where?.kind === "redemption") return [];
+      if (args?.select?.amountIdr && args?.where?.kind === "points_fee") return [];
+      return opts.journal;
+    });
+    (prisma.fiatProviderTransaction.count as jest.Mock).mockResolvedValue(opts.legs ?? opts.journal.length);
+    (sac.balance as jest.Mock).mockResolvedValue({
+      profileId: "PROF1",
+      accounts: [
+        { type: "DOKU_MERCHANT_IDR", currency: "IDR", accountNo: "1140340010", available: opts.fiatAvailable, reserved: "0.00" },
+        { type: "DOKU_MERCHANT_PENDING_IDR", currency: "IDR", accountNo: "1140340011", available: "0.00", reserved: "0.00" },
+        { type: "DOKU_MERCHANT_POINT", currency: "POINT", accountNo: "2211403401", available: opts.livePoints, reserved: "0.00" },
+      ],
+      rawResponse: {},
+    });
+    (sac.history as jest.Mock).mockResolvedValue({
+      items: (opts.pgFees ?? []).map((f, i) => ({
+        mutationType: "CREDIT", transactionType: "SETTLEMENT_FEE", amount: 0,
+        amountIdr: f.amountIdr, currency: "IDR", status: "SUCCESS",
+        partnerReferenceNo: `PG${i}`, referenceNo: `DOKU-PG${i}`,
+      })),
+      rawResponse: {},
+    });
+    return { service, prisma, sac };
+  }
+
+  const OUTSTANDING_JOURNAL = [
+    { kind: "points_issue", pid: "alice@pid", providerRef: "DP1-PTS", providerStatus: "settled", amountIdr: 100000n, direction: "in", entryGroup: "DP1", extinguished: false, counterparty: null, replaySeq: 1n },
+    { kind: "points_fee", pid: "alice@pid", providerRef: "DP1-PTS-FEE", providerStatus: "settled", amountIdr: 5000n, direction: "out", entryGroup: "DP1", extinguished: false, counterparty: { destination: "treasury" }, replaySeq: 2n },
+  ];
+
+  it("aggregate verdict ok when the gap maps exactly to observed PG fees", async () => {
+    // Outstanding 105000 (100k alice + 5k treasury), live alice 100000
+    // (invariant-1 holds), fiat backing 102000, PG observed 3000.
+    const { service } = sweepWorld({ livePoints: "100000.00", fiatAvailable: "102000.00", journal: OUTSTANDING_JOURNAL, pgFees: [{ amountIdr: "3000" }], legs: 2 });
+    const out = await service.adminSweep({ take: 5 });
+    expect(out.aggregate.verdict).toMatch(/^ok:/);
+    expect(out.aggregate.adjustments[0]).toMatchObject({ kind: "pg_observed_settlement_fees", amountIdr: "3000" });
+    expect(out.aggregate.adjustments[1]).toMatchObject({ kind: "platform_reserve", amountIdr: "0" });
+    expect(out.aggregate.adjustments[2]).toMatchObject({ kind: "rounding_allowance", amountIdr: "2", legs: 2 });
+    expect(out.aggregate.unexplainedIdr).toBe("0");
+    expect(out.redemptionHalted).toBe(false);
+  });
+
+  it("aggregate ALERTs and halts on unexplained gap; halt blocks redemption, admin clears", async () => {
+    // Same books, but DOKU shows no PG rows → 3000 unexplained (> Rp1 x 2 legs).
+    const { service, prisma, sac } = sweepWorld({ livePoints: "100000.00", fiatAvailable: "102000.00", journal: OUTSTANDING_JOURNAL, pgFees: [], legs: 2 });
+    const out = await service.adminSweep({ take: 5 });
+    expect(out.aggregate.verdict).toMatch(/^ALERT:/);
+    expect(out.aggregate.unexplainedIdr).toBe("3000");
+    expect(out.redemptionHalted).toBe(true);
+    // Halted redemptions fail fast with 503 even though the flag is on.
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    await expect(service.requestRedemption("alice@pid", {
+      amountIdr: "1000", bankCode: "014", bankAccountNumber: "1", bankAccountName: "A",
+    })).rejects.toMatchObject({ status: 503 });
+    expect(sac.debit).not.toHaveBeenCalled();
+    // Admin clears after review → redemptions flow again (fails later on
+    // balance here, but passes the halt gate).
+    expect(service.setRedemptionHalt(false, "ops reviewed test")).toMatchObject({ halted: false });
+    (prisma.fiatProviderTransaction.findMany as jest.Mock).mockResolvedValue([]);
+    await expect(service.requestRedemption("alice@pid", {
+      amountIdr: "1000", bankCode: "014", bankAccountNumber: "1", bankAccountName: "B",
+    })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("rounding allowance covers Rp1-per-leg representation drift, nothing more", async () => {
+    // Outstanding 105000, PG 3000 observed. Fiat 101998 → gap 3002,
+    // unexplained 2 ≤ 2 legs → ok. Fiat 101997 → unexplained 3 → ALERT.
+    // Live always equals replay (invariant-1 holds throughout).
+    const { service } = sweepWorld({ livePoints: "100000.00", fiatAvailable: "101998.00", journal: OUTSTANDING_JOURNAL, pgFees: [{ amountIdr: "3000" }], legs: 2 });
+    const out = await service.adminSweep({ take: 5 });
+    expect(out.aggregate.verdict).toMatch(/^ok:/);
+    const again = sweepWorld({ livePoints: "100000.00", fiatAvailable: "101997.00", journal: OUTSTANDING_JOURNAL, pgFees: [{ amountIdr: "3000" }], legs: 2 });
+    const out2 = await again.service.adminSweep({ take: 5 });
+    expect(out2.aggregate.verdict).toMatch(/^ALERT:/);
+    expect(out2.aggregate.unexplainedIdr).toBe("3");
+  });
+
+  it("clawback debits issued points and marks the parent clawed_back when whole", async () => {    const { service, prisma, sac } = setup({ DOKU_SYSTEM_POINT_ACCOUNT_NO: "9900000001" });
     const parent = {
       id: "d1", pid: "ifal@pid", kind: "deposit", providerRef: "DP1", providerStatus: "settled",
       amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, createdAt: new Date(),
