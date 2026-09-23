@@ -1,6 +1,8 @@
 # PRD v6 — Fiat Money Layer (DOKU ledger-first)
 
-Status: **accounting foundation implemented; financial rail gated on DOKU.**
+Status: **accounting foundation (done); UX minus Withdraw (done); financial
+rail + enablement open.** Withdraw scope is `(skipped)` — see §5, §6 row 9–10,
+§10 step 4. v6 keeps its filename until all §6 boxes tick.
 Parent: PRD_v5 (on-chain smart wallet) covers chain balances; this PRD covers
 everything fiat: deposits, spendable balance, transfers, reconciliation, and
 (future) withdrawals. One PeridotID → one fiat identity → one Saldo.
@@ -26,7 +28,7 @@ from unofficial sources.
 
 - **User** — holds one Saldo. "I top up Rp100.000 and see Rp100.000 usable
   in seconds." "I send Rp40.000 to `rani@pid` and see my new balance plus a
-  receipt." "I withdraw to my bank and see Processing → Completed."
+  receipt." (Withdraw story `(skipped)` — no Withdraw surface exists.)
 - **Treasury (platform)** — earns the flat 5% fee as redeemable points;
   funds bank payouts from pooled fiat liquidity. Never a user-visible actor.
 - **Ops/admin** — provisions hierarchy once, runs sweeps/backfills,
@@ -41,7 +43,13 @@ balance simulation.
 
 ## 3. Core model
 
-### 3.1 Hierarchy (no product parents)
+> Status of this section: **(done)** — hierarchy wiring, money rules,
+> journal/replay/invariants, and safety rules are implemented in
+> `apps/api/src/fiat/` + `packages/payments`, covered by 318 jest tests
+> and the issuance CI guard. Treasury-payout execution is `(skipped)` —
+> designed in §4, unbuilt.
+
+### 3.1 Hierarchy (no product parents) — (done)
 
 ```
 Peridot ID (Main Merchant, root)
@@ -56,7 +64,7 @@ dashboard (`DOKU_USERS_PARENT_PROFILE_ID`, `DOKU_TREASURY_PROFILE_ID` /
 `DOKU_TREASURY_ACCOUNT_NO`). `registerAccount` creates each PID account as
 a child of `Users`. Never hierarchy-by-product.
 
-### 3.2 Money
+### 3.2 Money — (done) except Treasury payout execution (skipped, §4)
 
 - **Spendable Saldo = live `DOKU_MERCHANT_POINT` available, 1:1 IDR peg.**
 - Checkout deposits are **NET-in** (min Rp100.000 NET, API-enforced):
@@ -83,7 +91,7 @@ a child of `Users`. Never hierarchy-by-product.
 - Every movement carries source, destination, amount, currency, DOKU ref,
   status, timestamp, and idempotency key in the journal.
 
-### 3.3 Double-entry PTS journal & invariants
+### 3.3 Double-entry PTS journal & invariants — (done)
 
 Every PTS movement is a balanced leg set sharing an `entryGroup`, folded in
 `replaySeq` order by the pure `replayJournal`
@@ -116,7 +124,7 @@ Every PTS movement is a balanced leg set sharing an `entryGroup`, folded in
 - Same-PID movements serialize via in-process pid locks (sender+recipient
   sorted for P2P); DOKU remains the final arbiter; every retry reuses refs.
 
-### 3.4 Safety rules (binding on implementation)
+### 3.4 Safety rules (binding on implementation) — (done, CI-enforced)
 
 - Row-before-call with unique `providerRef`; inquiry and payment share one
   `partnerReferenceNo`; register inserts `creating` first (no blind retry).
@@ -138,7 +146,7 @@ Every PTS movement is a balanced leg set sharing an `entryGroup`, folded in
   `DOKU_CHECKOUT_NOTIFY_URL`, `PID_REDEMPTION_ENABLED=false`,
   `PID_REDEMPTION_RESERVE_IDR=0`).
 
-## 4. Core flows
+## 4. Core flows — (done) except live payout execution (skipped)
 
 - **Deposit:** login → `POST accounts` → `POST deposits/checkout {net ≥
   100000}` → DOKU-hosted page (charged gross) → paid webhook → persist →
@@ -148,45 +156,53 @@ Every PTS movement is a balanced leg set sharing an `entryGroup`, folded in
   `/confirm` → NET points P2P + FEE to Treasury + recipient mirror →
   receipt. Serialized per sender+recipient.
 - **Settlement:** history legs flip `settlementStatus`; create nothing.
-- **Redemption (flagged off):** replay identifies claimant → `redemption`
-  parent (`requested`) → `points_redeem` burn (`{RD}-BURN`, extinguished
-  only when settled) → pool liquidity (claimant-local first, then journaled
-  `fiat_consolidation`) → `{RD}-PAY` `BANK_ACCOUNT` payout → `completed`.
-  Burn-without-payout resumes same-ref via sweep; requested-without-burn
-  older than 15 min expires and releases.
+- **Redemption (code done, live payout skipped):** replay identifies
+  claimant → `redemption` parent (`requested`) → `points_redeem` burn
+  (`{RD}-BURN`, extinguished only when settled) → pool liquidity
+  (claimant-local first, then journaled `fiat_consolidation`) → `{RD}-PAY`
+  `BANK_ACCOUNT` payout → `completed`. Saga implemented behind
+  `PID_REDEMPTION_ENABLED=false`; live bank payout and Withdraw UI are
+  `(skipped)` until the rail is proven. Burn-without-payout resumes
+  same-ref via sweep; requested-without-burn older than 15 min expires
+  and releases.
 
-## 5. UX specification (binding)
+## 5. UX specification (binding) — Balance/Deposit/Transfer (done); Withdraw (skipped)
 
-User screens show **Balance, Deposit, Transfer, Withdraw** only, with states
-**Processing / Completed / Failed**. Banned from user UI: PTS, DOKU ledger,
-pending, settlement, backing, SYSTEM_POINT, reconciliation, split,
-mirror, clawback, and any Sub-Account terminology. All of those live in
-admin/debug interfaces only. No Withdraw surface exists while
-`PID_REDEMPTION_ENABLED=false`; the minimal Withdraw flow (available
-Balance, bank destination, amount, statuses) ships at enablement.
-Bank-account management, limits education, and advanced UX are a later
-phase after the rail is proven.
+User screens show **Balance, Deposit, Transfer** only (Withdraw joins at
+enablement), with states **Processing / Completed / Failed**. Banned from
+user UI: PTS, DOKU ledger, pending, settlement, backing, SYSTEM_POINT,
+reconciliation, split, mirror, clawback, and any Sub-Account terminology.
+All of those live in admin/debug interfaces only. No Withdraw surface
+exists while `PID_REDEMPTION_ENABLED=false`; the minimal Withdraw flow
+(available Balance, bank destination, amount, statuses) ships at
+enablement. Bank-account management, limits education, and advanced UX are
+a later phase after the rail is proven.
 
 ## 6. Requirements (acceptance — all boxes ticked with evidence)
 
+Live-verification rows stay `☐` until proven against real DOKU behavior
+(mocks never tick a box). Rows whose logic is fully implemented and unit
+tested carry a `(code done)` tag — the remaining work on those rows is live
+proof only.
+
 | # | Criterion | How proven | Status |
 |---|---|---|---|
-| 1 | No POINT↔journal discrepancy | Invariant-1 exact, every lifecycle stage, sandbox entities | ☐ |
-| 2 | No double issuance | Duplicate webhook + duplicate issue runs; ref-uniqueness audit | ☐ |
-| 3 | No double fee | Treasury legs reconciled per group `G == N + F`; no fiat split active | ☐ |
-| 4 | No settlement-created PTS | Settlement-history replay produces zero new legs | ☐ |
-| 5 | No double burn | Burn-ref uniqueness; extinguished-once assertion | ☐ |
-| 6 | No payout without extinguished liability | Payout leg requires settled burn row (negative test included) | ☐ |
-| 7 | No stranded extinguished liability | Every burn resolves to payout-completed or recoverable sweep state; sweep report has zero criticals | ☐ |
-| 8 | Aggregate backing reconciles | Invariant-2 formula; every nonzero gap mapped to the adjustment ledger | ☐ |
-| 9 | David redeems with zero local fiat | Bank credited exact, burn-once, A-fiat untouched, later settlement creates nothing | ☐ |
-| 10 | Failed payout / crash recovery | Kill between burn and payout → sweep completes same-ref payout; requested-without-burn expires and releases | ☐ |
-| 11 | Refund/chargeback after issue | Clawback legs; outstanding and backing move together | ☐ |
-| 12 | UI exposes only Balance/Deposit/Transfer/Withdraw | Review per §5 | ☐ |
+| 1 | No POINT↔journal discrepancy | Invariant-1 exact, every lifecycle stage, sandbox entities | ☐ (code done) |
+| 2 | No double issuance | Duplicate webhook + duplicate issue runs; ref-uniqueness audit | ☐ (code done) |
+| 3 | No double fee | Treasury legs reconciled per group `G == N + F`; no fiat split active | ☐ (code done) |
+| 4 | No settlement-created PTS | Settlement-history replay produces zero new legs | ☐ (code done) |
+| 5 | No double burn | Burn-ref uniqueness; extinguished-once assertion | ☐ (code done) |
+| 6 | No payout without extinguished liability | Payout leg requires settled burn row (negative test included) | ☐ (code done) |
+| 7 | No stranded extinguished liability | Every burn resolves to payout-completed or recoverable sweep state; sweep report has zero criticals | ☐ (code done) |
+| 8 | Aggregate backing reconciles | Invariant-2 formula; every nonzero gap mapped to the adjustment ledger | ☐ (code done) |
+| 9 | David redeems with zero local fiat | Bank credited exact, burn-once, A-fiat untouched, later settlement creates nothing | ☐ (code done, live payout skipped) |
+| 10 | Failed payout / crash recovery | Kill between burn and payout → sweep completes same-ref payout; requested-without-burn expires and releases | ☐ (code done, live payout skipped) |
+| 11 | Refund/chargeback after issue | Clawback legs; outstanding and backing move together | ☐ (code done) |
+| 12 | UI exposes only Balance/Deposit/Transfer | Review per §5 (Withdraw out of scope — skipped) | (done — rendered copy audited 2026-09-23; bank-standard terms like VA/IDR/fee retained, ledger mechanics absent) |
 
 Mocked suites are regression gates, never acceptance evidence.
 
-## 7. DOKU dependency (forwardable — send as-is to DOKU)
+## 7. DOKU dependency (forwardable — send as-is to DOKU) — (drafted, NOT SENT)
 
 Status: **NOT SENT.** Nothing proceeds past corroborated-read behavior
 until every item is answered AND verified live. Code gates on the
@@ -229,7 +245,7 @@ capability being activated and verified, never on this section being sent.
   report quoting actual behavior. Sandbox-only, marked entities, never mixed
   with real users.
 
-## 8. Verification matrix (real calls, no mocks — strict order)
+## 8. Verification matrix (real calls, no mocks — strict order) — (not started)
 
 Preconditions: §7 answered; `DOKU_SYSTEM_POINT_ACCOUNT_NO` (+ Treasury/pool
 IDs) in **sandbox** env only; entities marked `sbx-verify-*`; journal
@@ -290,9 +306,9 @@ Results log (append dated entries):
     bank codes (Kirim docs), min/max, fees, callbacks, and pool/JIT
     consolidation acceptance unconfirmed. Redemption stays flagged until
     §8 passes plus a zero-discrepancy recon.
-1. **Fiat split rule retired** — fees move as Treasury POINTS; no fiat
-    split on payments (double charge). `admin/split-rules` passthrough is
-    future-use only; rule list/get/update/delete undocumented.
+1. **Fiat split rule retired** — (done) fees move as Treasury POINTS; no
+    fiat split on payments (double charge). `admin/split-rules` passthrough
+    is future-use only; rule list/get/update/delete undocumented.
 2. **Checkout `additional_info.account` casing** — camelCase in SAC guide
     vs snake_case in Checkout schema; implemented snake_case
     (`CHECKOUT_SAC_ACCOUNT_KEY`); sandbox-verify (invalid ids fail silently).
@@ -308,8 +324,8 @@ Results log (append dated entries):
     DOKU confirmation.
 7. **Bank-code list / channel default** — `BI_FAST` default; full list
     behind Kirim docs link.
-8. **Unified Ledger scope** — `DOKU_NON_FIAT`, P2P+POINT, POINT debit/cancel,
-    `topup/void` implemented. `DOKU_WALLET` out.
+8. **Unified Ledger scope** — (done) `DOKU_NON_FIAT`, P2P+POINT, POINT
+    debit/cancel, `topup/void` implemented. `DOKU_WALLET` out.
 9. **Bank/e-wallet payouts deferred** — `BANK_ACCOUNT`/`DOKU_WALLET` out of
     the transfer enum; legacy payout rows display-only. Re-enable with enum
     values + `beneficiaryBankCode`/`channel` DTO fields + payout UI +
@@ -323,8 +339,8 @@ Results log (append dated entries):
    cycle.
 3. Pool/Treasury/SYSTEM_POINT IDs in deploy env; flip
    `PID_REDEMPTION_ENABLED=true` one environment at a time.
-4. Minimal Withdraw flow per §5; bank-account management, limits education,
-   advanced UX deferred.
+4. Minimal Withdraw flow per §5 — (skipped); bank-account management,
+    limits education, advanced UX deferred with it.
 5. Rollback: flag back (in-flight sagas complete via sweep); any invariant
    breach re-triggers the stop rule.
 

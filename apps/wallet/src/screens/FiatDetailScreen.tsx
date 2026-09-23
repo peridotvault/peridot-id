@@ -93,12 +93,12 @@ export function FiatDetailScreen({ item: initial, onDone }: { item: FiatItem; on
 
       {!incoming && tx.providerStatus === "created" && (
         <View style={s.card}>
-          <Text style={styles.desc}>Transfer inquiry created — confirm it to move the money.</Text>
+          <Text style={styles.desc}>Transfer created — confirm it to move the money.</Text>
         </View>
       )}
       {awaitingPayment && (
         <View style={s.card}>
-          <Text style={styles.desc}>Waiting for payment — complete it on the DOKU page, then come back and check status.</Text>
+          <Text style={styles.desc}>Waiting for payment — complete it, then come back and check status.</Text>
           {tx.paymentUrl && (
             <UIButton
               title="Open DOKU payment page"
@@ -110,7 +110,7 @@ export function FiatDetailScreen({ item: initial, onDone }: { item: FiatItem; on
       )}
       {tx.providerStatus === "processing" && (
         <View style={s.card}>
-          <Text style={styles.desc}>Sent to DOKU — check status until it settles or fails.</Text>
+          <Text style={styles.desc}>Sent — check status until it completes or fails.</Text>
         </View>
       )}
 

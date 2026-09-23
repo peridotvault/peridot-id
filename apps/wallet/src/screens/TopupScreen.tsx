@@ -172,7 +172,7 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
         />
         {pending && (
           <View style={styles.pending}>
-            <Text style={s.hint}>Complete your payment on the DOKU page, then come back — the status updates automatically.</Text>
+            <Text style={s.hint}>Complete your payment, then come back — the status updates automatically.</Text>
             <UIButton title="Open payment page" onPress={() => openUrl(pending.paymentUrl)} />
           </View>
         )}
