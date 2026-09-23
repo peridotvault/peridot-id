@@ -1,4 +1,4 @@
-# PRD_v4.md — Peridot ID Non-Custodial Smart Wallet & Multi-Chain Account Platform
+# PRD_v4(done).md — Peridot ID Non-Custodial Smart Wallet & Multi-Chain Account Platform
 
 > Reading note: the architecture base below still stands, with two supersessions —
 > identities are now user-chosen `<handle>@pid` (not generated), and the `PidAccount`
@@ -1279,7 +1279,7 @@ peridot-id/
 │
 ├── docs/
 │   └── prds/
-│       └── PRD_v4.md
+│       └── PRD_v4(done).md
 └── README.md
 ```
 

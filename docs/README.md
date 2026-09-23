@@ -34,7 +34,7 @@ packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
 
 - [prds/PRD_v5.md](prds/PRD_v5.md) — current product spec (smart wallet)
 - [prds/PRD_v6.md](prds/PRD_v6.md) — fiat money layer (on-chain balances live in v5; fiat lives here)
-- [prds/PRD_v4.md](prds/PRD_v4.md) — architecture base (note: its `PidAccount` model is
+- [prds/PRD_v4(done).md](prds/PRD_v4(done).md) — architecture base (note: its `PidAccount` model is
   superseded (1 identity = 1 personal wallet; see [WHITEPAPER.md §1](../contracts/WHITEPAPER.md)))
 - [ARCHITECTURE.md](ARCHITECTURE.md) — modules and repo layout
 - [TECH_STACK.md](TECH_STACK.md) — NestJS, PostgreSQL, Prisma, JWT, Passport
