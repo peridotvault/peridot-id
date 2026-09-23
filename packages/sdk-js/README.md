@@ -1,8 +1,9 @@
 # `@peridotvault/pid-sdk-js`
 
 The PeridotID browser SDK. A thin, dependency-light `fetch` client that wraps the
-PeridotID API: **auth** (Google + passkey), **identity**, **profile**, and the
-**passkey wallet** (non-custodial Solana smart account).
+PeridotID API: **auth** (Google + passkey), **identity**, **profile**, the
+**passkey wallet** (non-custodial Solana smart account), and **fiat**
+(DOKU-backed IDR sub-accounts: top-up, transfer, balance).
 
 Layering: primitives (hashes, WebAuthn ceremonies, key custody) live in
 `@peridotvault/pid-core`, the chain adapter in `@peridotvault/pid-solana` — this
@@ -50,6 +51,7 @@ const available = await peridot.auth.pidAvailable('ifal'); // { available, pid }
 | Profile | `peridot.profile` | `me()`, `update(input)` |
 | Passkey credentials | `peridot.passkey` | `list()`, `register()`, `revoke(id)` |
 | Wallet | `peridot.wallet` | smart-account balance, history, deposit, withdraw (see `PeridotWallet`) |
+| Fiat | `peridot.fiat` | IDR top-up, P2P transfer, balance, ledger (writes approve via popup, see below) |
 
 EVM permissions (WHITEPAPER.md §10) are not SDK-wrapped yet: use `@peridotvault/pid-evm`
 (payload + calldata builders) with the `v1/permissions` API directly
@@ -92,8 +94,9 @@ const identity = await peridot.auth.exchange(code);
 // identity = { pid, identityId (deprecated shim), profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }
 ```
 
-`returnTo` must be an origin in the API's `CLIENT_REDIRECT_ALLOWLIST` env, otherwise
-the login request is rejected.
+`returnTo` must be an origin in your app's `allowedOrigins` (registered via
+`POST /v1/apps`), otherwise the login request is rejected. (Legacy global
+`CLIENT_REDIRECT_ALLOWLIST` still covers pre-`client_id` integrations.)
 
 ### Third-party apps ("Sign in with PeridotID")
 
@@ -115,9 +118,10 @@ for sign-in, `peridot.auth.exchange(code)` for the identity (see
 ## Popup flow (third-party origins)
 
 Trust-critical actions — connect, passkey sign-in/registration, `withdraw`,
-`execute`, `activate`, `rotate`, `topup` — never run in the developer's DOM.
-With `popupBaseUrl` set (and no inline `passkeySigner`), they open a popup on
-the PeridotID origin, where the user approves with the address bar visible:
+`execute`, `activate`, `rotate`, `topup`, fiat top-up and P2P transfer —
+never run in the developer's DOM. With `popupBaseUrl` set (and no inline
+`passkeySigner`), they open a popup on the PeridotID origin, where the user
+approves with the address bar visible:
 
 ```ts
 const peridot = Peridot({
@@ -128,11 +132,34 @@ const peridot = Peridot({
 
 await peridot.wallet.withdraw({ amount: '5000000', asset: 'SOL', to: '...' });
 // ^ opens the popup; resolves with { signature, … } after user approval.
+
+// Fiat: the popup shows server-quoted amounts and the requesting origin.
+// Top-up navigates the popup itself to the DOKU payment page on Approve.
+const deposit = await peridot.fiat.checkoutDeposit('100000'); // { paymentUrl, grossIdr, feeIdr, netIdr, … }
+const tx = await peridot.fiat.transferViaPopup({ type: 'DOKU_SUB_ACCOUNT', amountIdr: '40000', beneficiaryPid: 'rani@pid' });
 ```
 
+Split inquiry/confirm (`transferInquiry`/`transferConfirm`/`retryTransfer`)
+are first-party inline only — in popup mode they throw and direct you to
+`transferViaPopup()`, the single approved ceremony (inquiry runs server-side
+on the host, so the summary can never show a forged recipient or amount).
+
 Read-only calls (`getBalance()`, `tokens()`, `history()`, `activity()`, `me()`,
-`activation()`) always run inline — there is nothing to exploit there.
-`openPeridotPopup` / `openLoginPopup` are exported for custom flows.
+`activation()`, fiat `balance()`/`history()`/`ledger()`) always run inline —
+there is nothing to exploit there. `openPeridotPopup` / `openLoginPopup` are
+exported for custom flows.
+
+A minimal third-party sample lives at `apps/web/app/workspace/demo`
+(behaves like an external dapp: popup only, no session).
+
+## Error contract
+
+- Fiat methods **throw** `Error` (message = server message or fallback).
+- Auth/wallet reads return `T | ApiError` unions — check with `"statusCode" in res`
+  (legacy-stable; unification is roadmap, not 1.0 scope).
+- Popup writes throw (`PopupBlockedError`, `PopupClosedError`, access-denied
+  as plain `Error`). A closed or timed-out popup never resolves — treat it
+  as rejected and let the user retry.
 
 ## Low-level / server-side helpers
 
@@ -162,4 +189,5 @@ entry point.
 pnpm --filter @peridotvault/pid-sdk-js publish --access public --no-git-checks
 ```
 
-Publish **last** — depends on `pid-types` and `pid-solana`.
+Publish **last** — depends on `pid-types`, `pid-solana` and `pid-payments`.
+See CHANGELOG.md for release notes (1.0.0 is the first public major).

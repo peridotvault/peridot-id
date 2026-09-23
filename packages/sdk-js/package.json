@@ -1,6 +1,6 @@
 {
   "name": "@peridotvault/pid-sdk-js",
-  "version": "0.1.8",
+  "version": "1.0.0",
   "description": "The PeridotID browser SDK — auth (Google + passkey), identity, profile, and the passkey wallet (non-custodial Solana smart account).",
   "license": "MIT",
   "main": "./dist/cjs/index.js",
@@ -16,6 +16,7 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "sideEffects": false,

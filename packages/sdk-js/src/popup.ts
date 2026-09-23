@@ -257,10 +257,10 @@ export async function awaitPopupRequest(targetOrigin: string, timeoutMs = 30_000
   });
 }
 
-/** Hosted side: deliver the result to the opener and close. */
-export function postPopupResult(targetOrigin: string, result: PopupResult): void {
+/** Hosted side: deliver the result to the opener and close (unless keepOpen). */
+export function postPopupResult(targetOrigin: string, result: PopupResult, opts?: { keepOpen?: boolean }): void {
   requireBrowser();
   if (!window.opener) return;
   window.opener.postMessage({ type: POPUP_RESULT, ...result }, targetOrigin);
-  window.close();
+  if (!opts?.keepOpen) window.close();
 }

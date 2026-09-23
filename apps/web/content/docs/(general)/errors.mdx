@@ -33,6 +33,7 @@ strings:
 | `302` | Redirect (Google OAuth flow) |
 | `400` | Validation error — one or more fields are invalid |
 | `401` | Missing, expired, or invalid access/refresh token |
+| `403` | Authenticated but forbidden — e.g. withdrawals disabled, admin-only route, revoked grant |
 | `404` | Identity, profile, or wallet does not exist |
 | `409` | Conflict — e.g. email already associated with another account, PID already taken, or credential already linked |
 | `410` | Gone — claim ticket expired; sign in again for a fresh one |
@@ -54,7 +55,26 @@ Auth endpoints are rate limited to protect against brute force:
 | `POST /v1/auth/refresh` | 10 requests / minute |
 | `POST /v1/auth/login` | 20 requests / minute |
 | `POST /v1/auth/logout` | 20 requests / minute |
+| `POST /v1/auth/exchange` | 20 requests / minute |
+| `POST /v1/auth/authorize` | 20 requests / minute |
+| `POST /v1/apps` | 10 requests / minute |
+| `GET /v1/apps` | 30 requests / minute |
+| `PATCH /v1/apps/:id` | 20 requests / minute |
+| `POST /v1/apps/:id/secret` | 5 requests / minute |
 | `GET /v1/auth/google`, `/v1/auth/google/callback` | 100 requests / minute |
 | `POST /v1/wallet` | 10 requests / minute |
 
 Exceeding a limit returns `429`. Clients should back off and retry.
+
+## SDK popup errors
+
+Trust-critical SDK calls in popup mode throw instead of returning unions:
+
+| Error | Meaning |
+|---|---|
+| `PopupBlockedError` | Browser blocked the popup — ask the user to allow popups, then retry |
+| `PopupClosedError` | User closed the window, or it timed out (login 5 min, approval 2 min) |
+| `PopupUnavailableError` | No `popupBaseUrl` set, or not running in a browser |
+| `Error("…rejected…")` | User pressed Deny, or the host rejected a malformed/tampered request |
+
+A closed or timed-out popup never resolves — treat it as rejected.

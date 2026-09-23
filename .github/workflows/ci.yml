@@ -61,6 +61,23 @@ jobs:
             exit 1
           fi
 
+      - name: Fiat popup approval guard
+        run: |
+          # Every third-party fiat write ceremony must exist on BOTH sides:
+          # the SDK delegation (fiat-client routes viaPopup) and the host
+          # approval screen (server-quoted summary + Approve/Deny). A dangling
+          # action string means approvals silently never happen.
+          for action in fiat-checkout fiat-transfer; do
+            if ! rg -q "viaPopup.*\"$action\"" packages/sdk-js/src/fiat/fiat-client.ts; then
+              echo "::error::SDK missing viaPopup delegation for $action"
+              exit 1
+            fi
+            if ! rg -q "\"$action\"" apps/wallet/src/screens/ApproveScreen.tsx; then
+              echo "::error::ApproveScreen missing handler for $action"
+              exit 1
+            fi
+          done
+
       - name: Import boundaries guard
         run: |
           # ADR 007 §8: only pid-core (primitives) and pid-solana (chain adapter) may

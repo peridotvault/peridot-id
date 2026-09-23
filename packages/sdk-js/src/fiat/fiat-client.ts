@@ -19,6 +19,10 @@ export type { CheckoutDepositView, DepositChannelView, FeePolicyView, SubAccount
 interface ApiLike {
   get<T>(path: string): Promise<{ ok: boolean; data: T | ApiError }>;
   post<T>(path: string, body?: unknown): Promise<{ ok: boolean; data: T | ApiError }>;
+  /** Present on PeridotClient: run a trust-critical action in the PeridotID popup. */
+  popupRequest?<T>(action: string, payload?: unknown): Promise<T>;
+  /** Present on PeridotClient: popup host origin, set in third-party mode only. */
+  popupBaseUrl?: string;
 }
 
 function unwrap<T>(res: { ok: boolean; data: T | ApiError }, fallback: string): T {
@@ -34,8 +38,44 @@ const BASE = "/v1/fiat/sub-accounts";
 /** Bank/e-wallet payouts deferred — internal transfers only for now. */
 export type SacTransferType = "DOKU_SUB_ACCOUNT";
 
+/** Full P2P transfer in one popup ceremony (third-party mode). */
+export interface FiatTransferInput {
+  type: SacTransferType;
+  /** Gross points to send (fee quoted server-side, net goes to recipient). */
+  amountIdr: string;
+  /** Recipient identity, e.g. rani@pid (resolved server-side). */
+  beneficiaryPid: string;
+  remark?: string;
+}
+
 export class PeridotFiat {
   constructor(private readonly api: ApiLike) {}
+
+  /**
+   * Third-party mode: popupBaseUrl set (no first-party session/signer).
+   * Write ceremonies delegate to the PeridotID popup; reads stay direct.
+   * Fail-secure default — unknown mode goes through the popup, never silent.
+   */
+  private get delegated(): boolean {
+    return this.api.popupBaseUrl != null && this.api.popupRequest != null;
+  }
+
+  /** Delegate one trust-critical fiat action to the PeridotID popup. */
+  private viaPopup<T>(action: string, payload?: unknown): Promise<T> {
+    if (!this.api.popupRequest) {
+      throw new Error(
+        `Cannot ${action} here — pass popupBaseUrl to approve in the PeridotID popup (third-party origin).`,
+      );
+    }
+    return this.api.popupRequest<T>(action, payload);
+  }
+
+  /** Inline-only guard: split ceremonies have no popup equivalent. */
+  private inlineOnly(method: string): void {
+    if (this.delegated) {
+      throw new Error(`${method} is first-party inline only — in popup mode use transferViaPopup() for the full approved ceremony.`);
+    }
+  }
 
   /** Register (or resume) the caller's Sub-Account. Name + email only. */
   async createAccount(input: { name: string; email: string }): Promise<SubAccountView> {
@@ -61,8 +101,14 @@ export class PeridotFiat {
    * e-money, cards) routed to the caller's sub-account. netAmountIdr is
    * the NET credited to the user (minimum Rp100.000); fee/gross-payable
    * quote returned upfront.
+   *
+   * Third-party mode opens the PeridotID popup (`fiat-checkout`): the user
+   * reviews the server-quoted amounts and approves; the popup navigates
+   * itself to the DOKU payment page (popup blockers can't intercept a
+   * same-window navigation from the Approve click).
    */
   async checkoutDeposit(netAmountIdr: string): Promise<CheckoutDepositView> {
+    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", { netAmountIdr });
     return unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, { netAmountIdr }), "Checkout deposit failed");
   }
 
@@ -97,15 +143,29 @@ export class PeridotFiat {
     beneficiaryPid: string;
     remark?: string;
   }): Promise<SubTransferInquiryView> {
+    this.inlineOnly("transferInquiry");
     return unwrap(await this.api.post<SubTransferInquiryView>(`${BASE}/transfers/inquiry`, input), "Account validation failed");
   }
 
-  /** Transfer step 2: executes the transfer bound to the inquiry. */
+  /** Transfer step 2: executes the transfer bound to the inquiry. First-party inline only. */
   async transferConfirm(id: string, input: { beneficiaryAccountName: string; expectedName?: string }): Promise<SubTxView> {
+    this.inlineOnly("transferConfirm");
     return unwrap(await this.api.post<SubTxView>(`${BASE}/transfers/${id}/confirm`, input), "Transfer failed");
   }
 
+  /**
+   * Full P2P transfer as one popup ceremony (third-party mode only): the
+   * host runs the inquiry, shows the server-verified recipient + amounts,
+   * and confirms on Approve. Returns the settled transfer view.
+   */
+  async transferViaPopup(input: FiatTransferInput): Promise<SubTxView> {
+    return this.viaPopup<SubTxView>("fiat-transfer", input);
+  }
+
   async retryTransfer(id: string): Promise<SubTxView> {
+    if (this.delegated) {
+      throw new Error("retryTransfer is first-party inline only — in popup mode run transferViaPopup() again for a fresh approved ceremony.");
+    }
     return unwrap(await this.api.post<SubTxView>(`${BASE}/transfers/${id}/retry`), "Retry failed");
   }
 
@@ -145,42 +205,8 @@ export class PeridotFiat {
     return unwrap(await this.api.post<SubTxView>(`${BASE}/transactions/${id}/cancel`), "Cancel failed");
   }
 
-  /** Programmatic deduction from the sub-account (fee / purchase). */
-  async debit(amountIdr: string, description?: string): Promise<SubTxView> {
-    return unwrap(await this.api.post<SubTxView>(`${BASE}/debits`, { amountIdr, description }), "Debit failed");
-  }
-
-  async debitCancel(id: string, refundAmountIdr: string, reason?: string): Promise<SubTxView> {
-    return unwrap(await this.api.post<SubTxView>(`${BASE}/debits/${id}/cancel`, { refundAmountIdr, reason }), "Debit cancel failed");
-  }
-
-  /** Admin: sweep outstanding issuance + backing report (cron-driven). */
-  async adminSweep(input: { take?: number; skip?: number }): Promise<unknown> {
-    return unwrap(await this.api.post<unknown>(`${BASE}/admin/sweep`, input), "Sweep failed");
-  }
-
-  /** Admin: backfill makeup points for settled deposits missing issuance. */
-  async adminBackfill(input: { pid?: string; take?: number }): Promise<unknown> {
-    return unwrap(await this.api.post<unknown>(`${BASE}/admin/backfill`, input), "Backfill failed");
-  }
-
-  /** Admin: claw back issued points after a failed/charged-back payment. */
-  async adminClawback(input: { transactionId: string; amountIdr: string; reason?: string }): Promise<SubTxView> {
-    return unwrap(await this.api.post<SubTxView>(`${BASE}/admin/clawback`, input), "Clawback failed");
-  }
-
-  /** Admin: reconstruct historical recipient mirrors (authoritative-or-review). */
-  async adminBackfillMirrors(input: { take?: number }): Promise<unknown> {
-    return unwrap(await this.api.post<unknown>(`${BASE}/admin/backfill-mirrors`, input), "Mirror backfill failed");
-  }
-
-  /** Admin: immutable journal export + replay verdict for one PID. */
-  async adminJournal(pid: string): Promise<unknown> {
-    return unwrap(await this.api.get<unknown>(`${BASE}/admin/journal/${pid}`), "Journal export failed");
-  }
-
-  /** Admin: platform-wide replay projection (bounded). */
-  async adminReplay(): Promise<unknown> {
-    return unwrap(await this.api.get<unknown>(`${BASE}/admin/replay`), "Replay failed");
-  }
+  // NOTE (1.0): programmatic debit, admin ops (sweep/backfill/clawback/
+  // mirrors/journal/replay) and reconcile/drift were removed from the browser
+  // client — no in-repo consumer, server role-gated, raw fetch suffices.
+  // PeridotAdmin (chains dashboard) stays: first-party web workspace use only.
 }
