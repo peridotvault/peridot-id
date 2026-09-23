@@ -59,6 +59,10 @@ export function HomeScreen({
   // (web3-only user) or a real zero from the API.
   const [idrBalance, setIdrBalance] = useState<string | null>(null);
   const [idrError, setIdrError] = useState<string | null>(null);
+  // Fiat still arriving at DOKU (Pending), shown read-only so a fresh
+  // deposit doesn't look lost. Never spendable from here — Saldo above is
+  // the only usable number; null hides the line entirely.
+  const [idrPending, setIdrPending] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
   const [nfts, setNfts] = useState<NftItem[]>([]);
   const [assetTab, setAssetTab] = useState<"tokens" | "items">("tokens");
@@ -106,28 +110,36 @@ export function HomeScreen({
         setNfts([]);
       }
       try {
-        // Saldo = live DOKU Unified Ledger (POINT) balance. Fiat/pending
-        // details stay backend-only; this screen never shows them.
-        setIdrBalance((await peridot.fiat.balance()).pointsAvailableIdr);
+        // Saldo = live DOKU Unified Ledger (POINT) balance. Pending fiat is
+        // shown read-only below so arriving deposits are visible; it is
+        // never spendable and this screen never shows ledger internals.
+        const bal = await peridot.fiat.balance();
+        setIdrBalance(bal.pointsAvailableIdr);
+        setIdrPending(bal.pendingIdr !== "0" ? bal.pendingIdr : null);
         setIdrError(null);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (/not registered/i.test(msg)) {
           // No sub-account yet (web3-only user) — IDR is simply 0, not an error.
           setIdrBalance("0");
+          setIdrPending(null);
           setIdrError(null);
         } else if (/is creating|is failed/i.test(msg)) {
           // Dead creating/failed row (missed provisioning) — heal once, then read.
           try {
             await ensureSubAccount(peridot);
-            setIdrBalance((await peridot.fiat.balance()).pointsAvailableIdr);
+            const bal = await peridot.fiat.balance();
+            setIdrBalance(bal.pointsAvailableIdr);
+            setIdrPending(bal.pendingIdr !== "0" ? bal.pendingIdr : null);
             setIdrError(null);
           } catch (e2) {
             setIdrBalance(null);
+            setIdrPending(null);
             setIdrError(e2 instanceof Error ? e2.message : String(e2));
           }
         } else {
           setIdrBalance(null);
+          setIdrPending(null);
           // Distinct causes, distinct guidance: 401 = session gone, 404 = stale
           // API without sub-account routes, anything else = DOKU/gateway verbatim.
           setIdrError(
@@ -237,6 +249,9 @@ export function HomeScreen({
           </>
         ) : (
           <Text style={styles.fiatAmount}>{busy && fiatAmount === null ? "…" : (fiatAmount ?? "—")}</Text>
+        )}
+        {!idrError && idrPending && (
+          <Text style={s.hint}>Arriving: Rp{Number(idrPending).toLocaleString("id-ID")} — added to Saldo once your payment is confirmed.</Text>
         )}
       </View>
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { ArrowLeft } from "../icons";
 import type { CheckoutDepositView, FeePolicyView } from "@peridotvault/pid-sdk-js";
@@ -39,10 +39,11 @@ function previewFee(net: bigint, policy: FeePolicyView): bigint {
  * `Users` parent). Payments only: enter the NET amount you want credited
  * (minimum Rp100.000), tap Pay, and the DOKU Checkout page opens (all
  * banks, QRIS, e-money, cards). You pay net + the flat 5% platform fee,
- * quoted upfront. Seconds after payment your Saldo updates with the exact
- * quoted net — no waiting for settlement (fiat settlement only backs the
- * balance in the background). The static BRI VA below stays as the
- * always-on rail. DOKU is the ledger.
+ * quoted upfront. After paying, tap Check payment status (auto-checked
+ * once on return) — your Saldo updates with the exact quoted net as soon
+ * as the payment is confirmed, no waiting for settlement (fiat settlement
+ * only backs the balance in the background). The static BRI VA below stays
+ * as the always-on rail. DOKU is the ledger.
  */
 export function TopupScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -53,6 +54,8 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
   const [pending, setPending] = useState<CheckoutDepositView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -87,8 +90,44 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
   })();
 
   const openUrl = (url: string) => {
-    Linking.openURL(url).catch(() => setError("Could not open the DOKU payment page."));
+    Linking.openURL(url).catch(() => setError("Could not open the payment page."));
   };
+
+  /**
+   * Check a pending deposit against DOKU and unlock the Saldo when paid.
+   * Webhooks cannot reach local dev (and may lag in prod), so the wallet
+   * corroborates on demand — same server-side path as the webhook, never
+   * trust-based. Safe to tap repeatedly; duplicate checks are no-ops.
+   */
+  const checkStatus = useCallback(async (intent: CheckoutDepositView) => {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const tx = await peridot.fiat.syncTransaction(intent.id);
+      if (tx.providerStatus === "settled") {
+        setSyncMsg("Payment confirmed — your Saldo is updated. You can go back.");
+        setPending(null);
+      } else if (tx.providerStatus === "failed" || tx.providerStatus === "cancelled") {
+        setSyncMsg("This payment did not go through — no money moved. You can try again.");
+        setPending(null);
+      } else {
+        setSyncMsg("Still waiting for your bank transfer — check status again in a bit.");
+      }
+    } catch (e) {
+      setSyncMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }, [peridot]);
+
+  // Auto-check once when returning from the payment page with a fresh intent:
+  // the user just paid (or abandoned), so corroborate without making them dig.
+  const autoSyncedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pending || autoSyncedRef.current === pending.id) return;
+    autoSyncedRef.current = pending.id;
+    void checkStatus(pending);
+  }, [pending, checkStatus]);
 
   const createCheckout = async () => {
     setBusy(true);
@@ -172,10 +211,16 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
         />
         {pending && (
           <View style={styles.pending}>
-            <Text style={s.hint}>Complete your payment, then come back — the status updates automatically.</Text>
+            <Text style={s.hint}>Complete your payment, then tap Check status — your Saldo updates once the payment is confirmed.</Text>
+            <UIButton
+              title={syncing ? "Checking…" : "Check payment status"}
+              onPress={() => checkStatus(pending)}
+              disabled={syncing}
+            />
             <UIButton title="Open payment page" onPress={() => openUrl(pending.paymentUrl)} />
           </View>
         )}
+        {syncMsg && <Text style={s.hint}>{syncMsg}</Text>}
       </View>
 
       {va?.vaNumber && (
@@ -188,7 +233,7 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
 
       {policy && (
         <Text style={s.hint}>
-          Service fee {policy.percentBps / 100}% flat of the credited amount, no cap. Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Your Saldo updates seconds after payment.
+          Service fee {policy.percentBps / 100}% flat of the credited amount, no cap. Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Tap Check payment status after paying — your Saldo updates once confirmed.
         </Text>
       )}
 

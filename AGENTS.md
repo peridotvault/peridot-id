@@ -47,6 +47,11 @@ pnpm --filter @peridotvault/pid-api dev        # API on :3301
 cd apps/wallet && pnpm dev:web         # Expo web on :8081
 ```
 
+After pulling (or whenever Prisma complains about a missing column, e.g.
+P2022 on `fiat_provider_*`): `pnpm --filter @peridotvault/pid-api exec
+prisma migrate deploy`, then restart the API. (`nest --watch` rebuilds code
+but never touches the DB schema; deploy applies migrations automatically.)
+
 Env to set in `apps/api/.env`: `GOOGLE_CLIENT_ID`/`_SECRET` (dev Google
 client with localhost redirect; same key names in every env, values differ —
 prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
@@ -61,6 +66,13 @@ Users/Treasury are provisioned once via the DOKU dashboard. Spendable Saldo =
 DOKU POINT balance; points issue only inside the API after DOKU corroboration
 (CI-guarded — no route/SDK/wallet issuance). Sweep cadence: cron
 `POST /v1/fiat/sub-accounts/admin/sweep` (admin).
+
+Local fiat loop: DOKU webhooks cannot reach `localhost`, so deposits rely on
+explicit status checks, not pushes. TopupScreen auto-checks once per intent
+and offers “Check payment status” (`syncTransaction` — same corroborated
+path as the webhook). For real-time webhook delivery in dev, expose the API
+via a tunnel (e.g. `ngrok http 3301`) and set `DOKU_WEBHOOK_URL` (+
+`DOKU_CHECKOUT_NOTIFY_URL`) to the tunnel URL — localhost values never reach DOKU.
 
 ## Login split (first-party wallet vs public flow)
 
