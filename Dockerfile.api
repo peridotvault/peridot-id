@@ -23,6 +23,8 @@ COPY packages/solana/package.json ./packages/solana/
 COPY packages/sdk-js/package.json ./packages/sdk-js/
 COPY packages/openapi/package.json ./packages/openapi/
 COPY packages/core/package.json ./packages/core/
+COPY packages/payments/package.json ./packages/payments/
+COPY packages/evm/package.json ./packages/evm/
 
 # --ignore-scripts: root postinstall builds types/core/solana/sdk-js but their sources aren't
 # copied yet — we build them explicitly in the builder stage after COPY . .
@@ -40,6 +42,8 @@ COPY . .
 RUN pnpm --filter @peridotvault/pid-types build
 RUN pnpm --filter @peridotvault/pid-core build
 RUN pnpm --filter @peridotvault/pid-solana build
+RUN pnpm --filter @peridotvault/pid-payments build
+RUN pnpm --filter @peridotvault/pid-evm build
 RUN pnpm --filter @peridotvault/pid-sdk-js build
 RUN pnpm --filter @peridotvault/pid-api db:generate
 RUN pnpm --filter @peridotvault/pid-api build
