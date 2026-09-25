@@ -8,6 +8,14 @@ const cookieExtractor = (req: Request): string | null => {
   return cookie ?? null;
 };
 
+/**
+ * Writes a read-scoped (SSO) token may still perform. Deposit sync only
+ * corroborates the caller's OWN pending DOKU deposit against the provider and
+ * credits their own ledger — it moves no other funds — so a relying party's
+ * backend can confirm a checkout without a full app token.
+ */
+const READ_SCOPE_WRITE_ALLOW = [/^\/v1\/fiat\/deposits\/[^/]+\/sync\/?$/];
+
 @Injectable()
 export class JwtAuthGuard extends AuthGuard("jwt") {
   constructor() {
@@ -28,9 +36,10 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
   ): TUser {
     const authed = super.handleRequest(err, user, info, context, undefined);
     if (authed && (authed as { scope?: string }).scope === "read") {
-      const method = context.switchToHttp().getRequest<Request>().method;
-      if (method !== "GET" && method !== "HEAD") {
-        throw new ForbiddenException("This token is read-only");
+      const req = context.switchToHttp().getRequest<Request>();
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        const allowed = READ_SCOPE_WRITE_ALLOW.some((re) => re.test(req.path));
+        if (!allowed) throw new ForbiddenException("This token is read-only");
       }
     }
     return authed;
