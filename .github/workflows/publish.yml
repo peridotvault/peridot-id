@@ -2,8 +2,9 @@ name: Publish packages
 
 # Publishes the public npm packages on a version tag (e.g. `v1.0.0`) or manual
 # dispatch. Requires an NPM_TOKEN repo secret with publish access to the
-# @peridotvault scope. Order matters: pid-sdk-js depends on pid-core and
-# pid-payments, so publish the leaves first.
+# @peridotvault scope. Leaves first: pid-types → pid-core → pid-solana →
+# pid-payments → pid-sdk-js. Packages already at their current version on the
+# registry are skipped, so a dispatch is safe when only some were bumped.
 
 on:
   push:
@@ -37,10 +38,17 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for pkg in \
+            @peridotvault/pid-types \
             @peridotvault/pid-core \
+            @peridotvault/pid-solana \
             @peridotvault/pid-payments \
             @peridotvault/pid-sdk-js; do
-            echo "publishing $pkg"
+            ver=$(pnpm --filter "$pkg" exec node -e "process.stdout.write(require('./package.json').version)")
+            if npm view "$pkg@$ver" version >/dev/null 2>&1; then
+              echo "skip $pkg@$ver (already published)"
+              continue
+            fi
+            echo "publishing $pkg@$ver"
             pnpm --filter "$pkg" publish --access public --no-git-checks || {
-              echo "publish failed for $pkg"; exit 1; }
+              echo "publish failed for $pkg@$ver"; exit 1; }
           done
