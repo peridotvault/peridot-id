@@ -69,14 +69,23 @@ interface OpenerOpts {
   timeoutMs?: number;
 }
 
-/** Centered popup + gone-detection. onGone fires once on timeout or user close. */
-function openWindow(url: string, timeoutMs: number, onGone: () => void): { popup: Window; cancel: () => void } {
+/**
+ * Open the auth page in a normal new tab (auth is a full-page flow that may go
+ * through Google and the PID picker), or a centered popup for approval
+ * ceremonies. `onGone` fires once on timeout or user close.
+ */
+function openWindow(url: string, timeoutMs: number, onGone: () => void, newTab = false): { popup: Window; cancel: () => void } {
   requireBrowser();
-  const w = 420;
-  const h = 640;
-  const left = Math.max(0, (window.screenX ?? 0) + ((window.innerWidth ?? w) - w) / 2);
-  const top = Math.max(0, (window.screenY ?? 0) + ((window.innerHeight ?? h) - h) / 2);
-  const popup = window.open(url, "peridot-popup", `width=${w},height=${h},left=${left},top=${top},popup=1`);
+  let popup: Window | null;
+  if (newTab) {
+    popup = window.open(url, "_blank");
+  } else {
+    const w = 420;
+    const h = 640;
+    const left = Math.max(0, (window.screenX ?? 0) + ((window.innerWidth ?? w) - w) / 2);
+    const top = Math.max(0, (window.screenY ?? 0) + ((window.innerHeight ?? h) - h) / 2);
+    popup = window.open(url, "peridot-popup", `width=${w},height=${h},left=${left},top=${top},popup=1`);
+  }
   if (!popup) throw new PopupBlockedError();
   let done = false;
   const cancel = () => {
@@ -145,12 +154,13 @@ export async function openPeridotPopup<T>(opts: OpenerOpts & { request: { action
 }
 
 /**
- * Login opener: no handshake (the popup may leave to Google and return to the
- * dapp URL inside the popup). Resolves with the pidCode posted either by the
- * hosted page directly (passkey/consent path) or by the dapp page itself via
- * forwardPopupLoginCode() (OAuth redirect path).
+ * Login opener: opens the PeridotID auth page in a NEW TAB (auth is a full-page
+ * flow — Google + PID picker — and must not be a cramped popup). No handshake:
+ * the tab goes to Google and, on return, the hosted page mints a pid_code for
+ * this app (using our origin + clientId) and posts it back via `window.opener`.
+ * Resolves with { pidCode }.
  */
-export async function openLoginPopup(opts: OpenerOpts): Promise<{ pidCode?: string }> {
+export async function openLoginTab(opts: OpenerOpts): Promise<{ pidCode?: string }> {
   requireBrowser();
   const selfOrigin = window.location.origin;
   const { url, origin } = buildPopupUrl(opts);
@@ -168,7 +178,7 @@ export async function openLoginPopup(opts: OpenerOpts): Promise<{ pidCode?: stri
     const { popup, cancel } = openWindow(url, opts.timeoutMs ?? 300_000, () => {
       window.removeEventListener("message", onMessage);
       reject(new PopupClosedError());
-    });
+    }, true);
     const finish = (fn: () => void): void => {
       cancel();
       window.removeEventListener("message", onMessage);
@@ -182,6 +192,9 @@ export async function openLoginPopup(opts: OpenerOpts): Promise<{ pidCode?: stri
     window.addEventListener("message", onMessage);
   });
 }
+
+/** @deprecated Use {@link openLoginTab}. Kept as an alias for existing apps. */
+export const openLoginPopup = openLoginTab;
 
 /**
  * Dapp-in-popup side: after an OAuth round-trip lands back on the dapp URL
@@ -208,9 +221,11 @@ export interface PopupParams {
   origin: string;
   /** Login hint: which method to auto-start ("google" | "passkey"). */
   method?: string;
+  /** Registered app this login is for (binds the issued pid_code). */
+  clientId?: string;
 }
 
-/** Hosted side: parse `?popup=<action>&origin=<origin>&method=…`. Null off-browser or invalid. */
+/** Hosted side: parse `?popup=<action>&origin=<origin>&method=…&client_id=…`. */
 export function readPopupParams(): PopupParams | null {
   if (typeof window === "undefined") return null;
   try {
@@ -219,7 +234,13 @@ export function readPopupParams(): PopupParams | null {
     const origin = parsePopupOrigin(q.get("origin"));
     if (!action || !origin) return null;
     const method = q.get("method") ?? undefined;
-    return method ? { action, origin, method } : { action, origin };
+    const clientId = q.get("client_id") ?? undefined;
+    return {
+      action,
+      origin,
+      ...(method ? { method } : {}),
+      ...(clientId ? { clientId } : {}),
+    };
   } catch {
     return null;
   }

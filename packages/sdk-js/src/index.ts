@@ -47,6 +47,7 @@ export {
   awaitPopupRequest,
   forwardPopupLoginCode,
   openLoginPopup,
+  openLoginTab,
   openPeridotPopup,
   parsePopupOrigin,
   postPopupReady,

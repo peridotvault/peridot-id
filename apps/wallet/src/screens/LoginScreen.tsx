@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { postPopupResult, readPopupParams } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
+import { deliverLoginCode, readLoginContext, rejectLogin, type LoginContext } from "../popup-login";
 import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
 import { theme, styles as s } from "../theme";
 import { AsciiRidges } from "../components/AsciiRidges";
@@ -10,17 +10,23 @@ import { LoadingScreen } from "../components/LoadingScreen";
 import { SsoConsentModal } from "../components/SsoConsentModal";
 import { UIButton } from "../components/UIButton";
 
-export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; stepUp?: boolean }) {
+export function LoginScreen({
+  onLoggedIn,
+  stepUp,
+  loginContext,
+}: {
+  onLoggedIn: () => void;
+  stepUp?: boolean;
+  loginContext?: LoginContext | null;
+}) {
   const { peridot } = usePeridot();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sso] = useState(readSsoParams);
-  // Popup login (`?popup=login&origin=…` opened by a dapp): results go back via
-  // postMessage to the opener instead of navigation.
-  const [popup] = useState(() => {
-    const p = readPopupParams();
-    return p && p.action === "login" ? p : null;
-  });
+  // Auth-in-a-new-tab (`?popup=login&origin=…&client_id=…` opened by a dapp):
+  // the tab authenticates (and creates a PID if the user has none), then mints a
+  // pid_code and posts it to the opener instead of navigating.
+  const [ctx] = useState<LoginContext | null>(() => loginContext ?? readLoginContext());
   const autoStarted = useRef(false);
   // Post-auth PID creation: the handle becomes the permanent `<handle>@pid`
   // identity (never changeable, reused, or reassigned). The user must tick the
@@ -33,11 +39,11 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
   const [claim, setClaim] = useState<{ email: string | null; displayName: string | null } | null | undefined>(undefined);
   // Existing wallet session, if any (SSO mode only): offers one-tap Allow instead
   // of forcing a redundant login. undefined = still checking, null = none.
-  const [session, setSession] = useState<{ label: string } | null | undefined>(sso ? undefined : null);
+  const [session, setSession] = useState<{ label: string } | null | undefined>(sso || ctx ? undefined : null);
   const [showLogin, setShowLogin] = useState(false);
 
   useEffect(() => {
-    if (!sso || typeof window === "undefined") return;
+    if ((!sso && !ctx) || typeof window === "undefined") return;
     let cancelled = false;
     (async () => {
       try {
@@ -64,7 +70,17 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     return () => {
       cancelled = true;
     };
-  }, [sso, peridot]);
+  }, [sso, ctx, peridot]);
+
+  /**
+   * Auth-in-a-new-tab: once a session exists (returning user) and there is no
+   * pending PID claim, mint a pid_code for the app and post it to the opener.
+   * New users first pass through the claim screen below.
+   */
+  useEffect(() => {
+    if (!ctx || !session || claim !== null) return;
+    void deliverLoginCode(peridot, ctx);
+  }, [ctx, session, claim, peridot]);
 
   /** Pending post-auth claim check (server is source of truth). */
   useEffect(() => {
@@ -135,13 +151,6 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     return false;
   };
 
-  /** Popup delivery: post the code to the opener instead of navigating. True when delivered. */
-  const deliver = (pidCode: string): boolean => {
-    if (!popup || typeof window === "undefined" || !window.opener) return false;
-    postPopupResult(popup.origin, { ok: true, data: { pidCode } });
-    return true;
-  };
-
   const claimSignOut = async () => {
     setBusy(true);
     try {
@@ -154,6 +163,8 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
       setAckPermanent(false);
       setError(null);
       setBusy(false);
+      // Auth-in-a-new-tab: tell the opener PID creation was abandoned, then close.
+      if (ctx) rejectLogin(ctx, "pid_creation_cancelled");
     }
   };
 
@@ -168,13 +179,17 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
         url.searchParams.delete("claim");
         window.history.replaceState(null, "", url.toString());
       }
+      // Auth-in-a-new-tab: PID created — mint the app's pid_code and post it back.
+      if (ctx) {
+        await deliverLoginCode(peridot, ctx);
+        return;
+      }
       // SSO claim: the ticket (server-validated) knows where to go back to.
       // Legacy fallback: SSO params on our own URL. Otherwise stay home.
       if (res.pidCode && res.redirectTo && typeof window !== "undefined") {
         window.location.assign(withPidCode(res.redirectTo, res.pidCode));
         return;
       }
-      if (res.pidCode && deliver(res.pidCode)) return;
       if (finishSso(res.pidCode)) return;
       onLoggedIn();
     } catch (e) {
@@ -189,13 +204,16 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     setError(null);
     try {
       const res = await peridot.auth.loginWithPasskey(
-        sso ? { returnTo: sso.redirectUri, clientId: sso.clientId } : undefined,
+        ctx ? undefined : sso ? { returnTo: sso.redirectUri, clientId: sso.clientId } : undefined,
       );
       if (!res.ok) {
         setError("Sign-in was cancelled — try again.");
         return;
       }
-      if (res.pidCode && deliver(res.pidCode)) return;
+      if (ctx) {
+        await deliverLoginCode(peridot, ctx);
+        return;
+      }
       if (finishSso(res.pidCode)) return;
       onLoggedIn();
     } catch (e) {
@@ -217,16 +235,21 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
       // (= this wallet's origin) with the session cookie — or, for a new credential,
       // on the PID claim screen (the only place handles are chosen).
       // Never navigate on success here: the browser leaves for Google, and the
-      // return bootstrap lands home. On failure (null/throw) stay on login.
-      // Popup mode navigates too — the OAuth round-trip returns to the dapp URL
-      // inside this popup, which forwards the code to the opener itself.
+      // return bootstrap lands back on this tab. On failure (null/throw) stay on
+      // login. In auth-in-a-new-tab mode the round-trip returns here (no returnTo)
+      // so we can mint the app's pid_code and post it to the opener.
+      // Auth-in-a-new-tab: no returnTo — the Google callback returns to this
+      // wallet (CLIENT_SUCCESS_URL) so the tab can mint the app's pid_code and
+      // post it to the opener. Non-tab SSO keeps the cross-origin returnTo.
       const url = await peridot.auth.login(
-        sso
-          ? {
-              ...(sso.redirectUri ? { returnTo: sso.redirectUri } : {}),
-              ...(sso.clientId ? { clientId: sso.clientId } : {}),
-            }
-          : undefined,
+        ctx
+          ? undefined
+          : sso
+            ? {
+                ...(sso.redirectUri ? { returnTo: sso.redirectUri } : {}),
+                ...(sso.clientId ? { clientId: sso.clientId } : {}),
+              }
+            : undefined,
       );
       if (!url) {
         setError("Couldn't reach Google — try again.");
@@ -247,7 +270,6 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
     try {
       // Mint a code for the CURRENT session — no re-authentication needed.
       const { pidCode } = await peridot.auth.authorize({ returnTo: sso.redirectUri, clientId: sso.clientId });
-      if (deliver(pidCode)) return;
       window.location.assign(withPidCode(sso.redirectUri, pidCode));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -258,8 +280,8 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
 
   const denyApp = () => {
     if (typeof window === "undefined") return;
-    if (popup) {
-      postPopupResult(popup.origin, { ok: false, error: "access_denied" });
+    if (ctx) {
+      rejectLogin(ctx);
       return;
     }
     if (!sso) return;
@@ -269,18 +291,18 @@ export function LoginScreen({ onLoggedIn, stepUp }: { onLoggedIn: () => void; st
   // Popup opened from a method button: auto-start that method once the login
   // form is showing (not on the claim/consent screens).
   useEffect(() => {
-    if (!popup?.method || autoStarted.current) return;
+    if (!ctx?.method || autoStarted.current) return;
     if (claim !== null) return;
     if (sso && session !== null) return;
     autoStarted.current = true;
-    if (popup.method === "passkey") void signInWithPasskey();
+    if (ctx.method === "passkey") void signInWithPasskey();
     else void continueWithGoogle();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [popup, claim, sso, session]);
+  }, [ctx, claim, sso, session]);
 
   // SSO check in flight: branded loader, so the login form never flashes
   // before the consent modal resolves.
-  if (sso && session === undefined) {
+  if ((sso || ctx) && session === undefined) {
     return <LoadingScreen />;
   }
 

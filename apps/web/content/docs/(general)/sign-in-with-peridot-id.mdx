@@ -37,7 +37,7 @@ npm install @peridotvault/pid-sdk-js
 ```
 
 ```ts
-import { Peridot, openLoginPopup } from '@peridotvault/pid-sdk-js';
+import { Peridot, openLoginTab } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
   baseUrl: 'https://api.pid.peridotvault.com',
@@ -46,10 +46,9 @@ const peridot = Peridot({
 });
 
 async function signIn() {
-  const { pidCode } = await openLoginPopup({
+  const { pidCode } = await openLoginTab({
     popupBaseUrl: 'https://app.pid.peridotvault.com',
     params: {
-      redirect_uri: window.location.origin,
       origin: window.location.origin,
       popup: 'login',
       client_id: 'pidapp_...',
@@ -62,25 +61,32 @@ async function signIn() {
 }
 ```
 
-Both Google and passkey ceremonies run inside the popup on the hosted PeridotID
-login with the address bar visible — Google needs the redirect round-trip,
-WebAuthn legally requires a PeridotID origin, so no ceremony can run inside your
-page. When popups are blocked, fall back to navigating to the hosted login
-directly (same params as the URL query). No API calls happen before login, so
-there is nothing CORS-related to configure.
+Auth opens the PeridotID login in a **new tab** (a full-page flow: Google, plus
+the PID picker if the visitor has no PeridotID yet). When it completes the tab
+mints a one-time `pid_code` for your `client_id` and posts it to your page, then
+closes — you never handle a password and nothing runs in your DOM. Passkeys run
+on the PeridotID origin (browsers bind WebAuthn to our domain); Google uses the
+redirect round-trip. If the tab is blocked, fall back to navigating to the hosted
+login directly (same query params). No API calls happen before login, so there is
+nothing CORS-related to configure.
+
+> **First sign-in creates a PID.** If the visitor has no PeridotID yet, the tab
+> shows the emission-free **Create your PID** step (the handle is permanent and
+> user-chosen). Login only resolves once a PID exists. `popupBaseUrl` is reused
+> as the auth host; approval **popups** (a small window on the PeridotID origin)
+> are used only for confirmations like transfers and payments.
 
 In React, wrap the same two calls in your own button + hook — there is no
 provider component to install.
 
 ## 3. Handle the login
 
-After login the popup returns a one-time `pid_code` (full-page fallback:
-PeridotID redirects back to your `redirect_uri` with it). Exchange it as above
-— directly, or via your backend, which then mints your app's own session.
+After login the tab returns a one-time `pid_code` (posted to your opener; a
+full-page `redirect_uri` fallback is also supported). Exchange it as above —
+directly, or via your backend, which then mints your app's own session.
 
-Already logged in? The hosted page shows a one-tap consent screen asking to allow
-your website to sign in with the visitor's PeridotID — instead of another login.
-Denying returns to your `redirectUri` with `?error=access_denied`.
+Already signed in? The tab issues the code immediately (a one-tap consent screen
+appears for cross-origin SSO). Denying returns with `?error=access_denied`.
 
 Prefer to mint your own session? Exchange server-side instead of calling
 `peridot.auth.exchange` in the browser:
@@ -100,8 +106,8 @@ const identity = await r.json(); // single-use code, 5-minute expiry
 - Passkey login always runs on a PeridotID-hosted page (browsers bind WebAuthn to our
   domain) and returns with `pid_code` like Google does.
 - Codes are single-use, expire in ~5 minutes, and are bound to your `client_id`.
-- No framework? The snippet in step 2 is already framework-free: `openLoginPopup`,
-  `loginWithPasskey({ clientId, returnTo })` (auto-delegates to the popup),
+- No framework? The snippet in step 2 is already framework-free: `openLoginTab`
+  (alias `openLoginPopup`), `loginWithPasskey({ clientId, returnTo })`,
   `exchange(code, clientId)`.
 
 ## Next: money

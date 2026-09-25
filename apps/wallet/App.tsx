@@ -10,6 +10,7 @@ import { readPopupParams } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
 import { AppContext } from "./src/AppContext";
 import { needsProvisioning } from "./src/fiat-ensure";
+import { readLoginContext } from "./src/popup-login";
 import { theme } from "./src/theme";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { LoadingScreen } from "./src/components/LoadingScreen";
@@ -114,6 +115,10 @@ export default function App() {
   // in (consent flow) — otherwise a logged-in user landing here would sit on HomeScreen
   // with the request silently ignored.
   const [ssoRequest] = useState(readSsoParams);
+  // Auth-in-a-new-tab (`?popup=login&origin=…&client_id=…`): the tab stays on
+  // the login screen to authenticate (and create a PID if missing), then mints a
+  // pid_code for the opener. Survives the OAuth round-trip via sessionStorage.
+  const [loginContext] = useState(readLoginContext);
   // Popup sign request (`?popup=<action>&origin=…` opened by a dapp): the
   // approval screen takes over the whole app — never the normal wallet flow.
   // (`?popup=login` stays on the normal flow; LoginScreen delivers via popup.)
@@ -133,6 +138,11 @@ export default function App() {
   // provisioning (fresh account, failed/skipped setup); returning users go
   // straight home. The check is read-only — never traps at login.
   const routeAfterAuth = useCallback(async () => {
+    // Auth-in-a-new-tab stays on the login screen: it must deliver the pid_code.
+    if (loginContext) {
+      setScreen("login");
+      return;
+    }
     let need = false;
     try {
       need = await needsProvisioning(peridot);
@@ -140,7 +150,7 @@ export default function App() {
       need = false;
     }
     setScreen(need ? "provisioning" : "home");
-  }, [peridot]);
+  }, [peridot, loginContext]);
 
   const handleLoggedIn = useCallback(() => {
     setStepUp(false);
@@ -191,10 +201,16 @@ export default function App() {
         }
       }
       if (alive && me && !("statusCode" in me)) {
-        try {
-          setScreen((await needsProvisioning(peridot)) ? "provisioning" : "home");
-        } catch {
-          setScreen("home");
+        if (loginContext) {
+          // Auth-in-a-new-tab: keep the login screen mounted so it can deliver
+          // the pid_code to the opener (or show the PID picker if none yet).
+          setScreen("login");
+        } else {
+          try {
+            setScreen((await needsProvisioning(peridot)) ? "provisioning" : "home");
+          } catch {
+            setScreen("home");
+          }
         }
       }
     } catch {
@@ -215,7 +231,7 @@ export default function App() {
       clearTimeout(timer);
       if (alive) setBootstrapping(false);
     }
-  }, [peridot]);
+  }, [peridot, loginContext]);
 
   useEffect(() => {
     bootstrap();
@@ -252,7 +268,8 @@ export default function App() {
           <>
             {(screen === "login" || ssoRequest) && (
           <LoginScreen
-            onLoggedIn={handleLoggedIn}
+            onLoggedIn={loginContext ? () => {} : handleLoggedIn}
+            loginContext={loginContext}
             stepUp={stepUp}
           />
         )}

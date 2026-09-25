@@ -1,5 +1,14 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.1.0
+
+- Add `openLoginTab()`: auth opens a **new tab** (Google + PID picker for new
+  users), not a popup. It resolves with the `pid_code` the tab mints for the
+  app's `clientId`. `openLoginPopup` is kept as a deprecated alias (same
+  function). Approval ceremonies (transfers, payments) remain small popups.
+- `readPopupParams()` now exposes `clientId` (from `?client_id=`), so the hosted
+  page can bind the issued code to the app.
+
 ## 1.0.0 — public third-party release (breaking)
 
 - **Fiat is now the internal IDR ledger** (DOKU Checkout is money-in only; no
