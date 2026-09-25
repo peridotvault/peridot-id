@@ -104,6 +104,41 @@ const created = await peridot.wallet.createAccount();
   credential leaves it untouched, and logging in from another device does not change it.
 - `create` returns the API error object on validation failure (`400`).
 
+## Money (fiat)
+
+`peridot.fiat` covers top-up, balance, statement, and sends on the internal IDR
+ledger. Full guide: [Fiat & payments](/docs/fiat).
+
+```ts
+const bal = await peridot.fiat.balance();          // { balanceIdr, source: 'fiat-ledger', ... }
+const view = await peridot.fiat.ledger();          // statement rows
+const deposit = await peridot.fiat.checkoutDeposit('100000'); // → { paymentUrl, grossIdr, feeIdr, netIdr }
+await peridot.fiat.syncTransaction(deposit.id);    // corroborate payment → credits the ledger
+await peridot.fiat.transferViaPopup({ amountIdr: '100000', beneficiaryPid: 'live2dev@pid' });
+```
+
+- `checkoutDeposit`, `transferViaPopup`, and `transferConfirm` are trust-critical:
+  in popup mode they run on the PeridotID origin (see [Popup flow](#popup-flow-third-party-origins)).
+- Fiat methods **throw** `Error` on failure (not the `T | ApiError` union that reads return).
+- Pass the initiating app's `clientId` as the second argument to apply that app's
+  own fee — it stacks on the global 0.1% (min Rp100, no cap) and credits the app.
+
+## Apps, fees & raw calls
+
+`PeridotClient` also exposes `get` / `post` / `patch` / `put` / `delete` for
+endpoints without a dedicated wrapper — app management, per-app fees, and machine
+auth use these:
+
+```ts
+await peridot.get('/v1/apps');
+await peridot.patch(`/v1/apps/${id}`, { allowedOrigins: ['https://mygame.dev'] });
+await peridot.put(`/v1/apps/${id}/fees/topup`, {
+  percentBps: 200, minIdr: '0', maxIdr: '10000', enabled: true,
+});
+```
+
+See [Apps & workspace](/docs/apps) for the machine token and the full fee model.
+
 ## Log out
 
 ```ts

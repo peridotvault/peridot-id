@@ -1,0 +1,103 @@
+---
+title: Apps & workspace
+description: Register an app, manage its settings and fees, and read its escrow
+---
+
+A **PidApp** is a third-party application ("Sign in with PeridotID"). It has a
+public `client_id`, allowed origins, an optional backend secret, an optional fee
+schedule, and — because every app owner is a normal identity — its own
+**account/escrow balance**.
+
+## Manage in the workspace
+
+Open **[pid.peridotvault.com/workspace](/workspace)** and sign in. The **Apps**
+tab lists your apps (name only); click an app to open its **detail page**, which
+is where every setting lives:
+
+- **General** — rename, enable/disable.
+- **client_id** — public identifier for login and API calls.
+- **Allowed origins** — websites allowed to receive `pid_code`s and call the API.
+- **Backend secret** — for confidential clients; shown once when generated.
+- **Fees** — per-operation fee schedule (below).
+- **Escrow balance** — the app account's spendable IDR balance.
+
+Only the **owner** can view or change an app. The API is owner-scoped: a
+non-owner gets `404` from `GET /v1/apps/:id` and every mutation. This is enforced
+server-side (the workspace page is only a convenience).
+
+## Register an app
+
+```ts
+const res = await peridot.post('/v1/apps', { name: 'My Game' });
+// { id, clientId: "pidapp_...", name, allowedOrigins: [], isActive: true, ... }
+```
+
+Then add origins (`PATCH /v1/apps/:id` with `allowedOrigins`) — bare
+`https://…` origins, no paths. Local development needs nothing: `localhost` /
+`127.0.0.1` are always allowed. See
+[Sign in with PeridotID](/docs/sign-in-with-peridot-id).
+
+## Machine token
+
+To act **server-side** (read the escrow balance, initiate transfers, manage
+settings) with no browser session, exchange the client credentials for a
+short-lived bearer token:
+
+```bash
+curl -X POST https://api.pid.peridotvault.com/v1/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"clientId":"pidapp_...","clientSecret":"pidsk_..."}'
+# → { "accessToken": "eyJ...", "expiresIn": "1h" }
+```
+
+```ts
+const r = await fetch('https://api.pid.peridotvault.com/v1/fiat/balance', {
+  headers: { Authorization: `Bearer ${accessToken}` },
+});
+// { balanceIdr: "900000", source: "fiat-ledger", ... }
+```
+
+- Bound to the **app owner's pid**; carries the app's `clientId` (so app fees
+  apply automatically).
+- `clientSecret` is required when the app has one set (timing-safe check).
+- Machine tokens are **never admin**, even for an admin owner.
+
+## Fees
+
+Each app can charge its own fee, **stacked on top of the global PeridotID fee**
+(0.1%, min Rp100, no cap). The fee credits the **app's own account** and applies
+only when the movement is initiated in the app's context (e.g. the SDK popup
+passes the app's `clientId`).
+
+Three operations:
+
+| Operation | Applies to |
+|---|---|
+| `topup` | A user funding through this app |
+| `transaction` | Sends initiated through this app |
+| `withdraw` | Bank payouts initiated through this app (payouts are disabled for now) |
+
+Set a fee (owner-only) — `percentBps` is basis points (`10` = 0.1%); `minIdr` /
+`maxIdr` clamp the fee (`0` = unbounded):
+
+```bash
+curl -X PUT https://api.pid.peridotvault.com/v1/apps/<id>/fees/topup \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"percentBps":200,"minIdr":"0","maxIdr":"10000","enabled":true}'
+```
+
+Read the whole schedule with `GET /v1/apps/:id/fees`. When `enabled` is `false`
+the operation charges nothing.
+
+## Escrow
+
+An app owner identity (e.g. `live2dev@pid`) is a normal participant. Users send
+funds to it (escrow); the app releases them per its own logic. Read the app's
+balance with the machine token above, or `GET /v1/fiat/balance` in the workspace.
+See [Fiat & payments → Escrow](/docs/fiat#escrow-pattern).
+
+## Callbacks (deferred)
+
+Outbound callbacks (`POST /v1/apps/:id/webhook`) are **not in use yet**. The
+ledger is the source of truth: poll `GET /v1/fiat/ledger` / `balance`, or rely on
+the machine-token balance.

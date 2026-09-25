@@ -1,9 +1,15 @@
 import { Controller, Get, Res } from "@nestjs/common";
 import { Response } from "express";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 
-const SPEC_PATH = resolve(__dirname, "../../../../packages/openapi/src/openapi.yaml");
+// The compiled output nests extra dirs (`dist/src/...`), so resolve by
+// trying known roots and taking the first that exists (cwd is apps/api).
+const SPEC_PATH =
+  [
+    resolve(process.cwd(), "../../packages/openapi/src/openapi.yaml"),
+    resolve(__dirname, "../../../../packages/openapi/src/openapi.yaml"),
+  ].find((p) => existsSync(p)) ?? resolve(process.cwd(), "../../packages/openapi/src/openapi.yaml");
 
 @Controller("v1")
 export class OpenApiController {

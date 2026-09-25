@@ -1,20 +1,101 @@
-// DOKU Sub-Account V2 client (1 PID → 1 Sub-Account). Peridot is
-// identity/orchestration; DOKU is the authoritative ledger. No credentials
-// touch this client.
+// PeridotID fiat — one namespace for money. The spendable balance, statement
+// and send/receive live on the internal fiat ledger; DOKU Checkout is
+// money-in only (no Sub-Account). No credentials touch this client.
 
 import type { ApiError } from "@peridotvault/pid-types";
-import type {
-  CheckoutDepositView,
-  DepositChannelView,
-  FeePolicyView,
-  SubAccountView,
-  SubBalanceView,
-  SubHistoryItem,
-  SubTransferInquiryView,
-  SubTxView,
-} from "@peridotvault/pid-payments";
 
-export type { CheckoutDepositView, DepositChannelView, FeePolicyView, SubAccountView, SubBalanceView, SubHistoryItem, SubTransferInquiryView, SubTxView };
+/** Ledger balance (replayed server-side). */
+export interface FiatBalanceView {
+  balanceIdr: string;
+  currency: "IDR";
+  source: "fiat-ledger";
+  replayErrors: string[];
+}
+
+/** One immutable ledger entry (a double-entry leg). */
+export interface FiatLedgerEntry {
+  id: string;
+  /** fiat_issue | fiat_fee | fiat_transfer_in | fiat_transfer_out | fiat_adjust */
+  kind: string;
+  entryGroup: string;
+  counterpartyPid: string | null;
+  /** Leg amount; the sign comes from `direction`. */
+  amountIdr: string;
+  /** in | out */
+  direction: string;
+  /** created | posted | failed | cancelled */
+  status: string;
+  createdAt: string;
+}
+
+export interface FiatLedgerView {
+  pid: string;
+  balanceIdr: string;
+  treasuryCreditedIdr: string;
+  inFlight: string[];
+  errors: string[];
+  rows: FiatLedgerEntry[];
+}
+
+export interface FiatTransferInput {
+  /** Gross amount to send (fee quoted server-side, net goes to recipient). */
+  amountIdr: string;
+  /** Recipient identity, e.g. live2dev@pid (resolved server-side). */
+  beneficiaryPid: string;
+  remark?: string;
+  /** App context (model A): when set, this app's fee applies and stacks. */
+  clientId?: string;
+}
+
+export interface FiatTransferInquiryView {
+  id: string;
+  entryGroup: string;
+  grossIdr: string;
+  /** Total fee (global PeridotID + app). */
+  feeIdr: string;
+  /** App portion of the fee (0 when no app context). */
+  appFeeIdr?: string;
+  netIdr: string;
+  feePolicyVersion: number;
+  beneficiaryPid: string;
+}
+
+/** A DOKU Checkout deposit intent (money-in). */
+export interface CheckoutDepositView {
+  id: string;
+  providerRef: string;
+  paymentUrl: string;
+  tokenId: string;
+  expiredDate: string | null;
+  grossIdr: string;
+  feeIdr: string;
+  netIdr: string;
+  feePolicyVersion: number;
+  providerStatus: string;
+  createdAt: string;
+}
+
+/** A deposit row's corroborated status (sync result). */
+export interface FiatDepositView {
+  id: string;
+  kind: string;
+  providerRef: string;
+  providerStatus: string;
+  grossIdr: string;
+  feeIdr: string | null;
+  netIdr: string | null;
+  paymentUrl: string | null;
+  currency: "IDR";
+  createdAt: string;
+}
+
+export interface FeePolicyView {
+  version: number;
+  percentBps: number;
+  minIdr: string;
+  maxIdr: string;
+  active: boolean;
+}
 
 interface ApiLike {
   get<T>(path: string): Promise<{ ok: boolean; data: T | ApiError }>;
@@ -33,20 +114,7 @@ function unwrap<T>(res: { ok: boolean; data: T | ApiError }, fallback: string): 
   return res.data as T;
 }
 
-const BASE = "/v1/fiat/sub-accounts";
-
-/** Bank/e-wallet payouts deferred — internal transfers only for now. */
-export type SacTransferType = "DOKU_SUB_ACCOUNT";
-
-/** Full P2P transfer in one popup ceremony (third-party mode). */
-export interface FiatTransferInput {
-  type: SacTransferType;
-  /** Gross points to send (fee quoted server-side, net goes to recipient). */
-  amountIdr: string;
-  /** Recipient identity, e.g. rani@pid (resolved server-side). */
-  beneficiaryPid: string;
-  remark?: string;
-}
+const BASE = "/v1/fiat";
 
 export class PeridotFiat {
   constructor(private readonly api: ApiLike) {}
@@ -54,7 +122,6 @@ export class PeridotFiat {
   /**
    * Third-party mode: popupBaseUrl set (no first-party session/signer).
    * Write ceremonies delegate to the PeridotID popup; reads stay direct.
-   * Fail-secure default — unknown mode goes through the popup, never silent.
    */
   private get delegated(): boolean {
     return this.api.popupBaseUrl != null && this.api.popupRequest != null;
@@ -70,143 +137,77 @@ export class PeridotFiat {
     return this.api.popupRequest<T>(action, payload);
   }
 
-  /** Inline-only guard: split ceremonies have no popup equivalent. */
+  /** Inline-only guard: inquiry/confirm have no popup equivalent. */
   private inlineOnly(method: string): void {
     if (this.delegated) {
       throw new Error(`${method} is first-party inline only — in popup mode use transferViaPopup() for the full approved ceremony.`);
     }
   }
 
-  /** Register (or resume) the caller's Sub-Account. Name + email only. */
-  async createAccount(input: { name: string; email: string }): Promise<SubAccountView> {
-    return unwrap(await this.api.post<SubAccountView>(`${BASE}/accounts`, input), "Account creation failed");
+  // --- balance / statement ---
+
+  /** Spendable balance (internal fiat ledger). */
+  async balance(): Promise<FiatBalanceView> {
+    return unwrap(await this.api.get<FiatBalanceView>(`${BASE}/balance`), "Failed to load balance");
   }
 
-  async account(): Promise<SubAccountView> {
-    return unwrap(await this.api.get<SubAccountView>(`${BASE}/accounts/me`), "Account not found");
-  }
-
-  /** Static BRI VA + IDR account for deposits. */
-  async depositVa(): Promise<{ vaNumber: string | null; accountNo: string | null; profileId: string }> {
-    return unwrap(await this.api.get<{ vaNumber: string | null; accountNo: string | null; profileId: string }>(`${BASE}/deposit-va`), "Failed to load deposit info");
-  }
-
-  /** Bank-agnostic money-in channels (Checkout groups + static BRI VA). */
-  async depositChannels(): Promise<DepositChannelView[]> {
-    return unwrap(await this.api.get<DepositChannelView[]>(`${BASE}/deposit-channels`), "Failed to load deposit channels");
-  }
-
-  /**
-   * Create a Checkout deposit intent: DOKU-hosted page (all banks, QRIS,
-   * e-money, cards) routed to the caller's sub-account. netAmountIdr is
-   * the NET credited to the user (minimum Rp100.000); fee/gross-payable
-   * quote returned upfront.
-   *
-   * Third-party mode opens the PeridotID popup (`fiat-checkout`): the user
-   * reviews the server-quoted amounts and approves; the popup navigates
-   * itself to the DOKU payment page (popup blockers can't intercept a
-   * same-window navigation from the Approve click).
-   */
-  async checkoutDeposit(netAmountIdr: string): Promise<CheckoutDepositView> {
-    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", { netAmountIdr });
-    return unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, { netAmountIdr }), "Checkout deposit failed");
-  }
-
-  /** Live balance from DOKU (authoritative). */
-  async balance(): Promise<SubBalanceView> {
-    return unwrap(await this.api.get<SubBalanceView>(`${BASE}/balance`), "Failed to load balance");
-  }
-
-  /** Authoritative history from DOKU. */
-  async history(q: { accountNo?: string; fromDateTime: string; toDateTime: string; pageSize?: string; pageNumber?: string }): Promise<{ items: SubHistoryItem[] }> {
-    const params = new URLSearchParams({ fromDateTime: q.fromDateTime, toDateTime: q.toDateTime });
-    if (q.accountNo) params.set("accountNo", q.accountNo);
-    if (q.pageSize) params.set("pageSize", q.pageSize);
-    if (q.pageNumber) params.set("pageNumber", q.pageNumber);
-    return unwrap(await this.api.get<{ items: SubHistoryItem[] }>(`${BASE}/transactions?${params}`), "Failed to load history");
-  }
-
-  /** Local transaction references (not a balance). */
-  async ledger(): Promise<SubTxView[]> {
-    return unwrap(await this.api.get<SubTxView[]>(`${BASE}/ledger`), "Failed to load ledger");
+  /** Immutable ledger statement + replay verdict for the caller. */
+  async ledger(): Promise<FiatLedgerView> {
+    return unwrap(await this.api.get<FiatLedgerView>(`${BASE}/ledger`), "Failed to load statement");
   }
 
   async feePolicy(): Promise<FeePolicyView> {
     return unwrap(await this.api.get<FeePolicyView>(`${BASE}/fee-policy`), "Failed to load fee policy");
   }
 
-  /** Internal transfer step 1: POINT P2P inquiry only (moves no money).
-   *  The recipient is addressed by PID; amounts are gross points. */
-  async transferInquiry(input: {
-    type: SacTransferType;
-    amountIdr: string;
-    beneficiaryPid: string;
-    remark?: string;
-  }): Promise<SubTransferInquiryView> {
-    this.inlineOnly("transferInquiry");
-    return unwrap(await this.api.post<SubTransferInquiryView>(`${BASE}/transfers/inquiry`, input), "Account validation failed");
+  // --- money-in (DOKU Checkout) ---
+
+  /**
+   * Create a Checkout deposit intent: DOKU-hosted page. netAmountIdr is the
+   * NET credited to the user (minimum Rp100.000); PeridotID fee + gross
+   * payable are quoted upfront. Third-party mode opens the PeridotID popup
+   * (`fiat-checkout`) which navigates to the DOKU page on Approve.
+   */
+  async checkoutDeposit(netAmountIdr: string, clientId?: string): Promise<CheckoutDepositView> {
+    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", { netAmountIdr, clientId });
+    return unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, { netAmountIdr, clientId }), "Checkout deposit failed");
   }
 
-  /** Transfer step 2: executes the transfer bound to the inquiry. First-party inline only. */
-  async transferConfirm(id: string, input: { beneficiaryAccountName: string; expectedName?: string }): Promise<SubTxView> {
+  /** Recent deposit intents for the caller (money-in history). */
+  async deposits(): Promise<FiatDepositView[]> {
+    return unwrap(await this.api.get<FiatDepositView[]>(`${BASE}/deposits`), "Failed to load deposits");
+  }
+
+  /** Corroborate a pending deposit against DOKU and credit the ledger. */
+  async syncTransaction(id: string): Promise<FiatDepositView> {
+    return unwrap(await this.api.post<FiatDepositView>(`${BASE}/deposits/${id}/sync`), "Sync failed");
+  }
+
+  // --- send / receive (internal ledger) ---
+
+  /** Send step 1: inquiry only (moves no money). First-party inline only. */
+  async transferInquiry(input: FiatTransferInput): Promise<FiatTransferInquiryView> {
+    this.inlineOnly("transferInquiry");
+    return unwrap(await this.api.post<FiatTransferInquiryView>(`${BASE}/transfers/inquiry`, input), "Account validation failed");
+  }
+
+  /** Send step 2: posts all legs atomically. First-party inline only. */
+  async transferConfirm(id: string): Promise<FiatLedgerEntry> {
     this.inlineOnly("transferConfirm");
-    return unwrap(await this.api.post<SubTxView>(`${BASE}/transfers/${id}/confirm`, input), "Transfer failed");
+    return unwrap(await this.api.post<FiatLedgerEntry>(`${BASE}/transfers/${id}/confirm`), "Transfer failed");
   }
 
   /**
-   * Full P2P transfer as one popup ceremony (third-party mode only): the
-   * host runs the inquiry, shows the server-verified recipient + amounts,
-   * and confirms on Approve. Returns the settled transfer view.
+   * Full send as one popup ceremony (third-party mode only): the host runs
+   * the inquiry, shows the server-verified recipient + amounts, and confirms
+   * on Approve.
    */
-  async transferViaPopup(input: FiatTransferInput): Promise<SubTxView> {
-    return this.viaPopup<SubTxView>("fiat-transfer", input);
+  async transferViaPopup(input: FiatTransferInput): Promise<FiatLedgerEntry> {
+    return this.viaPopup<FiatLedgerEntry>("fiat-transfer", input);
   }
 
-  async retryTransfer(id: string): Promise<SubTxView> {
-    if (this.delegated) {
-      throw new Error("retryTransfer is first-party inline only — in popup mode run transferViaPopup() again for a fresh approved ceremony.");
-    }
-    return unwrap(await this.api.post<SubTxView>(`${BASE}/transfers/${id}/retry`), "Retry failed");
+  /** Cancel a created (not yet posted) transfer intent. */
+  async cancelTransaction(id: string): Promise<FiatLedgerEntry> {
+    return unwrap(await this.api.post<FiatLedgerEntry>(`${BASE}/transfers/${id}/cancel`), "Cancel failed");
   }
-
-  /** Reconcile a created/processing row via transactions-status. */
-  async syncTransaction(id: string): Promise<SubTxView> {
-    return unwrap(await this.api.post<SubTxView>(`${BASE}/transactions/${id}/sync`), "Sync failed");
-  }
-
-  // NOTE: settleFee was removed. DOKU settles NET → user sub-account +
-  // FEE → Treasury natively; the API never moves fee money.
-
-  /** Reconcile local rows against DOKU history over a window. */
-  async reconcile(fromDateTime: string, toDateTime: string): Promise<{
-    matched: number; backfilled: number; unparseable: number; truncated: boolean;
-    missingProvider: string[]; issued: number; pendingIssuance: string[];
-    pgObservedIdr: string; backing: unknown;
-    drift: { liveIdr: string; cachedIdr: string | null; drift: boolean; checkedAt: string };
-  }> {
-    return unwrap(
-      await this.api.post<{
-        matched: number; backfilled: number; unparseable: number; truncated: boolean;
-        missingProvider: string[]; issued: number; pendingIssuance: string[];
-        pgObservedIdr: string; backing: unknown;
-        drift: { liveIdr: string; cachedIdr: string | null; drift: boolean; checkedAt: string };
-      }>(`${BASE}/reconcile`, { fromDateTime, toDateTime }),
-      "Reconciliation failed",
-    );
-  }
-
-  /** Live-vs-cached balance drift check (live wins, cache refreshes). */
-  async drift(): Promise<{ liveIdr: string; cachedIdr: string | null; drift: boolean; checkedAt: string }> {
-    return unwrap(await this.api.get<{ liveIdr: string; cachedIdr: string | null; drift: boolean; checkedAt: string }>(`${BASE}/drift`), "Drift check failed");
-  }
-
-  /** Cancel a created (not yet executed) transaction. */
-  async cancelTransaction(id: string): Promise<SubTxView> {
-    return unwrap(await this.api.post<SubTxView>(`${BASE}/transactions/${id}/cancel`), "Cancel failed");
-  }
-
-  // NOTE (1.0): programmatic debit, admin ops (sweep/backfill/clawback/
-  // mirrors/journal/replay) and reconcile/drift were removed from the browser
-  // client — no in-repo consumer, server role-gated, raw fetch suffices.
-  // PeridotAdmin (chains dashboard) stays: first-party web workspace use only.
 }

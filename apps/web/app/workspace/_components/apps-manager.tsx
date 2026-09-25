@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { AppCard, type PidApp } from "./app-card";
+import type { PidApp } from "./app-types";
 import { unwrap } from "./api";
 import { Card, ERROR, FIELD, MUTED } from "./ui";
 import { PageHeader } from "./page-header";
 import { CutButton } from "@/components/landing/cut-button";
 
+/** Apps list: name only. Every setting lives on the app's detail page. */
 export function AppsManager({ client }: { client: PeridotClient }) {
   const [apps, setApps] = useState<PidApp[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,7 +29,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
 
   const create = useCallback(async () => {
     if (!name.trim()) {
-      setError("Give the app a name first — allowed origins are managed after.");
+      setError("Give the app a name first.");
       return;
     }
     setCreating(true);
@@ -48,15 +50,22 @@ export function AppsManager({ client }: { client: PeridotClient }) {
       <PageHeader
         eyebrow="App management"
         title="Apps"
-        description="Register client IDs, manage allowed origins, and rotate backend secrets."
+        description="Open an app to manage its origins, backend secret, fees, and balance."
       />
       {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
       {loading ? (
         <p className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
       ) : (
-        <div className="mt-4 flex flex-col gap-4">
+        <div className="mt-4 flex flex-col gap-2">
           {apps.map((app) => (
-            <AppCard key={app.id} client={client} app={app} onChanged={load} />
+            <Link
+              key={app.id}
+              href={`/workspace/apps/${app.id}`}
+              className="flex items-center justify-between border border-border bg-background px-4 py-3 transition-colors hover:bg-muted"
+            >
+              <span className="font-semibold tracking-tight">{app.name}</span>
+              <span className={`text-xs ${MUTED}`}>{app.isActive ? "Active" : "Disabled"} →</span>
+            </Link>
           ))}
           {apps.length === 0 && <p className={`text-sm ${MUTED}`}>No apps yet — register your first below.</p>}
         </div>
@@ -64,14 +73,15 @@ export function AppsManager({ client }: { client: PeridotClient }) {
 
       <Card className="mt-8">
         <h3 className="font-semibold tracking-tight">Register a new app</h3>
-        <p className={`mt-1 text-sm ${MUTED}`}>
-          Just a name for now — allowed origins are managed on the app card after.
-        </p>
+        <p className={`mt-1 text-sm ${MUTED}`}>Just a name — everything else is configured inside the app.</p>
         <label className="mt-3 block text-sm">
           Name
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void create();
+            }}
             placeholder="My Game"
             maxLength={60}
             className={FIELD}
@@ -79,7 +89,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
         </label>
         <CutButton
           type="button"
-          onClick={create}
+          onClick={() => void create()}
           disabled={creating}
           className={`mt-3 ${creating ? "pointer-events-none opacity-60" : ""}`}
         >

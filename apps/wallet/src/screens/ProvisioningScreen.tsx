@@ -4,15 +4,13 @@ import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";
-import { ensureSubAccount } from "../fiat-ensure";
 
-type StepKey = "identity" | "wallet" | "fiat";
+type StepKey = "identity" | "wallet";
 type StepStatus = "pending" | "running" | "done" | "failed";
 
 const STEPS: { key: StepKey; label: string; hint: string }[] = [
   { key: "identity", label: "Identity", hint: "Your PID session" },
   { key: "wallet", label: "Wallet", hint: "Your on-chain account record" },
-  { key: "fiat", label: "IDR wallet", hint: "Your DOKU Sub-Account" },
 ];
 
 async function runOne(peridot: PeridotClient, key: StepKey): Promise<void> {
@@ -23,15 +21,11 @@ async function runOne(peridot: PeridotClient, key: StepKey): Promise<void> {
     }
     return;
   }
-  if (key === "wallet") {
-    let acc = await peridot.wallet.me();
-    if (typeof acc === "object" && acc !== null && "statusCode" in acc) acc = await peridot.wallet.createAccount();
-    if (typeof acc === "object" && acc !== null && "statusCode" in acc) {
-      throw new Error("Could not set up the wallet — try again.");
-    }
-    return;
+  let acc = await peridot.wallet.me();
+  if (typeof acc === "object" && acc !== null && "statusCode" in acc) acc = await peridot.wallet.createAccount();
+  if (typeof acc === "object" && acc !== null && "statusCode" in acc) {
+    throw new Error("Could not set up the wallet — try again.");
   }
-  await ensureSubAccount(peridot);
 }
 
 function glyph(status: StepStatus): string {
@@ -45,16 +39,15 @@ function glyph(status: StepStatus): string {
 
 /**
  * Post-auth provisioning stepper (login + PID-claim funnel).
- * Runs identity → wallet → IDR wallet with visible progress; every step is
- * idempotent, failures show an inline Retry, and "Continue to home" is
- * always available so a provider outage never traps the user.
+ * Runs identity → wallet with visible progress; every step is idempotent,
+ * failures show an inline Retry, and "Continue to home" is always available
+ * so a provider outage never traps the user.
  */
 export function ProvisioningScreen({ onContinue }: { onContinue: () => void }) {
   const { peridot } = usePeridot();
   const [states, setStates] = useState<Record<StepKey, { status: StepStatus; error: string | null }>>({
     identity: { status: "pending", error: null },
     wallet: { status: "pending", error: null },
-    fiat: { status: "pending", error: null },
   });
   const started = useRef(false);
 
@@ -85,7 +78,7 @@ export function ProvisioningScreen({ onContinue }: { onContinue: () => void }) {
   return (
     <View style={s.container}>
       <Text style={s.title}>Setting up your wallet</Text>
-      <Text style={s.subtitle}>Creating your on-chain and IDR accounts — this usually takes a few seconds.</Text>
+      <Text style={s.subtitle}>Creating your on-chain account — this usually takes a few seconds.</Text>
 
       {STEPS.map((step) => {
         const st = states[step.key];

@@ -29,7 +29,7 @@ from unofficial sources.
 - **User** — holds one Saldo. "I top up Rp100.000 and see Rp100.000 usable
   in seconds." "I send Rp40.000 to `rani@pid` and see my new balance plus a
   receipt." (Withdraw story `(skipped)` — no Withdraw surface exists.)
-- **Treasury (platform)** — earns the flat 5% fee as redeemable points;
+- **Treasury (platform)** — earns the global PeridotID fee (0.1%, min Rp100, no cap) as redeemable points;
   funds bank payouts from pooled fiat liquidity. Never a user-visible actor.
 - **Ops/admin** — provisions hierarchy once, runs sweeps/backfills,
   reviews `manualReview` queues and halt states, reads the journal.
@@ -68,7 +68,9 @@ a child of `Users`. Never hierarchy-by-product.
 
 - **Spendable Saldo = live `DOKU_MERCHANT_POINT` available, 1:1 IDR peg.**
 - Checkout deposits are **NET-in** (min Rp100.000 NET, API-enforced):
-  `fee = flat 5% of net` (half-up, no cap), `gross = net + fee`.
+  `fee = 0.1% of net` min `Rp100`, no cap (half-up),
+  `gross = net + fee`. This is the PeridotID fee only — DOKU charges its own
+  provider fee separately (not part of the quote).
 - **Issuance (backend-only):** on corroborated payment the backend issues
   two `DOKU_NON_FIAT` top-ups from `DOKU_SYSTEM_POINT`: `{ref}-PTS` (NET →
   user) and `{ref}-PTS-FEE` (FEE → Treasury, redeemable). Unique refs → no
@@ -252,6 +254,13 @@ IDs) in **sandbox** env only; entities marked `sbx-verify-*`; journal
 `source: sandbox-verify`. Any provider failure: **stop at that boundary**,
 record actual behavior below, do not proceed.
 
+Executable harness (built, runs live once DOKU is unblocked; no mocks, no
+faked payment/POINT): `apps/api/test/fiat-live-proof.ts` →
+`pnpm --filter @peridotvault/pid-api proof:fiat preflight [pidA]` /
+`fixture:b` / `deposit:create` / `deposit:verify <ref>` / `transfer`.
+Raw captures land in gitignored `apps/api/test/.proof-out/` (secrets redacted);
+commit the harness, never the captures.
+
 Standard capture per step: full request/response bodies, our
 `partnerReferenceNo` ↔ DOKU `referenceNo`, status transitions with
 timestamps, webhooks received, `balance-inquiries` deltas, history rows,
@@ -306,6 +315,23 @@ Results log (append dated entries):
     bank codes (Kirim docs), min/max, fees, callbacks, and pool/JIT
     consolidation acceptance unconfirmed. Redemption stays flagged until
     §8 passes plus a zero-discrepancy recon.
+0c. **Issuance activation flags (code done, flip after §8)** —
+    `PID_UNIFIED_LEDGER_ACTIVE` (hard prerequisite for ALL POINT issuance;
+    fail-safe until DOKU_NON_FIAT TOPUP + SYSTEM_POINT funding live-verified)
+    and `PID_VA_ISSUANCE_ENABLED` (VA rail only; see PROVIDER-DEP-01).
+    Redemption stays `PID_REDEMPTION_ENABLED=false` until aggregate backing
+    + payout liquidity are live-verified.
+PROVIDER-DEP-01. **VA payment-confirmation signal (UNVERIFIED — do not
+    infer).** Which provider signal actually means payment-received for the
+    VA rail is unknown: txStatus `"00"` may be payment confirmation or
+    settlement-only. Until live sandbox evidence names it, VA issuance stays
+    behind `PID_VA_ISSUANCE_ENABLED=false` (fail safe, pendingIssuance
+    visible); the provisional gate is SUCCESS notify + `"00"` corroboration.
+PROVIDER-DEP-02. **DOKU refund/chargeback lifecycle (UNVERIFIED).**
+    Reversal signals only ever create admin-reviewable clawback candidates
+    for the exact issued NET (`{parent}-CLAWBACK-{n}`, idempotent);
+    partial/ambiguous reversals stay blocked for manual ops. No automatic
+    clawback until the refund/chargeback shapes + timelines are verified.
 1. **Fiat split rule retired** — (done) fees move as Treasury POINTS; no
     fiat split on payments (double charge). `admin/split-rules` passthrough
     is future-use only; rule list/get/update/delete undocumented.

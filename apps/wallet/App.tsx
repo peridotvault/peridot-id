@@ -31,10 +31,12 @@ import { AppConnectionsScreen } from "./src/screens/AppConnectionsScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { ActivityDetailScreen } from "./src/screens/ActivityDetailScreen";
 import { FiatDetailScreen } from "./src/screens/FiatDetailScreen";
+import { FiatTransferScreen } from "./src/screens/FiatTransferScreen";
+import { FiatLedgerDetailScreen } from "./src/screens/FiatLedgerDetailScreen";
 import { TabBar } from "./src/components/TabBar";
 import { ActivationScreen } from "./src/screens/ActivationScreen";
 import type { WalletTransaction } from "@peridotvault/pid-types";
-import type { FiatItem } from "./src/screens/ActivityScreen";
+import type { FiatItem, FiatLedgerItem } from "./src/screens/ActivityScreen";
 
 type Screen =
   | "login"
@@ -54,6 +56,8 @@ type Screen =
   | "activity"
   | "activity-detail"
   | "fiat-detail"
+  | "fiat-transfer"
+  | "fiat-ledger-detail"
   | "activation";
 
 export default function App() {
@@ -119,6 +123,7 @@ export default function App() {
   });
   const [activityTx, setActivityTx] = useState<WalletTransaction | null>(null);
   const [fiatItem, setFiatItem] = useState<FiatItem | null>(null);
+  const [ledgerItem, setLedgerItem] = useState<FiatLedgerItem | null>(null);
   const [passkeyReturn, setPasskeyReturn] = useState<Screen>("settings");
 
   const goHome = useCallback(() => setScreen("home"), []);
@@ -155,6 +160,11 @@ export default function App() {
   const openFiatDetail = useCallback((item: FiatItem) => {
     setFiatItem(item);
     setScreen("fiat-detail");
+  }, []);
+
+  const openLedgerDetail = useCallback((item: FiatLedgerItem) => {
+    setLedgerItem(item);
+    setScreen("fiat-ledger-detail");
   }, []);
 
   // After a Google OAuth redirect returns, detect the existing session and go straight home.
@@ -252,12 +262,14 @@ export default function App() {
             goReceive={() => go("receive")}
             goSwap={() => go("swap")}
             goBuy={() => go("topup")}
+            goTransfer={() => go("fiat-transfer")}
             goActivation={() => go("activation")}
             goPasskeys={() => openPasskey("settings")}
             goAppConnections={() => go("app-connections")}
           />
         )}
         {screen === "send" && <SendScreen onDone={goHome} />}
+        {screen === "fiat-transfer" && <FiatTransferScreen onDone={goHome} />}
         {screen === "receive" && <ReceiveScreen onDone={goHome} />}
         {screen === "swap" && <SwapScreen onDone={goHome} />}
         {screen === "topup" && <TopupScreen onDone={goHome} />}
@@ -283,9 +295,10 @@ export default function App() {
         {screen === "sessions" && <SessionsScreen onDone={() => go("settings")} />}
         {screen === "connected" && <ConnectedAccountsScreen onDone={() => go("settings")} />}
         {screen === "app-connections" && <AppConnectionsScreen onDone={goHome} />}
-        {screen === "activity" && <ActivityScreen onSelect={openActivityDetail} onSelectFiat={openFiatDetail} />}
+        {screen === "activity" && <ActivityScreen onSelect={openActivityDetail} onSelectFiat={openFiatDetail} onSelectLedger={openLedgerDetail} />}
         {screen === "activity-detail" && activityTx && <ActivityDetailScreen tx={activityTx} onDone={() => go("activity")} />}
         {screen === "fiat-detail" && fiatItem && <FiatDetailScreen item={fiatItem} onDone={() => go("activity")} />}
+        {screen === "fiat-ledger-detail" && ledgerItem && <FiatLedgerDetailScreen item={ledgerItem} onDone={() => go("activity")} />}
         {(screen === "home" || screen === "activity" || screen === "profile") && (
           <TabBar current={screen} go={go} />
         )}

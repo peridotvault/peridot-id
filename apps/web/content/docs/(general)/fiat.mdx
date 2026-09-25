@@ -1,0 +1,134 @@
+---
+title: Fiat & payments
+description: Top up, hold, and send IDR balances with the PeridotID fiat ledger
+---
+
+PeridotID provides an **IDR balance** for every identity (`<handle>@pid`), plus
+the ability to send it to any other identity — the building block for escrow,
+payouts, and platform fees. Money enters through a hosted **DOKU Checkout** page;
+everything else happens on the internal **fiat ledger**.
+
+- **Money in** — a user tops up via DOKU Checkout (any bank, QRIS, e-wallet, card).
+  The **NET** amount is credited to their balance the moment payment is confirmed.
+- **Balance & statement** — read the spendable balance and the immutable ledger.
+- **Send / receive** — send to any PeridotID identity (e.g. an app's escrow account).
+- **Fees** — a global PeridotID fee plus any per-app fee (see [Fees](#fees)).
+- **No withdrawal yet** — bank payouts (redemption) are disabled.
+
+## Balance and statement
+
+```ts
+const bal = await peridot.fiat.balance();
+// { balanceIdr: "900000", currency: "IDR", source: "fiat-ledger", replayErrors: [] }
+
+const view = await peridot.fiat.ledger();
+// view.balanceIdr, view.rows: FiatLedgerEntry[]
+// FiatLedgerEntry = { id, kind, entryGroup, counterpartyPid, amountIdr, direction, status, createdAt }
+```
+
+Balance is replayed from the immutable journal, never trusted from a cached number.
+`kind` is one of `fiat_issue`, `fiat_fee`, `fiat_app_fee`, `fiat_transfer_in`,
+`fiat_transfer_out`, `fiat_adjust`; `direction` is `in` or `out`; `status` is
+`created | posted | failed | cancelled` (only `posted` counts).
+
+## Top up (money in)
+
+`checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns the DOKU
+payment URL. `netAmountIdr` is what you want **credited** (minimum Rp100.000); the
+fee is quoted on top.
+
+```ts
+const deposit = await peridot.fiat.checkoutDeposit("100000");
+// { paymentUrl, grossIdr, feeIdr, netIdr, providerRef, ... }
+// Navigate the user to deposit.paymentUrl.
+```
+
+After the user pays, corroborate on demand (webhooks may lag):
+
+```ts
+const fresh = await peridot.fiat.syncTransaction(deposit.id);
+// providerStatus: "success" once PAID → the balance is credited
+```
+
+You can list recent intents with `peridot.fiat.deposits()`.
+
+> In third-party (popup) mode, `checkoutDeposit` opens the PeridotID popup
+> (`fiat-checkout`), shows the server quote, and navigates itself to the DOKU
+> page on Approve — the developer's page never touches the amounts.
+
+## Send / receive
+
+Any identity can send to any identity. Amounts are **gross** (the sender is
+debited the amount; the recipient receives it minus fees).
+
+```ts
+// First-party inline (wallet): inquiry → confirm
+const inq = await peridot.fiat.transferInquiry({
+  amountIdr: "100000",
+  beneficiaryPid: "live2dev@pid",
+  remark: "campaign escrow",
+});
+const done = await peridot.fiat.transferConfirm(inq.id); // posted
+
+// Third-party (popup): one approved ceremony
+const done2 = await peridot.fiat.transferViaPopup({
+  amountIdr: "100000",
+  beneficiaryPid: "live2dev@pid",
+});
+```
+
+`transferInquiry`/`transferConfirm` are **first-party inline only**; in popup mode
+they throw and direct you to `transferViaPopup()` (the inquiry runs server-side on
+the host, so the summary can never show a forged recipient or amount). A posted
+send can be cancelled only before it is confirmed (`cancelTransaction(id)`).
+
+### Escrow pattern
+
+An app (say `live2dev@pid`) is a normal identity: it holds a balance and can
+receive and send. A user sends funds to the app's account ("escrow"); the app
+releases them to other users when its own business logic is satisfied:
+
+```
+developer@pid  →  live2dev@pid   (escrow top-up)
+live2dev@pid   →  streamer@pid   (release on deal completion, ×N)
+```
+
+PeridotID records the movements and balances; the escrow release rules live in
+the app. Apps can read their escrow balance server-side with a
+[machine token](/docs/apps#machine-token).
+
+## Fees
+
+Two fees stack on every movement:
+
+1. **Global PeridotID fee** — **0.1% of the amount, minimum Rp100, no cap**. It
+   applies to every fiat movement (user↔user, escrow, top-up, withdrawal) and is
+   snapshotted per movement.
+2. **Per-app fee** — optional, set by the app (see
+   [App fees](/docs/apps#fees)). It is charged **only** when the movement is
+   initiated in that app's context, and it credits the **app's own account**.
+
+Except for top-up (quoted on the NET you want credited), the fee is taken from the
+gross amount the sender pays.
+
+```ts
+// Global fee only (first-party / no app context)
+//   100000 gross → global fee 100 (min) → recipient gets 99900
+
+// With an app context, the app's fee stacks on top and credits the app:
+const inq = await peridot.fiat.transferInquiry(
+  { amountIdr: "100000", beneficiaryPid: "live2dev@pid" },
+  "pidapp_...", // clientId of the app initiating the flow
+);
+// inq.feeIdr = total (global + app), inq.appFeeIdr = the app portion
+```
+
+## Errors
+
+Fiat methods **throw** plain `Error` (message = the server message), unlike
+auth/wallet reads which return `T | ApiError`. See [Errors](/docs/errors).
+
+## What's next
+
+- [Apps & workspace](/docs/apps) — register an app, set its fees, read its escrow.
+- [API reference](/docs/api) — every fiat endpoint and schema.

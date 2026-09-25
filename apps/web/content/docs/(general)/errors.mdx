@@ -61,10 +61,34 @@ Auth endpoints are rate limited to protect against brute force:
 | `GET /v1/apps` | 30 requests / minute |
 | `PATCH /v1/apps/:id` | 20 requests / minute |
 | `POST /v1/apps/:id/secret` | 5 requests / minute |
+| `POST /v1/apps/:id/webhook` | 5 requests / minute |
+| `GET /v1/apps/:id/fees` | 30 requests / minute |
+| `PUT /v1/apps/:id/fees/:operation` | 20 requests / minute |
+| `POST /v1/auth/token` | 20 requests / minute |
+| `POST /v1/fiat/deposits/checkout` | 10 requests / minute |
+| `POST /v1/fiat/transfers/inquiry`, `…/confirm` | 10 requests / minute |
+| `POST /v1/fiat/deposits/:id/sync` | 12 requests / minute |
 | `GET /v1/auth/google`, `/v1/auth/google/callback` | 100 requests / minute |
 | `POST /v1/wallet` | 10 requests / minute |
 
 Exceeding a limit returns `429`. Clients should back off and retry.
+
+## Fiat errors
+
+Fiat endpoints return the same JSON shape, but the **SDK fiat methods throw**
+(a plain `Error` whose message is the server message) instead of returning the
+`T | ApiError` union that auth/wallet reads use. Handle them with `try/catch`:
+
+```ts
+try {
+  await peridot.fiat.transferConfirm(inquiryId);
+} catch (e) {
+  // e.message: "Insufficient internal credit", "Amount too small…", etc.
+}
+```
+
+Common fiat statuses: `400` (bad amount / net too small), `401` (no session),
+`404` (unknown recipient / transaction), `503` (ledger disabled or frozen).
 
 ## SDK popup errors
 

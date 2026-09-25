@@ -8,7 +8,7 @@
 // NEXT_PUBLIC_PID_CLIENT_ID set.
 
 import { useMemo, useState } from "react";
-import { Peridot, openLoginPopup, type CheckoutDepositView, type SubTxView } from "@peridotvault/pid-sdk-js";
+import { Peridot, openLoginPopup, type CheckoutDepositView, type FiatLedgerEntry } from "@peridotvault/pid-sdk-js";
 import { Card, ERROR, MUTED } from "../_components/ui";
 import { PageHeader } from "../_components/page-header";
 import { CutButton } from "@/components/landing/cut-button";
@@ -38,7 +38,7 @@ export default function DemoPage() {
   const [toPid, setToPid] = useState("");
   const [sendAmount, setSendAmount] = useState("");
   const [deposit, setDeposit] = useState<CheckoutDepositView | null>(null);
-  const [receipt, setReceipt] = useState<SubTxView | null>(null);
+  const [receipt, setReceipt] = useState<FiatLedgerEntry | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,7 +84,6 @@ export default function DemoPage() {
     run("transfer", async () => {
       // One popup ceremony: inquiry + verified recipient + confirm on Approve.
       const tx = await peridot.fiat.transferViaPopup({
-        type: "DOKU_SUB_ACCOUNT",
         amountIdr: sendAmount.replace(/\D/g, ""),
         beneficiaryPid: toPid.trim(),
       });
@@ -164,8 +163,8 @@ export default function DemoPage() {
         </div>
         {receipt && (
           <p className="mt-3 text-sm">
-            Transfer <code>{receipt.providerRef}</code> — {receipt.providerStatus}. Gross {receipt.grossIdr}, net{" "}
-            {receipt.netIdr ?? "pending"}.
+            Transfer <code>{receipt.entryGroup}</code> — {receipt.status}. Amount {receipt.amountIdr} (
+            {receipt.direction}).
           </p>
         )}
       </Card>

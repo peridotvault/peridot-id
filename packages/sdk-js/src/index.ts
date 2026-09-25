@@ -29,7 +29,17 @@ import { PopupClosedError, PopupUnavailableError } from "./popup.js";
 
 export { PeridotWallet, type PeridotWalletOptions };
 export type { ExecuteInput, ExecuteMetaInput, RotateInput, TopupInput, WithdrawInput } from "./wallet/wallet-client.js";
-export { PeridotFiat, type CheckoutDepositView, type DepositChannelView, type FeePolicyView, type FiatTransferInput, type SacTransferType, type SubAccountView, type SubBalanceView, type SubHistoryItem, type SubTransferInquiryView, type SubTxView } from "./fiat/fiat-client.js";
+export {
+  PeridotFiat,
+  type CheckoutDepositView,
+  type FeePolicyView,
+  type FiatBalanceView,
+  type FiatDepositView,
+  type FiatLedgerEntry,
+  type FiatLedgerView,
+  type FiatTransferInput,
+  type FiatTransferInquiryView,
+} from "./fiat/fiat-client.js";
 export type { ActivationView, ActivationStatus } from "./wallet/wallet-client.js";
 export { authenticatePasskey, BrowserPasskeySigner, PasskeyHostedRequiredError, registerPasskey } from "@peridotvault/pid-core";
 export type { PasskeySigner } from "@peridotvault/pid-core";
@@ -437,6 +447,10 @@ class PeridotClient {
 
   patch<T>(path: string, body: unknown) {
     return this.request<T>(path, { method: "PATCH", body: JSON.stringify(body) });
+  }
+
+  put<T>(path: string, body: unknown) {
+    return this.request<T>(path, { method: "PUT", body: JSON.stringify(body) });
   }
 
   delete<T>(path: string) {

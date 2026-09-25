@@ -11,6 +11,8 @@ import { PrismaService } from "../prisma/prisma.service";
 export interface AccessTokenPayload {
   sub: string;
   type: "access";
+  /** Present on machine (client-credentials) tokens: the app's clientId. */
+  app?: string;
 }
 
 export interface RefreshTokenPayload {
@@ -42,6 +44,21 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Short-lived machine token for an app's backend (client-credentials),
+   * bound to the app owner's pid + the app's clientId. Used to read the app's
+   * escrow balance, initiate transfers, and manage app settings server-side —
+   * no browser session. The token carries `app`, and AdminGuard rejects it.
+   */
+  async issueAppAccessToken(ownerPid: string, clientId: string): Promise<{ accessToken: string; expiresIn: string }> {
+    const ttl = this.config.get<string>("APP_TOKEN_TTL", "1h");
+    const accessToken = await this.jwt.signAsync(
+      { sub: ownerPid, type: "access", app: clientId },
+      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: ttl },
+    );
+    return { accessToken, expiresIn: ttl };
+  }
 
   /**
    * Existing identity for a Google credential, if any (bumps lastLoginAt).

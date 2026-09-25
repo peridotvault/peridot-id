@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ArrowDownLeft, ArrowUpRight, Rocket, ChevronRight, RefreshCw } from "../icons";
-import type { SubTxView } from "@peridotvault/pid-sdk-js";
+import type { FiatLedgerEntry, FiatDepositView } from "@peridotvault/pid-sdk-js";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
@@ -13,9 +13,16 @@ type Tab = "all" | "onchain" | "idr";
 export type FiatKind = "deposit" | "withdraw" | "transfer" | "debit" | "fee";
 
 /** Ledger-backed fiat row. DOKU is the ledger; this is the reference log. */
-export type FiatItem = { kind: FiatKind; createdAt: string; tx: SubTxView };
+export type FiatItem = { kind: FiatKind; createdAt: string; tx: FiatDepositView };
 
-type AllItem = { createdAt: string; row: { kind: "chain"; tx: WalletTransaction } | FiatItem };
+/** A fiat ledger entry row. */
+export type LedgerKind = "deposit" | "transfer" | "adjust";
+export type FiatLedgerItem = { kind: LedgerKind; createdAt: string; tx: FiatLedgerEntry };
+
+type AllItem =
+  | { type: "chain"; createdAt: string; tx: WalletTransaction }
+  | { type: "fiat"; createdAt: string; item: FiatItem }
+  | { type: "ledger"; createdAt: string; item: FiatLedgerItem };
 
 function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;
@@ -37,6 +44,61 @@ function fiatLabel(kind: FiatKind): string {
     case "fee": return "Service fee";
     default: return "Withdraw";
   }
+}
+
+/** Friendly status text — provider enums (settled/processing/...) never reach the user. */
+export function fiatStatusLabel(kind: FiatKind, status: string): string {
+  const incoming = kind === "deposit";
+  switch (status) {
+    case "success":
+    case "settled":
+      return incoming ? "Payment received" : "Completed";
+    case "created":
+    case "processing":
+      return incoming ? "Waiting for payment" : "Processing";
+    case "expired":
+      return incoming ? "Payment expired" : "Expired";
+    case "failed":
+      return incoming ? "Payment failed" : "Failed";
+    case "cancelled":
+      return "Cancelled";
+    case "refunded":
+      return "Refunded";
+    default:
+      return "Pending";
+  }
+}
+
+function ledgerKindOf(kind: string): LedgerKind {
+  if (kind === "fiat_issue") return "deposit";
+  if (kind === "fiat_adjust") return "adjust";
+  return "transfer"; // fiat_transfer_in / fiat_transfer_out
+}
+
+function ledgerLabel(kind: LedgerKind, incoming: boolean): string {
+  if (kind === "deposit") return "Deposit";
+  if (kind === "adjust") return "Adjustment";
+  return incoming ? "Transfer in" : "Transfer out";
+}
+
+export function ledgerStatusLabel(status: string): string {
+  switch (status) {
+    case "posted":
+      return "Completed";
+    case "created":
+      return "Pending";
+    case "failed":
+      return "Failed";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return "Pending";
+  }
+}
+
+/** Pending deposits (DOKU intent rows not yet posted to the ledger). */
+function pendingDeposit(tx: FiatDepositView): boolean {
+  return tx.kind === "deposit" && (tx.providerStatus === "created" || tx.providerStatus === "processing");
 }
 
 function fmtAmount(t: WalletTransaction): string {
@@ -67,14 +129,17 @@ function fmtDate(iso: string): string {
 export function ActivityScreen({
   onSelect,
   onSelectFiat,
+  onSelectLedger,
 }: {
   onSelect: (tx: WalletTransaction) => void;
   onSelectFiat: (item: FiatItem) => void;
+  onSelectLedger: (item: FiatLedgerItem) => void;
 }) {
   const { peridot } = usePeridot();
   const [tab, setTab] = useState<Tab>("all");
   const [items, setItems] = useState<WalletTransaction[]>([]);
-  const [fiat, setFiat] = useState<SubTxView[]>([]);
+  const [deposits, setDeposits] = useState<FiatDepositView[]>([]);
+  const [entries, setEntries] = useState<FiatLedgerEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,19 +147,21 @@ export function ActivityScreen({
     setBusy(true);
     setError(null);
     try {
-      const [chain, ledger] = await Promise.all([
+      const [chain, depositsView, ledgerView] = await Promise.all([
         peridot.wallet.history(),
-        peridot.fiat.ledger().catch(() => []),
+        peridot.fiat.deposits().catch(() => [] as FiatDepositView[]),
+        peridot.fiat.ledger().then((l) => l.rows).catch(() => [] as FiatLedgerEntry[]),
       ]);
-      // Heal unsettled rows against DOKU (local rows never self-heal).
+      // Heal unsettled deposit intents against DOKU (local rows never self-heal).
       const healed = await Promise.all(
-        ledger
-          .filter((x) => x.providerStatus === "created" || x.providerStatus === "processing")
+        depositsView
+          .filter((x) => pendingDeposit(x))
           .map((x) => peridot.fiat.syncTransaction(x.id).catch(() => null)),
       );
       const fresh = new Map(healed.filter((x) => x !== null).map((x) => [x.id, x]));
       setItems((Array.isArray(chain) ? chain : []) as WalletTransaction[]);
-      setFiat(ledger.map((x) => fresh.get(x.id) ?? x));
+      setDeposits(depositsView.map((x) => fresh.get(x.id) ?? x));
+      setEntries(ledgerView);
     } catch (e) {
       setError(String(e));
       // Non-fatal: keep showing cached local history if the RPC is unreachable.
@@ -109,26 +176,31 @@ export function ActivityScreen({
 
   // Fee legs live in the DB (idempotency + audit) but never surface in the
   // user's feed — the parent deposit/transfer already shows fee + net.
-  const fiatItems: FiatItem[] = fiat
-    .filter((tx) => tx.kind !== "fee" && tx.kind !== "points_fee")
-    .map((tx): FiatItem => ({
-      kind: fiatKindOf(tx.kind),
+  // IDR tab = pending DOKU deposit intents (not yet on the ledger) + the
+  // fiat ledger. Issued deposits appear only as fiat_issue rows.
+  const fiatItems: FiatItem[] = deposits
+    .filter((tx) => pendingDeposit(tx))
+    .map((tx): FiatItem => ({ kind: "deposit", createdAt: tx.createdAt, tx }))
+    .sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
+
+  const ledgerItems: FiatLedgerItem[] = entries
+    .filter((tx) => tx.kind !== "fiat_fee")
+    .map((tx): FiatLedgerItem => ({
+      kind: ledgerKindOf(tx.kind),
       createdAt: tx.createdAt,
       tx,
     }))
     .sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
 
-  const allItems: AllItem[] = [
-    ...items.map((tx): AllItem => ({ createdAt: tx.createdAt, row: { kind: "chain", tx } })),
-    ...fiatItems.map((f): AllItem => ({ createdAt: f.createdAt, row: f })),
-  ].sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
+  const chainItems: AllItem[] = items.map((tx): AllItem => ({ type: "chain", createdAt: tx.createdAt, tx }));
+  const fiatAll: AllItem[] = fiatItems.map((f): AllItem => ({ type: "fiat", createdAt: f.createdAt, item: f }));
+  const ledgerAll: AllItem[] = ledgerItems.map((c): AllItem => ({ type: "ledger", createdAt: c.createdAt, item: c }));
+  const idrAll = [...fiatAll, ...ledgerAll].sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
+
+  const allItems = [...chainItems, ...idrAll].sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
 
   const visible: AllItem[] =
-    tab === "all"
-      ? allItems
-      : tab === "onchain"
-        ? items.map((tx): AllItem => ({ createdAt: tx.createdAt, row: { kind: "chain", tx } }))
-        : fiatItems.map((f): AllItem => ({ createdAt: f.createdAt, row: f }));
+    tab === "all" ? allItems : tab === "onchain" ? chainItems : idrAll;
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
@@ -156,10 +228,12 @@ export function ActivityScreen({
       )}
 
       {visible.map((item) =>
-        item.row.kind === "chain" ? (
-          <ChainRow key={item.row.tx.id} tx={item.row.tx} onSelect={onSelect} />
+        item.type === "chain" ? (
+          <ChainRow key={item.tx.id} tx={item.tx} onSelect={onSelect} />
+        ) : item.type === "fiat" ? (
+          <FiatRow key={item.item.tx.id} item={item.item} onSelect={onSelectFiat} />
         ) : (
-          <FiatRow key={item.row.tx.id} item={item.row} onSelect={onSelectFiat} />
+          <LedgerRow key={item.item.tx.id} item={item.item} onSelect={onSelectLedger} />
         ),
       )}
     </ScrollView>
@@ -202,9 +276,9 @@ function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: FiatItem
   const incoming = item.kind === "deposit";
   const { tx } = item;
   const Icon = incoming ? ArrowDownLeft : ArrowUpRight;
-  const color = tx.providerStatus === "settled" ? theme.colors.success : theme.colors.foreground;
-  // Only live money gets a sign: failed/cancelled moved nothing.
-  const live = tx.providerStatus === "settled" || tx.providerStatus === "processing" || tx.providerStatus === "created";
+  const color = tx.providerStatus === "settled" || tx.providerStatus === "success" ? theme.colors.success : theme.colors.foreground;
+  // Only live money gets a sign: failed/cancelled/expired moved nothing.
+  const live = ["settled", "success", "processing", "created"].includes(tx.providerStatus);
   const sign = live ? (incoming ? "+" : "−") : "";
   // Fee rows move the fee, not the parent gross — show what actually moved.
   // Headline rule everywhere: show NET (what the user gets), fall back to
@@ -218,9 +292,35 @@ function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: FiatItem
         </View>
         <View style={styles.meta}>
           <Text style={styles.label}>{fiatLabel(item.kind)}</Text>
-          <Text style={styles.muted}>{fmtDate(item.createdAt)} · {tx.providerStatus}</Text>
+          <Text style={styles.muted}>{fmtDate(item.createdAt)} · {fiatStatusLabel(item.kind, tx.providerStatus)}</Text>
         </View>
         <Text style={styles.amount}>{sign}{fmtIdr(moved)}</Text>
+        <ChevronRight size={16} color={theme.colors.mutedForeground} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function LedgerRow({ item, onSelect }: { item: FiatLedgerItem; onSelect: (item: FiatLedgerItem) => void }) {
+  const { tx } = item;
+  const incoming = tx.direction === "in";
+  const posted = tx.status === "posted";
+  const Icon = incoming ? ArrowDownLeft : ArrowUpRight;
+  const color = posted ? (incoming ? theme.colors.success : theme.colors.foreground) : theme.colors.mutedForeground;
+  const amount = tx.amountIdr;
+  // Only posted money gets a sign: pending/failed/cancelled moved nothing.
+  const sign = posted ? (incoming ? "+" : "−") : "";
+  return (
+    <TouchableOpacity key={tx.id} style={s.card} onPress={() => onSelect(item)}>
+      <View style={styles.row}>
+        <View style={[styles.icon, { backgroundColor: color + "22" }]}>
+          <Icon size={16} color={color} />
+        </View>
+        <View style={styles.meta}>
+          <Text style={styles.label}>{ledgerLabel(item.kind, incoming)}</Text>
+          <Text style={styles.muted}>{fmtDate(item.createdAt)} · {ledgerStatusLabel(tx.status)}</Text>
+        </View>
+        <Text style={styles.amount}>{sign}{fmtIdr(amount)}</Text>
         <ChevronRight size={16} color={theme.colors.mutedForeground} />
       </View>
     </TouchableOpacity>

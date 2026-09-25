@@ -129,6 +129,12 @@ export class CheckoutDepositDto {
   /** Net deposit, whole IDR (credited to the user; fee is quoted on top). */
   @Matches(/^\d+$/, { message: "Amount must be whole IDR (positive integer)" })
   netAmountIdr!: string;
+
+  /** Optional app context (model A): when set, this app's topup fee applies. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  clientId?: string;
 }
 
 export class ReconcileDto {
@@ -208,4 +214,10 @@ export class RedemptionRequestDto {
   @IsOptional()
   @IsIn(["BI_FAST", "ONLINE"])
   channel?: "BI_FAST" | "ONLINE";
+
+  /** Optional app context: when set, this app's withdraw fee applies. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  clientId?: string;
 }

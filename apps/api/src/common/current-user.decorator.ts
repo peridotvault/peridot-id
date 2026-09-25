@@ -2,6 +2,8 @@ import { createParamDecorator, ExecutionContext } from "@nestjs/common";
 
 export interface AuthenticatedUser {
   pid: string;
+  /** Set when the request used a machine (client-credentials) token — the app's clientId. */
+  app?: string;
 }
 
 export const CurrentUser = createParamDecorator(

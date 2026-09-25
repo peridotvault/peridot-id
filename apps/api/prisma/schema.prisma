@@ -61,44 +61,52 @@ model Identity {
   updatedAt DateTime       @updatedAt
   deletedAt DateTime?
 
+  // Back-refs below are Prisma-mandatory declarations (a relation needs both
+  // sides); they cost nothing at runtime. Convention: never `include` from
+  // Identity — query the child delegate directly (see docs/DATABASE.md).
+  // Auth & profile.
   profile     Profile?
   credentials IdentityCredential[]
   devices     Device[]
-
+  challenges  CredentialChallenge[]
+  // Wallet (1 identity = 1 personal wallet).
   chainAccounts ChainAccount[]
   authorities   Authority[]
   intents       Intent[]
   transactions  Transaction[]
-  challenges    CredentialChallenge[]
-  securityEvents  SecurityEvent[]
-  pidApps PidApp[]
-  fiatProviderAccounts FiatProviderAccount[]
+  // Platform: third-party apps, audit log.
+  securityEvents SecurityEvent[]
+  pidApps        PidApp[]
+  // Money rails (journals; Postgres is journal+cache, DOKU is the ledger —
+  // internal credit excepted, see docs/INTERNAL_CREDIT.md).
+  fiatProviderAccounts     FiatProviderAccount[]
   fiatProviderTransactions FiatProviderTransaction[]
+  fiatLedgerEntries    FiatLedgerEntry[]
 
   @@map("identities")
 }
 
 model Profile {
   // Strict 1:1 with Identity — shared primary key, no surrogate UUID.
-  pid               String   @id
-  identity          Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
-  displayName       String?
-  avatarUrl         String?
-  locale            String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  pid         String   @id
+  identity    Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  displayName String?
+  avatarUrl   String?
+  locale      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@map("profiles")
 }
 
 model IdentityCredential {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   pid            String
-  identity       Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  identity       Identity  @relation(fields: [pid], references: [pid], onDelete: Cascade)
   provider       String
   providerUserId String
   email          String?
-  linkedAt       DateTime @default(now())
+  linkedAt       DateTime  @default(now())
   lastLoginAt    DateTime?
 
   @@unique([provider, providerUserId])
@@ -107,16 +115,16 @@ model IdentityCredential {
 }
 
 model Device {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   pid        String
-  identity   Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  identity   Identity  @relation(fields: [pid], references: [pid], onDelete: Cascade)
   userAgent  String?
   // How this session family authenticated ("google" | "passkey"). Null on
   // pre-existing rows, treated as "google" (shorter cap). Preserved across
   // refresh rotations, which keep the same device.
   authMethod String?
-  lastSeenAt DateTime @default(now())
-  createdAt  DateTime @default(now())
+  lastSeenAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
   sessions   Session[]
 
   @@index([pid])
@@ -124,13 +132,13 @@ model Device {
 }
 
 model Session {
-  id          String   @id
+  id          String    @id
   deviceId    String
-  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  device      Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   rotatedFrom String?
   revokedAt   DateTime?
   expiresAt   DateTime
-  createdAt  DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   @@index([deviceId])
   @@map("sessions")
@@ -144,16 +152,16 @@ model Session {
 // is a random nonce (PRD_v4 §22: replay protection). `approvalChallenge` carries the
 // existing-credential approval required to add a second credential.
 model CredentialChallenge {
-  id                String           @id @default(uuid())
+  id                String    @id @default(uuid())
   pid               String?
-  identity          Identity?  @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  identity          Identity? @relation(fields: [pid], references: [pid], onDelete: Cascade)
   kind              String
   challenge         String
   approvalChallenge String?
-  isAdditional      Boolean          @default(false)
+  isAdditional      Boolean   @default(false)
   expiresAt         DateTime
   consumedAt        DateTime?
-  createdAt         DateTime         @default(now())
+  createdAt         DateTime  @default(now())
 
   @@index([pid])
   @@map("credential_challenges")
@@ -166,18 +174,18 @@ model CredentialChallenge {
 // are read back through the join (never duplicated here).
 // No key-material columns, ever (long-standing rule).
 model ChainAccount {
-  id                 String            @id @default(uuid())
+  id                 String             @id @default(uuid())
   pid                String
-  identity           Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  identity           Identity           @relation(fields: [pid], references: [pid], onDelete: Cascade)
   chainId            String
-  chain              Chain             @relation(fields: [chainId], references: [id], onDelete: Restrict)
+  chain              Chain              @relation(fields: [chainId], references: [id], onDelete: Restrict)
   address            String
   accountType        String
   status             ChainAccountStatus @default(inactivated)
-  activationBalance  BigInt?     // lamports detected at last poll (null = unpolled)
-  activationRequired BigInt?     // lamports needed to activate (rent+fee+margin)
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  activationBalance  BigInt? // lamports detected at last poll (null = unpolled)
+  activationRequired BigInt? // lamports needed to activate (rent+fee+margin)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   feePayers    WalletFeePayer[]
   transactions Transaction[]
@@ -192,7 +200,7 @@ model ChainAccount {
 model Authority {
   id           String          @id @default(uuid())
   pid          String
-  identity     Identity  @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  identity     Identity        @relation(fields: [pid], references: [pid], onDelete: Cascade)
   type         String
   publicKey    Bytes
   credentialId String?
@@ -220,13 +228,13 @@ model WalletFeePayer {
 // PRD_v4 §5.4: application expresses a desired action; validated, policy-checked,
 // and given an expiry before anything is signed.
 model Intent {
-  id        String         @id @default(uuid())
+  id        String       @id @default(uuid())
   pid       String
-  identity  Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  identity  Identity     @relation(fields: [pid], references: [pid], onDelete: Cascade)
   type      String
   payload   Json
-  status    IntentStatus   @default(pending)
-  createdAt DateTime       @default(now())
+  status    IntentStatus @default(pending)
+  createdAt DateTime     @default(now())
   expiresAt DateTime
 
   transactions Transaction[]
@@ -238,7 +246,7 @@ model Intent {
 model Transaction {
   id             String            @id @default(uuid())
   pid            String
-  identity       Identity    @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  identity       Identity          @relation(fields: [pid], references: [pid], onDelete: Cascade)
   chainAccountId String
   chainAccount   ChainAccount      @relation(fields: [chainAccountId], references: [id], onDelete: Cascade)
   intentId       String?
@@ -266,12 +274,12 @@ model Transaction {
 // PRD_v4 §22: audit log written by auth, credential, wallet, and program-facing
 // flows. Metadata is JSONB; never contains secrets.
 model SecurityEvent {
-  id         String           @id @default(uuid())
-  pid        String
-  identity   Identity         @relation(fields: [pid], references: [pid], onDelete: Cascade)
-  eventType  String
-  metadata   Json
-  createdAt  DateTime         @default(now())
+  id        String   @id @default(uuid())
+  pid       String
+  identity  Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  eventType String
+  metadata  Json
+  createdAt DateTime @default(now())
 
   @@index([pid])
   @@map("security_events")
@@ -321,12 +329,12 @@ model SsoCode {
 // pid_code is exchanged; revoking stops future code issuance to that origin.
 // It cannot end the relying party's own session (standard OAuth limitation).
 model SsoGrant {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   pid         String
   origin      String
   clientId    String?
-  firstSeenAt DateTime @default(now())
-  lastUsedAt  DateTime @default(now())
+  firstSeenAt DateTime  @default(now())
+  lastUsedAt  DateTime  @default(now())
   revokedAt   DateTime?
 
   @@unique([pid, origin])
@@ -380,34 +388,41 @@ model ChainContract {
 // cached reads, transaction references and fee snapshots only.
 // Local `lastBalance` is a read cache, never a ledger.
 model FiatProviderAccount {
-  id                String   @id @default(uuid())
-  pid               String
-  identity          Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
-  provider          String   @default("doku-sub-account")
-  /** V2 profileId (1 PID → 1 Sub-Account). */
-  profileId         String?  @unique
-  /** IDR cash account number (DOKU_MERCHANT_IDR, withdrawable). */
-  providerAccountId String?
-  /** All V2 accounts [{type, currency, accountNo}] incl. pending/points. */
-  accounts          Json?
-  /** Static BRI VA for deposits (when DOKU returns it). */
-  vaNumber          String?
-  /** POINT account number (DOKU_MERCHANT_POINT, spendable ledger). */
-  pointAccountId    String?
-  /** Contact snapshot from registration (no OTP lifecycle in V2). */
-  phoneNo           String?
-  email             String?
-  accountStatus     String   @default("creating")
-  currency          String   @default("IDR")
-  lastBalance       String?
-  lastBalanceAt     DateTime?
-  /** Cached POINT spendable balance (read projection only — DOKU is truth). */
-  lastPointBalance  String?
-  lastPointBalanceAt DateTime?
-  registerRef       String?  @unique
-  providerResponse  Json?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                 String    @id @default(uuid())
+  pid                String
+  identity           Identity  @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  provider           String    @default("doku-sub-account")
+  // V2 profileId (1 PID → 1 Sub-Account). */
+  profileId          String?   @unique
+  /**
+   * IDR cash account number (DOKU_MERCHANT_IDR, withdrawable).
+   */
+  providerAccountId  String?
+  /**
+   * All V2 accounts [{type, currency, accountNo}] incl. pending/points.
+   */
+  accounts           Json?
+  /**
+   * Static BRI VA for deposits (when DOKU returns it).
+   */
+  vaNumber           String?
+  /**
+   * POINT account number (DOKU_MERCHANT_POINT, spendable ledger).
+   */
+  pointAccountId     String?
+  /**
+   * Contact snapshot from registration (no OTP lifecycle in V2).
+   */
+  phoneNo            String?
+  email              String?
+  accountStatus      String    @default("creating")
+  currency           String    @default("IDR")
+  lastBalance        String?
+  lastBalanceAt      DateTime?
+  registerRef        String?   @unique
+  providerResponse   Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   @@unique([pid, provider])
   @@index([providerAccountId])
@@ -415,57 +430,93 @@ model FiatProviderAccount {
 }
 
 model FiatProviderTransaction {
-  id               String   @id @default(uuid())
-  pid              String
-  identity         Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
-  accountId        String?
-  kind             String
-  providerRef      String   @unique
-  providerStatus   String   @default("created")
-  /** Gross movement amount, whole IDR. Checkout deposits: what the customer
-   *  paid (net + fee). Internal transfers: the requested amount, GROSS-in
-   *  (beneficiary receives gross − fee). */
-  amountIdr        BigInt
-  currency         String   @default("IDR")
-  /** Platform service fee quote, snapshotted at intent time. DOKU settles
-   *  fees natively (NET → user + FEE → Treasury) — the API never moves them.
-   *  Legacy `kind = fee` rows remain for history only. */
-  feeIdr           BigInt?
-  /** Net effect on the user, whole IDR (gross − fee once known). */
-  netIdr           BigInt?
-  feePolicyVersion Int?
-  counterparty     Json?
-  providerResponse Json?
-  /** DOKU ledger operation for this movement, if any (Unified Ledger).
-   *  partnerReferenceNo of the DOKU_NON_FIAT top-up / POINT P2P / POINT
-   *  debit — the idempotency key at DOKU. Null when no ledger movement
-   *  was (or will be) issued for this row. */
-  ledgerRef        String?
-  /** Ledger credit status, tracked SEPARATELY from payment status:
-   *  pending | issued | failed | blocked | clawed_back. */
-  ledgerStatus     String?
-  /** Fiat settlement status, tracked SEPARATELY from payment/ledger:
-   *  pending | settled. Settlement is a backing event, never a balance. */
-  settlementStatus String?
-  /** Double-entry direction of this row relative to `pid` (immutable
-   *  journal): in = credit to pid, out = debit from pid. Fiat-intent rows
-   *  (deposit parents) carry null — they move no PTS. */
-  direction        String?
-  /** DOKU account number debited by this movement (audit/source leg). */
-  sourceAccount    String?
-  /** DOKU account number credited by this movement (audit/dest leg). */
-  destAccount      String?
-  /** Groups the legs of one logical movement (e.g. a P2P transfer's
-   *  sender-out + recipient-in + treasury-fee legs). */
-  entryGroup       String?
-  /** Deterministic replay order (autoincrement — never reuse createdAt).
-   *  Replay folds rows in replaySeq order. */
-  replaySeq        BigInt?  @default(autoincrement())
-  /** True once PTS units are permanently extinguished (redemption burn).
-   *  Extinguished rows never count toward outstanding, forever. */
-  extinguished     Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                    String   @id @default(uuid())
+  pid                   String
+  identity              Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  accountId             String?
+  kind                  String
+  providerRef           String   @unique
+  providerStatus        String   @default("created")
+  /**
+   * Payment truth for deposit rows, tracked SEPARATELY from settlement:
+   * pending | success | expired | failed | refunded.
+   * Checkout SUCCESS writes success here and may trigger POINT issuance.
+   * Sub-Account settlement rows NEVER write here — they update
+   * settlementStatus only. Legacy rows predate this column: fall back to
+   * providerStatus ("success"/"settled" both read as confirmed for
+   * non-Checkout history).
+   */
+  providerPaymentStatus String?
+  /**
+   * Gross movement amount, whole IDR. Checkout deposits: what the customer
+   * paid (net + fee). Internal transfers: the requested amount, GROSS-in
+   * (beneficiary receives gross − fee).
+   */
+  amountIdr             BigInt
+  currency              String   @default("IDR")
+  /**
+   * Platform service fee quote, snapshotted at intent time. DOKU settles
+   * fees natively (NET → user + FEE → Treasury) — the API never moves them.
+   * Legacy `kind = fee` rows remain for history only.
+   */
+  feeIdr                BigInt?
+  /**
+   * Net effect on the user, whole IDR (gross − fee once known).
+   */
+  netIdr                BigInt?
+  feePolicyVersion      Int?
+  counterparty          Json?
+  providerResponse      Json?
+  /**
+   * DOKU ledger operation for this movement, if any (Unified Ledger).
+   * partnerReferenceNo of the DOKU_NON_FIAT top-up / POINT P2P / POINT
+   * debit — the idempotency key at DOKU. Null when no ledger movement
+   * was (or will be) issued for this row.
+   */
+  ledgerRef             String?
+  /**
+   * Ledger credit status, tracked SEPARATELY from payment status:
+   * pending | issued | failed | blocked | clawed_back.
+   */
+  ledgerStatus          String?
+  /**
+   * Fiat settlement/backing status, tracked SEPARATELY from payment/ledger:
+   * pending | settled | failed. Settlement is a backing/reconciliation
+   * event only — it NEVER gates POINT issuance and NEVER means payment
+   * confirmed. Written only from SETTLEMENT-family history rows.
+   */
+  settlementStatus      String?
+  /**
+   * Double-entry direction of this row relative to `pid` (immutable
+   * journal): in = credit to pid, out = debit from pid. Fiat-intent rows
+   * (deposit parents) carry null — they move no PTS.
+   */
+  direction             String?
+  /**
+   * DOKU account number debited by this movement (audit/source leg).
+   */
+  sourceAccount         String?
+  /**
+   * DOKU account number credited by this movement (audit/dest leg).
+   */
+  destAccount           String?
+  /**
+   * Groups the legs of one logical movement (e.g. a P2P transfer's
+   * sender-out + recipient-in + treasury-fee legs).
+   */
+  entryGroup            String?
+  /**
+   * Deterministic replay order (autoincrement — never reuse createdAt).
+   * Replay folds rows in replaySeq order.
+   */
+  replaySeq             BigInt?  @default(autoincrement())
+  /**
+   * True once PTS units are permanently extinguished (redemption burn).
+   * Extinguished rows never count toward outstanding, forever.
+   */
+  extinguished          Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@index([pid])
   @@index([accountId])
@@ -490,21 +541,79 @@ model FiatWebhookEvent {
 // Versioned platform service-fee policy. Exactly one row is active; every
 // money movement snapshots {feeIdr, netIdr, feePolicyVersion} at intent time
 // so policy changes never rewrite history.
-// fee = round-half-up(amount * percentBps / 10_000) — flat 5%, no floor,
-// no cap. minIdr/maxIdr are retained for schema compat only (0/0 = uncapped)
-// and are NOT applied by the formula.
+// fee = clamp(round-half-up(amount * percentBps / 10_000), minIdr, maxIdr).
+// Flat 5% clamped to [Rp5.000, Rp25.000] by default; 0 = unbounded on either
+// side. This is the PeridotID fee ONLY — DOKU charges its own fee separately.
 // Checkout top-ups additionally enforce a Rp100.000 NET minimum in API code
 // (no DOKU-side minimum). Internal transfers stay GROSS-in.
 // Settlement is DOKU-native per payment (static PERCENTAGE split rule).
 model FiatFeePolicy {
-  version       Int      @id
-  percentBps    Int      @default(500)
-  minIdr        BigInt   @default(0)
-  maxIdr        BigInt   @default(25000)
-  active        Boolean  @default(false)
-  createdAt     DateTime @default(now())
+  version    Int      @id
+  percentBps Int      @default(500)
+  minIdr     BigInt   @default(0)
+  maxIdr     BigInt   @default(25000)
+  active     Boolean  @default(false)
+  createdAt  DateTime @default(now())
 
   @@map("fiat_fee_policies")
+}
+
+// Fiat ledger — the spendable balance, statement and send/receive. This is
+// the ONLY balance rail: DOKU Checkout is money-in only (no Sub-Account).
+// Immutable double-entry journal: one logical movement = one entryGroup,
+// written atomically. Only `posted` rows count in replay
+// (apps/api/src/fiat/fiat-ledger-replay.ts). Rows are never deleted.
+model FiatLedgerEntry {
+  id               String   @id @default(uuid())
+  entryGroup       String
+  kind             String
+  pid              String
+  identity         Identity @relation(fields: [pid], references: [pid], onDelete: Restrict)
+  counterpartyPid  String?
+  amountIdr        BigInt
+  direction        String
+  idempotencyKey   String   @unique
+  parentRef        String?
+  status           String   @default("created")
+  feePolicyVersion Int?
+  counterparty     Json?
+  source           String?
+  replaySeq        BigInt?  @default(autoincrement())
+  /** Tamper-evident chain (posted rows only). `hash` = sha256(canonical row +
+   *  prevHash); `hashSeq` is the chain position, assigned at post time in the
+   *  ledger write lock. See apps/api/src/fiat/fiat-ledger-hash.ts. */
+  prevHash         String?
+  hash             String?
+  hashSeq          BigInt?
+  createdAt        DateTime @default(now())
+
+  @@index([pid])
+  @@index([entryGroup])
+  @@index([pid, status])
+  @@index([hashSeq])
+  @@map("fiat_ledger_entries")
+}
+
+// Outbox for third-party callbacks (Live2Dev escrow etc.). Written in the same
+// transaction as the ledger movement; delivered asynchronously with HMAC and
+// retries by the admin dispatch endpoint. See docs/FIAT_LEDGER.md.
+model FiatLedgerEvent {
+  id            String    @id @default(uuid())
+  eventType     String
+  /** Owner PID of the target PidApp (the escrow/recipient app). */
+  targetPid     String
+  targetUrl     String
+  payload       Json
+  /** pending | delivered | failed */
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  deliveredAt   DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@map("fiat_ledger_events")
 }
 
 // Registered third-party apps ("Sign in with PeridotID"). Any developer registers an
@@ -512,21 +621,47 @@ model FiatFeePolicy {
 // returned to (the exact return URL is passed in code at login time). The same list
 // gates browser API calls (CORS).
 model PidApp {
-  id           String   @id @default(uuid())
-  clientId     String   @unique
-  ownerPid     String
-  owner        Identity @relation(fields: [ownerPid], references: [pid], onDelete: Cascade)
-  name         String
-  allowedOrigins String[]
-  isActive     Boolean  @default(true)
+  id                    String    @id @default(uuid())
+  clientId              String    @unique
+  ownerPid              String
+  owner                 Identity  @relation(fields: [ownerPid], references: [pid], onDelete: Cascade)
+  name                  String
+  allowedOrigins        String[]
+  isActive              Boolean   @default(true)
   // Optional backend secret (confidential clients). SHA-256 hex, never plaintext.
   // When set, code exchange requires the matching secret.
   clientSecretHash      String?
   clientSecretPrefix    String?
   clientSecretCreatedAt DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  // Per-app callback endpoint + HMAC signing secret (set together). The
+  // ledger posts signed events here (X-Pid-Signature). See docs/FIAT_LEDGER.md.
+  webhookUrl            String?
+  webhookSecret         String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  fees PidAppFee[]
 
   @@index([ownerPid])
   @@map("pid_apps")
+}
+
+// Per-app fee schedule (stacks on top of the global PeridotID fee). Charged
+// only when the movement is initiated in this app's context (model A); the fee
+// credits the app's own account (ownerPid). One row per operation.
+model PidAppFee {
+  id         String   @id @default(uuid())
+  appId      String
+  app        PidApp   @relation(fields: [appId], references: [id], onDelete: Cascade)
+  /** topup | transaction | withdraw */
+  operation  String
+  percentBps Int      @default(0)
+  minIdr     BigInt   @default(0)
+  maxIdr     BigInt   @default(0)
+  enabled    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([appId, operation])
+  @@map("pid_app_fees")
 }

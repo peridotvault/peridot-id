@@ -5,7 +5,6 @@ import type { CheckoutDepositView, FeePolicyView } from "@peridotvault/pid-sdk-j
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";
-import { ensureSubAccount } from "../fiat-ensure";
 
 function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;
@@ -29,9 +28,27 @@ function groupDigits(digits: string): string {
   return Number(digits).toLocaleString("id-ID");
 }
 
-/** Client-side fee preview: flat percent of net, half-up, no floor, no cap. */
-function previewFee(net: bigint, policy: FeePolicyView): bigint {
-  return (net * BigInt(policy.percentBps) + 5_000n) / 10_000n;
+/** Client-side fee preview — mirrors calcServiceFee (@peridotvault/pid-payments):
+ *  5% of the amount, clamped to policy [minIdr, maxIdr] (0 = unbounded). The
+ *  server recomputes authoritatively when the intent is created, so this is
+ *  display-only. */
+function previewFee(amount: bigint, policy: FeePolicyView): bigint {
+  const fee = (amount * BigInt(policy.percentBps) + 5_000n) / 10_000n;
+  const min = BigInt(policy.minIdr ?? "0");
+  const max = BigInt(policy.maxIdr ?? "0");
+  if (min > 0n && fee < min) return min;
+  if (max > 0n && fee > max) return max;
+  return fee;
+}
+
+/** Human bounds for the fee copy: " (min Rp5.000, max Rp25.000)". */
+function feeBoundsText(policy: FeePolicyView): string {
+  const min = BigInt(policy.minIdr ?? "0");
+  const max = BigInt(policy.maxIdr ?? "0");
+  const parts: string[] = [];
+  if (min > 0n) parts.push(`min ${fmtIdr(policy.minIdr)}`);
+  if (max > 0n) parts.push(`max ${fmtIdr(policy.maxIdr)}`);
+  return parts.length ? ` (${parts.join(", ")})` : "";
 }
 
 /**
@@ -47,9 +64,7 @@ function previewFee(net: bigint, policy: FeePolicyView): bigint {
  */
 export function TopupScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
-  const [va, setVa] = useState<{ vaNumber: string | null; accountNo: string | null } | null>(null);
   const [policy, setPolicy] = useState<FeePolicyView | null>(null);
-  const [noAccount, setNoAccount] = useState(false);
   const [net, setNet] = useState("");
   const [pending, setPending] = useState<CheckoutDepositView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,13 +73,6 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    try {
-      setVa(await peridot.fiat.depositVa());
-      setNoAccount(false);
-    } catch (e) {
-      // Missing row OR a dead creating/failed row — the inline setup below recovers.
-      if (/not registered|is creating|is failed/i.test(String(e))) setNoAccount(true);
-    }
     try {
       setPolicy(await peridot.fiat.feePolicy());
     } catch {
@@ -104,10 +112,10 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
     setSyncMsg(null);
     try {
       const tx = await peridot.fiat.syncTransaction(intent.id);
-      if (tx.providerStatus === "settled") {
+      if (tx.providerStatus === "settled" || tx.providerStatus === "success") {
         setSyncMsg("Payment confirmed — your Saldo is updated. You can go back.");
         setPending(null);
-      } else if (tx.providerStatus === "failed" || tx.providerStatus === "cancelled") {
+      } else if (["failed", "cancelled", "expired"].includes(tx.providerStatus)) {
         setSyncMsg("This payment did not go through — no money moved. You can try again.");
         setPending(null);
       } else {
@@ -156,35 +164,6 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
     }
   };
 
-  /** Inline fallback for a skipped provisioning run — same path as the stepper. */
-  const ensure = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await ensureSubAccount(peridot);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (noAccount) {
-    return (
-      <View style={s.container}>
-        <TouchableOpacity style={styles.back} onPress={onDone} accessibilityLabel="Back">
-          <ArrowLeft size={18} color={theme.colors.foreground} />
-          <Text style={styles.backLabel}>Back</Text>
-        </TouchableOpacity>
-        <Text style={s.title}>Top Up</Text>
-        <Text style={s.subtitle}>Your IDR wallet isn't set up yet — this only happens if provisioning was skipped.</Text>
-        {error && <Text style={s.error}>{error}</Text>}
-        <UIButton title={busy ? "Setting up…" : "Set up IDR wallet"} onPress={ensure} disabled={busy} variant="primary" />
-      </View>
-    );
-  }
-
   return (
     <ScrollView contentContainerStyle={s.container}>
       <TouchableOpacity style={styles.back} onPress={onDone} accessibilityLabel="Back">
@@ -223,17 +202,9 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
         {syncMsg && <Text style={s.hint}>{syncMsg}</Text>}
       </View>
 
-      {va?.vaNumber && (
-        <View style={styles.card}>
-          <Text style={s.label}>Or deposit via BRI Virtual Account (real-time)</Text>
-          <Text style={styles.va} selectable>{va.vaNumber}</Text>
-          <Text style={s.hint}>Transfer from any bank. VA credits are preserved as received; ones below the Rp100.000 net minimum are flagged for review, not treated as top-ups.</Text>
-        </View>
-      )}
-
       {policy && (
         <Text style={s.hint}>
-          Service fee {policy.percentBps / 100}% flat of the credited amount, no cap. Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Tap Check payment status after paying — your Saldo updates once confirmed.
+          Service fee {policy.percentBps / 100}% of the credited amount{feeBoundsText(policy)}. Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Tap Check payment status after paying — your Saldo updates once confirmed.
         </Text>
       )}
 

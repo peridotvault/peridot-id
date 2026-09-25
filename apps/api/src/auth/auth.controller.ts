@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, Param, ParseUUIDPipe, Post, Req, Res, UseGuards } from "@nestjs/common";
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { Request, Response } from "express";
@@ -13,7 +13,8 @@ import { AuthService } from "./auth.service";
 import { ClaimService } from "./claim.service";
 import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { isPendingGoogleClaim } from "./google.strategy";
-import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto } from "./dto/auth.dto";
+import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto } from "./dto/auth.dto";
+import { PidAppsService } from "./apps.service";
 import { decodeState, encodeState, SsoService } from "./sso.service";
 
 /** Redirect target with a pid_code appended (keeps any existing query string). */
@@ -54,8 +55,26 @@ export class AuthController {
     private readonly credentialService: CredentialService,
     private readonly ssoService: SsoService,
     private readonly claimService: ClaimService,
+    private readonly apps: PidAppsService,
     private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Machine token for an app's backend (client-credentials). Bound to the app
+   * owner's pid; carries the app's clientId (fee context + non-admin). Send it
+   * as `Authorization: Bearer <token>`. No browser session required.
+   */
+  @Post("token")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async appToken(@Body() dto: AppTokenDto) {
+    const app = await this.apps.findActive(dto.clientId);
+    if (!app) throw new UnauthorizedException("Invalid client");
+    if (app.clientSecretHash && !PidAppsService.secretMatches(dto.clientSecret ?? "", app.clientSecretHash)) {
+      throw new UnauthorizedException("Invalid client");
+    }
+    return this.authService.issueAppAccessToken(app.ownerPid, app.clientId);
+  }
 
   @Post("login")
   @HttpCode(HttpStatus.OK)

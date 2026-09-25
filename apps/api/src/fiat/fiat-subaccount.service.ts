@@ -6,12 +6,14 @@ import {
   calcServiceFee,
   DEFAULT_FEE_POLICY,
   mapSacStatus,
+  parseCheckoutNotify,
   parseIdrStrict,
   ProviderError,
   type DokuCheckoutClient,
   type SubAccountProvider,
 } from "@peridotvault/pid-payments";
 import { replayJournal } from "./ledger-replay";
+import { FiatLedgerService } from "./fiat-ledger.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CHECKOUT_CLIENT } from "./checkout-client.token";
@@ -92,6 +94,19 @@ interface FeeParams {
  * Internal transfers stay GROSS-in: the requested amount is gross, the
  * recipient receives net (gross − quoted fee); no separate fee movement.
  * (Bank/e-wallet payouts are deferred.)
+ *
+  * Payment vs settlement vocabulary (no overload — see correction log):
+  * `providerPaymentStatus` on a deposit means PAYMENT state only:
+  * pending | success (Checkout transaction SUCCESS, corroborated +
+  * amount-matched; VA only behind PID_VA_ISSUANCE_ENABLED) | expired |
+  * failed | refunded. `providerStatus` is dual-written for history compat
+  * (success/settled/failed/...) but is NEVER the issuance gate — the gate
+  * reads `isPaymentConfirmedRow`, which prefers providerPaymentStatus and
+  * falls back to legacy providerStatus for pre-split rows.
+  * `settlementStatus` (pending | settled | failed) tracks fiat
+  * settlement/backing ONLY and never gates issuance. Sub-Account
+  * `transactions-status` codes are movement state for legs and the
+  * provisional VA-rail signal — never the payment signal for Checkout rows.
  */
 @Injectable()
 export class FiatSubAccountService {
@@ -128,7 +143,95 @@ export class FiatSubAccountService {
     @Inject(SUBACCOUNT_PROVIDER) private readonly sac: SubAccountProvider,
     @Inject(CHECKOUT_CLIENT) private readonly checkout: DokuCheckoutClient,
     private readonly security: SecurityEventService,
+    private readonly ledger: FiatLedgerService,
   ) {}
+
+  /**
+   * Payment-confirmation predicate for deposit rows. New writes use
+   * "success"; pre-change rows carry legacy "settled" meaning paid.
+   * Settlement state is NEVER consulted here — see settlementStatus.
+   */
+  private isPaymentConfirmedStatus(status: string | null | undefined): boolean {
+    return status === "success" || status === "settled";
+  }
+
+  /**
+   * Issuance gate: prefers providerPaymentStatus (post-split writes);
+   * falls back to legacy providerStatus for pre-split rows. Settlement
+   * state is never consulted — settlement is backing, not payment.
+   */
+  private isPaymentConfirmedRow(row: { providerPaymentStatus?: string | null; providerStatus: string }): boolean {
+    const payment = row.providerPaymentStatus ?? null;
+    if (payment != null) return payment === "success";
+    return this.isPaymentConfirmedStatus(row.providerStatus);
+  }
+
+  /**
+   * Write payment truth + legacy providerStatus together (dual-write keeps
+   * history queries and the API shape working while the gate reads the
+   * payment column). Checkout SUCCESS and corroborated VA success are the
+   * only writers of "success" for deposits; settlement rows never call this.
+   */
+  private markPayment(id: string, payment: "success" | "expired" | "failed" | "refunded" | "pending", raw: unknown) {
+    const legacy =
+      payment === "success" ? "success"
+      : payment === "expired" ? "cancelled"
+      : payment === "failed" ? "failed"
+      : payment === "refunded" ? "refunded"
+      : "processing";
+    return this.prisma.fiatProviderTransaction.update({
+      where: { id },
+      data: { providerStatus: legacy, providerPaymentStatus: payment, providerResponse: json(raw ?? {}) },
+    });
+  }
+
+  /**
+   * Map a Sub-Account movement status to deposit payment vocabulary.
+   * Used for the VA rail + transfer legs only — never for Checkout rows
+   * (their payment truth is the Checkout order status).
+   */
+  private mapSacToPayment(status: string): "success" | "failed" | "refunded" | "pending" {
+    if (status === "settled") return "success";
+    if (status === "failed") return "failed";
+    if (status === "refunded") return "refunded";
+    if (status === "cancelled") return "failed"; // void-topup code; terminal, never confirmed
+    return "pending";
+  }
+
+  /**
+   * Hard prerequisite for ALL POINT issuance (correction §6): the Unified
+   * Ledger (DOKU_NON_FIAT TOPUP + SYSTEM_POINT funding) must be
+   * live-verified and explicitly activated. Until then issuance fails safe —
+   * rows stay pending, zero journal writes, zero fabricated balance.
+   */
+  private unifiedLedgerActive(): boolean {
+    return this.config.get<string>("PID_UNIFIED_LEDGER_ACTIVE", "false") === "true";
+  }
+
+  /**
+   * VA-rail issuance kill-switch (PROVIDER-DEP-01): whether txStatus "00"
+   * (+ SUCCESS notify) actually means payment-received for VA credits is
+   * UNVERIFIED — flip only after live sandbox evidence names the true
+   * payment-confirmation signal. Until then VA rows stay pending.
+   */
+  private vaIssuanceEnabled(): boolean {
+    return this.config.get<string>("PID_VA_ISSUANCE_ENABLED", "false") === "true";
+  }
+
+  /** Best-effort whole-IDR parse of a txStatus amount value (null when absent/unparseable). */
+  private corroboratedAmount(value: unknown): bigint | null {
+    if (value == null) return null;
+    try {
+      return parseIdrStrict(value as string, "corroborated amount");
+    } catch {
+      return null;
+    }
+  }
+
+  /** True when the row was created by our Checkout flow (invoice owns the ref). */
+  private isCheckoutRow(cp: Record<string, any> | null | undefined): boolean {
+    return (cp as Record<string, any> | null)?.channel === "checkout";
+  }
 
   // --- account lifecycle (server-side register: name + email only) ---
 
@@ -273,25 +376,31 @@ export class FiatSubAccountService {
    * split — the fee moves as Treasury points at issuance, never as a
    * post-settlement fiat debit). No API-side fiat fee debit happens.
    */
-  async createCheckoutDeposit(pid: string, netAmountIdr: string) {
+  async createCheckoutDeposit(pid: string, netAmountIdr: string, appClientId?: string | null) {
     const net = this.parseGross(netAmountIdr);
     if (net < MIN_CHECKOUT_NET_IDR) throw new BadRequestException("Minimum top-up is Rp100.000");
-    const account = await this.requireActive(pid);
-    if (!account.profileId) throw new ServiceUnavailableException("Sub-account not registered");
-    const policy = await this.activeFeePolicy();
-    const fee = calcServiceFee(net, policy);
+    // No DOKU Sub-Account required: Checkout money-in lands on the merchant
+    // account; every user balance lives on the internal fiat ledger.
+    // Fee = global PeridotID + (when an app initiated this) that app's fee.
+    const { globalFee, appFee, appId, appOwnerPid, policyVersion } = await this.ledger.quoteFees(appClientId, "topup", net);
+    const fee = globalFee + appFee;
     const gross = net + fee;
     if (gross > MAX_CHECKOUT_GROSS) throw new BadRequestException("Amount exceeds Checkout 12-digit limit");
     const providerRef = buildInvoiceNumber("DP");
+    // Optional: route to a legacy sub-account if one happens to exist.
+    const account = await this.prisma.fiatProviderAccount
+      .findUnique({ where: { pid_provider: { pid, provider: PROVIDER } } })
+      .catch(() => null);
     const row = await this.prisma.fiatProviderTransaction.create({
       data: {
-        pid, accountId: account.providerAccountId, kind: "deposit", providerRef,
+        pid, accountId: account?.providerAccountId ?? null, kind: "deposit", providerRef,
         providerStatus: "created", amountIdr: gross,
-        feeIdr: fee, netIdr: net, feePolicyVersion: policy.version,
+        feeIdr: globalFee, netIdr: net, feePolicyVersion: policyVersion,
         ledgerStatus: "pending", settlementStatus: "pending",
         counterparty: {
-          channel: "checkout", feeQuote: fee.toString(), netQuote: net.toString(),
-          feePolicyVersion: policy.version,
+          channel: "checkout", feeQuote: globalFee.toString(), netQuote: net.toString(),
+          feePolicyVersion: policyVersion,
+          ...(appId && appOwnerPid ? { appId, appOwnerPid, appFeeQuote: appFee.toString() } : {}),
         },
       },
     });
@@ -301,10 +410,10 @@ export class FiatSubAccountService {
         () => this.checkout.createPayment({
           invoiceNumber: providerRef,
           grossAmountIdr: gross,
-          profileId: account.profileId as string,
+          ...(account?.profileId ? { profileId: account.profileId } : {}),
           // Customer name rendered by DOKU is always the pid — never the
           // display name (dashboard/label consistency, no impersonation).
-          customer: { id: pid, name: pid, phone: account.phoneNo ?? undefined, email: account.email ?? undefined },
+          customer: { id: pid, name: pid, phone: account?.phoneNo ?? undefined, email: account?.email ?? undefined },
           notifyUrl: this.config.get<string>("DOKU_CHECKOUT_NOTIFY_URL", "") || this.config.get<string>("DOKU_WEBHOOK_URL", "") || undefined,
         }),
         "checkout payment",
@@ -315,7 +424,7 @@ export class FiatSubAccountService {
     }
     const updated = await this.markTx(row.id, "created", payment.rawResponse);
     await this.security.log(pid, "fiat.subaccount.checkout", { providerRef }).catch(() => undefined);
-    return this.toCheckoutView(updated, payment, fee, policy.version);
+    return this.toCheckoutView(updated, payment, fee, policyVersion);
   }
 
   // --- authoritative reads (DOKU is the ledger) ---
@@ -323,7 +432,7 @@ export class FiatSubAccountService {
   /**
    * Live balance from DOKU. The spendable Saldo is the Unified Ledger POINT
    * balance (1:1 IDR peg); fiat IDR/pending are backing (admin/debug).
-   * Local lastBalance/lastPointBalance are timestamped caches only.
+   * Local lastBalance is a timestamped cache only.
    */
   async balance(pid: string): Promise<{
     pointsAvailableIdr: string; pointsReservedIdr: string;
@@ -362,7 +471,6 @@ export class FiatSubAccountService {
         where: { pid_provider: { pid, provider: PROVIDER } },
         data: {
           lastBalance: available.toString(), lastBalanceAt: at,
-          lastPointBalance: pointAvail.toString(), lastPointBalanceAt: at,
           accounts: json(result.accounts),
           ...(pointAccountId && !account.pointAccountId ? { pointAccountId } : {}),
         },
@@ -436,6 +544,13 @@ export class FiatSubAccountService {
       );
     }
     return env;
+  }
+
+  /** True when DOKU has actually provided the SYSTEM_POINT funding account.
+   *  The activation flag alone cannot move POINT — this is the real DOKU
+   *  readiness signal the issuance prerequisite checks before any write. */
+  private systemPointConfigured(): boolean {
+    return this.config.get<string>("DOKU_SYSTEM_POINT_ACCOUNT_NO", "") !== "";
   }
 
   /** Treasury POINT account (fee revenue, redeemable). Env preferred, else
@@ -805,12 +920,18 @@ export class FiatSubAccountService {
     }
   }
 
-  /** Reconcile any row via the documented transactions-status query (retried). */
+  /** Reconcile any row via the documented Checkout order status (retried). */
   async syncTx(pid: string, id: string): Promise<SubTxView> {
     const row = await this.prisma.fiatProviderTransaction.findFirst({ where: { id, pid } });
     if (!row) throw new NotFoundException("Transaction not found");
     if (!["created", "processing"].includes(row.providerStatus)) {
       return (await this.attachFeeStatus([this.toTxView(row)]))[0];
+    }
+    const cp = (row.counterparty ?? {}) as Record<string, any>;
+    // Checkout rail: payment confirmation comes from the Checkout order
+    // status (transaction SUCCESS), never from Sub-Account settlement state.
+    if (row.kind === "deposit" && this.isCheckoutRow(cp)) {
+      return this.syncCheckoutDeposit(row);
     }
     let res;
     try {
@@ -824,14 +945,157 @@ export class FiatSubAccountService {
       throw this.mapError(err, "transaction status");
     }
     const status = mapSacStatus(res.latestTransactionStatus);
-    const updated = await this.markTx(row.id, status, res.rawResponse);
+    // Deposits dual-write payment truth (provisional VA semantics — the
+    // issuance gate additionally requires the VA kill-switch); transfer
+    // legs keep movement state only.
+    const updated = row.kind === "deposit"
+      ? await this.markPayment(row.id, this.mapSacToPayment(status), res.rawResponse)
+      : await this.markTx(row.id, status, res.rawResponse);
     // Paid deposits unlock the Saldo immediately: issue Unified Ledger points
     // (server-corroborated above — never on caller claims). Awaited so the
     // user sees usable balance right after "Check status".
     if (status === "settled" && row.kind === "deposit") {
       await this.issuePointsForDeposit(row.id, "sync");
+      // Rail B (temporary internal credit): same corroborated payment, own
+      // gate inside (never throws — the POINT path above is unaffected).
+      await this.ledger.issueForDeposit(row.id, "sync");
     }
     return (await this.attachFeeStatus([this.toTxView((await this.prisma.fiatProviderTransaction.findFirst({ where: { id, pid } })) ?? updated)]))[0];
+  }
+
+  /** Minimal deposit-row shape shared by the Checkout corroboration path. */
+  private async syncCheckoutDeposit(row: {
+    id: string; pid: string; kind: string; providerRef: string; providerStatus: string;
+    amountIdr: bigint; feeIdr: bigint | null; netIdr: bigint | null;
+    counterparty: unknown; providerResponse: unknown; createdAt: Date;
+  }): Promise<SubTxView> {
+    let corr: { outcome: "paid" | "pending" | "expired" | "failed" | "unknown"; paidAmount: bigint | null };
+    try {
+      corr = await this.withRetry(() => this.corroborateCheckoutPayment(row.providerRef), "checkout order status");
+    } catch (err) {
+      // Order-level 404 on a fresh intent = unpaid (channel hasn't published
+      // anything yet). Keep the row `created` and say so plainly.
+      if (err instanceof ProviderError && err.httpStatus === 404 && row.providerStatus === "created") {
+        throw new BadRequestException("Not paid yet — open the DOKU payment page to pay, then check again");
+      }
+      // Endpoint-level failure (e.g. order status not activated for this
+      // merchant): fall back to the legacy txStatus path, loudly. Payment
+      // semantics stay conservative — issuance still requires its own gate.
+      this.logger.warn(`checkout order status unavailable for ${row.providerRef}, falling back to txStatus: ${String(err)?.slice(0, 160)}`);
+      await this.prisma.fiatProviderTransaction.update({
+        where: { id: row.id },
+        data: { counterparty: json({ ...((row.counterparty ?? {}) as Record<string, unknown>), orderStatusUnavailable: true }) },
+      }).catch(() => undefined);
+      return this.syncLegacyDeposit(row);
+    }
+    if (corr.outcome === "pending" || corr.outcome === "unknown") {
+      return (await this.attachFeeStatus([this.toTxView(row)]))[0];
+    }
+    if (corr.outcome === "expired") {
+      const updated = await this.markPayment(row.id, "expired", { checkoutExpired: true });
+      return (await this.attachFeeStatus([this.toTxView(updated)]))[0];
+    }
+    if (corr.outcome === "failed") {
+      const updated = await this.markPayment(row.id, "failed", { checkoutFailed: true });
+      return (await this.attachFeeStatus([this.toTxView(updated)]))[0];
+    }
+    // Paid: amount-match against OUR invoice gross, then mark payment success
+    // and issue. Settlement is never consulted here.
+    // assertInvoiceAmountMatch blocks (ledgerStatus "blocked") and returns
+    // false on mismatch/unverifiable — issuance must not proceed then.
+    if (!(await this.assertInvoiceAmountMatch(row.id, row.amountIdr, corr.paidAmount, row.providerRef))) {
+      throw new BadRequestException("Paid amount does not match the invoice — held for review");
+    }
+    const updated = await this.markPayment(row.id, "success", { checkoutPaid: true });
+    await this.issuePointsForDeposit(row.id, "sync");
+    // Internal fiat ledger (the live Saldo rail): same corroborated payment,
+    // own gate inside (never throws — issued only after re-corroboration).
+    await this.ledger.issueForDeposit(row.id, "sync");
+    return (await this.attachFeeStatus([this.toTxView((await this.prisma.fiatProviderTransaction.findFirst({ where: { id: row.id, pid: row.pid } })) ?? updated)]))[0];
+  }
+
+  /**
+   * Legacy deposit corroboration via Sub-Account transactions-status.
+   * VA rail only (plus pre-change rows): Checkout rows must use
+   * corroborateCheckoutPayment instead — txStatus codes track settlement
+   * there, never payment. This path writes movement state ONLY (no payment
+   * column): for Checkout rows txStatus must never confirm payment, so
+   * issuance stays deferred until order-status corroboration lands. An
+   * unpaid intent 404s: "not paid", not corruption.
+   */
+  private async syncLegacyDeposit(row: {
+    id: string; pid: string; kind: string; providerRef: string; providerStatus: string;
+    amountIdr: bigint; feeIdr: bigint | null; netIdr: bigint | null;
+    counterparty: unknown; providerResponse: unknown; createdAt: Date;
+  }): Promise<SubTxView> {
+    let res;
+    try {
+      res = await this.withRetry(() => this.sac.txStatus(row.providerRef), "transaction status");
+    } catch (err) {
+      if (row.kind === "deposit" && row.providerStatus === "created" && err instanceof ProviderError && err.httpStatus === 404) {
+        throw new BadRequestException("Not paid yet — open the DOKU payment page to pay, then check again");
+      }
+      throw this.mapError(err, "transaction status");
+    }
+    const status = mapSacStatus(res.latestTransactionStatus);
+    // Checkout rows only (order-status unavailable): txStatus "settled" here
+    // is settlement-side movement, never payment — record it as processing
+    // so the legacy vocabulary can't read as payment-confirmed, and never
+    // issue. The row stays open for order-status corroboration or the sweep.
+    const updated = await this.markTx(row.id, status === "settled" ? "processing" : status, res.rawResponse);
+    return (await this.attachFeeStatus([this.toTxView((await this.prisma.fiatProviderTransaction.findFirst({ where: { id: row.id, pid: row.pid } })) ?? updated)]))[0];
+  }
+
+  /**
+   * Corroborate a Checkout payment against DOKU's order status (documented).
+   * `paid` requires transaction.status === "SUCCESS" (FINAL = customer paid),
+   * independent of Sub-Account settlement. Throws ProviderError (with raw
+   * response) on transport/endpoint failure or unknown invoice — callers
+   * decide fallback vs waiting. Never infers payment from anything else.
+   */
+  private async corroborateCheckoutPayment(invoiceNumber: string): Promise<{
+    outcome: "paid" | "pending" | "expired" | "failed" | "unknown";
+    paidAmount: bigint | null;
+    raw: unknown;
+  }> {
+    const st = await this.checkout.checkOrderStatus(invoiceNumber);
+    if (st.paid) return { outcome: "paid", paidAmount: st.paidAmount, raw: st.rawResponse };
+    if (st.expired) return { outcome: "expired", paidAmount: st.paidAmount, raw: st.rawResponse };
+    if (st.txStatus === "FAILED" || st.txStatus === "REFUNDED") {
+      return { outcome: "failed", paidAmount: st.paidAmount, raw: st.rawResponse };
+    }
+    return { outcome: "pending", paidAmount: st.paidAmount, raw: st.rawResponse };
+  }
+
+  /**
+   * Invoice amount-match: corroborated paid amount must equal OUR invoice
+   * gross exactly. Returns true on match. Null (unparseable provider amount)
+   * returns false without writing (retry later). Mismatch writes ledgerStatus
+   * "blocked" for ops review and returns false — never round, never guess.
+   */
+  private async assertInvoiceAmountMatch(rowId: string, invoicedGross: bigint, paidAmount: bigint | null, providerRef: string): Promise<boolean> {
+    if (paidAmount === null) {
+      this.logger.warn(`issue skipped for ${providerRef}: unparseable corroborated amount`);
+      return false;
+    }
+    if (paidAmount !== invoicedGross) {
+      await this.prisma.fiatProviderTransaction.update({
+        where: { id: rowId },
+        data: {
+          ledgerStatus: "blocked",
+          counterparty: await this.counterpartyWith(rowId, { amountMismatch: paidAmount.toString() }),
+        },
+      }).catch(() => undefined);
+      this.logger.error(`ISSUE BLOCKED amount mismatch for ${providerRef}: paid ${paidAmount} vs invoiced ${invoicedGross}`);
+      return false;
+    }
+    return true;
+  }
+
+  /** Merge extra keys into a row's counterparty JSON (read-modify-write). */
+  private async counterpartyWith(rowId: string, extra: Record<string, unknown>): Promise<Prisma.InputJsonValue> {
+    const row = await this.prisma.fiatProviderTransaction.findUnique({ where: { id: rowId } }).catch(() => null);
+    return json({ ...(((row?.counterparty ?? {}) as Record<string, unknown>)), ...extra });
   }
 
   async cancelTx(pid: string, id: string): Promise<SubTxView> {
@@ -862,12 +1126,18 @@ export class FiatSubAccountService {
   }
 
   async createFeePolicy(input: { percentBps: number; minIdr: string; maxIdr: string }) {
+    const minIdr = BigInt(input.minIdr);
+    const maxIdr = BigInt(input.maxIdr);
+    // 0 = unbounded. A finite floor above a finite cap can never be satisfied.
+    if (minIdr > 0n && maxIdr > 0n && minIdr > maxIdr) {
+      throw new BadRequestException("minIdr cannot exceed maxIdr");
+    }
     const max = await this.prisma.fiatFeePolicy.aggregate({ _max: { version: true } });
     const version = (max._max.version ?? 0) + 1;
     return this.prisma.$transaction(async (tx) => {
       await tx.fiatFeePolicy.updateMany({ where: { active: true }, data: { active: false } });
       const row = await tx.fiatFeePolicy.create({
-        data: { version, percentBps: input.percentBps, minIdr: BigInt(input.minIdr), maxIdr: BigInt(input.maxIdr), active: true },
+        data: { version, percentBps: input.percentBps, minIdr, maxIdr, active: true },
       });
       return { version: row.version, percentBps: row.percentBps, minIdr: row.minIdr.toString(), maxIdr: row.maxIdr.toString(), active: row.active };
     });
@@ -879,12 +1149,25 @@ export class FiatSubAccountService {
 
   // --- Unified Ledger issuance (backend-only) ---
   //
+  // THE MODEL: POINT is not an app-invented balance. It lives on DOKU's
+  // Unified Ledger. Payment confirmed → we call DOKU_NON_FIAT to move POINT
+  // from the merchant SYSTEM_POINT account into the user's POINT account
+  // (NET) and into Treasury (FEE). The PeridotID journal only RECORDS that
+  // movement and reconstructs ownership; it is never the balance itself.
+  // Therefore every points_issue/points_fee row must correspond to a REAL
+  // DOKU movement, and the leg only becomes `issued` after DOKU corroborates
+  // it (txStatus "00"). If DOKU cannot move POINT (SYSTEM_POINT/TOPUP not
+  // provisioned → 4004203), we DEFER: no journal write, no fabricated
+  // balance. Settlement of the fiat leg is backing and never gates this.
+  //
   // SECURITY: these functions are the ONLY place points are ever issued, and
-  // they run ONLY after server-side payment corroboration (DOKU
-  // transactions-status + amount-match against the server-created invoice).
-  // No controller route, SDK method, or wallet screen may call them — a CI
-  // guard fails the build otherwise. User input creates invoices; only
-  // verified DOKU money creates points.
+  // they run ONLY after server-side payment corroboration (Checkout order
+  // SUCCESS + exact amount-match against the server-created invoice; VA only
+  // behind PID_VA_ISSUANCE_ENABLED) AND Unified Ledger readiness
+  // (PID_UNIFIED_LEDGER_ACTIVE + DOKU_SYSTEM_POINT_ACCOUNT_NO). No controller
+  // route, SDK method, or wallet screen may call them — a CI guard fails the
+  // build otherwise. User input creates invoices; only verified DOKU money
+  // creates points.
 
   /**
    * Execute one DOKU_NON_FIAT point top-up under a deterministic ref.
@@ -896,6 +1179,10 @@ export class FiatSubAccountService {
     pid: string; providerRef: string; toPointAccount: string; amountIdr: bigint;
     kind: "points_issue" | "points_fee"; parentRef: string; source: string;
   }): Promise<"settled" | "processing" | "failed"> {
+    // Resolve the DOKU funding account BEFORE any journal write: a missing
+    // SYSTEM_POINT must defer (throw → caller defers), never leave an orphan
+    // failed leg. Every points_issue/points_fee is a REAL DOKU movement.
+    const systemPoint = this.systemPointAccount();
     const existing = await this.prisma.fiatProviderTransaction.findFirst({
       where: { kind: input.kind, providerRef: input.providerRef },
     });
@@ -909,7 +1196,7 @@ export class FiatSubAccountService {
         // Fee legs leave the depositor's ownership (they paid gross, kept
         // net) and land in Treasury; user legs credit the recipient.
         direction: input.kind === "points_fee" ? "out" : "in",
-        sourceAccount: this.systemPointAccount(), destAccount: input.toPointAccount,
+        sourceAccount: systemPoint, destAccount: input.toPointAccount,
         entryGroup: input.parentRef,
         ledgerRef: input.providerRef, ledgerStatus: "pending",
         counterparty: { parentRef: input.parentRef, currency: "POINT", source: input.source },
@@ -924,7 +1211,6 @@ export class FiatSubAccountService {
       return status;
     };
     try {
-      const systemPoint = this.systemPointAccount();
       const inquiry = await this.withRetry(
         () => this.sac.transferInquiry({
           partnerReferenceNo: input.providerRef, type: "DOKU_NON_FIAT", amountIdr: input.amountIdr,
@@ -986,46 +1272,96 @@ export class FiatSubAccountService {
   private async issuePointsForDepositInner(rowId: string, source: string): Promise<void> {
     try {
       const row = await this.prisma.fiatProviderTransaction.findUnique({ where: { id: rowId } });
-      if (!row || row.kind !== "deposit" || row.providerStatus !== "settled") return;
+      // PAYMENT CONFIRMED → issue POINT. The gate reads payment truth only
+      // (providerPaymentStatus, legacy fallback); settlement is
+      // backing/reconciliation and never gates issuance.
+      if (!row || row.kind !== "deposit" || !this.isPaymentConfirmedRow(row as never)) return;
       if (row.ledgerStatus === "issued") return; // already done — no double issue
-      // Re-verify payment at DOKU (server-side truth, not caller claims).
-      let st;
-      try {
-        st = await this.withRetry(() => this.sac.txStatus(row.providerRef), "issue corroboration");
-      } catch (err) {
-        this.logger.warn(`issue corroboration failed for ${row.providerRef}: ${String(err)?.slice(0, 200)}`);
+      // Hard prerequisite (correction §6): Unified Ledger activation. Until
+      // DOKU_NON_FIAT TOPUP + SYSTEM_POINT funding are live-verified, fail
+      // safe here — before any DOKU call, zero writes, zero fabricated balance.
+      // The flag only PERMITS the flow; it is not readiness by itself.
+      if (!this.unifiedLedgerActive()) {
+        this.logger.warn(`issue deferred for ${row.providerRef}: Unified Ledger not activated (PID_UNIFIED_LEDGER_ACTIVE)`);
         return;
       }
-      if (mapSacStatus(st.latestTransactionStatus) !== "settled") return; // not paid — nothing to issue
-      // Amount-match: the paid amount must equal OUR invoice gross. A mismatch
-      // means tampering or a DOKU-side anomaly — block issuance for ops review.
-      const paidRaw = (st.amount as { value?: string } | undefined)?.value;
-      if (paidRaw != null) {
-        try {
-          const paid = parseIdrStrict(paidRaw, "corroborated amount");
-          if (paid !== row.amountIdr) {
-            await this.prisma.fiatProviderTransaction.update({
-              where: { id: row.id },
-              data: {
-                ledgerStatus: "blocked",
-                counterparty: json({ ...((row.counterparty ?? {}) as Record<string, unknown>), amountMismatch: paid.toString() }),
-              },
-            }).catch(() => undefined);
-            this.logger.error(`ISSUE BLOCKED amount mismatch for ${row.providerRef}: paid ${paid} vs invoiced ${row.amountIdr}`);
-            return;
-          }
-        } catch {
-          // Unparseable corroborated amount — do not issue blindly.
-          this.logger.warn(`issue skipped for ${row.providerRef}: unparseable corroborated amount`);
-          return;
-        }
+      // The flag alone cannot move money: DOKU must actually provide the
+      // merchant SYSTEM_POINT account that funds DOKU_NON_FIAT top-ups.
+      // Missing it means no real Unified Ledger movement is possible, so
+      // defer with zero writes rather than write an orphan failed leg.
+      if (!this.systemPointConfigured()) {
+        this.logger.warn(`issue deferred for ${row.providerRef}: DOKU_SYSTEM_POINT_ACCOUNT_NO not configured (Unified Ledger provider dependency)`);
+        return;
       }
       const cp = (row.counterparty ?? {}) as Record<string, any>;
-      const net = typeof cp.netQuote === "string" && /^\d+$/.test(cp.netQuote)
-        ? BigInt(cp.netQuote)
+      if (this.isCheckoutRow(cp)) {
+        // Checkout rail: payment confirmation is Checkout transaction SUCCESS
+        // (order status), re-verified here regardless of which path called us.
+        // Sub-Account settlement state is never consulted for issuance.
+        let corr: { outcome: string; paidAmount: bigint | null };
+        try {
+          corr = await this.withRetry(() => this.corroborateCheckoutPayment(row.providerRef), "issue corroboration");
+        } catch (err) {
+          this.logger.warn(`issue corroboration failed for ${row.providerRef}: ${String(err)?.slice(0, 200)}`);
+          return;
+        }
+        if (corr.outcome !== "paid") return; // pending/expired/failed/unknown — nothing to issue
+        if (!(await this.assertInvoiceAmountMatch(row.id, row.amountIdr, corr.paidAmount, row.providerRef))) return;
+      } else {
+        // VA rail: the SUCCESS-only payment notification is the provisional
+        // payment signal; txStatus corroboration below is defense-in-depth.
+        // Boundary (PROVIDER-DEP-01, sandbox-verify): whether txStatus "00"
+        // alone ever means payment-received vs settlement-only for VA credits
+        // is UNCONFIRMED — so a persisted SUCCESS notify is REQUIRED here,
+        // and the VA kill-switch must be explicitly enabled. Rows whose only
+        // evidence is txStatus-00 stay pending for ops review (visible via
+        // pendingIssuance); nothing is inferred.
+        if (cp.notifyTxStatus !== "SUCCESS") {
+          this.logger.warn(`issue deferred for ${row.providerRef}: no SUCCESS payment notification on record`);
+          return;
+        }
+        if (!this.vaIssuanceEnabled()) {
+          this.logger.warn(`issue deferred for ${row.providerRef}: VA payment semantics unverified (PID_VA_ISSUANCE_ENABLED)`);
+          return;
+        }
+        let st;
+        try {
+          st = await this.withRetry(() => this.sac.txStatus(row.providerRef), "issue corroboration");
+        } catch (err) {
+          this.logger.warn(`issue corroboration failed for ${row.providerRef}: ${String(err)?.slice(0, 200)}`);
+          return;
+        }
+        if (mapSacStatus(st.latestTransactionStatus) !== "settled") return; // not corroborated — nothing to issue
+        // Amount-match: the paid amount must equal OUR invoice gross. A mismatch
+        // means tampering or a DOKU-side anomaly — block issuance for ops review.
+        const paidRaw = (st.amount as { value?: string } | undefined)?.value;
+        if (paidRaw != null) {
+          try {
+            const paid = parseIdrStrict(paidRaw, "corroborated amount");
+            if (paid !== row.amountIdr) {
+              await this.prisma.fiatProviderTransaction.update({
+                where: { id: row.id },
+                data: {
+                  ledgerStatus: "blocked",
+                  counterparty: json({ ...((row.counterparty ?? {}) as Record<string, unknown>), amountMismatch: paid.toString() }),
+                },
+              }).catch(() => undefined);
+              this.logger.error(`ISSUE BLOCKED amount mismatch for ${row.providerRef}: paid ${paid} vs invoiced ${row.amountIdr}`);
+              return;
+            }
+          } catch {
+            // Unparseable corroborated amount — do not issue blindly.
+            this.logger.warn(`issue skipped for ${row.providerRef}: unparseable corroborated amount`);
+            return;
+          }
+        }
+      }
+      const cpq = (row.counterparty ?? {}) as Record<string, any>;
+      const net = typeof cpq.netQuote === "string" && /^\d+$/.test(cpq.netQuote)
+        ? BigInt(cpq.netQuote)
         : (row.netIdr ?? row.amountIdr);
-      const fee = typeof cp.feeQuote === "string" && /^\d+$/.test(cp.feeQuote)
-        ? BigInt(cp.feeQuote)
+      const fee = typeof cpq.feeQuote === "string" && /^\d+$/.test(cpq.feeQuote)
+        ? BigInt(cpq.feeQuote)
         : (row.feeIdr ?? 0n);
       const userPoint = await this.pointAccountFor(row.pid, "Depositor").catch(() => undefined);
       if (!userPoint) {
@@ -1079,22 +1415,151 @@ export class FiatSubAccountService {
     const amount = this.parseGross(input.amountIdr);
     const parent = await this.prisma.fiatProviderTransaction.findUnique({ where: { id: input.transactionId } });
     if (!parent || parent.kind !== "deposit") throw new NotFoundException("Deposit not found");
-    return this.withPidLocks([parent.pid], () => this.clawbackPointsInner(parent, amount, input.reason));
-  }
-
-  private async clawbackPointsInner(
-    parent: { id: string; pid: string; providerRef: string; amountIdr: bigint; netIdr: bigint | null; ledgerStatus: string | null },
-    amount: bigint,
-    reason?: string,
-  ) {
     if (!["issued", "partial"].includes(parent.ledgerStatus ?? "")) {
       throw new BadRequestException("Nothing issued to claw back — ledgerStatus is " + (parent.ledgerStatus ?? "unset"));
     }
+    return this.withPidLocks([parent.pid], () => this.clawbackPointsDirect(parent, amount, input.reason));
+  }
+
+  /**
+   * Propose a clawback candidate after a corroborated reversal signal — creates
+   * the journal row WITHOUT executing any debit. The candidate waits in
+   * ledgerStatus "review" for explicit admin approval (approveClawback).
+   * Idempotent per (parentRef, signal): repeat signals return the existing
+   * candidate instead of forking duplicates. No automatic clawback exists —
+   * reversal automation ends here by design (correction §8).
+   * Exactness rule: when the corroborated reversal amount is known and
+   * differs from the issued NET, the reversal is ambiguous/partial → NO
+   * candidate is created (returns null, stays blocked for manual ops via
+   * direct clawbackPoints). Only exact (or amount-unknown) reversals become
+   * candidates, always for the exact issued NET. Never throws for "nothing
+   * to do" — returns null so webhook/sync/reconcile paths stay quiet.
+   */
+  async proposeClawback(parentProviderRef: string, reason: string, signal: string, reversalAmountIdr?: bigint | null): Promise<{ id: string; providerRef: string } | null> {
+    const parent = await this.prisma.fiatProviderTransaction.findUnique({ where: { providerRef: parentProviderRef } }).catch(() => null);
+    if (!parent || parent.kind !== "deposit") return null;
+    if (!["issued", "partial"].includes(parent.ledgerStatus ?? "")) return null; // nothing issued — nothing to claw
+    const existing = await this.prisma.fiatProviderTransaction.findFirst({
+      where: { kind: "points_clawback", counterparty: { path: ["parentRef"], equals: parentProviderRef } },
+    }).catch(() => null);
+    if (existing) {
+      const existingSignal = ((existing.counterparty ?? {}) as Record<string, any>).signal;
+      if (existingSignal === signal || (existing.ledgerStatus ?? "") === "review") return { id: existing.id, providerRef: existing.providerRef };
+    }
+    const cp = (parent.counterparty ?? {}) as Record<string, any>;
+    const exactNet = typeof cp.netQuote === "string" && /^\d+$/.test(cp.netQuote)
+      ? BigInt(cp.netQuote)
+      : (parent.netIdr ?? parent.amountIdr);
+    // Partial/ambiguous reversal (known amount ≠ issued NET) → blocked for
+    // manual ops. No candidate: an auto-created exact-NET candidate would
+    // over-claw on approval.
+    if (reversalAmountIdr != null && reversalAmountIdr !== exactNet) {
+      this.logger.warn(`clawback blocked for ${parentProviderRef}: reversal ${reversalAmountIdr} != issued NET ${exactNet} — manual review`);
+      await this.security.log(parent.pid, "fiat.points.clawback_blocked", {
+        providerRef: parentProviderRef, signal, reversal: reversalAmountIdr.toString(), exactNet: exactNet.toString(),
+      }).catch(() => undefined);
+      return null;
+    }
+    const prior = await this.prisma.fiatProviderTransaction.findMany({
+      where: { kind: "points_clawback", providerRef: { startsWith: `${parentProviderRef}-CLAWBACK` } },
+      select: { amountIdr: true },
+    }).catch(() => []);
+    const providerRef = `${parentProviderRef}-CLAWBACK-${prior.length + 1}`;
+    const userPoint = await this.pointAccountFor(parent.pid, "Depositor").catch(() => undefined);
+    const row = await this.prisma.fiatProviderTransaction.create({
+      data: {
+        pid: parent.pid, accountId: userPoint ?? undefined, kind: "points_clawback", providerRef, amountIdr: exactNet,
+        feeIdr: null, netIdr: exactNet, providerStatus: "created",
+        direction: "out", sourceAccount: userPoint, destAccount: undefined, entryGroup: providerRef,
+        ledgerRef: providerRef, ledgerStatus: "review",
+        counterparty: {
+          parentRef: parentProviderRef, currency: "POINT", signal, reason,
+          exactNet: exactNet.toString(), status: "awaiting-review",
+          ...(reversalAmountIdr != null ? { reversalAmountIdr: reversalAmountIdr.toString() } : {}),
+        },
+      },
+    });
+    await this.security.log(parent.pid, "fiat.points.clawback_proposed", { providerRef, signal, reason: reason.slice(0, 160) }).catch(() => undefined);
+    return { id: row.id, providerRef };
+  }
+
+  /**
+   * Approve a review-pending clawback candidate: executes the POINT debit.
+   * The only path that moves clawback money — reversal signals only ever
+   * create candidates (proposeClawback). Direct admin clawbackPoints below
+   * shares the same executor.
+   */
+  async approveClawback(id: string): Promise<SubTxView> {
+    const row = await this.prisma.fiatProviderTransaction.findUnique({ where: { id } });
+    if (!row || row.kind !== "points_clawback") throw new NotFoundException("Clawback candidate not found");
+    if ((row.ledgerStatus ?? "") !== "review" || row.providerStatus !== "created") {
+      throw new BadRequestException("Clawback candidate is no longer awaiting review");
+    }
+    const parent = await this.prisma.fiatProviderTransaction.findFirst({
+      where: { kind: "deposit", providerRef: ((row.counterparty ?? {}) as Record<string, any>).parentRef ?? "" },
+    });
+    if (!parent) throw new NotFoundException("Parent deposit not found");
+    return this.withPidLocks([parent.pid], () => this.executeClawbackRow({ ...row, counterparty: row.counterparty ?? {} }));
+  }
+
+  private async executeClawbackRow(clawRow: {
+    id: string; pid: string; kind: string; providerRef: string; amountIdr: bigint; counterparty: unknown;
+  }): Promise<SubTxView> {
+    const cp = (clawRow.counterparty ?? {}) as Record<string, any>;
+    const parent = await this.prisma.fiatProviderTransaction.findFirst({
+      where: { kind: "deposit", providerRef: typeof cp.parentRef === "string" ? cp.parentRef : "" },
+    });
+    const userPoint = await this.pointAccountFor(clawRow.pid, "Depositor");
+    const amount = clawRow.amountIdr;
+    const providerRef = clawRow.providerRef;
+    try {
+      const res = await this.withRetry(
+        () => this.sac.debit({
+          partnerReferenceNo: providerRef, fromAccount: userPoint, amountIdr: amount,
+          currency: "POINT", description: `PID clawback for ${typeof cp.parentRef === "string" ? cp.parentRef : providerRef}${cp.reason ? `: ${cp.reason}` : ""}`.slice(0, 128),
+        }),
+        "clawback debit",
+      );
+      const status = mapSacStatus(res.latestTransactionStatus ?? "03");
+      const settledClaw = await this.markTx(clawRow.id, status, res.rawResponse);
+      await this.prisma.fiatProviderTransaction.update({
+        where: { id: clawRow.id },
+        data: { ledgerStatus: status === "settled" ? "issued" : status },
+      }).catch(() => undefined);
+      if (status !== "failed" && parent) {
+        const prior = await this.prisma.fiatProviderTransaction.findMany({
+          where: { kind: "points_clawback", providerRef: { startsWith: `${parent.providerRef}-CLAWBACK` } },
+          select: { providerRef: true, amountIdr: true, providerStatus: true },
+        }).catch(() => []);
+        // Exclude this leg (already journaled) to avoid double counting.
+        const recovered = prior
+          .filter((r) => r.providerRef !== providerRef && r.providerStatus !== "failed")
+          .reduce((s, r) => s + r.amountIdr, 0n) + amount;
+        const net = parent.netIdr ?? parent.amountIdr;
+        await this.prisma.fiatProviderTransaction.update({
+          where: { id: parent.id },
+          data: { ledgerStatus: recovered >= net ? "clawed_back" : "partial" },
+        }).catch(() => undefined);
+      }
+      await this.security.log(clawRow.pid, "fiat.points.clawback", { providerRef, amount: amount.toString() }).catch(() => undefined);
+      return this.toTxView({ ...settledClaw, feeIdr: null, netIdr: amount });
+    } catch (err) {
+      await this.markTx(clawRow.id, "failed", err);
+      throw this.mapError(err, "clawback");
+    }
+  }
+  /**
+   * Direct admin clawback: explicit operator action with amount + reason
+   * (NOT a reversal signal — those go through proposeClawback). Creates the
+   * row then executes via the shared executor. Kept for manual ops; reversal
+   * automation must use propose → approve instead.
+   */
+  async clawbackPointsDirect(parent: { id: string; pid: string; providerRef: string }, amount: bigint, reason?: string): Promise<SubTxView> {
     const userPoint = await this.pointAccountFor(parent.pid, "Depositor");
     const prior = await this.prisma.fiatProviderTransaction.findMany({
       where: { kind: "points_clawback", providerRef: { startsWith: `${parent.providerRef}-CLAWBACK` } },
       select: { amountIdr: true },
-    });
+    }).catch(() => []);
     const providerRef = `${parent.providerRef}-CLAWBACK-${prior.length + 1}`;
     const clawRow = await this.prisma.fiatProviderTransaction.create({
       data: {
@@ -1105,34 +1570,7 @@ export class FiatSubAccountService {
         counterparty: { parentRef: parent.providerRef, currency: "POINT", reason: reason ?? null, source: "admin" },
       },
     });
-    try {
-      const res = await this.withRetry(
-        () => this.sac.debit({
-          partnerReferenceNo: providerRef, fromAccount: userPoint, amountIdr: amount,
-          currency: "POINT", description: `PID clawback for ${parent.providerRef}${reason ? `: ${reason}` : ""}`.slice(0, 128),
-        }),
-        "clawback debit",
-      );
-      const status = mapSacStatus(res.latestTransactionStatus ?? "03");
-      const settledClaw = await this.markTx(clawRow.id, status, res.rawResponse);
-      const total = prior.reduce((s, r) => s + r.amountIdr, 0n) + (status === "failed" ? 0n : amount);
-      const net = parent.netIdr ?? parent.amountIdr;
-      await this.prisma.fiatProviderTransaction.update({
-        where: { id: clawRow.id },
-        data: { ledgerStatus: status === "settled" ? "issued" : status },
-      }).catch(() => undefined);
-      if (status !== "failed") {
-        await this.prisma.fiatProviderTransaction.update({
-          where: { id: parent.id },
-          data: { ledgerStatus: total >= net ? "clawed_back" : "partial" },
-        }).catch(() => undefined);
-      }
-      await this.security.log(parent.pid, "fiat.points.clawback", { providerRef, amount: amount.toString() }).catch(() => undefined);
-      return this.toTxView({ ...settledClaw, feeIdr: null, netIdr: amount });
-    } catch (err) {
-      await this.markTx(clawRow.id, "failed", err);
-      throw this.mapError(err, "clawback");
-    }
+    return this.executeClawbackRow({ ...clawRow, counterparty: clawRow.counterparty ?? {} });
   }
 
   // --- redemption saga (PTS→fiat, feature-flagged) ---
@@ -1187,7 +1625,8 @@ export class FiatSubAccountService {
   }
 
   async requestRedemption(pid: string, input: {
-    amountIdr: string; bankCode: string; bankAccountNumber: string; bankAccountName: string; channel?: "BI_FAST" | "ONLINE";
+    amountIdr: string; bankCode: string; bankAccountNumber: string; bankAccountName: string;
+    channel?: "BI_FAST" | "ONLINE"; clientId?: string;
   }): Promise<SubTxView> {
     if (!this.redemptionEnabled()) throw new ForbiddenException("Withdrawals are disabled");
     if (this.redemptionHalted) {
@@ -1199,20 +1638,27 @@ export class FiatSubAccountService {
 
   private async redemptionInner(
     pid: string, amount: bigint,
-    input: { bankCode: string; bankAccountNumber: string; bankAccountName: string; channel?: "BI_FAST" | "ONLINE" },
+    input: { bankCode: string; bankAccountNumber: string; bankAccountName: string; channel?: "BI_FAST" | "ONLINE"; clientId?: string },
   ): Promise<SubTxView> {
     // Claimant check from REPLAY, not from any fiat location.
     const owned = await this.replayedBalance(pid);
     if (owned < amount) throw new BadRequestException(`Insufficient redeemable balance (owns ${owned}, requested ${amount})`);
+    // Withdraw fee (bank payout): global + app (when an app context is given).
+    // Application to the payout leg is done when the redemption rail is
+    // reworked for the internal ledger; snapshot it now so intent is recorded.
+    const { globalFee, appFee, appId, appOwnerPid } = await this.ledger.quoteFees(input.clientId ?? null, "withdraw", amount);
+    const totalFee = globalFee + appFee;
     const providerRef = buildInvoiceNumber("RD");
     const parent = await this.prisma.fiatProviderTransaction.create({
       data: {
         pid, accountId: null, kind: "redemption", providerRef, amountIdr: amount,
-        feeIdr: null, netIdr: amount, providerStatus: "created",
+        feeIdr: totalFee, netIdr: amount - totalFee, providerStatus: "created",
         ledgerStatus: "requested",
         counterparty: {
           bankCode: input.bankCode, bankAccountNumber: input.bankAccountNumber,
           bankAccountName: input.bankAccountName, channel: input.channel ?? "BI_FAST",
+          feeQuote: globalFee.toString(),
+          ...(appId && appOwnerPid ? { appId, appOwnerPid, appFeeQuote: appFee.toString() } : {}),
         },
       },
     });
@@ -1654,19 +2100,57 @@ export class FiatSubAccountService {
           const row = byRef.get(ref);
           if (row) {
             if (["created", "processing"].includes(row.providerStatus)) {
-              try {
-                const st = await this.withRetry(() => this.sac.txStatus(ref), "reconcile status");
-                const status = mapSacStatus(st.latestTransactionStatus);
-                await this.markTx(row.id, status, st.rawResponse);
-                if (status === "settled" && row.kind === "deposit") {
-                  await this.issuePointsForDeposit(row.id, "reconcile");
-                  issued++;
+              const rowCp = (row.counterparty ?? {}) as Record<string, any>;
+              // Checkout rail: payment confirmation via order status — txStatus
+              // codes track settlement here and must never gate issuance.
+              if (row.kind === "deposit" && this.isCheckoutRow(rowCp)) {
+                try {
+                  const corr = await this.withRetry(() => this.corroborateCheckoutPayment(ref), "reconcile order status");
+                  if (corr.outcome === "paid") {
+                    if (await this.assertInvoiceAmountMatch(row.id, row.amountIdr, corr.paidAmount, ref)) {
+                      await this.markPayment(row.id, "success", corr.raw);
+                      await this.issuePointsForDeposit(row.id, "reconcile");
+                      await this.ledger.issueForDeposit(row.id, "reconcile");
+                      issued++;
+                    }
+                  } else if (corr.outcome === "expired") {
+                    await this.markPayment(row.id, "expired", { checkoutExpired: true });
+                  } else if (corr.outcome === "failed") {
+                    await this.markPayment(row.id, "failed", { checkoutFailed: true });
+                    if (["issued", "partial"].includes(row.ledgerStatus ?? "")) {
+                      await this.proposeClawback(row.providerRef, "checkout failed after issuance (reconcile)", "failed", corr.paidAmount).catch(() => undefined);
+                    }
+                  }
+                } catch (err) {
+                  this.logger.warn(`reconcile status failed for ${ref}: ${String(err)?.slice(0, 200)}`);
                 }
-              } catch (err) {
-                this.logger.warn(`reconcile status failed for ${ref}: ${String(err)?.slice(0, 200)}`);
+              } else {
+                try {
+                  const st = await this.withRetry(() => this.sac.txStatus(ref), "reconcile status");
+                  const status = mapSacStatus(st.latestTransactionStatus);
+                  if (row.kind === "deposit") {
+                    await this.markPayment(row.id, this.mapSacToPayment(status), st.rawResponse);
+                  } else {
+                    await this.markTx(row.id, status, st.rawResponse);
+                  }
+                  if ((status === "failed" || status === "refunded") && row.kind === "deposit" && ["issued", "partial"].includes(row.ledgerStatus ?? "")) {
+                    await this.proposeClawback(
+                      row.providerRef, `provider ${status} after issuance (reconcile)`, status,
+                      this.corroboratedAmount((st.amount as { value?: unknown } | undefined)?.value),
+                    ).catch(() => undefined);
+                  }
+                  if (status === "settled" && row.kind === "deposit") {
+                    await this.issuePointsForDeposit(row.id, "reconcile");
+              await this.ledger.issueForDeposit(row.id, "reconcile");
+                    issued++;
+                  }
+                } catch (err) {
+                  this.logger.warn(`reconcile status failed for ${ref}: ${String(err)?.slice(0, 200)}`);
+                }
               }
             } else if (row.kind === "deposit" && (row.ledgerStatus ?? "") !== "issued") {
               await this.issuePointsForDeposit(row.id, "reconcile");
+              await this.ledger.issueForDeposit(row.id, "reconcile");
               issued++;
             }
             // Fiat settlement legs are backing events, never user credits.
@@ -1678,6 +2162,9 @@ export class FiatSubAccountService {
             continue;
           }
           // Unknown DOKU row: backfill inbound CREDIT+SUCCESS as deposits.
+          // Payment state is UNKNOWN here (settlement history proves backing,
+          // never payment) — write "processing" and corroborate below. Never
+          // write "settled": that vocabulary now means payment-confirmed.
           if (it.mutationType === "CREDIT" && it.status === "SUCCESS" && it.amountIdr !== undefined) {
             try {
               const gross = parseIdrStrict(it.amountIdr, "reconcile amount");
@@ -1686,7 +2173,9 @@ export class FiatSubAccountService {
                 where: { providerRef: ref },
                 create: {
                   pid, accountId: accountNo, kind: "deposit", providerRef: ref, amountIdr: gross,
-                  providerStatus: "settled", ledgerStatus: "pending", settlementStatus: "settled",
+                  // CREDIT history is payment-ish, never settlement evidence —
+                  // settlement stays pending until a SETTLEMENT-family row lands.
+                  providerStatus: "processing", ledgerStatus: "pending", settlementStatus: "pending",
                   counterparty: {
                     source: "reconcile", channel: it.channel ?? null, transactionType: it.transactionType ?? null,
                     ...(flagged ? { belowMinimumNet: true } : {}),
@@ -1696,8 +2185,35 @@ export class FiatSubAccountService {
                 update: {},
               });
               backfilled++;
-              await this.issuePointsForDeposit(bf.id, "reconcile");
-              issued++;
+              // Corroborate before any issuance: our invoice → order status;
+              // anything else → VA path (txStatus). Unknown refs stay pending.
+              try {
+                const corr = await this.withRetry(() => this.corroborateCheckoutPayment(ref), "backfill order status");
+                if (corr.outcome === "paid" && await this.assertInvoiceAmountMatch(bf.id, gross, corr.paidAmount, ref)) {
+                  await this.markPayment(bf.id, "success", corr.raw);
+                  await this.issuePointsForDeposit(bf.id, "reconcile");
+                  await this.ledger.issueForDeposit(bf.id, "reconcile");
+                  issued++;
+                }
+              } catch {
+                // Not our invoice (or order API unavailable) → VA/unknown path:
+                // txStatus corroboration, same as the matched-row branch. On
+                // corroborated success the row is dual-written (payment
+                // success + legacy settled); issuance additionally requires
+                // the VA kill-switch (PROVIDER-DEP-01) — txStatus-00-alone
+                // semantics for VA remain sandbox-verify, never inferred.
+                try {
+                  const st = await this.withRetry(() => this.sac.txStatus(ref), "backfill status");
+                  if (mapSacStatus(st.latestTransactionStatus) === "settled") {
+                    await this.markPayment(bf.id, "success", st.rawResponse);
+                    await this.issuePointsForDeposit(bf.id, "reconcile");
+                  await this.ledger.issueForDeposit(bf.id, "reconcile");
+                    issued++;
+                  }
+                } catch (err) {
+                  this.logger.warn(`backfill corroboration failed for ${ref}: ${String(err)?.slice(0, 200)}`);
+                }
+              }
             } catch {
               unparseable++;
             }
@@ -1718,7 +2234,7 @@ export class FiatSubAccountService {
     const missingProvider = local.filter((r) => ["created", "processing"].includes(r.providerStatus) && !seen.has(r.providerRef)).map((r) => r.providerRef);
     // Deposits paid but still missing issued points need attention.
     const pendingIssuance = local
-      .filter((r) => r.kind === "deposit" && r.providerStatus === "settled" && (r.ledgerStatus ?? "") !== "issued")
+      .filter((r) => r.kind === "deposit" && ["settled", "success"].includes(r.providerStatus) && (r.ledgerStatus ?? "") !== "issued")
       .map((r) => r.providerRef);
     const backing = await this.backingReport(pid).catch(() => null);
     const drift = await this.driftCheck(pid);
@@ -1841,13 +2357,14 @@ export class FiatSubAccountService {
     for (const a of accounts) {
       try {
         const settled = await this.prisma.fiatProviderTransaction.findMany({
-          where: { pid: a.pid, kind: "deposit", providerStatus: "settled" },
+          where: { pid: a.pid, kind: "deposit", providerStatus: { in: ["settled", "success"] } },
           orderBy: { createdAt: "asc" }, take: 100,
         });
         let completed = 0;
         for (const r of settled) {
           if ((r.ledgerStatus ?? "") === "issued") continue;
           await this.issuePointsForDeposit(r.id, "sweep");
+          await this.ledger.issueForDeposit(r.id, "sweep");
           completed++;
         }
         // Complete transfer legs + mirrors for settled/processing transfers.
@@ -2009,7 +2526,7 @@ export class FiatSubAccountService {
   async adminBackfill(input: { pid?: string; take?: number }) {
     const take = Math.min(Math.max(input.take ?? 100, 1), 500);
     const rows = await this.prisma.fiatProviderTransaction.findMany({
-      where: { kind: "deposit", providerStatus: "settled", ...(input.pid ? { pid: input.pid } : {}) },
+      where: { kind: "deposit", providerStatus: { in: ["settled", "success"] }, ...(input.pid ? { pid: input.pid } : {}) },
       orderBy: { createdAt: "asc" }, take: take * 2,
     });
     const todo = rows.filter((r) => (r.ledgerStatus ?? "") !== "issued").slice(0, take);
@@ -2019,6 +2536,7 @@ export class FiatSubAccountService {
         data: { counterparty: json({ ...((r.counterparty ?? {}) as Record<string, unknown>), source: "backfill" }) },
       }).catch(() => undefined);
       await this.issuePointsForDeposit(r.id, "backfill");
+      await this.ledger.issueForDeposit(r.id, "backfill");
     }
     const done = await this.prisma.fiatProviderTransaction.findMany({
       where: { id: { in: todo.map((r) => r.id) } },
@@ -2111,19 +2629,103 @@ export class FiatSubAccountService {
       return { ok: true }; // unrecorded stays received for admin review
     }
     if (!["created", "processing"].includes(row.providerStatus)) {
+      // Already terminal — but a reversal signal for an ISSUED deposit must
+      // still be heard: inspect the notify-declared status (cheap, untrusted)
+      // and corroborate before proposing anything. Anything else → no-op.
+      // Both notify shapes are heard: Checkout documented fields
+      // (order.invoice_number + transaction.status) and the VA shape
+      // (partnerReferenceNo + transaction.status).
+      if (row.kind === "deposit" && ["issued", "partial"].includes(row.ledgerStatus ?? "")) {
+        const txStatusRaw = (body?.transaction as Record<string, unknown> | undefined)?.status;
+        const declared = parseCheckoutNotify(body)?.txStatus
+          ?? (typeof txStatusRaw === "string" ? txStatusRaw : undefined);
+        if (declared && ["FAILED", "REFUNDED", "EXPIRED"].includes(declared)) {
+          const cp = (row.counterparty ?? {}) as Record<string, any>;
+          if (this.isCheckoutRow(cp)) {
+            try {
+              const corr = await this.withRetry(() => this.corroborateCheckoutPayment(String(providerRef)), "reversal corroboration");
+              if (corr.outcome === "failed" || corr.outcome === "expired") {
+                await this.proposeClawback(row.providerRef, `checkout ${corr.outcome} after issuance`, String(corr.outcome), corr.paidAmount).catch(() => undefined);
+              }
+            } catch {
+              // Corroboration failed — leave for sweep/poll, never invent.
+            }
+          } else {
+            try {
+              const detail = await this.withRetry(() => this.sac.txStatus(String(providerRef)), "reversal corroboration");
+              const status = mapSacStatus(detail.latestTransactionStatus);
+              if (status === "failed" || status === "refunded") {
+                await this.proposeClawback(
+                  row.providerRef, `provider ${status} after issuance`, status,
+                  this.corroboratedAmount((detail.amount as { value?: unknown } | undefined)?.value),
+                ).catch(() => undefined);
+              }
+            } catch {
+              // Corroboration failed — leave for sweep/poll, never invent.
+            }
+          }
+        }
+      }
       await this.prisma.fiatWebhookEvent.update({ where: { externalId }, data: { status: "applied" } }).catch(() => undefined);
       return { ok: true };
     }
+    // Checkout notifies carry the invoice number as partnerReferenceNo and
+    // are corroborated through the order status API below (never trusted).
     try {
-      const detail = await this.withRetry(() => this.sac.txStatus(String(providerRef)), "webhook status");
-      const status = mapSacStatus(detail.latestTransactionStatus);
-      await this.markTx(row.id, status, detail.rawResponse);
-      // Paid deposits unlock the Saldo: issue Unified Ledger points via the
-      // idempotent backend-only path (fire-and-forget — ack fast; the sweep
-      // completes anything missed). Never on caller claims — corroborated
-      // above, re-verified inside.
-      if (status === "settled" && row.kind === "deposit") {
-        void this.issuePointsForDeposit(row.id, "webhook");
+      const cp = (row.counterparty ?? {}) as Record<string, any>;
+      // Checkout rail: corroborate through the order status, never through
+      // Sub-Account settlement state.
+      if (row.kind === "deposit" && this.isCheckoutRow(cp)) {
+        let corr: { outcome: string; paidAmount: bigint | null; raw: unknown };
+        try {
+          corr = await this.withRetry(() => this.corroborateCheckoutPayment(String(providerRef)), "webhook order status");
+        } catch (err) {
+          this.logger.warn(`webhook corroboration failed for ${providerRef}: ${String(err)?.slice(0, 200)}`);
+          return { ok: true };
+        }
+        // Reversal after issuance never auto-claws-back: propose a
+        // reviewable candidate instead (correction: no unconditional auto).
+        // Partial/ambiguous reversals stay blocked (no candidate) — the
+        // corroborated amount is passed so proposeClawback can enforce it.
+        if ((corr.outcome === "failed" || corr.outcome === "expired") && ["issued", "partial"].includes(row.ledgerStatus ?? "")) {
+          await this.proposeClawback(row.providerRef, `checkout ${corr.outcome} after issuance`, String(corr.outcome), corr.paidAmount).catch(() => undefined);
+        }
+        if (corr.outcome === "paid") {
+          await this.markPayment(row.id, "success", corr.raw);
+          // Paid deposits unlock the Saldo: issue Unified Ledger points via
+          // the idempotent backend-only path (fire-and-forget — ack fast;
+          // the sweep completes anything missed). Never on caller claims —
+          // corroborated above, re-verified inside.
+          void this.issuePointsForDeposit(row.id, "webhook");
+          void this.ledger.issueForDeposit(row.id, "webhook");
+        } else if (corr.outcome === "expired") {
+          await this.markPayment(row.id, "expired", { checkoutExpired: true });
+        } else if (corr.outcome === "failed") {
+          await this.markPayment(row.id, "failed", { checkoutFailed: true });
+        }
+        // pending/unknown: leave the row untouched for a later push or poll.
+      } else {
+        const detail = await this.withRetry(() => this.sac.txStatus(String(providerRef)), "webhook status");
+        const status = mapSacStatus(detail.latestTransactionStatus);
+        // Deposits dual-write payment truth (provisional VA semantics);
+        // transfer legs keep movement state only. Settlement rows never
+        // confirm payment for Checkout rows — this branch is non-Checkout.
+        if (row.kind === "deposit") {
+          await this.markPayment(row.id, this.mapSacToPayment(status), detail.rawResponse);
+        } else {
+          await this.markTx(row.id, status, detail.rawResponse);
+        }
+        // Reversal after issuance → reviewable candidate, never auto-clawback.
+        if ((status === "failed" || status === "refunded") && row.kind === "deposit" && ["issued", "partial"].includes(row.ledgerStatus ?? "")) {
+          await this.proposeClawback(
+            row.providerRef, `provider ${status} after issuance`, status,
+            this.corroboratedAmount((detail.amount as { value?: unknown } | undefined)?.value),
+          ).catch(() => undefined);
+        }
+        if (status === "settled" && row.kind === "deposit") {
+          void this.issuePointsForDeposit(row.id, "webhook");
+          void this.ledger.issueForDeposit(row.id, "webhook");
+        }
       }
     } catch (err) {
       this.logger.warn(`webhook corroboration failed for ${providerRef}: ${String(err)?.slice(0, 200)}`);
@@ -2144,6 +2746,14 @@ export class FiatSubAccountService {
    * Rp100.000 Checkout minimum, the row is flagged
    * (counterparty.belowMinimumNet) for separate exception handling instead
    * of being silently treated as a valid top-up.
+   *
+   * The notify body is an UNSIGNED hint (correction §3): it is persisted,
+   * then corroborated through the documented status APIs before ANY state
+   * becomes payment truth. Checkout-shaped bodies (order.invoice_number)
+   * are tagged channel=checkout and corroborated via order status ONLY —
+   * txStatus codes track settlement for that rail and must never confirm
+   * payment. VA-shaped bodies use txStatus. Declared statuses alone never
+   * write terminal payment state (a forged FAILED must not brick a deposit).
    */
   private async recordInboundDeposit(providerRef: string, body: Record<string, any>): Promise<boolean> {
     const toAccount: string | undefined =
@@ -2164,6 +2774,19 @@ export class FiatSubAccountService {
       return false; // unparseable — stays received for admin review
     }
     if (gross <= 0n) return false;
+    // VA payment-confirmation signal (provisional, PROVIDER-DEP-01): a
+    // persisted SUCCESS notify is REQUIRED for VA issuance, and txStatus
+    // corroboration below is defense-in-depth. Whether txStatus "00" alone
+    // means payment-received vs settlement-only for VA is UNCONFIRMED —
+    // sandbox-verify before treating it as sufficient on its own. An absent
+    // status field leaves the row processing: issuance then relies on the
+    // same corroboration (never on inference).
+    const notifyTx = (body?.transaction as Record<string, unknown> | undefined)?.status;
+    const notifyTxStatus = typeof notifyTx === "string" ? notifyTx : undefined;
+    // Checkout-shaped notify (documented fields only): this ref is a Checkout
+    // invoice, so the row takes the Checkout rail — order-status
+    // corroboration only, never txStatus.
+    const checkoutShaped = parseCheckoutNotify(body) != null;
     const policy = await this.activeFeePolicy().catch(() => null);
     const fee = policy ? calcServiceFee(gross, policy) : 0n;
     const net = gross - fee;
@@ -2178,6 +2801,8 @@ export class FiatSubAccountService {
           source: "webhook", feeQuote: fee.toString(), netQuote: net.toString(),
           ...(policy ? { feePolicyVersion: policy.version } : {}),
           ...(flagged ? { belowMinimumNet: true } : {}),
+          ...(notifyTxStatus ? { notifyTxStatus } : {}),
+          ...(checkoutShaped ? { channel: "checkout" } : {}),
         },
         providerResponse: json(body),
       },
@@ -2185,12 +2810,40 @@ export class FiatSubAccountService {
     });
     // Corroborate server-side, then unlock the Saldo via the same idempotent
     // issuance path (fire-and-forget: the webhook must ack fast).
+    if (checkoutShaped) {
+      try {
+        const corr = await this.withRetry(() => this.corroborateCheckoutPayment(providerRef), "inbound order status");
+        if (corr.outcome === "paid" && await this.assertInvoiceAmountMatch(row.id, gross, corr.paidAmount, providerRef)) {
+          await this.markPayment(row.id, "success", corr.raw);
+          void this.issuePointsForDeposit(row.id, "webhook");
+          void this.ledger.issueForDeposit(row.id, "webhook");
+        } else if (corr.outcome === "expired") {
+          await this.markPayment(row.id, "expired", { checkoutExpired: true });
+        } else if (corr.outcome === "failed") {
+          await this.markPayment(row.id, "failed", { checkoutFailed: true });
+        }
+        // pending/unknown/unmatched: row stays processing for a later push or poll.
+      } catch (err) {
+        this.logger.warn(`inbound corroboration failed for ${providerRef}: ${String(err)?.slice(0, 200)}`);
+      }
+      return true;
+    }
     try {
       const st = await this.withRetry(() => this.sac.txStatus(providerRef), "inbound status");
-      if (mapSacStatus(st.latestTransactionStatus) === "settled") {
-        await this.markTx(row.id, "settled", st.rawResponse);
-        void this.issuePointsForDeposit(row.id, "webhook");
+      const status = mapSacStatus(st.latestTransactionStatus);
+      // A FAILED-declared notify contradicting corroborated settlement is
+      // ambiguous — leave processing for ops instead of bricking or issuing.
+      if (status === "settled" && notifyTxStatus !== undefined && notifyTxStatus !== "SUCCESS") {
+        this.logger.warn(`inbound ambiguous for ${providerRef}: declared ${notifyTxStatus} vs corroborated settled — held for review`);
+        return true;
       }
+      if (status === "settled") {
+        await this.markPayment(row.id, "success", st.rawResponse);
+        void this.issuePointsForDeposit(row.id, "webhook");
+      } else if (status === "failed" || status === "refunded") {
+        await this.markPayment(row.id, this.mapSacToPayment(status), st.rawResponse);
+      }
+      // processing/cancelled: row stays processing for a later push or poll.
     } catch (err) {
       this.logger.warn(`inbound corroboration failed for ${providerRef}: ${String(err)?.slice(0, 200)}`);
     }

@@ -35,7 +35,30 @@ All configuration is loaded from `.env` in the API package. Copy
 | `SOLANA_NETWORK` | no | `devnet` (default) or `mainnet-beta` |
 | `ACCESS_TOKEN_TTL` | no | Access token lifetime (default `15m`) |
 | `REFRESH_TOKEN_TTL` | no | Refresh token lifetime (default `30d`) |
+| `APP_TOKEN_TTL` | no | Machine (client-credentials) token lifetime (default `1h`) |
 | `PORT` | no | HTTP port (default `3301`) |
+
+### Fiat (DOKU Checkout + internal ledger)
+
+Fiat is one namespace: **DOKU Checkout is money-in only** (no Sub-Account); every
+balance lives on the internal fiat ledger. See [Fiat & payments](/docs/fiat).
+
+| Variable | Required | Description |
+|---|---|---|
+| `DOKU_MODE` | no | `sandbox` (default) or `production` |
+| `DOKU_CLIENT_ID` / `DOKU_SECRET_KEY` | yes* | DOKU merchant credentials (Checkout) |
+| `DOKU_PRIVATE_KEY` | no | RSA PEM for legacy Sub-Account calls (not needed for Checkout-only) |
+| `DOKU_WEBHOOK_URL` | no | Public URL for DOKU payment notifications (`/v1/fiat/webhook`) |
+| `DOKU_CHECKOUT_NOTIFY_URL` | no | Per-payment notify override (defaults to `DOKU_WEBHOOK_URL`) |
+| `PID_FIAT_LEDGER_ENABLED` | no | Master switch (default `true`) |
+| `PID_FIAT_LEDGER_FROZEN` | no | Freeze new issues/sends (default `false`) |
+| `PID_FIAT_LEDGER_TREASURY_PID` | no | Label for the global-fee treasury (env, never hardcoded) |
+| `PID_REDEMPTION_ENABLED` | no | Bank withdrawals (default `false`; disabled for now) |
+
+`*` DOKU endpoints fail at call time until these are set. The global fee policy
+is versioned in the DB (`fiat_fee_policies`) and can be published by an admin
+(`POST /v1/fiat/admin/fee-policy`); per-app fees are configured per app in the
+workspace.
 
 `*` Google endpoints return `503` until these are set. Dev and prod run the
 identical OAuth code path — only the values differ per environment. Create a

@@ -58,21 +58,23 @@ prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
 `WEBAUTHN_ORIGINS` includes `http://localhost:8081`, `CLIENT_SUCCESS_URL=http://localhost:8081`,
 `CORS_ORIGINS=http://localhost:8081`. Restart the API after `.env` changes (`nest --watch` does not reload env).
 
-Fiat env (same key names every env): `DOKU_MODE/CLIENT_ID/SECRET_KEY/PRIVATE_KEY`,
-`DOKU_USERS_PARENT_PROFILE_ID`, `DOKU_TREASURY_PROFILE_ID`,
-`DOKU_TREASURY_POINT_ACCOUNT_NO`, `DOKU_SYSTEM_POINT_ACCOUNT_NO` (Unified Ledger
-activation + SYSTEM_POINT verified before issuance works), `DOKU_WEBHOOK_URL`.
-Users/Treasury are provisioned once via the DOKU dashboard. Spendable Saldo =
-DOKU POINT balance; points issue only inside the API after DOKU corroboration
-(CI-guarded — no route/SDK/wallet issuance). Sweep cadence: cron
-`POST /v1/fiat/sub-accounts/admin/sweep` (admin).
+Fiat (one namespace `fiat`, see docs/FIAT_LEDGER.md): **DOKU Checkout is
+money-in only** (no Sub-Account). Every user balance lives on the internal
+fiat ledger (`fiat_ledger_entries`). Env: `DOKU_MODE/CLIENT_ID/SECRET_KEY`
+(Checkout), optional `PID_FIAT_LEDGER_ENABLED` (default true),
+`PID_FIAT_LEDGER_APP_ALLOWLIST` (escrow recipients, e.g. `live2dev@pid`),
+`PID_FIAT_LEDGER_TREASURY_PID`, `DOKU_WEBHOOK_URL`. On corroborated payment the
+API issues `fiat_issue` (NET) + `fiat_fee`; issuance runs only inside the API
+(CI-guarded — no route/SDK/wallet issuance). DOKU Sub-Account / Unified Ledger
+code stays frozen (docs/FUTURE_UNIFIED_LEDGER.md).
 
 Local fiat loop: DOKU webhooks cannot reach `localhost`, so deposits rely on
 explicit status checks, not pushes. TopupScreen auto-checks once per intent
-and offers “Check payment status” (`syncTransaction` — same corroborated
-path as the webhook). For real-time webhook delivery in dev, expose the API
-via a tunnel (e.g. `ngrok http 3301`) and set `DOKU_WEBHOOK_URL` (+
-`DOKU_CHECKOUT_NOTIFY_URL`) to the tunnel URL — localhost values never reach DOKU.
+and offers “Check payment status” (`syncTransaction` → `POST /v1/fiat/deposits/:id/sync`
+— same corroborated path as the webhook, and it is what issues the ledger
+credit). For real-time webhook delivery in dev, expose the API via a tunnel
+(e.g. `ngrok http 3301`) and set `DOKU_WEBHOOK_URL` (+ `DOKU_CHECKOUT_NOTIFY_URL`)
+to the tunnel URL — localhost values never reach DOKU.
 
 ## Login split (first-party wallet vs public flow)
 

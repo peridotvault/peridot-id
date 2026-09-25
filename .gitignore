@@ -11,6 +11,8 @@ coverage/
 !deploy/.env.main.example
 !deploy/.env.test.example
 *.log
+# Fiat live-proof harness captures (may contain account numbers — local only)
+apps/api/test/.proof-out/
 .DS_Store
 *.rdb
 *.tsbuildinfo

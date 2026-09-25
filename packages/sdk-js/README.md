@@ -51,7 +51,7 @@ const available = await peridot.auth.pidAvailable('ifal'); // { available, pid }
 | Profile | `peridot.profile` | `me()`, `update(input)` |
 | Passkey credentials | `peridot.passkey` | `list()`, `register()`, `revoke(id)` |
 | Wallet | `peridot.wallet` | smart-account balance, history, deposit, withdraw (see `PeridotWallet`) |
-| Fiat | `peridot.fiat` | IDR top-up, P2P transfer, balance, ledger (writes approve via popup, see below) |
+| Fiat | `peridot.fiat` | balance, statement (`ledger`), send/receive, DOKU Checkout top-up (writes approve via popup, see below) |
 
 EVM permissions (WHITEPAPER.md §10) are not SDK-wrapped yet: use `@peridotvault/pid-evm`
 (payload + calldata builders) with the `v1/permissions` API directly
@@ -133,19 +133,32 @@ const peridot = Peridot({
 await peridot.wallet.withdraw({ amount: '5000000', asset: 'SOL', to: '...' });
 // ^ opens the popup; resolves with { signature, … } after user approval.
 
-// Fiat: the popup shows server-quoted amounts and the requesting origin.
+// Fiat (internal ledger): the popup shows server-quoted amounts + origin.
 // Top-up navigates the popup itself to the DOKU payment page on Approve.
 const deposit = await peridot.fiat.checkoutDeposit('100000'); // { paymentUrl, grossIdr, feeIdr, netIdr, … }
-const tx = await peridot.fiat.transferViaPopup({ type: 'DOKU_SUB_ACCOUNT', amountIdr: '40000', beneficiaryPid: 'rani@pid' });
+const bal = await peridot.fiat.balance();                     // { balanceIdr, source: 'fiat-ledger' }
+const sent = await peridot.fiat.transferViaPopup({ amountIdr: '100000', beneficiaryPid: 'live2dev@pid' });
+// Pass the initiating app's clientId to stack that app's fee (credits the app):
+const sent2 = await peridot.fiat.transferViaPopup({ amountIdr: '100000', beneficiaryPid: 'live2dev@pid', clientId: 'pidapp_...' });
 ```
 
-Split inquiry/confirm (`transferInquiry`/`transferConfirm`/`retryTransfer`)
-are first-party inline only — in popup mode they throw and direct you to
-`transferViaPopup()`, the single approved ceremony (inquiry runs server-side
-on the host, so the summary can never show a forged recipient or amount).
+Split inquiry/confirm (`transferInquiry`/`transferConfirm`) are first-party
+inline only — in popup mode they throw and direct you to `transferViaPopup()`,
+the single approved ceremony (inquiry runs server-side on the host, so the
+summary can never show a forged recipient or amount). Any identity can send to
+any identity; fees are global 0.1% (min Rp100, no cap) plus any per-app fee.
+
+Apps, fees, and machine auth have no dedicated wrapper — use the raw client
+(`peridot.get/post/patch/put/delete`):
+
+```ts
+await peridot.put(`/v1/apps/${id}/fees/topup`, { percentBps: 200, minIdr: '0', maxIdr: '10000', enabled: true });
+// Server-side backend token for the app's escrow (no browser session):
+//   POST /v1/auth/token { clientId, clientSecret } → { accessToken, expiresIn }
+```
 
 Read-only calls (`getBalance()`, `tokens()`, `history()`, `activity()`, `me()`,
-`activation()`, fiat `balance()`/`history()`/`ledger()`) always run inline —
+`activation()`, fiat `balance()`/`ledger()`/`feePolicy()`) always run inline —
 there is nothing to exploit there. `openPeridotPopup` / `openLoginPopup` are
 exported for custom flows.
 

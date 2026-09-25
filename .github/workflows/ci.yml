@@ -52,12 +52,16 @@ jobs:
           # primitives — user input creates invoices, never credits. The only
           # sanctioned entry is the admin-guarded clawback route, which calls
           # the service (never DOKU directly). Docs (*.md) may name them.
-          if rg -n 'issuePointsForDeposit|executePointTopup|clawbackPoints|topupVoid|DOKU_NON_FIAT' apps/wallet packages/sdk-js --glob '!*.md'; then
+          if rg -n 'issuePointsForDeposit|issueForDeposit|executePointTopup|clawbackPoints|topupVoid|DOKU_NON_FIAT' apps/wallet packages/sdk-js --glob '!*.md'; then
             echo "::error::points issuance outside FiatSubAccountService corroborated paths — see docs/prds/PRD_v6.md §3"
             exit 1
           fi
-          if rg -n 'issuePointsForDeposit|executePointTopup|topupVoid|DOKU_NON_FIAT' apps/api/src/fiat/fiat-subaccount.controller.ts; then
+          if rg -n 'issuePointsForDeposit|executePointTopup|topupVoid|DOKU_NON_FIAT' apps/api/src/fiat/fiat.controller.ts; then
             echo "::error::controller must never issue points directly — see docs/prds/PRD_v6.md §3"
+            exit 1
+          fi
+          if rg -n 'issueForDeposit' apps/api/src/fiat/fiat-ledger.controller.ts; then
+            echo "::error::ledger controller must never issue directly — issuance runs only inside FiatLedgerService after corroboration, see docs/FIAT_LEDGER.md"
             exit 1
           fi
 

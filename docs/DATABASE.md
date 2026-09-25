@@ -51,7 +51,23 @@ identities 1--* intents 1--* transactions *--1 chain_accounts
 identities 1--* credential_challenges
 identities 1--* security_events
 identities 1--* devices 1--* sessions
+identities 1--* pid_apps (via ownerPid)
+identities 1--* fiat_provider_accounts
+identities 1--* fiat_provider_transactions
+identities 1--* fiat_ledger_entries
 ```
+
+## Relation conventions
+
+- Back-ref fields on `Identity` are Prisma-mandatory declarations (a relation
+  needs both sides) and cost nothing at runtime. **Never `include` from
+  `Identity`** — query the child delegate directly by `pid`
+  (e.g. `prisma.fiatProviderAccount.findUnique(...)`).
+- Journals are append-only: FK `onDelete: Restrict` (history must never vanish
+  with the identity). Owned lifecycle rows (credentials, devices, chain
+  accounts, authorities) use `Cascade`.
+- Money movements lock the `identities` rows (`SELECT … FOR UPDATE`, PID-sorted)
+  — no separate marker table (the deleted `internal_credit_accounts` taught us that).
 
 Invariants:
 

@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsBoolean, IsOptional, IsString, Length, Matches } from "class-validator";
+import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Length, Matches, Max, MaxLength, Min } from "class-validator";
 
 /**
  * A bare http(s) origin: scheme + host + optional port, no path/query/fragment.
@@ -35,4 +35,29 @@ export class UpdatePidAppDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+}
+
+/** Per-app fee for one operation (stacks on the global fee). */
+export class SetAppFeeDto {
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  percentBps!: number;
+
+  @Matches(/^\d+$/, { message: "minIdr must be whole IDR" })
+  minIdr!: string;
+
+  @Matches(/^\d+$/, { message: "maxIdr must be whole IDR" })
+  maxIdr!: string;
+
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+/** Callback endpoint for ledger events (escrow apps). https (or localhost). */
+export class SetWebhookDto {
+  @IsString()
+  @MaxLength(2048)
+  @Matches(/^https?:\/\/[^\s]+$/i, { message: "url must be an http(s) URL" })
+  url!: string;
 }

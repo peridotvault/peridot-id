@@ -13,7 +13,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:seed": "ts-node prisma/seed.ts"
+    "db:seed": "ts-node prisma/seed.ts",
+    "proof:fiat": "ts-node test/fiat-live-proof.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

@@ -3,17 +3,18 @@ import { ConfigService } from "@nestjs/config";
 import { DokuCheckoutClient, DokuSubAccountProvider } from "@peridotvault/pid-payments";
 import { SecurityModule } from "../security/security-event.module";
 import { CHECKOUT_CLIENT } from "./checkout-client.token";
-import { FiatSubAccountController } from "./fiat-subaccount.controller";
+import { FiatController } from "./fiat.controller";
+import { FiatLedgerController } from "./fiat-ledger.controller";
+import { FiatLedgerService } from "./fiat-ledger.service";
 import { FiatSubAccountService } from "./fiat-subaccount.service";
 import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
 
 @Module({
   imports: [SecurityModule],
-  controllers: [FiatSubAccountController],
+  controllers: [FiatController, FiatLedgerController],
   providers: [
-    // DOKU Sub-Account V2 provider. Reuses the DOKU merchant credentials;
-    // the RSA key signs B2B token requests. Missing keys fail at call time
-    // with a clear error so non-fiat setups still boot.
+    // DOKU Sub-Account provider — legacy surface kept for internal/admin
+    // paths only; the user-facing money-in (Checkout) needs no sub-account.
     {
       provide: SUBACCOUNT_PROVIDER,
       inject: [ConfigService],
@@ -40,6 +41,7 @@ import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
       },
     },
     FiatSubAccountService,
+    FiatLedgerService,
   ],
 })
 export class FiatModule {}

@@ -11,7 +11,8 @@ import { AccessTokenPayload } from "./auth.service";
 export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
   constructor(config: ConfigService, private readonly prisma: PrismaService) {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([cookieExtractor]),
+      // Cookie (browser session) or Bearer (machine/client-credentials token).
+      jwtFromRequest: ExtractJwt.fromExtractors([cookieExtractor, ExtractJwt.fromAuthHeaderAsBearerToken()]),
       ignoreExpiration: false,
       secretOrKey: config.getOrThrow<string>("JWT_ACCESS_SECRET"),
     });
@@ -24,6 +25,6 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
       select: { status: true },
     });
     if (!identity || identity.status !== "active") throw new UnauthorizedException("Identity is not active");
-    return { pid: payload.sub };
+    return { pid: payload.sub, ...(payload.app ? { app: payload.app } : {}) };
   }
 }

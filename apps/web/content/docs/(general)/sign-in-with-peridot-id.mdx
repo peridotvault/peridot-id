@@ -103,3 +103,12 @@ const identity = await r.json(); // single-use code, 5-minute expiry
 - No framework? The snippet in step 2 is already framework-free: `openLoginPopup`,
   `loginWithPasskey({ clientId, returnTo })` (auto-delegates to the popup),
   `exchange(code, clientId)`.
+
+## Next: money
+
+Once users can sign in, you can fund their balance, hold escrow on your app's
+account, and charge your own fee:
+
+- [Fiat & payments](/docs/fiat) — top-up, balance, sends, escrow.
+- [Apps & workspace](/docs/apps) — manage your app, set per-app fees, read the
+  escrow balance with a machine token.

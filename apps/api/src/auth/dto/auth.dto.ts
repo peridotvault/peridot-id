@@ -40,6 +40,19 @@ export class ClaimDto {
 }
 
 /**
+ * Client-credentials token for an app's backend (no browser). `clientSecret`
+ * is required when the app has one set.
+ */
+export class AppTokenDto {
+  @IsString()
+  clientId!: string;
+
+  @IsOptional()
+  @IsString()
+  clientSecret?: string;
+}
+
+/**
  * Mint a pid_code for the CURRENT session (cookie-authenticated). Powers consent
  * screens: an already-logged-in user approves an app without re-authenticating.
  */

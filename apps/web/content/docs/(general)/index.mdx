@@ -13,6 +13,8 @@ account.
 - **Identity** — a permanent PID for each user across the Antigane ecosystem (`<handle>@pid`, e.g. `ifal@pid`) — user-chosen once, never changeable, reused, or reassigned
 - **Profile** — per-user mutable labels (`displayName`, `avatarUrl`, `locale`)
 - **Wallet** — a Solana wallet address associated with the PID (record-only custody, one per PID)
+- **Fiat** — an IDR balance per identity: DOKU Checkout top-up, internal fiat ledger, and sends to any identity (escrow/payouts)
+- **Apps** — third-party apps with their own `client_id`, origins, backend secret, fees, and escrow account
 
 ## Key facts
 
@@ -24,7 +26,10 @@ account.
 | Authentication | `HttpOnly` cookies (JWT access token + rotating refresh token) |
 | Access token lifetime | 15 minutes |
 | Refresh token lifetime | 30 days (rotated on every use) |
-| Wallet | One per PID; user-supplied Solana address; record-only custody (no key material) |
+| Wallet | One per PID; Solana smart account + EVM counterfactuals; no key material |
+| Fiat balance | Internal IDR ledger per identity; money in via DOKU Checkout |
+| Fees | Global 0.1% (min Rp100, no cap) + optional per-app fee (stacks) |
+| Machine auth | `POST /v1/auth/token` (client credentials) for app backends |
 | Spec | [OpenAPI 3.0](/docs/api) — also served by the API at `GET /v1/openapi.yaml` |
 
 ## Next steps
@@ -32,4 +37,6 @@ account.
 - [Getting started](/docs/getting-started) — base URLs and your first request
 - [Authentication](/docs/authentication) — how login, refresh, and logout work
 - [SDK](/docs/sdk) — the JavaScript SDK
+- [Fiat & payments](/docs/fiat) — balances, top-up, sends, fees
+- [Apps & workspace](/docs/apps) — register apps, fees, escrow, machine token
 - [API reference](/docs/api) — every endpoint, schema, and example

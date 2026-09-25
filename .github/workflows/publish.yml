@@ -1,0 +1,46 @@
+name: Publish packages
+
+# Publishes the public npm packages on a version tag (e.g. `v1.0.0`) or manual
+# dispatch. Requires an NPM_TOKEN repo secret with publish access to the
+# @peridotvault scope. Order matters: pid-sdk-js depends on pid-core and
+# pid-payments, so publish the leaves first.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.27.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @peridotvault/pid-types --filter @peridotvault/pid-core --filter @peridotvault/pid-payments --filter @peridotvault/pid-solana --filter @peridotvault/pid-sdk-js build
+
+      - name: Publish (leaves first)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for pkg in \
+            @peridotvault/pid-core \
+            @peridotvault/pid-payments \
+            @peridotvault/pid-sdk-js; do
+            echo "publishing $pkg"
+            pnpm --filter "$pkg" publish --access public --no-git-checks || {
+              echo "publish failed for $pkg"; exit 1; }
+          done

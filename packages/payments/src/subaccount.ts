@@ -163,7 +163,13 @@ export interface SacSplitRuleItem {
   accountNumber: number;
 }
 
-/** Map V2 latestTransactionStatus → Peridot providerStatus. Unknown stays processing. */
+/** Map V2 latestTransactionStatus → Peridot movement state. Unknown stays processing.
+ *  NOTE: for VA-rail deposits this is PROVISIONAL payment evidence only
+ *  (PROVIDER-DEP-01 — whether "00" means payment-received vs settlement-only
+ *  is sandbox-unverified). The API gates VA issuance behind an explicit
+ *  flag + a persisted SUCCESS notify and never infers from "00" alone.
+ *  For Checkout rows these codes track settlement and must never confirm
+ *  payment (Checkout payment truth is the order status). */
 export function mapSacStatus(code: string | undefined | null): "settled" | "processing" | "failed" | "cancelled" | "refunded" {
   const c = String(code ?? "").trim();
   if (c === "00") return "settled";
@@ -173,32 +179,36 @@ export function mapSacStatus(code: string | undefined | null): "settled" | "proc
   return "processing";
 }
 
-/** Versioned platform service-fee policy. fee is a FLAT percent of the quoted
- *  amount: fee = round-half-up(amount * percentBps / 10_000). No floor, no
- *  cap. minIdr/maxIdr are retained as schema/policy fields but are NOT
- *  applied (both must be 0).
- *  Peridot computes the QUOTE only. The fee moves as Treasury POINTS at
- *  issuance, never as a post-settlement fiat debit. See docs/prds/PRD_v6.md
- *  §3. */
+/** Versioned platform service-fee policy. PeridotID fee is a percent of the
+ *  quoted amount, CLAMPED to [minIdr, maxIdr]:
+ *    fee = clamp(round-half-up(amount * percentBps / 10_000), minIdr, maxIdr)
+ *  `minIdr = 0` = no floor, `maxIdr = 0` = uncapped. The PeridotID fee is
+ *  SEPARATE from any provider (DOKU) fee, which DOKU charges on its own.
+ *  Peridot computes the QUOTE only; the fee moves as Treasury POINTS at
+ *  issuance, never as a post-settlement fiat debit. See docs/prds/PRD_v6.md §3. */
 export interface FeePolicy {
   version: number;
   percentBps: number;
-  /** Unused, always 0 (kept for schema compat). */
+  /** Fee floor in whole IDR. 0 = no floor. */
   minIdr: bigint;
-  /** Unused, always 0 = uncapped (kept for schema compat). */
+  /** Fee cap in whole IDR. 0 = uncapped. */
   maxIdr: bigint;
 }
 
 export const DEFAULT_FEE_POLICY: FeePolicy = {
-  version: 3,
-  percentBps: 500, // flat 5%
-  minIdr: 0n,
-  maxIdr: 0n,
+  version: 5,
+  percentBps: 10, // 0.1%
+  minIdr: 100n, // floor Rp100
+  maxIdr: 0n, // no cap
 };
 
-/** Flat fee = round-half-up(amount * percentBps / 10_000). No floor, no cap. */
+/** PeridotID fee = percent of amount, clamped to [minIdr, maxIdr]
+ *  (round-half-up). 0 bounds mean "unbounded". */
 export function calcServiceFee(amountIdr: bigint, policy: FeePolicy = DEFAULT_FEE_POLICY): bigint {
-  return (amountIdr * BigInt(policy.percentBps) + 5_000n) / 10_000n;
+  const fee = (amountIdr * BigInt(policy.percentBps) + 5_000n) / 10_000n;
+  if (policy.minIdr > 0n && fee < policy.minIdr) return policy.minIdr;
+  if (policy.maxIdr > 0n && fee > policy.maxIdr) return policy.maxIdr;
+  return fee;
 }
 
 /** Provider-agnostic Sub-Account boundary — swapping DOKU later means one new class. */
@@ -615,12 +625,17 @@ if (require.main === module) {
   assert.strictEqual(mapSacStatus("04"), "refunded", "status 04");
   assert.strictEqual(mapSacStatus("06"), "failed", "status 06");
   assert.strictEqual(mapSacStatus(undefined), "processing", "unknown stays processing");
-  assert.strictEqual(calcServiceFee(30_000n), 1_500n, "30k -> 5% 1.5k");
-  assert.strictEqual(calcServiceFee(100_000n), 5_000n, "100k -> 5k");
-  assert.strictEqual(calcServiceFee(500_000n), 25_000n, "500k -> 5% 25k");
-  assert.strictEqual(calcServiceFee(1_000_000n), 50_000n, "1M -> flat 5% 50k, no cap");
-  assert.strictEqual(calcServiceFee(10_000_000n), 500_000n, "10M -> flat 5% 500k");
-  assert.strictEqual(calcServiceFee(99_999n), 5_000n, "half-up rounding");
-  assert.strictEqual(calcServiceFee(200_000n), 10_000n, "200k -> 5% 10k");
+  // Default policy: 0.1% clamped to min Rp100, no cap.
+  assert.strictEqual(calcServiceFee(30_000n), 100n, "30k -> 30 floored to 100");
+  assert.strictEqual(calcServiceFee(100_000n), 100n, "100k -> 100");
+  assert.strictEqual(calcServiceFee(500_000n), 500n, "500k -> 0.1% 500");
+  assert.strictEqual(calcServiceFee(1_000_000n), 1_000n, "1M -> 0.1% 1k");
+  assert.strictEqual(calcServiceFee(10_000_000n), 10_000n, "10M -> 0.1% 10k, no cap");
+  assert.strictEqual(calcServiceFee(99_999n), 100n, "half-up rounding, floored to 100");
+  assert.strictEqual(calcServiceFee(200_000n), 200n, "200k -> 200");
+  // Unbounded policy (0/0) keeps the raw percent — legacy/back-compat.
+  const open = { version: 0, percentBps: 500, minIdr: 0n, maxIdr: 0n };
+  assert.strictEqual(calcServiceFee(30_000n, open), 1_500n, "open -> 5% no floor");
+  assert.strictEqual(calcServiceFee(1_000_000n, open), 50_000n, "open -> 5% no cap");
   console.log("pid-payments subaccount self-check OK");
 }

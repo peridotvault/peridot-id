@@ -21,6 +21,25 @@ import { DOKU_PROD_URL, DOKU_SANDBOX_URL } from "./subaccount";
 export const CHECKOUT_PAYMENT_PATH = "/checkout/v1/payment";
 
 /**
+ * Checkout Check Status endpoint (documented: GET {base}/orders/v1/status/
+ * {invoice_number}, non-SNAP auth). Returns order-level status
+ * (ORDER_GENERATED / ORDER_EXPIRED / ORDER_RECOVERED) plus the channel
+ * transaction status (PENDING / SUCCESS / FAILED / EXPIRED / REFUNDED /
+ * TIMEOUT / REDIRECT). `transaction.status === "SUCCESS"` is FINAL and
+ * means the customer paid — independent of Sub-Account settlement.
+ * SANDBOX-VERIFY (2 items, fail loudly — never silent):
+ *  (a) merchants registered before Dec 2024 may need DOKU support to
+ *      activate order-level status; expect 404/4xx there, handled as unknown;
+ *  (b) the generic Check Status reference page shows SNAP-style headers
+ *      (X-SIGNATURE etc.) while the Checkout/JOKUL family uses the
+ *      Client-Id/Request-Id/Request-Timestamp/Signature scheme implemented
+ *      here (same credentials as createPayment — no new secrets). A 401
+ *      means the scheme is wrong for this merchant: fix the client, do NOT
+ *      fall back to weaker corroboration.
+ */
+export const CHECKOUT_ORDER_STATUS_PATH = "/orders/v1/status";
+
+/**
  * SAC routing key inside Checkout `additional_info`.
  * The SAC guide shows camelCase `additionalInfo.account`; Checkout's own
  * schema is snake_case (`additional_info`) and does not list `account` —
@@ -45,8 +64,9 @@ export interface CheckoutPaymentInput {
   invoiceNumber: string;
   /** Gross amount, whole IDR (Checkout takes an integer, no decimals). */
   grossAmountIdr: bigint;
-  /** Destination Sub-Account profileId (SAC-…). */
-  profileId: string;
+  /** Optional destination Sub-Account profileId (SAC-…). Omitted = the
+   *  payment lands on the merchant's main account (no sub-account routing). */
+  profileId?: string;
   splitRuleId?: string;
   customer: { id?: string; name?: string; phone?: string; email?: string };
   /** Documented payment_method_types allowlist; omitted = all active channels. */
@@ -63,6 +83,46 @@ export interface CheckoutPaymentResult {
   expiredDate?: string;
   sessionId?: string;
   rawResponse: unknown;
+}
+
+/**
+ * Normalized Checkout order status. `paid` is true ONLY on
+ * `transaction.status === "SUCCESS"` (documented FINAL = customer paid).
+ * `expired` covers both `order.status === "ORDER_EXPIRED"` and transaction
+ * `EXPIRED`. Anything else (PENDING/TIMEOUT/REDIRECT/unknown) is neither —
+ * the caller must keep waiting, never issue, never fail the row.
+ */
+export interface CheckoutOrderStatus {
+  paid: boolean;
+  /** Whole-IDR order amount when present and an exact integer; else null. */
+  paidAmount: bigint | null;
+  expired: boolean;
+  orderStatus?: string;
+  txStatus?: string;
+  rawResponse: unknown;
+}
+
+/**
+ * Strict parser for Checkout HTTP-notification bodies. Documented fields
+ * only: `order.invoice_number`, `order.amount`, `transaction.status`.
+ * Returns null when the body is unparseable or names no invoice — the caller
+ * must leave the event `received` for admin review, never infer payment.
+ */
+export function parseCheckoutNotify(body: unknown): {
+  invoiceNumber: string;
+  amountRaw: unknown;
+  txStatus?: string;
+} | null {
+  if (typeof body !== "object" || body === null) return null;
+  const order = (body as Record<string, unknown>).order;
+  if (typeof order !== "object" || order === null) return null;
+  const invoiceNumber = (order as Record<string, unknown>).invoice_number;
+  if (typeof invoiceNumber !== "string" || invoiceNumber.length === 0) return null;
+  const tx = (body as Record<string, unknown>).transaction;
+  const txStatus = typeof tx === "object" && tx !== null && typeof (tx as Record<string, unknown>).status === "string"
+    ? String((tx as Record<string, unknown>).status)
+    : undefined;
+  return { invoiceNumber, amountRaw: (order as Record<string, unknown>).amount, txStatus };
 }
 
 /** UTC ISO8601 `...Z` timestamp (Checkout runs on UTC, not WIB). */
@@ -88,6 +148,25 @@ function checkoutSignature(opts: {
     `Request-Timestamp:${opts.requestTimestamp}\n` +
     `Request-Target:${opts.requestTarget}\n` +
     `Digest:${opts.digest}`;
+  return `HMACSHA256=${createHmac("sha256", opts.secretKey).update(raw).digest("base64")}`;
+}
+
+/**
+ * GET-request signature: same non-SNAP scheme minus the Digest line
+ * (documented: Digest applies to POST only).
+ */
+function checkoutGetSignature(opts: {
+  clientId: string;
+  requestId: string;
+  requestTimestamp: string;
+  requestTarget: string;
+  secretKey: string;
+}): string {
+  const raw =
+    `Client-Id:${opts.clientId}\n` +
+    `Request-Id:${opts.requestId}\n` +
+    `Request-Timestamp:${opts.requestTimestamp}\n` +
+    `Request-Target:${opts.requestTarget}`;
   return `HMACSHA256=${createHmac("sha256", opts.secretKey).update(raw).digest("base64")}`;
 }
 
@@ -119,13 +198,21 @@ export class DokuCheckoutClient {
         ...(input.customer.phone ? { phone: input.customer.phone } : {}),
         ...(input.customer.email ? { email: input.customer.email } : {}),
       },
-      additional_info: {
-        [CHECKOUT_SAC_ACCOUNT_KEY]: {
-          id: input.profileId,
-          ...(input.splitRuleId ? { split_rule_id: input.splitRuleId } : {}),
-        },
-        ...(input.notifyUrl ? { override_notification_url: input.notifyUrl } : {}),
-      },
+      // Sub-account routing only when a profileId is given; otherwise the
+      // payment lands on the merchant's main account.
+      ...(input.profileId
+        ? {
+            additional_info: {
+              [CHECKOUT_SAC_ACCOUNT_KEY]: {
+                id: input.profileId,
+                ...(input.splitRuleId ? { split_rule_id: input.splitRuleId } : {}),
+              },
+              ...(input.notifyUrl ? { override_notification_url: input.notifyUrl } : {}),
+            },
+          }
+        : input.notifyUrl
+          ? { additional_info: { override_notification_url: input.notifyUrl } }
+          : {}),
     };
     const body = JSON.stringify(bodyObj);
     const requestId = randomUUID();
@@ -169,6 +256,72 @@ export class DokuCheckoutClient {
       rawResponse: data,
     };
   }
+
+  /**
+   * Query Checkout order status by OUR invoice number (documented: GET
+   * /orders/v1/status/{invoice_number OR Request-Id}; we always use the
+   * invoice we created). Non-SNAP JOKUL auth, same credentials as payment
+   * creation. 404 = DOKU knows no such order (unpaid, or pre-Dec-2024
+   * merchant without order-level status — caller decides; never assume).
+   * Throws ProviderError with the raw response preserved for review.
+   */
+  async checkOrderStatus(invoiceNumber: string): Promise<CheckoutOrderStatus> {
+    if (!/^[A-Za-z0-9-]{1,30}$/.test(invoiceNumber)) {
+      throw new ProviderError(400, "invoiceNumber must be 1-30 alphanumerics/dashes (card-acquirer limit)");
+    }
+    const target = `${CHECKOUT_ORDER_STATUS_PATH}/${invoiceNumber}`;
+    const requestId = randomUUID();
+    const timestamp = checkoutTimestamp();
+    const headers = {
+      "Client-Id": this.config.clientId,
+      "Request-Id": requestId,
+      "Request-Timestamp": timestamp,
+      Signature: checkoutGetSignature({
+        clientId: this.config.clientId,
+        requestId,
+        requestTimestamp: timestamp,
+        requestTarget: target,
+        secretKey: this.config.secretKey,
+      }),
+    };
+    let res: Response;
+    try {
+      res = await fetch(`${this.base()}${target}`, { method: "GET", headers });
+    } catch {
+      throw new ProviderError(null, "Payment gateway unreachable");
+    }
+    const data = (await res.json().catch(() => null)) as Record<string, any> | null;
+    if (!res.ok || !data) {
+      const errs = Array.isArray((data as any)?.error_messages) ? (data as any).error_messages.join("; ") : undefined;
+      const msg = String(errs ?? (data as any)?.message ?? res.statusText ?? "unknown").slice(0, 200);
+      throw new ProviderError(res.status, `DOKU Checkout order status failed (${res.status}): ${msg}`, requestId, data);
+    }
+    const order = (data?.order ?? {}) as Record<string, any>;
+    const tx = (data?.transaction ?? {}) as Record<string, any>;
+    const orderStatus = typeof order.status === "string" ? order.status : undefined;
+    const txStatus = typeof tx.status === "string" ? tx.status : undefined;
+    // Whole-IDR only: fractional or unparseable amounts fail SAFE (null →
+    // the caller must block issuance, never round or guess).
+    let paidAmount: bigint | null = null;
+    const rawAmount: unknown = order.amount;
+    if (typeof rawAmount === "number" && Number.isInteger(rawAmount) && rawAmount >= 0) {
+      paidAmount = BigInt(rawAmount);
+    } else if (typeof rawAmount === "string" && /^\d+$/.test(rawAmount.trim())) {
+      try {
+        paidAmount = BigInt(rawAmount.trim());
+      } catch {
+        paidAmount = null;
+      }
+    }
+    return {
+      paid: txStatus === "SUCCESS",
+      paidAmount,
+      expired: orderStatus === "ORDER_EXPIRED" || txStatus === "EXPIRED",
+      orderStatus,
+      txStatus,
+      rawResponse: data,
+    };
+  }
 }
 
 // ponytail: self-check — `node dist/checkout.js` fails loudly if helpers break.
@@ -179,7 +332,22 @@ if (require.main === module) {
     requestTarget: CHECKOUT_PAYMENT_PATH, digest: checkoutDigest("{}"), secretKey: "S",
   });
   assert.ok(sig.startsWith("HMACSHA256="), "non-SNAP signature prefix");
+  const getSig = checkoutGetSignature({
+    clientId: "C", requestId: "R", requestTimestamp: "2020-08-11T08:45:42Z",
+    requestTarget: `${CHECKOUT_ORDER_STATUS_PATH}/INV-1`, secretKey: "S",
+  });
+  assert.ok(getSig.startsWith("HMACSHA256="), "GET signature prefix");
+  assert.notStrictEqual(getSig, sig, "GET omits the Digest line");
   assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(checkoutTimestamp(new Date("2020-08-11T08:45:42.123Z"))), "UTC Z timestamp");
   assert.strictEqual(CHECKOUT_LANGUAGE, "ID", "checkout locale");
+  // Notify parser: documented fields only, strict on invoice.
+  assert.deepStrictEqual(
+    parseCheckoutNotify({ order: { invoice_number: "INV-1", amount: 150000 }, transaction: { status: "SUCCESS" } }),
+    { invoiceNumber: "INV-1", amountRaw: 150000, txStatus: "SUCCESS" },
+    "notify parse",
+  );
+  assert.strictEqual(parseCheckoutNotify({ order: { amount: 1 } }), null, "notify without invoice rejected");
+  assert.strictEqual(parseCheckoutNotify(null), null, "null body rejected");
+  assert.strictEqual(parseCheckoutNotify({ order: { invoice_number: "", amount: 1 } }), null, "empty invoice rejected");
   console.log("pid-payments checkout self-check OK");
 }

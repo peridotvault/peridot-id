@@ -10,9 +10,9 @@ import {
   postPopupReady,
   postPopupResult,
   type CheckoutDepositView,
+  type FiatTransferInquiryView,
   type PeridotClient,
   type PopupParams,
-  type SubTransferInquiryView,
 } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
 import { styles as s } from "../theme";
@@ -89,12 +89,12 @@ async function runAction(peridot: PeridotClient, action: string, payload: unknow
 async function runFiatAction(
   peridot: PeridotClient,
   action: string,
-  inquiry: SubTransferInquiryView | null,
+  inquiry: FiatTransferInquiryView | null,
   intent: CheckoutDepositView | null,
 ): Promise<unknown> {
   if (action === "fiat-transfer") {
-    if (!inquiry || !inquiry.accountName) throw new Error("Verified transfer missing — request rejected.");
-    return peridot.fiat.transferConfirm(inquiry.id, { beneficiaryAccountName: inquiry.accountName });
+    if (!inquiry) throw new Error("Verified transfer missing — request rejected.");
+    return peridot.fiat.transferConfirm(inquiry.id);
   }
   if (action === "fiat-checkout") {
     if (!intent) throw new Error("Verified top-up missing — request rejected.");
@@ -117,7 +117,7 @@ export function ApproveScreen({ popup }: { popup: PopupParams }) {
   // Server-quoted fiat state. Summaries are built from THESE (DOKU-side
   // truth), never from opener-supplied amounts — a malicious opener can't
   // display one amount while submitting another.
-  const [inquiry, setInquiry] = useState<SubTransferInquiryView | null>(null);
+  const [inquiry, setInquiry] = useState<FiatTransferInquiryView | null>(null);
   const [intent, setIntent] = useState<CheckoutDepositView | null>(null);
   // popup.origin is handshake-validated (awaitPopupRequest only accepts
   // messages from window.opener at exactly this origin), so displaying it
@@ -130,20 +130,19 @@ export function ApproveScreen({ popup }: { popup: PopupParams }) {
       const beneficiaryPid = typeof p.beneficiaryPid === "string" ? p.beneficiaryPid : "";
       if (!/^\d+$/.test(amountIdr) || !beneficiaryPid) throw new Error("Transfer request is malformed.");
       const inq = await peridot.fiat.transferInquiry({
-        type: "DOKU_SUB_ACCOUNT",
         amountIdr,
         beneficiaryPid,
         ...(typeof p.remark === "string" ? { remark: p.remark } : {}),
+        ...(typeof p.clientId === "string" ? { clientId: p.clientId } : {}),
       });
-      // Tamper guard: the quote must match what the opener asked for, and the
-      // recipient must be verified by name. Anything else fails closed.
+      // Tamper guard: the quote must match what the opener asked for.
       if (inq.grossIdr !== amountIdr) throw new Error("Quote mismatch — request rejected.");
-      if (!inq.netIdr || !inq.feeIdr || !inq.accountName) {
-        throw new Error("Recipient could not be verified — request rejected.");
+      if (!inq.netIdr || !inq.feeIdr) {
+        throw new Error("Quote incomplete — request rejected.");
       }
       setInquiry(inq);
       setSummary(
-        `Send ${fmtIdr(inq.netIdr)} to ${beneficiaryPid} (${inq.accountName}) · fee ${fmtIdr(inq.feeIdr)} · total debited ${fmtIdr(inq.grossIdr)}`,
+        `Send ${fmtIdr(inq.netIdr)} to ${beneficiaryPid} · fee ${fmtIdr(inq.feeIdr)} · total debited ${fmtIdr(inq.grossIdr)}`,
       );
     },
     [peridot],
@@ -155,7 +154,7 @@ export function ApproveScreen({ popup }: { popup: PopupParams }) {
     async (p: Record<string, unknown>) => {
       const netAmountIdr = typeof p.netAmountIdr === "string" ? p.netAmountIdr : "";
       if (!/^\d+$/.test(netAmountIdr)) throw new Error("Top-up request is malformed.");
-      const created = await peridot.fiat.checkoutDeposit(netAmountIdr);
+      const created = await peridot.fiat.checkoutDeposit(netAmountIdr, typeof p.clientId === "string" ? p.clientId : undefined);
       if (created.netIdr !== netAmountIdr || !created.paymentUrl || !created.grossIdr || !created.feeIdr) {
         throw new Error("Quote mismatch — request rejected.");
       }
@@ -232,7 +231,7 @@ export function ApproveScreen({ popup }: { popup: PopupParams }) {
         : await runAction(peridot, action, payload);
       // Checkout keeps the window open and navigates itself to the DOKU
       // payment page: same-window navigation from the Approve click can't be
-      // popup-blocked, unlike a dapp-side window.open on async RESULT.
+      // popup-blocked, unlike a dapp-side async popup.
       const checkoutUrl =
         action === "fiat-checkout" && intent?.paymentUrl ? intent.paymentUrl : null;
       postPopupResult(

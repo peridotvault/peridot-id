@@ -14,7 +14,6 @@ import type { ActivationView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";
-import { ensureSubAccount } from "../fiat-ensure";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -37,6 +36,7 @@ interface HomeScreenProps {
   goReceive: () => void;
   goSwap: () => void;
   goBuy: () => void;
+  goTransfer: () => void;
   goActivation: () => void;
   goPasskeys: () => void;
   goAppConnections: () => void;
@@ -47,6 +47,7 @@ export function HomeScreen({
   goReceive,
   goSwap,
   goBuy,
+  goTransfer,
   goActivation,
   goPasskeys,
   goAppConnections,
@@ -55,14 +56,9 @@ export function HomeScreen({
   const [profile, setProfile] = useState<Profile | null>(null);
   const [pid, setPid] = useState<string | null>(null);
   const [solLamports, setSolLamports] = useState<number>(0);
-  // null = failed load (error shown separately). "0" means no wallet yet
-  // (web3-only user) or a real zero from the API.
-  const [idrBalance, setIdrBalance] = useState<string | null>(null);
-  const [idrError, setIdrError] = useState<string | null>(null);
-  // Fiat still arriving at DOKU (Pending), shown read-only so a fresh
-  // deposit doesn't look lost. Never spendable from here — Saldo above is
-  // the only usable number; null hides the line entirely.
-  const [idrPending, setIdrPending] = useState<string | null>(null);
+  // Saldo = the fiat ledger. null = failed load (error shown separately).
+  const [balanceIdr, setBalanceIdr] = useState<string | null>(null);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
   const [nfts, setNfts] = useState<NftItem[]>([]);
   const [assetTab, setAssetTab] = useState<"tokens" | "items">("tokens");
@@ -110,46 +106,21 @@ export function HomeScreen({
         setNfts([]);
       }
       try {
-        // Saldo = live DOKU Unified Ledger (POINT) balance. Pending fiat is
-        // shown read-only below so arriving deposits are visible; it is
-        // never spendable and this screen never shows ledger internals.
+        // Saldo = the fiat ledger. Replay stays server-side; the user sees one
+        // usable number. No DOKU sub-account required.
         const bal = await peridot.fiat.balance();
-        setIdrBalance(bal.pointsAvailableIdr);
-        setIdrPending(bal.pendingIdr !== "0" ? bal.pendingIdr : null);
-        setIdrError(null);
+        setBalanceIdr(bal.balanceIdr);
+        setBalanceError(null);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (/not registered/i.test(msg)) {
-          // No sub-account yet (web3-only user) — IDR is simply 0, not an error.
-          setIdrBalance("0");
-          setIdrPending(null);
-          setIdrError(null);
-        } else if (/is creating|is failed/i.test(msg)) {
-          // Dead creating/failed row (missed provisioning) — heal once, then read.
-          try {
-            await ensureSubAccount(peridot);
-            const bal = await peridot.fiat.balance();
-            setIdrBalance(bal.pointsAvailableIdr);
-            setIdrPending(bal.pendingIdr !== "0" ? bal.pendingIdr : null);
-            setIdrError(null);
-          } catch (e2) {
-            setIdrBalance(null);
-            setIdrPending(null);
-            setIdrError(e2 instanceof Error ? e2.message : String(e2));
-          }
-        } else {
-          setIdrBalance(null);
-          setIdrPending(null);
-          // Distinct causes, distinct guidance: 401 = session gone, 404 = stale
-          // API without sub-account routes, anything else = DOKU/gateway verbatim.
-          setIdrError(
-            /401|Unauthorized/i.test(msg)
-              ? "Session expired — log in again."
-              : /404|Not Found|Cannot GET|Cannot POST/i.test(msg)
-                ? "API server is outdated — restart it."
-                : msg,
-          );
-        }
+        setBalanceIdr(null);
+        setBalanceError(
+          /401|Unauthorized/i.test(msg)
+            ? "Session expired — log in again."
+            : /503|disabled|frozen|unavailable/i.test(msg)
+              ? "Saldo is temporarily unavailable."
+              : msg,
+        );
       }
       try {
         const creds = await peridot.passkey.list();
@@ -187,7 +158,7 @@ export function HomeScreen({
     })),
   ];
 
-  const fiatAmount = idrBalance === null ? null : `Rp${Number(idrBalance).toLocaleString("id-ID")}`;
+  const balanceAmount = balanceIdr === null ? null : `Rp${Number(balanceIdr).toLocaleString("id-ID")}`;
 
   const st = activation?.status;
   const activated = st === "active";
@@ -242,17 +213,15 @@ export function HomeScreen({
 
       <View style={s.card}>
         <Text style={styles.fiatLabel}>Saldo</Text>
-        {idrError ? (
+        {balanceError ? (
           <>
-            <Text style={s.error}>{idrError}</Text>
+            <Text style={s.error}>{balanceError}</Text>
             <UIButton title="Retry" onPress={load} />
           </>
         ) : (
-          <Text style={styles.fiatAmount}>{busy && fiatAmount === null ? "…" : (fiatAmount ?? "—")}</Text>
+          <Text style={styles.fiatAmount}>{busy && balanceAmount === null ? "…" : (balanceAmount ?? "—")}</Text>
         )}
-        {!idrError && idrPending && (
-          <Text style={s.hint}>Arriving: Rp{Number(idrPending).toLocaleString("id-ID")} — added to Saldo once your payment is confirmed.</Text>
-        )}
+        <UIButton title="Transfer" onPress={goTransfer} />
       </View>
 
       <View style={styles.plainTabs}>
