@@ -23,8 +23,9 @@ function setup() {
   };
   prisma.$transaction = jest.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
   const security = { log: jest.fn(async () => undefined) };
-  const service = new ClaimService(prisma as never, security as never);
-  return { service, prisma, security };
+  const config = { get: (_k: string, d?: string) => d ?? "" };
+  const service = new ClaimService(prisma as never, security as never, config as never);
+  return { service, prisma, security, config };
 }
 
 function liveTicket(overrides: Record<string, unknown> = {}) {
@@ -77,11 +78,19 @@ describe("ClaimService", () => {
     const res = await service.claim("ct_x", "IFAL");
 
     expect(res).toMatchObject({ pid: "ifal@pid", redirectTo: null });
-    expect(prisma.identity.create).toHaveBeenCalledWith({ data: { pid: "ifal@pid", status: "active" } });
+    expect(prisma.identity.create).toHaveBeenCalledWith({ data: { pid: "ifal@pid", status: "active", role: "user" } });
     expect(prisma.claimTicket.update).toHaveBeenCalledWith({ where: { id: "ct_x" }, data: { consumedAt: expect.any(Date) } });
     // Audit must join the claim transaction: the root client cannot see the
     // uncommitted identity row (P2003 + full rollback — see issue log).
     expect(security.log).toHaveBeenCalledWith("ifal@pid", "identity.claimed", { provider: "google" }, prisma);
+  });
+
+  it("grants admin to a bootstrap PID from env", async () => {
+    const { service, prisma, config } = setup();
+    config.get = (_k: string, d?: string) => (_k === "PID_BOOTSTRAP_ADMIN_PID" ? "ifal@pid, ops@pid" : (d ?? ""));
+    prisma.claimTicket.findUnique.mockResolvedValue(liveTicket());
+    await service.claim("ct_x", "IFAL");
+    expect(prisma.identity.create).toHaveBeenCalledWith({ data: { pid: "ifal@pid", status: "active", role: "admin" } });
   });
 
   it("rejects an invalid handle", async () => {

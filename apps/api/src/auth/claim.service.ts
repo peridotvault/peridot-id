@@ -5,6 +5,7 @@
 // credential and consumes the ticket. Nothing exists until claim, so abandoning
 // restarts cleanly on the next login.
 import { BadRequestException, ConflictException, GoneException, Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { randomBytes } from "node:crypto";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
@@ -28,7 +29,19 @@ export class ClaimService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly security: SecurityEventService,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Ops bootstrap: PIDs in `PID_BOOTSTRAP_ADMIN_PID` (comma-separated, e.g.
+   * `ifal@pid`) are created with the `admin` role when claimed. Env-driven, never
+   * hardcoded; an already-existing identity is never changed here (promote via
+   * the documented SQL/`admin:promote` instead).
+   */
+  private isBootstrapAdmin(pid: string): boolean {
+    const raw = this.config.get<string>("PID_BOOTSTRAP_ADMIN_PID", "") || "";
+    return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).includes(pid.toLowerCase());
+  }
 
   /** Mint a ticket from a verified Google profile (+ SSO targets). Returns the opaque id. */
   async mint(profile: GoogleProfile, opts?: { redirectTo?: string; clientId?: string }): Promise<string> {
@@ -99,7 +112,7 @@ export class ClaimService {
         if (emailOwner) throw new ConflictException("Email is already linked to another account");
       }
 
-      await tx.identity.create({ data: { pid, status: "active" } });
+      await tx.identity.create({ data: { pid, status: "active", role: this.isBootstrapAdmin(pid) ? "admin" : "user" } });
       await tx.profile.create({
         data: { pid, displayName: ticket.displayName, avatarUrl: ticket.avatarUrl },
       });
