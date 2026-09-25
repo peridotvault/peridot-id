@@ -27,9 +27,12 @@ test("detectEnv: only 'production' is production, everything else sandbox", () =
 test("Peridot presets: env picks the hosts; custom baseUrl drops the popup preset", () => {
   withNodeEnv("production", () => {
     assert.equal(Peridot().popupBaseUrl, "https://app.pid.peridotvault.com");
+    // Explicit env override wins (e.g. a production build targeting sandbox).
+    assert.equal(Peridot({ env: "sandbox" }).popupBaseUrl, "https://app.sandbox.pid.peridotvault.com");
   });
   withNodeEnv("development", () => {
     assert.equal(Peridot().popupBaseUrl, "https://app.sandbox.pid.peridotvault.com");
+    assert.equal(Peridot({ env: "production" }).popupBaseUrl, "https://app.pid.peridotvault.com");
   });
   // Caller brings the API origin → caller brings the popup host (first-party inline).
   assert.equal(Peridot({ baseUrl: "http://localhost:3301" }).popupBaseUrl, undefined);

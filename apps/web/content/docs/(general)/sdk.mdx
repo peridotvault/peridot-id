@@ -18,6 +18,7 @@ npm install @peridotvault/pid-sdk-js
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
+  clientId: 'pidapp_…', // your registered app id
   onUnauthorized: async () => {
     // Access token expired — try to refresh silently before redirecting to login
     const ok = await peridot.auth.refresh();
@@ -29,11 +30,16 @@ const peridot = Peridot({
 });
 ```
 
-No URLs to pass. The environment is auto-detected: `NODE_ENV === 'production'`
-→ production, everything else (unset, `development`, `staging`, `test`, …) →
-sandbox. The API origin, popup host, Solana RPC, and program id all resolve
-from there — chains come from the API registry, not your config. To target a
-custom API (self-host / localhost), pass `baseUrl` (and `popupBaseUrl`).
+That's the whole config. `clientId` is applied to login, exchange, and fiat calls
+automatically. The environment is auto-detected: `NODE_ENV === 'production'` →
+production, everything else (unset, `development`, `staging`, `test`, …) →
+sandbox. The API origin, popup host, Solana RPC, and program id all resolve from
+there — chains come from the API registry, not your config.
+
+- Force an environment for a staging build with `env: 'sandbox'`.
+- Self-host / localhost: pass advanced `baseUrl` (and `popupBaseUrl`).
+- Server-side only: pass `clientSecret` (used by `auth.exchange`) — **never** in
+  browser code.
 
 ## Sign in
 

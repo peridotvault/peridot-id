@@ -77,17 +77,26 @@ const PRESETS: Record<PeridotEnv, { baseUrl: string; popupBaseUrl: string }> = {
 };
 
 /**
- * `NODE_ENV === "production"` → production; everything else (unset, `development`,
- * `staging`, `test`, …) → sandbox. Explicit `baseUrl` still overrides the API host.
+ * Explicit `env` wins; otherwise `NODE_ENV === "production"` → production and
+ * everything else (unset, `development`, `staging`, `test`, …) → sandbox.
  */
-export function detectEnv(): PeridotEnv {
+export function detectEnv(override?: PeridotEnv): PeridotEnv {
+  if (override === "production" || override === "sandbox") return override;
   const nodeEnv = typeof process !== "undefined" ? process.env?.NODE_ENV : undefined;
   return nodeEnv === "production" ? "production" : "sandbox";
 }
 
 export interface PeridotOptions {
-  /** API origin override (self-host/localhost). Defaults to the env preset. */
+  /** Registered app id (`pidapp_…`). Applied to login, exchange, and fiat calls. */
+  clientId?: string;
+  /** Backend-only app secret (`pidsk_…`). NEVER ship in browser code — used by `auth.exchange`. */
+  clientSecret?: string;
+  /** Force the target environment (e.g. `sandbox` for a staging build). Default: NODE_ENV-derived. */
+  env?: PeridotEnv;
+  /** Advanced: API origin override (self-host/localhost). Defaults to the env preset. */
   baseUrl?: string;
+  /** Advanced: popup host override. Preset from env unless `baseUrl` is passed. */
+  popupBaseUrl?: string;
   /** Fee-payer secure storage (defaults to an in-memory store). */
   feePayerStore?: SecretStore;
   /**
@@ -96,8 +105,6 @@ export interface PeridotOptions {
    * delegate to the PeridotID popup instead of signing in the dev DOM.
    */
   passkeySigner?: PasskeySigner;
-  /** Popup host override. Preset from env unless `baseUrl` is passed (then caller-supplied). */
-  popupBaseUrl?: string;
   /** On-chain activity cache (defaults to localStorage-backed). */
   historyStore?: HistoryStore;
   onUnauthorized?: () => void;
@@ -116,11 +123,12 @@ export class PeridotAuth {
    * navigates itself), or null when the login URL could not be obtained.
    */
   async login(opts?: { returnTo?: string; clientId?: string }): Promise<string | null> {
+    const clientId = this.appId(opts?.clientId);
     const body =
-      opts?.returnTo || opts?.clientId
+      opts?.returnTo || clientId
         ? {
-            ...(opts.returnTo ? { returnTo: opts.returnTo } : {}),
-            ...(opts.clientId ? { clientId: opts.clientId } : {}),
+            ...(opts?.returnTo ? { returnTo: opts.returnTo } : {}),
+            ...(clientId ? { clientId } : {}),
           }
         : undefined;
     const res = await this.client.post<LoginResponse>("/v1/auth/login", body);
@@ -128,22 +136,34 @@ export class PeridotAuth {
     return (res.data as LoginResponse).url;
   }
 
+  /** App id from the call, else the client-level `clientId`. */
+  private appId(explicit?: string): string | undefined {
+    return explicit ?? this.client.clientId;
+  }
+
+  /** App secret from the call, else the client-level `clientSecret` (server-only). */
+  private appSecret(explicit?: string): string | undefined {
+    return explicit ?? this.client.clientSecret;
+  }
+
   /**
    * Sign in via the PeridotID origin in a new tab (full-page Google + PID picker).
    * Resolves the one-time `pidCode` for `exchange`. Uses the configured popup host —
    * no URL to pass. Throws `PopupUnavailableError` when none is configured.
    */
-  async loginTab(opts?: { clientId?: string; returnTo?: string }): Promise<{ pidCode?: string }> {
+  async loginTab(opts?: { clientId?: string; returnTo?: string; method?: string }): Promise<{ pidCode?: string }> {
     if (!this.client.popupBaseUrl) {
       throw new PopupUnavailableError("No popup host configured — omit baseUrl so the env preset applies, or pass popupBaseUrl.");
     }
     if (typeof window === "undefined") throw new PopupUnavailableError("Sign-in needs a browser.");
+    const clientId = this.appId(opts?.clientId);
     return openLoginTab({
       popupBaseUrl: this.client.popupBaseUrl,
       params: {
         popup: "login",
         origin: window.location.origin,
-        ...(opts?.clientId ? { client_id: opts.clientId } : {}),
+        ...(opts?.method ? { method: opts.method } : {}),
+        ...(clientId ? { client_id: clientId } : {}),
         ...(opts?.returnTo ? { redirect_uri: opts.returnTo } : {}),
       },
     });
@@ -152,11 +172,12 @@ export class PeridotAuth {
   /** Popup params shared by the login delegation below (redirect + app binding). */
   private loginPopupParams(opts?: { returnTo?: string; clientId?: string }): Record<string, string | undefined> {
     if (typeof window === "undefined") return {};
+    const clientId = this.appId(opts?.clientId);
     return {
       redirect_uri: opts?.returnTo ?? window.location.origin,
       origin: window.location.origin,
       popup: "login",
-      ...(opts?.clientId ? { client_id: opts.clientId } : {}),
+      ...(clientId ? { client_id: clientId } : {}),
     };
   }
 
@@ -189,6 +210,7 @@ export class PeridotAuth {
    * delegates to the PeridotID popup instead of failing cryptically.
    */
   async loginWithPasskey(opts?: { returnTo?: string; clientId?: string }): Promise<{ ok: boolean; pidCode?: string }> {
+    const clientId = this.appId(opts?.clientId);
     try {
       const finish = await authenticatePasskey({
         start: async () => {
@@ -200,7 +222,7 @@ export class PeridotAuth {
           const res = await this.client.post<{ ok: boolean; pidCode?: string }>("/v1/auth/passkey/finish", {
             ...input,
             ...(opts?.returnTo ? { returnTo: opts.returnTo } : {}),
-            ...(opts?.clientId ? { clientId: opts.clientId } : {}),
+            ...(clientId ? { clientId } : {}),
           });
           if (!res.ok) throw new Error("Passkey sign-in failed");
           return res.data as { ok: boolean; pidCode?: string };
@@ -222,10 +244,12 @@ export class PeridotAuth {
    * when the bound app has a secret set.
    */
   async exchange(code: string, clientId?: string, clientSecret?: string): Promise<ExchangeResult | ApiError> {
+    const cid = this.appId(clientId);
+    const secret = this.appSecret(clientSecret);
     const res = await this.client.post<ExchangeResult>("/v1/auth/exchange", {
       code,
-      ...(clientId ? { clientId } : {}),
-      ...(clientSecret ? { clientSecret } : {}),
+      ...(cid ? { clientId: cid } : {}),
+      ...(secret ? { clientSecret: secret } : {}),
     });
     return res.data;
   }
@@ -236,9 +260,10 @@ export class PeridotAuth {
    * re-authenticating. Throws on rejection (unknown app, disallowed returnTo).
    */
   async authorize(opts: { returnTo: string; clientId?: string }): Promise<{ pidCode: string }> {
+    const clientId = this.appId(opts.clientId);
     const res = await this.client.post<{ pidCode: string }>("/v1/auth/authorize", {
       returnTo: opts.returnTo,
-      ...(opts.clientId ? { clientId: opts.clientId } : {}),
+      ...(clientId ? { clientId } : {}),
     });
     if (!res.ok) throw new Error("Authorization failed — returnTo is not allowed for this app.");
     return res.data as { pidCode: string };
@@ -441,18 +466,32 @@ class PeridotClient {
   readonly fiat: PeridotFiat;
   readonly admin: PeridotAdmin;
 
+  private readonly appOptions: { clientId?: string; clientSecret?: string };
+
   constructor(
     private baseUrl: string,
     private walletOptions: PeridotWalletOptions,
+    appOptions: { clientId?: string; clientSecret?: string } = {},
     private onUnauthorized?: () => void,
   ) {
+    this.appOptions = appOptions;
     this.auth = new PeridotAuth(this);
     this.identity = new PeridotIdentity(this);
     this.profile = new PeridotProfile(this);
     this.passkey = new PeridotPasskey(this);
     this.wallet = new PeridotWallet(this, walletOptions);
-    this.fiat = new PeridotFiat(this);
+    this.fiat = new PeridotFiat(this, appOptions.clientId);
     this.admin = new PeridotAdmin(this);
+  }
+
+  /** Registered app id applied by default (login/exchange/fiat). */
+  get clientId(): string | undefined {
+    return this.appOptions.clientId;
+  }
+
+  /** App secret applied by default (server-side `exchange` only). */
+  get clientSecret(): string | undefined {
+    return this.appOptions.clientSecret;
   }
 
   private async request<T>(path: string, init: RequestInit): Promise<{ ok: boolean; data: T | ApiError }> {
@@ -540,7 +579,7 @@ export type {
   UpsertContractInput,
 };
 export function Peridot(options: PeridotOptions = {}): PeridotClient {
-  const preset = PRESETS[detectEnv()];
+  const preset = PRESETS[detectEnv(options.env)];
   // Caller-supplied baseUrl means "I know where the API is" (self-host/localhost) —
   // then the popup host is theirs to pass too; otherwise the env preset fills both.
   const popupBaseUrl = options.popupBaseUrl ?? (options.baseUrl ? undefined : preset.popupBaseUrl);
@@ -552,6 +591,7 @@ export function Peridot(options: PeridotOptions = {}): PeridotClient {
       popupBaseUrl,
       historyStore: options.historyStore,
     },
+    { clientId: options.clientId, clientSecret: options.clientSecret },
     options.onUnauthorized,
   );
 }

@@ -1,5 +1,22 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.3.1
+
+- `auth.loginTab({ method })` — pass `method: 'passkey'` to auto-start the
+  passkey ceremony in the hosted tab (otherwise the user picks).
+
+## 1.3.0
+
+- **Configure once with `clientId` (+ optional `clientSecret`).** `Peridot({
+  clientId, clientSecret?, env? })` — the app id is applied by default to
+  `auth.login`, `auth.loginTab`, `auth.authorize`, `auth.exchange`, and every
+  `fiat.*` call. No per-call `clientId`, no URLs.
+- **`env: 'production' | 'sandbox'`** override added on top of the
+  `NODE_ENV`-derived default — a production build can target sandbox (staging)
+  with one word.
+- `clientSecret` is backend-only (used by `auth.exchange`); never ship it in
+  browser code.
+
 ## 1.2.0
 
 - **No URLs to configure.** `baseUrl`/`popupBaseUrl` are now optional and the

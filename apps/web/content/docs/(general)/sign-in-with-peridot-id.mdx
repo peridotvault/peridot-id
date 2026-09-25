@@ -14,7 +14,7 @@ List every URL PeridotID may return users to — codes are only issued to these:
 ```ts
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
-const peridot = Peridot({});
+const peridot = Peridot({ clientId: 'pidapp_…' });
 // Register with just a name — allowed origins are managed after, in the dashboard
 // at pid.peridotvault.com/workspace (or PATCH /v1/apps).
 const res = await peridot.post('/v1/apps', { name: 'My Game' });
@@ -39,12 +39,12 @@ npm install @peridotvault/pid-sdk-js
 ```ts
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
-const peridot = Peridot({}); // environment auto-detected from NODE_ENV
+const peridot = Peridot({ clientId: 'pidapp_…' }); // environment auto-detected
 
 async function signIn() {
-  const { pidCode } = await peridot.auth.loginTab({ clientId: 'pidapp_...' });
+  const { pidCode } = await peridot.auth.loginTab(); // opens in a new tab
   if (pidCode) {
-    const identity = await peridot.auth.exchange(pidCode, 'pidapp_...');
+    const identity = await peridot.auth.exchange(pidCode);
     // { pid, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }
   }
 }

@@ -35,10 +35,11 @@ There is no per-app environment switch.
 1. Open the sandbox workspace and register your app there (separate `client_id`).
 2. Your test build points at the sandbox **automatically**: the SDK selects the
    environment from `NODE_ENV` — `production` → production, anything else
-   (unset, `development`, `staging`, `test`, …) → sandbox. No URL to configure:
+   (unset, `development`, `staging`, `test`, …) → sandbox. A staging build that
+   runs with `NODE_ENV=production` just adds `env: 'sandbox'`:
    ```ts
-   const peridot = Peridot({}); // sandbox while NODE_ENV !== 'production'
-   // no passkeySigner → popup/tab mode
+   const peridot = Peridot({ clientId: 'pidapp_…', env: 'sandbox' });
+   // omit env on production; no URLs, no passkeySigner → popup/tab mode
    ```
 3. Top up / send with test flows — DOKU runs in sandbox, so nothing is real.
 4. When it works, register the same app in **production** and build with

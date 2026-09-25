@@ -117,7 +117,14 @@ function unwrap<T>(res: { ok: boolean; data: T | ApiError }, fallback: string): 
 const BASE = "/v1/fiat";
 
 export class PeridotFiat {
-  constructor(private readonly api: ApiLike) {}
+  constructor(
+    private readonly api: ApiLike,
+    private readonly defaultClientId?: string,
+  ) {}
+
+  private appId(explicit?: string): string | undefined {
+    return explicit ?? this.defaultClientId;
+  }
 
   /**
    * Third-party mode: popupBaseUrl set (no first-party session/signer).
@@ -169,8 +176,9 @@ export class PeridotFiat {
    * (`fiat-checkout`) which navigates to the DOKU page on Approve.
    */
   async checkoutDeposit(netAmountIdr: string, clientId?: string): Promise<CheckoutDepositView> {
-    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", { netAmountIdr, clientId });
-    return unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, { netAmountIdr, clientId }), "Checkout deposit failed");
+    const cid = this.appId(clientId);
+    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", { netAmountIdr, clientId: cid });
+    return unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, { netAmountIdr, clientId: cid }), "Checkout deposit failed");
   }
 
   /** Recent deposit intents for the caller (money-in history). */
@@ -188,7 +196,9 @@ export class PeridotFiat {
   /** Send step 1: inquiry only (moves no money). First-party inline only. */
   async transferInquiry(input: FiatTransferInput): Promise<FiatTransferInquiryView> {
     this.inlineOnly("transferInquiry");
-    return unwrap(await this.api.post<FiatTransferInquiryView>(`${BASE}/transfers/inquiry`, input), "Account validation failed");
+    const clientId = this.appId(input.clientId);
+    const body = { ...input, ...(clientId ? { clientId } : {}) };
+    return unwrap(await this.api.post<FiatTransferInquiryView>(`${BASE}/transfers/inquiry`, body), "Account validation failed");
   }
 
   /** Send step 2: posts all legs atomically. First-party inline only. */
@@ -203,7 +213,8 @@ export class PeridotFiat {
    * on Approve.
    */
   async transferViaPopup(input: FiatTransferInput): Promise<FiatLedgerEntry> {
-    return this.viaPopup<FiatLedgerEntry>("fiat-transfer", input);
+    const clientId = this.appId(input.clientId);
+    return this.viaPopup<FiatLedgerEntry>("fiat-transfer", { ...input, ...(clientId ? { clientId } : {}) });
   }
 
   /** Cancel a created (not yet posted) transfer intent. */
