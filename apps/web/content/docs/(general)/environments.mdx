@@ -1,0 +1,53 @@
+---
+title: Environments (production & sandbox)
+description: Production and sandbox stacks — real money vs DOKU sandbox
+---
+
+PeridotID runs **two fully separate environments**. They share no database,
+credentials, or app registrations — only the same code and (for now) the same
+Google OAuth client.
+
+| | Production | Sandbox (test) |
+|---|---|---|
+| Docs / workspace | `https://pid.peridotvault.com` | `https://sandbox.pid.peridotvault.com` |
+| Wallet app | `https://app.pid.peridotvault.com` | `https://app.sandbox.pid.peridotvault.com` |
+| API | `https://api.pid.peridotvault.com` | `https://api.sandbox.pid.peridotvault.com` |
+| Money | **real** (DOKU production) | **test** (DOKU sandbox) |
+| Database | `peridot_id` | `peridot_id_test` |
+| Deploy branch | `main` | `test` |
+
+## What differs (everything that can move money)
+
+- **DOKU mode**: production vs `sandbox`. Sandbox top-ups use DOKU's sandbox —
+  no real money ever moves.
+- **Database** (users, identities, apps, ledger) is separate.
+- **JWT secrets**, cookie domain (`.sandbox.pid.peridotvault.com`), and WebAuthn
+  RP id are separate — a session or passkey from one env never works in the other.
+- **App registrations**: `client_id`, allowed origins, backend secret, **fees**,
+  and webhook are per environment.
+
+Because environments are separate deployments, **register your app in each
+environment** you want to support (same name is fine; the `client_id` differs).
+There is no per-app environment switch.
+
+## Use the sandbox
+
+1. Open the sandbox workspace and register your app there (separate `client_id`).
+2. Point your test build's SDK at the sandbox:
+   ```ts
+   const peridot = Peridot({
+     baseUrl: 'https://api.sandbox.pid.peridotvault.com',
+     popupBaseUrl: 'https://app.sandbox.pid.peridotvault.com',
+     // no passkeySigner → popup/tab mode
+   });
+   ```
+3. Top up / send with test flows — DOKU runs in sandbox, so nothing is real.
+4. When it works, register the same app in **production** and switch `baseUrl`.
+
+> Never point a sandbox build at the production API, or a production build at the
+> sandbox — the SDK takes `baseUrl` explicitly, so choose it by your own
+> environment.
+
+Fees, the fiat ledger, and webhooks behave identically in both environments; only
+the DOKU mode and data differ. See [Fiat & payments](/docs/fiat) and
+[Apps & workspace](/docs/apps).

@@ -11,6 +11,7 @@
     "sdk",
     "fiat",
     "apps",
+    "environments",
     "sign-in-with-peridot-id",
     "errors"
   ]

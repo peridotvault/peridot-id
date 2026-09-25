@@ -3,6 +3,8 @@ name: Deploy
 on:
   push:
     branches: [main, test]
+  # Manual deploy: pick the ref (main → production, test → sandbox).
+  workflow_dispatch:
 
 jobs:
   typecheck:

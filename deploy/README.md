@@ -14,6 +14,9 @@ labels. No infra repo changes are ever required.
    - `pid.peridotvault.com`
    - `app.pid.peridotvault.com`
    - `api.pid.peridotvault.com`
+   - `sandbox.pid.peridotvault.com` (sandbox workspace)
+   - `app.sandbox.pid.peridotvault.com` (sandbox wallet)
+   - `api.sandbox.pid.peridotvault.com` (sandbox API)
 3. Google OAuth console: create OAuth 2.0 credentials with
    `https://api.pid.peridotvault.com/v1/auth/google/callback` as the redirect URI
    (redirect lands back on `app.pid.peridotvault.com` via CLIENT_SUCCESS_URL).
@@ -39,11 +42,39 @@ fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /
 Traefik auto-detects the two services, issues HTTPS via Let's Encrypt, and
 routing goes live. No infra change.
 
+## Sandbox (test) stack — DOKU sandbox, no real money
+
+A second, fully separate stack for testing apps (public + internal). Same code,
+**separate** DB (`peridot_id_test`), DOKU **sandbox** credentials, JWT secrets,
+cookie domain, and app registrations. Deployed from the `test` branch.
+
+```sh
+ssh root@VPS
+cd /opt/apps/peridot-id
+git clone https://github.com/peridotvault/peridot-id.git peridot-id-test
+cd peridot-id-test
+cp deploy/.env.test.example deploy/.env.test
+$EDITOR deploy/.env.test   # DOKU sandbox creds; Google client + sandbox callback
+./deploy/db-init.sh test   # creates peridot_id_test + migrations
+./deploy/up.sh test
+```
+
+Domains: `sandbox.pid.peridotvault.com`, `app.sandbox.pid.peridotvault.com`,
+`api.sandbox.pid.peridotvault.com` (same VPS, separate Traefik routers via
+`NAMESPACE=-test` / `ENV_SUFFIX=sandbox.`).
+
+**Google OAuth:** the sandbox reuses the production Google client, so add
+`https://api.sandbox.pid.peridotvault.com/v1/auth/google/callback` to that
+client's authorized redirect URIs. Never add localhost URIs to the prod client.
+**WebAuthn** uses `sandbox.pid.peridotvault.com` as RP id → passkeys are isolated
+per environment.
+
 ## Update
 
 ```sh
-# on the VPS (or via the GitHub Actions deploy workflow on push to main)
-git pull && ./deploy/up.sh main
+# on the VPS (or via the GitHub Actions deploy workflow)
+git pull && ./deploy/up.sh main      # production (branch main)
+git pull && ./deploy/up.sh test      # sandbox (branch test)
 ```
 
 ## Operate
