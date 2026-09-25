@@ -20,6 +20,7 @@ import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter, SolanaRpc } f
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
 import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE } from "../common/chains";
+import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
   feePolicyVersion as configuredPolicyVersion,
   protocolFeeBps,
@@ -27,7 +28,6 @@ import {
   exceedsDriftBound,
   relayerKeypair,
   solanaAdapter,
-  solanaRpcUrl,
   treasuryPubkey,
 } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
@@ -69,6 +69,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly security: SecurityEventService,
+    private readonly chains: ChainRegistryService,
   ) {}
 
   onModuleInit(): void {
@@ -83,12 +84,14 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
-  private rpcUrl(): string {
-    return solanaRpcUrl(this.config);
-  }
-
   private policyVersion(): number {
     return configuredPolicyVersion(this.config);
+  }
+
+  /** Activity label derived from the registry chain (no SOLANA_NETWORK env). */
+  private async networkLabel(): Promise<string> {
+    const chain = await this.chains.solanaChain();
+    return chain && !chain.isTestnet ? "mainnet-beta" : "devnet";
   }
 
   /** sha256 of the WebAuthn RP ID — stored on-chain and verified per assertion. */
@@ -114,8 +117,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return treasuryPubkey(this.pidSolana, this.config);
   }
 
-  private adapter(): SolanaAdapter {
-    return solanaAdapter(this.pidSolana, this.config);
+  private async adapter(): Promise<SolanaAdapter> {
+    const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(), this.chains.solanaProgramId()]);
+    return solanaAdapter(this.pidSolana, rpcUrl, programId);
   }
 
   /** Realtime activation network-cost estimate (rent + message fee, no margin)
@@ -138,7 +142,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
 
   /** Active lamports held by the Peridot relayer (the float that funds fee + rent). */
   private async relayerBalanceLamports(): Promise<number> {
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     return adapter.getBalanceOf(this.relayer().publicKey.toBase58());
   }
 
@@ -161,7 +165,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     sig: string,
     address: string,
   ): Promise<{ outcome: "confirmed" | "failed" | "pending"; reason?: string }> {
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     const attempts = this.confirmAttempts();
     const intervalMs = this.confirmIntervalMs();
     for (let i = 0; i < attempts; i++) {
@@ -193,7 +197,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     });
     if (pending.length === 0) return;
 
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     const quoted = await this.quotedFees(adapter);
 
     for (const ca of pending) {
@@ -265,7 +269,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     if (chain.status === "active") return this.viewOf(user);
 
     // Re-derive live state so a stale stored status can't block a genuinely READY account.
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     let balance = 0;
     let activated = false;
     try {
@@ -369,7 +373,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
             direction: "out",
             counterparty: this.treasury().toBase58(),
             chain: "solana",
-            network: this.config.get<string>("SOLANA_NETWORK", "devnet"),
+            network: await this.networkLabel(),
             txHash: signature,
             status: "confirmed" as TransactionStatus,
             confirmedAt: new Date(),
@@ -411,7 +415,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   /** Activation view derived live from on-chain state (ownership-checked). */
   async viewOf(user: { pid: string }): Promise<ActivationView> {
     const chain = await this.ownedSolanaRow(user.pid);
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     let balance = 0;
     let activated = false;
     try {

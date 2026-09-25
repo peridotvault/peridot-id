@@ -14,7 +14,7 @@ List every URL PeridotID may return users to — codes are only issued to these:
 ```ts
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
-const peridot = Peridot({ baseUrl: 'https://api.pid.peridotvault.com' });
+const peridot = Peridot({});
 // Register with just a name — allowed origins are managed after, in the dashboard
 // at pid.peridotvault.com/workspace (or PATCH /v1/apps).
 const res = await peridot.post('/v1/apps', { name: 'My Game' });
@@ -37,23 +37,12 @@ npm install @peridotvault/pid-sdk-js
 ```
 
 ```ts
-import { Peridot, openLoginTab } from '@peridotvault/pid-sdk-js';
+import { Peridot } from '@peridotvault/pid-sdk-js';
 
-const peridot = Peridot({
-  baseUrl: 'https://api.pid.peridotvault.com',
-  solanaRpcUrl: 'https://api.devnet.solana.com',
-  popupBaseUrl: 'https://app.pid.peridotvault.com',
-});
+const peridot = Peridot({}); // environment auto-detected from NODE_ENV
 
 async function signIn() {
-  const { pidCode } = await openLoginTab({
-    popupBaseUrl: 'https://app.pid.peridotvault.com',
-    params: {
-      origin: window.location.origin,
-      popup: 'login',
-      client_id: 'pidapp_...',
-    },
-  });
+  const { pidCode } = await peridot.auth.loginTab({ clientId: 'pidapp_...' });
   if (pidCode) {
     const identity = await peridot.auth.exchange(pidCode, 'pidapp_...');
     // { pid, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }

@@ -26,12 +26,27 @@ const [PDA] = PublicKey.findProgramAddressSync(
   PROGRAM,
 );
 const PDA_B58 = PDA.toBase58();
+const CHAIN_VIEW = {
+  id: "chain-sol",
+  namespace: "solana",
+  reference: "ref",
+  name: "solana-devnet",
+  nativeSymbol: "SOL",
+  decimals: 9,
+  rpcUrls: ["http://127.0.0.1:8899"],
+  explorerUrl: null,
+  logoUrl: null,
+  isTestnet: true,
+  isActive: true,
+  contracts: [{ id: "k1", chainId: "chain-sol", type: "program", address: PROGRAM.toBase58(), versionLabel: "v1", deployTxHash: null, isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+};
 // mock API: identity + chain rows + credentials endpoints
 const mockApi = {
   async get(path){
     if (path === "/v1/identity/me") return { ok: true, data: { pid: PID } };
     if (path === "/v1/account") return { ok: true, data: [{ id: "c1", pid: PID, chainId: "chain-sol", chainNamespace: "solana", chainReference: "ref", address: PDA_B58, accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] };
     if (path === "/v1/credentials") return { ok: true, data: [{ id: "a1", type: "secp256r1", credentialId: "cred", publicKey: AUTHORITY_B64, createdAt: new Date().toISOString(), lastUsedAt: null }] };
+    if (path === "/v1/chains") return { ok: true, data: [CHAIN_VIEW] };
     return { ok: true, data: {} };
   },
   async post(){ return { ok: true, data: {} }; },
@@ -39,7 +54,7 @@ const mockApi = {
 // mock passkey signer (V3: authenticatorData carries the RP-ID hash + UV flag)
 const signer = { async sign(challenge){ const cj=Buffer.from(JSON.stringify({type:"webauthn.get",challenge:b64url(challenge),origin:"x"})); const ad=Buffer.concat([RP_ID_HASH,Buffer.from([0x05,0,0,0,1])]); const md=await buildWebAuthnMessage(ad,cj); let s=crypto.sign("sha256",md,{key:passkey.privateKey,dsaEncoding:"ieee-p1363"}); const r=BigInt("0x"+s.subarray(0,32).toString("hex"));let ss=BigInt("0x"+s.subarray(32).toString("hex"));if(ss>N/2n)ss=N-ss; return {credentialId:"cred",signature:Buffer.concat([Buffer.from(r.toString(16).padStart(64,"0"),"hex"),Buffer.from(ss.toString(16).padStart(64,"0"),"hex")]),authenticatorData:ad,clientDataJSON:cj}; } };
 const storeMap = new Map([["peridot.feePayer.ed25519", Buffer.from(feePayer.secretKey).toString("hex")]]);
-const wallet = new PeridotWallet(mockApi, { solanaRpcUrl: "http://127.0.0.1:8899", passkeySigner: signer, feePayerStore: { get: async(k)=>storeMap.get(k) ?? null, set: async(k,v)=>storeMap.set(k,v) } });
+const wallet = new PeridotWallet(mockApi, { passkeySigner: signer, feePayerStore: { get: async(k)=>storeMap.get(k) ?? null, set: async(k,v)=>storeMap.set(k,v) } });
 const adapter = new SolanaAdapter(new SolanaRpc("http://127.0.0.1:8899"));
 await conn.confirmTransaction(await conn.requestAirdrop(feePayer.publicKey, 10*LAMPORTS_PER_SOL), "confirmed");
 await conn.confirmTransaction(await conn.requestAirdrop(backend.publicKey, 10*LAMPORTS_PER_SOL), "confirmed");

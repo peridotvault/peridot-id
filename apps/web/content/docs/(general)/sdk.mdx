@@ -18,8 +18,6 @@ npm install @peridotvault/pid-sdk-js
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
-  baseUrl: 'https://api.pid.peridotvault.com',
-  popupBaseUrl: 'https://app.pid.peridotvault.com', // trust-critical actions open here
   onUnauthorized: async () => {
     // Access token expired — try to refresh silently before redirecting to login
     const ok = await peridot.auth.refresh();
@@ -30,6 +28,12 @@ const peridot = Peridot({
   },
 });
 ```
+
+No URLs to pass. The environment is auto-detected: `NODE_ENV === 'production'`
+→ production, everything else (unset, `development`, `staging`, `test`, …) →
+sandbox. The API origin, popup host, Solana RPC, and program id all resolve
+from there — chains come from the API registry, not your config. To target a
+custom API (self-host / localhost), pass `baseUrl` (and `popupBaseUrl`).
 
 ## Sign in
 

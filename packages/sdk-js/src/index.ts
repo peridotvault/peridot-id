@@ -24,7 +24,7 @@ import { authenticatePasskey, registerPasskey, BrowserPasskeySigner, PasskeyHost
 import type { PasskeySigner } from "@peridotvault/pid-core";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
-import { openLoginPopup, openPeridotPopup } from "./popup.js";
+import { openLoginPopup, openLoginTab, openPeridotPopup } from "./popup.js";
 import { PopupClosedError, PopupUnavailableError } from "./popup.js";
 
 export { PeridotWallet, type PeridotWalletOptions };
@@ -61,10 +61,33 @@ export type { PopupParams, PopupResult } from "./popup.js";
 export { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 export { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
 
+/** Target environment. Auto-detected from `NODE_ENV` (see `detectEnv`). */
+export type PeridotEnv = "production" | "sandbox";
+
+/** API + popup hosts per environment. Chains/RPC come from the API registry, never here. */
+const PRESETS: Record<PeridotEnv, { baseUrl: string; popupBaseUrl: string }> = {
+  production: {
+    baseUrl: "https://api.pid.peridotvault.com",
+    popupBaseUrl: "https://app.pid.peridotvault.com",
+  },
+  sandbox: {
+    baseUrl: "https://api.sandbox.pid.peridotvault.com",
+    popupBaseUrl: "https://app.sandbox.pid.peridotvault.com",
+  },
+};
+
+/**
+ * `NODE_ENV === "production"` → production; everything else (unset, `development`,
+ * `staging`, `test`, …) → sandbox. Explicit `baseUrl` still overrides the API host.
+ */
+export function detectEnv(): PeridotEnv {
+  const nodeEnv = typeof process !== "undefined" ? process.env?.NODE_ENV : undefined;
+  return nodeEnv === "production" ? "production" : "sandbox";
+}
+
 export interface PeridotOptions {
-  baseUrl: string;
-  /** Solana RPC endpoint (devnet/local) used for smart-account transactions. */
-  solanaRpcUrl: string | string[];
+  /** API origin override (self-host/localhost). Defaults to the env preset. */
+  baseUrl?: string;
   /** Fee-payer secure storage (defaults to an in-memory store). */
   feePayerStore?: SecretStore;
   /**
@@ -73,7 +96,7 @@ export interface PeridotOptions {
    * delegate to the PeridotID popup instead of signing in the dev DOM.
    */
   passkeySigner?: PasskeySigner;
-  /** Popup host for delegated ceremonies, e.g. https://app.pid.peridotvault.com (no prod default). */
+  /** Popup host override. Preset from env unless `baseUrl` is passed (then caller-supplied). */
   popupBaseUrl?: string;
   /** On-chain activity cache (defaults to localStorage-backed). */
   historyStore?: HistoryStore;
@@ -103,6 +126,27 @@ export class PeridotAuth {
     const res = await this.client.post<LoginResponse>("/v1/auth/login", body);
     if (!res.ok) return null;
     return (res.data as LoginResponse).url;
+  }
+
+  /**
+   * Sign in via the PeridotID origin in a new tab (full-page Google + PID picker).
+   * Resolves the one-time `pidCode` for `exchange`. Uses the configured popup host —
+   * no URL to pass. Throws `PopupUnavailableError` when none is configured.
+   */
+  async loginTab(opts?: { clientId?: string; returnTo?: string }): Promise<{ pidCode?: string }> {
+    if (!this.client.popupBaseUrl) {
+      throw new PopupUnavailableError("No popup host configured — omit baseUrl so the env preset applies, or pass popupBaseUrl.");
+    }
+    if (typeof window === "undefined") throw new PopupUnavailableError("Sign-in needs a browser.");
+    return openLoginTab({
+      popupBaseUrl: this.client.popupBaseUrl,
+      params: {
+        popup: "login",
+        origin: window.location.origin,
+        ...(opts?.clientId ? { client_id: opts.clientId } : {}),
+        ...(opts?.returnTo ? { redirect_uri: opts.returnTo } : {}),
+      },
+    });
   }
 
   /** Popup params shared by the login delegation below (redirect + app binding). */
@@ -495,14 +539,17 @@ export type {
   UpdateChainInput,
   UpsertContractInput,
 };
-export function Peridot(options: PeridotOptions): PeridotClient {
+export function Peridot(options: PeridotOptions = {}): PeridotClient {
+  const preset = PRESETS[detectEnv()];
+  // Caller-supplied baseUrl means "I know where the API is" (self-host/localhost) —
+  // then the popup host is theirs to pass too; otherwise the env preset fills both.
+  const popupBaseUrl = options.popupBaseUrl ?? (options.baseUrl ? undefined : preset.popupBaseUrl);
   return new PeridotClient(
-    options.baseUrl,
+    options.baseUrl ?? preset.baseUrl,
     {
-      solanaRpcUrl: options.solanaRpcUrl,
       feePayerStore: options.feePayerStore,
       passkeySigner: options.passkeySigner,
-      popupBaseUrl: options.popupBaseUrl,
+      popupBaseUrl,
       historyStore: options.historyStore,
     },
     options.onUnauthorized,

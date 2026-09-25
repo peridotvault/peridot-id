@@ -105,8 +105,9 @@ the `peridot_id` role + database, then runs `prisma migrate deploy`.
 - Images build from source on the VPS (serially via `./deploy/up.sh`: api, docs, app); the
   app's `EXPO_PUBLIC_API_URL` is baked in at build via a Docker build arg. Changing it
   requires a rebuild.
-- Solana is `devnet` for now (relayer funded on devnet). Mainnet later = new
-  program deploy + funded relayer + `SOLANA_NETWORK=mainnet-beta`; the compose
-  already passes network through from env.
+- Solana is `devnet` for now (relayer funded on devnet). The Solana chain, its
+  RPC endpoints, and the smart-account program id live in the DB chain registry
+  (edited in the workspace admin), not in env. Mainnet later = register the
+  mainnet chain + contracts there and fund the relayer on it.
 - The GitHub Actions `deploy.yml` mirrors live2dev: on push to `main` it runs
   typecheck, then SSHes to the VPS and runs `./deploy/up.sh main`.

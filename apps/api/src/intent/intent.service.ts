@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { Intent, IntentStatus, Transaction, TransactionStatus } from "@prisma/client";
 import { ACCOUNT_TYPE_SMART } from "../common/chains";
+import { ChainRegistryService } from "../chain/chain-registry.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -80,12 +80,14 @@ function toTxView(t: Transaction): TransactionView {
 export class IntentService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
     private readonly security: SecurityEventService,
+    private readonly chains: ChainRegistryService,
   ) {}
 
-  private network(): string {
-    return this.config.get<string>("SOLANA_NETWORK") ?? "devnet";
+  /** Activity label derived from the registry chain (no SOLANA_NETWORK env). */
+  private async network(): Promise<string> {
+    const chain = await this.chains.solanaChain();
+    return chain && !chain.isTestnet ? "mainnet-beta" : "devnet";
   }
 
   /** The identity's smart-account chain row (ownership from token). */
@@ -139,7 +141,7 @@ export class IntentService {
         payload: {
           ...input.payload,
           chain: "solana",
-          network: this.network(),
+          network: await this.network(),
           pid,
           smartAccountAddress: smart.address,
         },
@@ -189,7 +191,7 @@ export class IntentService {
         chainAccountId: smart.id,
         intentId: intent.id,
         chain: "solana",
-        network: input.network ?? this.network(),
+        network: input.network ?? (await this.network()),
         txHash: input.txHash,
         status: "submitted" as TransactionStatus,
       },
@@ -234,7 +236,7 @@ export class IntentService {
         direction: input.direction,
         counterparty: input.counterparty ?? null,
         chain: "solana",
-        network: this.network(),
+        network: await this.network(),
         txHash: input.txHash ?? null,
         status: "submitted" as TransactionStatus,
       },

@@ -33,20 +33,20 @@ There is no per-app environment switch.
 ## Use the sandbox
 
 1. Open the sandbox workspace and register your app there (separate `client_id`).
-2. Point your test build's SDK at the sandbox:
+2. Your test build points at the sandbox **automatically**: the SDK selects the
+   environment from `NODE_ENV` — `production` → production, anything else
+   (unset, `development`, `staging`, `test`, …) → sandbox. No URL to configure:
    ```ts
-   const peridot = Peridot({
-     baseUrl: 'https://api.sandbox.pid.peridotvault.com',
-     popupBaseUrl: 'https://app.sandbox.pid.peridotvault.com',
-     // no passkeySigner → popup/tab mode
-   });
+   const peridot = Peridot({}); // sandbox while NODE_ENV !== 'production'
+   // no passkeySigner → popup/tab mode
    ```
 3. Top up / send with test flows — DOKU runs in sandbox, so nothing is real.
-4. When it works, register the same app in **production** and switch `baseUrl`.
+4. When it works, register the same app in **production** and build with
+   `NODE_ENV=production` — same code, production hosts.
 
 > Never point a sandbox build at the production API, or a production build at the
-> sandbox — the SDK takes `baseUrl` explicitly, so choose it by your own
-> environment.
+> sandbox. The SDK derives the environment from `NODE_ENV`; if you override
+> `baseUrl`, **you** own staying on the right environment.
 
 Fees, the fiat ledger, and webhooks behave identically in both environments; only
 the DOKU mode and data differ. See [Fiat & payments](/docs/fiat) and

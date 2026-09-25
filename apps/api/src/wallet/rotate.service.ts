@@ -19,6 +19,7 @@ import { ConfigService } from "@nestjs/config";
 import type { Keypair, PasskeyAssertion, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { ACCOUNT_TYPE_SMART } from "../common/chains";
+import { ChainRegistryService } from "../chain/chain-registry.service";
 import { MAX_TTL_SECS, relayerKeypair, solanaAdapter } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -32,6 +33,7 @@ export class RotateService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly security: SecurityEventService,
+    private readonly chains: ChainRegistryService,
   ) {}
 
   /** Lazy pid-solana module (keeps @solana/web3.js out of Jest's transform graph). */
@@ -44,8 +46,9 @@ export class RotateService {
     return relayerKeypair(this.pidSolana, this.config);
   }
 
-  private adapter(): SolanaAdapter {
-    return solanaAdapter(this.pidSolana, this.config);
+  private async adapter(): Promise<SolanaAdapter> {
+    const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(), this.chains.solanaProgramId()]);
+    return solanaAdapter(this.pidSolana, rpcUrl, programId);
   }
 
   async rotate(
@@ -64,7 +67,7 @@ export class RotateService {
     if (dto.assertion.id !== dto.oldCredentialId) {
       throw new BadRequestException("Assertion must come from the current authority credential");
     }
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     const smart = await this.prisma.chainAccount.findFirst({
       where: { pid, accountType: ACCOUNT_TYPE_SMART },
     });

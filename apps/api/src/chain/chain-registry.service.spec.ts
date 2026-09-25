@@ -76,6 +76,27 @@ describe("ChainRegistryService", () => {
     expect(findMany).toHaveBeenCalledTimes(2);
   });
 
+  it("resolves Solana RPC + program from the registry, with constant fallbacks", async () => {
+    const solanaRow = dbRow({
+      id: "chain-sol",
+      namespace: "solana",
+      reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z",
+      name: "solana-devnet",
+      nativeSymbol: "SOL",
+      decimals: 9,
+      rpcUrls: ["https://solana.example"],
+      contracts: [{ type: "program", address: "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT", versionLabel: "v1" }],
+    });
+    const withRow = setup([solanaRow]);
+    expect(await withRow.solanaRpcUrl()).toBe("https://solana.example");
+    expect(await withRow.solanaProgramId()).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
+
+    // Empty registry → EVM code fallback has no Solana chain → constants.
+    const empty = setup([]);
+    expect(await empty.solanaRpcUrl()).toBe("https://api.devnet.solana.com");
+    expect(await empty.solanaProgramId()).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
+  });
+
   it("derives the same address on every deployable chain (determinism invariant)", async () => {
     // Decision 9/10: the same PID must derive to the same EVM address on every
     // supported chain. That holds iff every chain shares one factory/implementation

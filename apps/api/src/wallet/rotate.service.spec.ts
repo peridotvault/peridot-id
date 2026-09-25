@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { RotateService } from "./rotate.service";
-import { mockSecurity, solanaRelayerConfig, COSE_HEX } from "../../test/factories";
+import { mockSecurity, solanaRelayerConfig, minimalChainsStub, COSE_HEX } from "../../test/factories";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 
 const IDENTITY_ID = "pid_01HASH";
@@ -63,7 +63,7 @@ function setup() {
       update: jest.fn(async (args: unknown) => args),
     },
   };
-  const service = new RotateService(prisma as never, config as never, security as never);
+  const service = new RotateService(prisma as never, config as never, security as never, minimalChainsStub() as never);
   return { service, prisma, security };
 }
 

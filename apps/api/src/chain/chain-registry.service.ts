@@ -7,7 +7,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { EVM_CHAINS } from "@peridotvault/pid-core/dist/evm";
-import { SOLANA_MAINNET_REFERENCE, SOLANA_NAMESPACE } from "../common/chains";
+import { SOLANA_DEVNET_RPC, SOLANA_MAINNET_REFERENCE, SOLANA_NAMESPACE, SOLANA_PROGRAM_ID } from "../common/chains";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface RegistryContract {
@@ -95,6 +95,24 @@ export class ChainRegistryService {
     });
     if (!row) throw new NotFoundException("Solana chain is not registered — run db:seed");
     return row.id;
+  }
+
+  /** The active Solana chain (undefined when the registry has none). */
+  async solanaChain(): Promise<RegistryChain | undefined> {
+    const chains = await this.activeChains();
+    return chains.find((c) => c.namespace === SOLANA_NAMESPACE);
+  }
+
+  /** Solana RPC from the registry (public devnet as last resort). */
+  async solanaRpcUrl(): Promise<string> {
+    const chain = await this.solanaChain();
+    return chain?.rpcUrls[0] ?? SOLANA_DEVNET_RPC;
+  }
+
+  /** Solana program id from the `program` contract (canonical constant as last resort). */
+  async solanaProgramId(): Promise<string> {
+    const chain = await this.solanaChain();
+    return chain?.contracts.find((k) => k.type === "program")?.address ?? SOLANA_PROGRAM_ID;
   }
 
   /** RPC URL for a reference (row URL, else shared env fallback). */

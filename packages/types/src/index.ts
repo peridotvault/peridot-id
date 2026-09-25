@@ -63,7 +63,7 @@ export interface UpdateChainInput {
 }
 
 export interface UpsertContractInput {
-  type: "factory" | "account_implementation" | "verifier" | "paymaster";
+  type: "factory" | "account_implementation" | "verifier" | "paymaster" | "program";
   address: string;
   versionLabel?: string;
   deployTxHash?: string;

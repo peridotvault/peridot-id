@@ -7,10 +7,6 @@ import type { Keypair, PublicKey, SolanaAdapter } from "@peridotvault/pid-solana
 
 type PidSolanaModule = typeof import("@peridotvault/pid-solana");
 
-export function solanaRpcUrl(config: ConfigService): string {
-  return config.get<string>("PID_SOLANA_RPC_URL", "https://api.devnet.solana.com");
-}
-
 /** Shared activation/withdraw margin (retired in V3 — kept for config compat only).
  *  V3 quotes the raw network estimate; the protocol fee is a separate percentage. */
 export function activationMarginRate(config: ConfigService): number {
@@ -66,7 +62,7 @@ export function treasuryPubkey(ps: PidSolanaModule, config: ConfigService): Publ
   return override ? new PublicKey(override) : relayerKeypair(ps, config).publicKey;
 }
 
-export function solanaAdapter(ps: PidSolanaModule, config: ConfigService): SolanaAdapter {
-  const { SolanaAdapter, SolanaRpc } = ps;
-  return new SolanaAdapter(new SolanaRpc(solanaRpcUrl(config)));
+export function solanaAdapter(ps: PidSolanaModule, rpcUrl: string, programId: string): SolanaAdapter {
+  const { SolanaAdapter, SolanaRpc, PublicKey } = ps;
+  return new SolanaAdapter(new SolanaRpc(rpcUrl), new PublicKey(programId));
 }

@@ -3,12 +3,11 @@
 import { PublicKey } from "@peridotvault/pid-core";
 import { b64url, b64urlToBytes, buildActivatePayload, buildActivatePayloadV2, buildActivatePayloadV3, buildExecutePayloadV3, buildUpdateAuthorityPayloadV2, buildUpdateAuthorityPayloadV3, buildWithdrawPayload, buildWithdrawPayloadV2, buildWithdrawPayloadV3, buildWithdrawTokenPayload, buildWithdrawTokenPayloadV2, buildWithdrawTokenPayloadV3, executeCallHash, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import type { NftItem, ParsedTx, PasskeySigner, TokenBalance, TransactionStatus } from "@peridotvault/pid-solana";
-import type { ApiError, Authority, ChainAccount, WalletTransaction } from "@peridotvault/pid-types";
+import type { ApiError, Authority, Chain, ChainAccount, WalletTransaction } from "@peridotvault/pid-types";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
 
 export interface PeridotWalletOptions {
-  solanaRpcUrl: string | string[];
   feePayerStore?: SecretStore;
   /**
    * Inline passkey signer — first-party PeridotID origin only. Omitted on
@@ -85,7 +84,7 @@ function isApiError(v: unknown): v is ApiError {
 }
 
 export class PeridotWallet {
-  private readonly adapter: SolanaAdapter;
+  private adapterPromise: Promise<SolanaAdapter> | null = null;
   private readonly feePayer: FeePayerManager;
   private readonly passkeySigner: PasskeySigner | undefined;
   private readonly historyStore: HistoryStore;
@@ -94,13 +93,35 @@ export class PeridotWallet {
     private readonly api: ApiLike,
     options: PeridotWalletOptions,
   ) {
-    this.adapter = new SolanaAdapter(new SolanaRpc(options.solanaRpcUrl));
     this.feePayer = new FeePayerManager(options.feePayerStore);
     // No silent inline default: an explicit signer means "this IS the trusted
     // origin" (first-party wallet / hosted popup page). Otherwise trust-critical
     // methods delegate to the popup (viaPopup throws without popupRequest).
     this.passkeySigner = options.passkeySigner;
     this.historyStore = options.historyStore ?? new LocalHistoryStore();
+  }
+
+  /**
+   * Solana adapter, resolved once from the API chain registry (active `solana`
+   * chain → first RPC URL + the `program` contract address). Chain/RPC config
+   * lives in the DB registry, not in SDK options or env.
+   */
+  private async solana(): Promise<SolanaAdapter> {
+    if (!this.adapterPromise) {
+      this.adapterPromise = (async () => {
+        const res = await this.api.get<Chain[]>("/v1/chains");
+        if (!res.ok || isApiError(res.data) || !Array.isArray(res.data)) {
+          throw new Error("Failed to load the chain registry");
+        }
+        const chain = (res.data as Chain[]).find((c) => c.namespace === "solana");
+        const rpcUrl = chain?.rpcUrls?.[0];
+        const program = chain?.contracts?.find((k) => k.type === "program")?.address;
+        if (!chain || !rpcUrl) throw new Error("Solana chain is not configured");
+        if (!program) throw new Error("Solana program contract is not configured");
+        return new SolanaAdapter(new SolanaRpc(rpcUrl), new PublicKey(program));
+      })();
+    }
+    return this.adapterPromise;
   }
 
   /** Inline signer — throws a routable error when the caller runs popup-mode. */
@@ -197,10 +218,11 @@ export class PeridotWallet {
     const feePayer = await this.feePayer.getOrCreate();
     const lamports = BigInt(input.amount);
 
+    const adapter = await this.solana();
     const signature =
       input.asset === "SOL"
-        ? await this.adapter.depositSol(pid, feePayer, lamports)
-        : await this.adapter.depositToken(pid, new PublicKey(input.asset), feePayer, lamports);
+        ? await adapter.depositSol(pid, feePayer, lamports)
+        : await adapter.depositToken(pid, new PublicKey(input.asset), feePayer, lamports);
     return { signature };
   }
 
@@ -217,6 +239,7 @@ export class PeridotWallet {
     const amount = BigInt(input.amount);
     const destination = new PublicKey(input.to);
     const accountId = pidToSeed32(pid);
+    const adapter = await this.solana();
 
     const getQuote = async () => {
       const quoteRes = await this.api.post<{ networkFeeLamports: string; protocolFeeBps: number; feePolicyVersion: number; totalFeeLamports: string; chainTime: number; treasury: string }>(
@@ -242,7 +265,7 @@ export class PeridotWallet {
               destination,
               expiry,
               quote.feePolicyVersion,
-              await this.adapter.tokenAta(pid, new PublicKey(input.asset)),
+              await adapter.tokenAta(pid, new PublicKey(input.asset)),
             );
       const a = await this.signer().sign(p, {});
       const res = await this.api.post<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }>("/v1/wallet/withdraw", {
@@ -267,7 +290,7 @@ export class PeridotWallet {
       return res.data as { signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" };
     };
 
-    const nonce = await this.adapter.getNonce(pid);
+    const nonce = await adapter.getNonce(pid);
     const quote = await getQuote();
     try {
       return await attempt(nonce, quote);
@@ -275,13 +298,13 @@ export class PeridotWallet {
       if (!(e instanceof Error)) throw e;
       // Stale nonce (another tx landed in between) — re-read and retry once.
       if (/stale|newer nonce/i.test(e.message)) {
-        const freshNonce = await this.adapter.getNonce(pid);
+        const freshNonce = await adapter.getNonce(pid);
         return attempt(freshNonce, quote);
       }
       // Network fee moved beyond the drift bound — re-quote once and sign fresh intent.
       if (/moved — re-quote|re-quote/i.test(e.message)) {
         const fresh = await getQuote();
-        const freshNonce = await this.adapter.getNonce(pid);
+        const freshNonce = await adapter.getNonce(pid);
         return attempt(freshNonce, fresh);
       }
       throw e;
@@ -298,6 +321,7 @@ export class PeridotWallet {
     if (!this.passkeySigner) return this.viaPopup("execute", input);
     const pid = await this.pid();
     const accountId = pidToSeed32(pid);
+    const adapter = await this.solana();
     const target = new PublicKey(input.target);
     const metas = input.metas.map((m) => ({ address: new PublicKey(m.address), writable: m.writable, signer: m.signer }));
     const data = b64urlToBytes(input.data);
@@ -341,7 +365,7 @@ export class PeridotWallet {
       return res.data as { signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" };
     };
 
-    const nonce = await this.adapter.getNonce(pid);
+    const nonce = await adapter.getNonce(pid);
     const quote = await getQuote();
     try {
       return await attempt(nonce, quote);
@@ -349,13 +373,13 @@ export class PeridotWallet {
       if (!(e instanceof Error)) throw e;
       // Stale nonce (another tx landed in between) — re-read and retry once.
       if (/stale|newer nonce/i.test(e.message)) {
-        const freshNonce = await this.adapter.getNonce(pid);
+        const freshNonce = await adapter.getNonce(pid);
         return attempt(freshNonce, quote);
       }
       // Network fee moved beyond the drift bound — re-quote once and sign fresh intent.
       if (/moved — re-quote|re-quote/i.test(e.message)) {
         const fresh = await getQuote();
-        const freshNonce = await this.adapter.getNonce(pid);
+        const freshNonce = await adapter.getNonce(pid);
         return attempt(freshNonce, fresh);
       }
       throw e;
@@ -363,25 +387,25 @@ export class PeridotWallet {
   }
 
   async waitForConfirmation(signature: string, attempts = 8, intervalMs = 1000): Promise<"confirmed" | "failed" | "pending"> {
-    return this.adapter.waitForConfirmation(signature, attempts, intervalMs);
+    return (await this.solana()).waitForConfirmation(signature, attempts, intervalMs);
   }
 
   async getTransactionStatus(signature: string): Promise<TransactionStatus> {
-    return this.adapter.getStatus(signature);
+    return (await this.solana()).getStatus(signature);
   }
 
   async getBalance(): Promise<number> {
-    return this.adapter.getBalanceOf(await this.smartAccountAddress());
+    return (await this.solana()).getBalanceOf(await this.smartAccountAddress());
   }
 
   /** SPL token balances held by the smart account (with their account/ATA addresses). */
   async tokens(): Promise<TokenBalance[]> {
-    return this.adapter.getTokenBalancesOf(await this.smartAccountAddress());
+    return (await this.solana()).getTokenBalancesOf(await this.smartAccountAddress());
   }
 
   /** Heuristic NFT inventory (SPL 0-decimal ×1; misses Token-2022/cNFTs — no DAS). */
   async nfts(): Promise<NftItem[]> {
-    return this.adapter.getNftsOf(await this.smartAccountAddress());
+    return (await this.solana()).getNftsOf(await this.smartAccountAddress());
   }
 
   /**
@@ -441,8 +465,9 @@ export class PeridotWallet {
     if (!oldCred?.credentialId) throw new Error("Current credential not found");
     if (!newCred?.credentialId) throw new Error("Replacement credential is not registered — register it first");
     const newKey = b64urlToBytes(newCred.publicKey);
-    const nonce = await this.adapter.getNonce(pid);
-    const chainTime = await this.adapter.chainTime();
+    const adapter = await this.solana();
+    const nonce = await adapter.getNonce(pid);
+    const chainTime = await adapter.chainTime();
     const expiry = Math.floor(chainTime) + 300;
     const payload = await buildUpdateAuthorityPayloadV3(pidToSeed32(pid), nonce, newKey, expiry);
     const a = await this.signer().sign(payload, { allowCredentialId: oldCred.credentialId });
@@ -483,10 +508,11 @@ export class PeridotWallet {
 
     let newlyParsed: WalletTransaction[] = [];
     try {
+      const adapter = await this.solana();
       // Fetch recent signatures from every watched account (skip errored txs).
       const seen = new Map<string, string>(); // signature
       for (const addr of watchers) {
-        const sigs = await this.adapter.getHistory(addr, limit).catch(() => []);
+        const sigs = await adapter.getHistory(addr, limit).catch(() => []);
         for (const s of sigs) if (s.err === null) seen.set(s.signature, s.signature);
       }
       const signatures = [...seen.keys()].slice(0, limit);
@@ -497,7 +523,7 @@ export class PeridotWallet {
 
       newlyParsed = [];
       for (const sig of fresh.slice(0, limit)) {
-        const parsed = await this.adapter.parseTransaction(sig).catch(() => null);
+        const parsed = await adapter.parseTransaction(sig).catch(() => null);
         if (!parsed) continue;
         for (const row of parseTx(parsed, smartAccount)) newlyParsed.push(row);
       }

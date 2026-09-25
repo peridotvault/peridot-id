@@ -1,6 +1,6 @@
 {
   "name": "@peridotvault/pid-sdk-js",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "The PeridotID browser SDK — auth (Google + passkey), identity, profile, and the passkey wallet (non-custodial Solana smart account).",
   "license": "MIT",
   "main": "./dist/cjs/index.js",
@@ -47,6 +47,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'}));require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/env.test.mjs",
     "prepack": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'}));require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\""
   },
   "devDependencies": {

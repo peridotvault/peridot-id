@@ -25,8 +25,9 @@ for Vercel.
 
 `DATABASE_URL` (Postgres **`peridot_id`**), `GOOGLE_CLIENT_ID_DEV`/`_SECRET_DEV`
 (or `_PROD` when `NODE_ENV=production`),
-`PID_PROGRAM_ID=CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`, `WEBAUTHN_ORIGINS`,
-`CLIENT_SUCCESS_URL`, `CORS_ORIGINS`. See `.env.example`.
+`WEBAUTHN_ORIGINS`, `CLIENT_SUCCESS_URL`, `CORS_ORIGINS`. See `.env.example`.
+Solana chains/RPC/program id come from the DB chain registry (`GET /v1/chains`,
+seeded by `db:seed`, edited in the workspace admin) — not env.
 
 ## Modules
 

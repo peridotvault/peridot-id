@@ -35,7 +35,8 @@ function setup() {
     securityEvent: { create: jest.fn(async () => ({})) },
   };
   const chains = minimalChainsStub();
-  const service = new AccountService(prisma as never, config as never, security as never, chains as never);
+  chains.solanaProgramId.mockResolvedValue(PROGRAM_ID);
+  const service = new AccountService(prisma as never, security as never, chains as never);
   return { service, prisma, config, security, chains };
 }
 
@@ -79,6 +80,7 @@ describe("AccountService", () => {
     };
     const chains = {
       solanaChainIdOrThrow: jest.fn(async () => "chain-sol"),
+      solanaProgramId: jest.fn(async () => PROGRAM_ID),
       deployableEvmChains: jest.fn(async () =>
         ["10143", "97", "421614", "84532"].map((reference) => ({
           id: `chain-${reference}`,
@@ -108,7 +110,7 @@ describe("AccountService", () => {
       },
       securityEvent: { create: jest.fn(async () => ({})) },
     };
-    const service = new AccountService(prisma as never, config as never, security as never, chains as never);
+    const service = new AccountService(prisma as never, security as never, chains as never);
 
     await service.ensureAccount("pid_01HASH");
 

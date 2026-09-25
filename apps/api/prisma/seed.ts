@@ -1,7 +1,13 @@
-// One-time chain-registry bootstrap from current env/code. Safe to re-run
-// (upserts by natural key). Run: `pnpm --filter @peridotvault/pid-api db:seed`
+// One-time chain-registry bootstrap. Safe to re-run (upserts by natural key).
+// Chains/RPC/contracts live in the DB and are edited in the workspace admin —
+// no Solana chain/RPC/program env. Run: `pnpm --filter @peridotvault/pid-api db:seed`
 import { PrismaClient } from "@prisma/client";
-import { SOLANA_MAINNET_REFERENCE, SOLANA_NAMESPACE } from "../src/common/chains";
+import {
+  SOLANA_DEVNET_RPC,
+  SOLANA_MAINNET_REFERENCE,
+  SOLANA_NAMESPACE,
+  SOLANA_PROGRAM_ID,
+} from "../src/common/chains";
 
 const prisma = new PrismaClient();
 
@@ -13,42 +19,28 @@ const EVM = [
 ];
 
 async function main(): Promise<void> {
-  // Same constants the account-creation path writes (common/chains.ts) — the
-  // chain_accounts FK requires these rows to exist. Env override preserved.
-  const solanaRef = process.env.SOLANA_CHAIN_REFERENCE ?? SOLANA_MAINNET_REFERENCE;
-  await prisma.chain.upsert({
-    where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: solanaRef } },
+  // The account-creation path writes SOLANA_MAINNET_REFERENCE (common/chains.ts) —
+  // the chain_accounts FK requires this row to exist. Admin edits RPC/contracts later.
+  const solana = await prisma.chain.upsert({
+    where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_MAINNET_REFERENCE } },
     update: {},
     create: {
       namespace: SOLANA_NAMESPACE,
-      reference: solanaRef,
-      name: process.env.SOLANA_NETWORK === "mainnet-beta" ? "solana-mainnet" : "solana-devnet",
+      reference: SOLANA_MAINNET_REFERENCE,
+      name: "solana-devnet",
       nativeSymbol: "SOL",
       decimals: 9,
-      rpcUrls: [process.env.PID_SOLANA_RPC_URL ?? "https://api.devnet.solana.com"],
+      rpcUrls: [SOLANA_DEVNET_RPC],
       explorerUrl: "https://explorer.solana.com",
-      isTestnet: process.env.SOLANA_NETWORK !== "mainnet-beta",
+      isTestnet: true,
       isActive: true,
     },
   });
-  // The creation path always writes SOLANA_MAINNET_REFERENCE — if the env
-  // override points elsewhere, the const row must still exist for the FK.
-  if (solanaRef !== SOLANA_MAINNET_REFERENCE) {
-    await prisma.chain.upsert({
-      where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_MAINNET_REFERENCE } },
-      update: {},
-      create: {
-        namespace: SOLANA_NAMESPACE,
-        reference: SOLANA_MAINNET_REFERENCE,
-        name: "solana",
-        nativeSymbol: "SOL",
-        decimals: 9,
-        rpcUrls: [process.env.PID_SOLANA_RPC_URL ?? "https://api.devnet.solana.com"],
-        isTestnet: true,
-        isActive: true,
-      },
-    });
-  }
+  await prisma.chainContract.upsert({
+    where: { chainId_type: { chainId: solana.id, type: "program" } },
+    update: {},
+    create: { chainId: solana.id, type: "program", address: SOLANA_PROGRAM_ID, versionLabel: "v1" },
+  });
 
   const factory = process.env.EVM_FACTORY_ADDRESS;
   const implementation = process.env.EVM_IMPLEMENTATION_ADDRESS;

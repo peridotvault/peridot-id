@@ -2,8 +2,6 @@
 // API keys stay in env by design.
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from "class-validator";
 
-const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
-
 export class CreateChainDto {
   @IsIn(["solana", "eip155"])
   namespace!: string;
@@ -88,11 +86,13 @@ export class UpdateChainDto {
 }
 
 export class UpsertContractDto {
-  @IsIn(["factory", "account_implementation", "verifier", "paymaster"])
+  @IsIn(["factory", "account_implementation", "verifier", "paymaster", "program"])
   type!: string;
 
   @IsString()
-  @Matches(EVM_ADDRESS_RE, { message: "contract address must be 0x + 40 hex chars" })
+  @Matches(/^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/, {
+    message: "contract address must be an EVM 0x address or a base58 Solana address",
+  })
   address!: string;
 
   @IsString()

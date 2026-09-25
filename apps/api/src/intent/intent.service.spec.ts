@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { IntentService } from "./intent.service";
-import { mockSecurity } from "../../test/factories";
+import { mockSecurity, minimalChainsStub } from "../../test/factories";
 
 
 const SMART_ADDR = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
@@ -48,7 +48,6 @@ function txRow(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 function setup() {
-  const config = { get: jest.fn((key: string) => (key === "SOLANA_NETWORK" ? "devnet" : undefined)) };
   const security = mockSecurity();
   const prisma = {
     chainAccount: { findFirst: jest.fn(async () => null as any) },
@@ -65,7 +64,7 @@ function setup() {
       findMany: jest.fn(async () => [] as any),
     },
   };
-  const service = new IntentService(prisma as never, config as never, security as never);
+  const service = new IntentService(prisma as never, security as never, minimalChainsStub() as never);
   return { service, prisma, security };
 }
 

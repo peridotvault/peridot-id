@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { SponsoredWithdrawService } from "./sponsored-withdraw.service";
-import { mockSecurity, solanaRelayerConfig, COSE_HEX, TREASURY } from "../../test/factories";
+import { mockSecurity, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
 
 
 const ACCOUNT_ID = "50997bcf-f3e3-406b-bc77-7108593ef5cb";
@@ -65,7 +65,9 @@ function setup() {
     },
     authority: { findFirst: jest.fn(async () => ({ id: "auth-1", publicKey: Buffer.from(COSE_HEX, "hex"), pid: IDENTITY_ID, status: "active", credentialId: "cred-1" })) },
   };
-  const service = new SponsoredWithdrawService(prisma as never, config as never, security as never);
+  const chains = minimalChainsStub();
+  chains.solanaProgramId.mockResolvedValue("PidProgram1111111111111111111111111111111");
+  const service = new SponsoredWithdrawService(prisma as never, config as never, security as never, chains as never);
   return { service, security };
 }
 

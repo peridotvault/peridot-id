@@ -27,7 +27,6 @@ export default function DemoPage() {
     () =>
       Peridot({
         baseUrl: API_BASE,
-        solanaRpcUrl: "https://api.devnet.solana.com",
         popupBaseUrl: POPUP_URL, // no passkeySigner → third-party popup mode
       }),
     [],

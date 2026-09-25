@@ -110,7 +110,12 @@ describe("Wallet authorization & abuse cases (routes)", () => {
         JwtStrategy,
         {
           provide: ChainRegistryService,
-          useValue: { solanaChainIdOrThrow: jest.fn(async () => "chain-sol") },
+          useValue: {
+            solanaChainIdOrThrow: jest.fn(async () => "chain-sol"),
+            solanaChain: jest.fn(async () => undefined),
+            solanaRpcUrl: jest.fn(async () => "https://api.devnet.solana.com"),
+            solanaProgramId: jest.fn(async () => "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT"),
+          },
         },
         {
           provide: ConfigService,

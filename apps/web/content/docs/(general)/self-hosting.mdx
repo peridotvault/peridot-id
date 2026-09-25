@@ -29,14 +29,17 @@ All configuration is loaded from `.env` in the API package. Copy
 | `COOKIE_SAMESITE` | no | `lax` (default) or `none` (cross-site clients, requires `COOKIE_SECURE=true`) |
 | `CLIENT_SUCCESS_URL` | no | Where users land after Google sign-in |
 | `CORS_ORIGINS` | no | Comma-separated extra client origins allowed by CORS |
-| `PID_PROGRAM_ID` | yes | Solana program id the wallet derives PDAs against |
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGINS` | yes | Passkey relying-party config |
 | `CLIENT_REDIRECT_ALLOWLIST` | no | Comma-separated origins allowed for cross-origin SSO |
-| `SOLANA_NETWORK` | no | `devnet` (default) or `mainnet-beta` |
 | `ACCESS_TOKEN_TTL` | no | Access token lifetime (default `15m`) |
 | `REFRESH_TOKEN_TTL` | no | Refresh token lifetime (default `30d`) |
 | `APP_TOKEN_TTL` | no | Machine (client-credentials) token lifetime (default `1h`) |
 | `PORT` | no | HTTP port (default `3301`) |
+
+> **Solana chains/RPC/program id are not env.** They live in the chain registry
+> (DB), seeded by `pnpm db:seed` and edited in the workspace admin
+> (`GET /v1/chains`, `POST /v1/admin/chains`). RPC API keys, if any, must be
+> public or proxied — the registry is served to clients as-is.
 
 ### Fiat (DOKU Checkout + internal ledger)
 

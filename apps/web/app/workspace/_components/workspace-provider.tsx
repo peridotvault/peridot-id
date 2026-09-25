@@ -45,7 +45,7 @@ export function useWorkspace(): WorkspaceContextValue {
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [client] = useState<PeridotClient>(() =>
-    Peridot({ baseUrl: API_BASE, solanaRpcUrl: "https://api.devnet.solana.com" }),
+    Peridot({ baseUrl: API_BASE }),
   );
   const [status, setStatus] = useState<WorkspaceStatus>("checking");
   const [role, setRole] = useState<Role>("user");

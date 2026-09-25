@@ -19,6 +19,7 @@ import { ChainAccount } from "@prisma/client";
 import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { ACCOUNT_TYPE_SMART } from "../common/chains";
+import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
   exceedsDriftBound,
   feePolicyVersion as configuredPolicyVersion,
@@ -26,7 +27,6 @@ import {
   protocolFeeOf,
   relayerKeypair,
   solanaAdapter,
-  solanaRpcUrl,
   treasuryPubkey,
 } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
@@ -64,11 +64,8 @@ export class SponsoredWithdrawService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly security: SecurityEventService,
+    private readonly chains: ChainRegistryService,
   ) {}
-
-  private rpcUrl(): string {
-    return solanaRpcUrl(this.config);
-  }
 
   private policyVersion(): number {
     return configuredPolicyVersion(this.config);
@@ -88,8 +85,9 @@ export class SponsoredWithdrawService {
     return treasuryPubkey(this.pidSolana, this.config);
   }
 
-  private adapter(): SolanaAdapter {
-    return solanaAdapter(this.pidSolana, this.config);
+  private async adapter(): Promise<SolanaAdapter> {
+    const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(), this.chains.solanaProgramId()]);
+    return solanaAdapter(this.pidSolana, rpcUrl, programId);
   }
 
   /** The identity's smart-account chain row (ownership from token). */
@@ -118,7 +116,7 @@ export class SponsoredWithdrawService {
 
   /** Compute the quote the client signs the policy (not amounts) against. */
   async quote(pid: string): Promise<WithdrawQuote> {
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
     const networkFee = await this.networkFeeLamports(adapter);
@@ -150,7 +148,7 @@ export class SponsoredWithdrawService {
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
     },
   ): Promise<SponsoredWithdrawResult> {
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
 
@@ -332,17 +330,18 @@ export class SponsoredWithdrawService {
   }
 
   /** Decode + validate a generic execute call (caps, self-target, PDA delegation). */
-  private decodeExecuteCall(
+  private async decodeExecuteCall(
     chainAddress: string,
     call: {
       target: string;
       metas: { address: string; writable: boolean; signer: boolean }[];
       data: string;
     },
-  ): { target: PublicKey; metas: { address: PublicKey; writable: boolean; signer: boolean }[]; data: Uint8Array } {
-    const { PublicKey, PID_PROGRAM_ID, b64urlToBytes } = this.pidSolana;
+  ): Promise<{ target: PublicKey; metas: { address: PublicKey; writable: boolean; signer: boolean }[]; data: Uint8Array }> {
+    const { PublicKey, b64urlToBytes } = this.pidSolana;
+    const programId = await this.chains.solanaProgramId();
     const target = new PublicKey(call.target);
-    if (target.toBase58() === new PublicKey(PID_PROGRAM_ID).toBase58()) {
+    if (target.toBase58() === new PublicKey(programId).toBase58()) {
       throw new BadRequestException("Target cannot be the smart-account program");
     }
     if (call.metas.length === 0 || call.metas.length > 64) {
@@ -369,10 +368,10 @@ export class SponsoredWithdrawService {
       data: string;
     },
   ): Promise<WithdrawQuote> {
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
-    const decoded = this.decodeExecuteCall(chain.address, call);
+    const decoded = await this.decodeExecuteCall(chain.address, call);
     const networkFee = await adapter.estimateExecuteFee(decoded.target, decoded.metas, decoded.data.length);
     const version = this.policyVersion();
     const bps = protocolFeeBps(version);
@@ -402,10 +401,10 @@ export class SponsoredWithdrawService {
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
     },
   ): Promise<SponsoredWithdrawResult> {
-    const adapter = this.adapter();
+    const adapter = await this.adapter();
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
-    const decoded = this.decodeExecuteCall(chain.address, dto);
+    const decoded = await this.decodeExecuteCall(chain.address, dto);
 
     // The asserting credential must be one of this wallet's active passkeys.
     const authority = await this.prisma.authority.findFirst({

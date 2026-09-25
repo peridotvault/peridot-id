@@ -7,7 +7,7 @@ import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import { SafeAreaView, StyleSheet, View } from "react-native";
 import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
 import { readPopupParams } from "@peridotvault/pid-sdk-js";
-import { API_BASE_URL, SOLANA_RPC_URL } from "./src/config";
+import { API_BASE_URL } from "./src/config";
 import { AppContext } from "./src/AppContext";
 import { needsProvisioning } from "./src/fiat-ensure";
 import { readLoginContext } from "./src/popup-login";
@@ -68,7 +68,7 @@ export default function App() {
   const [peridot] = useState(() =>
     Peridot({
       baseUrl: API_BASE_URL,
-      solanaRpcUrl: SOLANA_RPC_URL,
+      // Chains/RPC resolved from the API registry.
       // First-party origin: inline ceremonies are legitimate here (this IS the
       // trusted DOM). Third-party dapps omit the signer and use the popup.
       passkeySigner: new BrowserPasskeySigner(),

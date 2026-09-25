@@ -28,6 +28,21 @@ const RPC = "https://api.devnet.solana.com";
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 const conn = new Connection(RPC, "confirmed");
 const PID = "ifal@pid";
+const PROGRAM_ID = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
+const CHAIN_VIEW = {
+  id: "chain-sol",
+  namespace: "solana",
+  reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z",
+  name: "solana-devnet",
+  nativeSymbol: "SOL",
+  decimals: 9,
+  rpcUrls: [RPC],
+  explorerUrl: null,
+  logoUrl: null,
+  isTestnet: true,
+  isActive: true,
+  contracts: [{ id: "k1", chainId: "chain-sol", type: "program", address: PROGRAM_ID, versionLabel: "v1", deployTxHash: null, isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+};
 
 function compressedPub(pub) {
   const der = pub.export({ format: "der", type: "spki" });
@@ -64,6 +79,7 @@ async function main() {
       if (path === "/v1/identity/me") return { ok: true, data: { pid: PID } };
       if (path === "/v1/account") return { ok: true, data: [{ id: "c1", pid: PID, chainId: "chain-sol", chainNamespace: "solana", chainReference: "ref", address: "x", accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] };
       if (path === "/v1/credentials") return { ok: true, data: [{ id: "a1", type: "secp256r1", credentialId: "cred", publicKey: AUTHORITY_B64, createdAt: new Date().toISOString(), lastUsedAt: null }] };
+      if (path === "/v1/chains") return { ok: true, data: [CHAIN_VIEW] };
       return { ok: true, data: {} };
     },
     async post(path) {
@@ -92,7 +108,6 @@ async function main() {
 
   const storeMap = new Map([["peridot.feePayer.ed25519", toHex(feePayer.secretKey)]]);
   const wallet = new PeridotWallet(mockApi, {
-    solanaRpcUrl: RPC,
     passkeySigner: signer,
     feePayerStore: { get: async (k) => storeMap.get(k) ?? null, set: async (k, v) => storeMap.set(k, v) },
   });

@@ -1,5 +1,4 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { ChainAccountStatus } from "@prisma/client";
 import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
 import { ChainRegistryService } from "../chain/chain-registry.service";
@@ -48,13 +47,12 @@ export function toChainView(ca: {
 export class AccountService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
     private readonly security: SecurityEventService,
     private readonly chains: ChainRegistryService,
   ) {}
 
-  private programId(): string {
-    return this.config.getOrThrow<string>("PID_PROGRAM_ID");
+  private async programId(): Promise<string> {
+    return this.chains.solanaProgramId();
   }
 
   /**
@@ -99,8 +97,8 @@ export class AccountService {
    * every chain row. 1 identity = 1 personal wallet.
    */
   async ensureAccount(pid: string): Promise<ChainAccountView[]> {
-    // Read env before any DB write so a missing PID_PROGRAM_ID can't orphan rows.
-    const programId = this.programId();
+    // Resolve the program id (registry) before any DB write so it can't orphan rows.
+    const programId = await this.programId();
 
     // The smart-account address is deterministically resolvable before on-chain
     // initialization — seed the chain_accounts row with the derived PDA address.

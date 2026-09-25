@@ -1,5 +1,17 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.2.0
+
+- **No URLs to configure.** `baseUrl`/`popupBaseUrl` are now optional and the
+  environment is auto-detected from `NODE_ENV`: `production` → production,
+  anything else (unset, `development`, `staging`, `test`, …) → sandbox. Passing
+  `baseUrl` (self-host/localhost) still wins and disables the popup preset.
+- **`solanaRpcUrl` removed.** Chains, RPC endpoints, and the program id are read
+  from the API chain registry (`GET /v1/chains`) — the wallet resolves its
+  Solana adapter lazily from there. No chain/RPC config in SDK options or env.
+- New `peridot.auth.loginTab({ clientId })` — opens the PeridotID sign-in tab
+  with the configured popup host and resolves the `pid_code` (no host to pass).
+
 ## 1.1.0
 
 - Add `openLoginTab()`: auth opens a **new tab** (Google + PID picker for new
