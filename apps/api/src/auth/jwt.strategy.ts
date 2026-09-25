@@ -25,6 +25,10 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
       select: { status: true },
     });
     if (!identity || identity.status !== "active") throw new UnauthorizedException("Identity is not active");
-    return { pid: payload.sub, ...(payload.app ? { app: payload.app } : {}) };
+    return {
+      pid: payload.sub,
+      ...(payload.app ? { app: payload.app } : {}),
+      ...(payload.scope ? { scope: payload.scope } : {}),
+    };
   }
 }

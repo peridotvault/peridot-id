@@ -11,7 +11,9 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
       };
       return values[key] ?? def;
     }),
+    getOrThrow: jest.fn((key: string) => (key === "JWT_ACCESS_SECRET" ? "test-secret" : key)),
   };
+  const jwt = { signAsync: jest.fn(async () => "sso.jwt.token") };
   const security = mockSecurity();
   const rows = new Map<string, Record<string, unknown>>();
   const grants = new Map<string, Record<string, unknown>>();
@@ -91,7 +93,7 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
   const pidApps = apps ?? {
     findActive: jest.fn(async () => ({ redirectUris: ["https://mygame.dev/callback"] })),
   };
-  const service = new SsoService(prisma as never, config as never, security as never, pidApps as never);
+  const service = new SsoService(prisma as never, config as never, security as never, pidApps as never, jwt as never);
   return { service, rows, security };
 }
 
@@ -116,6 +118,9 @@ describe("SsoService", () => {
     expect(identity.pid).toBe("pid_1");
     expect(identity.profile.displayName).toBe("Peridot");
     expect(identity.credentials[0].email).toBe("a@b.com");
+    // RP backends need an app-scoped bearer for read APIs; TTL is seconds.
+    expect(identity.accessToken).toBe("sso.jwt.token");
+    expect(identity.expiresIn).toBeGreaterThan(0);
   });
 
   it("rejects reusing the same code (single-use)", async () => {

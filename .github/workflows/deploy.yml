@@ -56,16 +56,16 @@ jobs:
       group: deploy-test
       cancel-in-progress: true
     steps:
-      - name: Deploy sandbox stack to VPS
+      - name: Deploy sandbox stack (separate sandbox VPS)
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.PROD_VPS_HOST }}
-          username: ${{ secrets.PROD_VPS_USER }}
-          key: ${{ secrets.PROD_VPS_SSH_KEY }}
+          host: ${{ secrets.SANDBOX_VPS_HOST }}
+          username: ${{ secrets.SANDBOX_VPS_USER }}
+          password: ${{ secrets.SANDBOX_VPS_PASSWORD }}
           command_timeout: 60m
           script: |
-            # Separate clone so the sandbox branch never clobbers the prod
-            # checkout. Uses deploy/.env.test (DOKU sandbox — no real money).
+            # Dedicated sandbox host + clone. Uses deploy/.env.test
+            # (DOKU sandbox — no real money ever moves here).
             cd /opt/apps/peridot-id/peridot-id-test
             git fetch "https://x-access-token:${{ secrets.GH_PAT }}@github.com/peridotvault/peridot-id.git" test
             git reset --hard FETCH_HEAD

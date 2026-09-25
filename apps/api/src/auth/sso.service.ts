@@ -5,6 +5,8 @@
 
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { JwtService } from "@nestjs/jwt";
+import ms from "ms";
 import { randomBytes } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -18,6 +20,14 @@ export interface SsoIdentity {
   identityId: string;
   profile: { displayName: string | null; avatarUrl: string | null };
   credentials: { provider: string; email: string | null }[];
+  /**
+   * App-scoped bearer token for the relying party's backend to call PeridotID
+   * read APIs (e.g. GET /v1/fiat/balance) on the identity's behalf. Never sent
+   * to the browser by the RP. TTL via SSO_EXCHANGE_TOKEN_TTL.
+   */
+  accessToken: string;
+  /** accessToken lifetime in seconds (for RP-side caching). */
+  expiresIn: number;
 }
 
 /** Validated cross-domain return target: where to redirect + which app asked. */
@@ -94,6 +104,7 @@ export class SsoService {
     private readonly config: ConfigService,
     private readonly security: SecurityEventService,
     private readonly apps: PidAppsService,
+    private readonly jwt: JwtService,
   ) {}
 
   /** Allowed origins for cross-domain redirects (e.g. Live2Dev). */
@@ -208,11 +219,22 @@ export class SsoService {
 
     await this.security.log(row.pid, "sso.code.consumed", {});
 
+    // App-scoped bearer for RP backend reads (balance/ledger). The RP keeps it
+    // server-side; the browser only ever sees the RP's own session.
+    const ttl = this.config.get<string>("SSO_EXCHANGE_TOKEN_TTL", "30d");
+    const accessToken = await this.jwt.signAsync(
+      // scope:"read" — the RP backend may only GET (balance/ledger), never write.
+      { sub: row.pid, type: "access", scope: "read", ...(row.clientId ? { app: row.clientId } : {}) },
+      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: ttl },
+    );
+
     return {
       pid: row.pid,
       identityId: row.pid,
       profile: { displayName: profile?.displayName ?? null, avatarUrl: profile?.avatarUrl ?? null },
       credentials,
+      accessToken,
+      expiresIn: Math.floor(ms(ttl) / 1000),
     };
   }
 

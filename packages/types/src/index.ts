@@ -225,6 +225,10 @@ export interface ExchangeResult {
   identityId: string;
   profile: { displayName: string | null; avatarUrl: string | null };
   credentials: { provider: string; email: string | null }[];
+  /** App-scoped bearer for the RP backend to read PeridotID APIs. Keep server-side. */
+  accessToken: string;
+  /** accessToken lifetime in seconds. */
+  expiresIn: number;
 }
 
 /** WebAuthn registration ceremony (task 003). */

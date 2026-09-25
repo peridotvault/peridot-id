@@ -13,6 +13,8 @@ export interface AccessTokenPayload {
   type: "access";
   /** Present on machine (client-credentials) tokens: the app's clientId. */
   app?: string;
+  /** "read" restricts the token to safe (GET) routes — e.g. the SSO exchange token. */
+  scope?: string;
 }
 
 export interface RefreshTokenPayload {
