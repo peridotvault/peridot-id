@@ -8,6 +8,10 @@ import type { PeridotClient, Role } from "@peridotvault/pid-sdk-js";
 import { Topbar, type WorkspaceTab } from "./topbar";
 
 const API_BASE = process.env.NEXT_PUBLIC_PID_API_URL ?? "https://api.pid.peridotvault.com";
+// "production" (real money) or "sandbox" (DOKU sandbox). This workspace is bound
+// to one environment at build time; apps are registered separately per env.
+const PID_ENV = process.env.NEXT_PUBLIC_PID_ENV ?? "production";
+const OTHER_WORKSPACE_URL = process.env.NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL;
 
 export type WorkspaceStatus = "checking" | "anonymous" | "owner";
 
@@ -22,6 +26,8 @@ interface WorkspaceContextValue {
   onTab: (key: string) => void;
   contractChainId: string | null;
   openContracts: (chainId?: string) => void;
+  env: string;
+  otherWorkspaceUrl?: string;
   busy: boolean;
   error: string | null;
   signInWithGoogle: () => void;
@@ -172,6 +178,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       onTab,
       contractChainId,
       openContracts,
+      env: PID_ENV,
+      otherWorkspaceUrl: OTHER_WORKSPACE_URL,
       busy,
       error,
       signInWithGoogle,
@@ -186,7 +194,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 /** Layout-owned topbar fed from context (hidden until an owner session exists). */
 export function WorkspaceTopbar() {
-  const { status, tabs, tab, onTab, pid, isAdmin, signOut } = useWorkspace();
+  const { status, tabs, tab, onTab, pid, isAdmin, signOut, env, otherWorkspaceUrl } = useWorkspace();
   if (status !== "owner") return null;
   return (
     <Topbar
@@ -195,6 +203,8 @@ export function WorkspaceTopbar() {
       onTab={onTab}
       sessionLabel={pid}
       isAdmin={isAdmin}
+      env={env}
+      otherWorkspaceUrl={otherWorkspaceUrl}
       onSignOut={() => void signOut()}
     />
   );

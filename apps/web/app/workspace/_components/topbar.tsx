@@ -17,6 +17,8 @@ export function Topbar({
   onTab,
   sessionLabel,
   isAdmin,
+  env = "production",
+  otherWorkspaceUrl,
   onSignOut,
 }: {
   tabs: WorkspaceTab[];
@@ -24,8 +26,11 @@ export function Topbar({
   onTab: (key: string) => void;
   sessionLabel: string;
   isAdmin: boolean;
+  env?: string;
+  otherWorkspaceUrl?: string;
   onSignOut: () => void;
 }) {
+  const isSandbox = env !== "production";
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
       <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-4 px-5 py-2 sm:px-8">
@@ -51,6 +56,26 @@ export function Topbar({
           ))}
         </nav>
         <div className="flex items-center gap-3 justify-self-end">
+          {isSandbox ? (
+            <span
+              title="Sandbox: DOKU test mode — no real money moves here."
+              className="rounded-[3px] bg-amber-400/20 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300"
+            >
+              sandbox
+            </span>
+          ) : (
+            <span
+              title="Production: real money via DOKU."
+              className="rounded-[3px] bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"
+            >
+              production
+            </span>
+          )}
+          {otherWorkspaceUrl && (
+            <a href={otherWorkspaceUrl} className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+              {isSandbox ? "Switch to production" : "Open sandbox"}
+            </a>
+          )}
           <span className="truncate text-xs text-muted-foreground">
             {isAdmin && (
               <span className="mr-2 rounded-[3px] bg-brand-1 px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-brand-2 dark:text-[#07170f]">

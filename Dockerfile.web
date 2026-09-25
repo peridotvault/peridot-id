@@ -25,6 +25,18 @@ ENV NODE_OPTIONS=--max-old-space-size=1536
 
 COPY . .
 
+# Public (build-time) config — baked into the Next bundle. Per environment.
+ARG NEXT_PUBLIC_PID_API_URL
+ARG NEXT_PUBLIC_PID_ENV
+ARG NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL
+ARG NEXT_PUBLIC_PID_POPUP_URL
+ARG NEXT_PUBLIC_PID_CLIENT_ID
+ENV NEXT_PUBLIC_PID_API_URL=${NEXT_PUBLIC_PID_API_URL} \
+    NEXT_PUBLIC_PID_ENV=${NEXT_PUBLIC_PID_ENV} \
+    NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL=${NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL} \
+    NEXT_PUBLIC_PID_POPUP_URL=${NEXT_PUBLIC_PID_POPUP_URL} \
+    NEXT_PUBLIC_PID_CLIENT_ID=${NEXT_PUBLIC_PID_CLIENT_ID}
+
 RUN mkdir -p apps/web/public
 # Workspace dists for the SDK import (postinstall was --ignore-scripts, so build
 # them explicitly in dependency order before Next needs them).

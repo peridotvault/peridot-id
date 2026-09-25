@@ -84,7 +84,7 @@ services:
       start_period: 20s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.pid-api${NAMESPACE}.rule=Host(`api.pid.peridotvault.com`)"
+      - "traefik.http.routers.pid-api${NAMESPACE}.rule=Host(`api.${ENV_SUFFIX}pid.peridotvault.com`)"
       - "traefik.http.routers.pid-api${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.pid-api${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
@@ -94,6 +94,12 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_PID_API_URL: ${EXPO_PUBLIC_API_URL}
+        NEXT_PUBLIC_PID_ENV: ${PID_ENV:-production}
+        NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL: ${PID_OTHER_WORKSPACE_URL:-}
+        NEXT_PUBLIC_PID_POPUP_URL: ${CLIENT_SUCCESS_URL}
+        NEXT_PUBLIC_PID_CLIENT_ID: ${PID_DEMO_CLIENT_ID:-}
     image: peridot-id-web${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
     networks: [proxy]
@@ -106,7 +112,7 @@ services:
       start_period: 20s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.pid-web${NAMESPACE}.rule=Host(`pid.peridotvault.com`)"
+      - "traefik.http.routers.pid-web${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`)"
       - "traefik.http.routers.pid-web${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.pid-web${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.pid-web${NAMESPACE}.middlewares=security-headers@file"
@@ -130,7 +136,7 @@ services:
       start_period: 10s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.app${NAMESPACE}.rule=Host(`app.pid.peridotvault.com`)"
+      - "traefik.http.routers.app${NAMESPACE}.rule=Host(`app.${ENV_SUFFIX}pid.peridotvault.com`)"
       - "traefik.http.routers.app${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.app${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.app${NAMESPACE}.middlewares=security-headers@file"
