@@ -22,21 +22,42 @@ labels. No infra repo changes are ever required.
    (redirect lands back on `app.pid.peridotvault.com` via CLIENT_SUCCESS_URL).
 4. Firewall: 80/tcp and 443/tcp open.
 
-## First deploy
+## First deploy (Infisical Cloud)
+
+Secrets live in Infisical Cloud, project `peridot-id-uf-w9`
+(`51f99bb1-16c8-4b74-be1f-52657e066a93`), envs `dev` / `test` / `main`:
+
+- `/apps/api` — runtime secrets (`DATABASE_URL`, `JWT_*`, `GOOGLE_*`, `DOKU_*`, `PID_*`, …)
+- `/apps/web` — `NEXT_PUBLIC_*` (public build args)
+- `/apps/wallet` — `EXPO_PUBLIC_*` (public build args)
+
+There is no `/deploy` folder — it only duplicated the above. Delete it in the
+Infisical UI for every env if it still exists. Deploy meta (`ENV_SUFFIX`,
+`NAMESPACE`) is hardcoded in `up.sh`, not stored as secrets.
 
 ```sh
 ssh root@VPS
 mkdir -p /opt/apps && cd /opt/apps
 git clone https://github.com/peridotvault/peridot-id.git peridot-id && cd peridot-id
 
-cp deploy/.env.main.example deploy/.env.main
-$EDITOR deploy/.env.main        # JWT secrets, Google OAuth, relayer, DB URL
+# One-time per VPS: authenticate a Universal Auth machine identity scoped to
+# main (prod) — and separately on the sandbox host scoped to test.
+export INFISICAL_TOKEN=$(infisical login --method=universal-auth \
+  --client-id=<client-id> --client-secret=<client-secret> --silent --plain)
 
 # Small VPS: ensure swap before the first build or it may OOM.
 fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 
 ./deploy/db-init.sh main        # creates peridot_id db/role + runs migrations
-./deploy/up.sh main             # builds api + web serially and starts them
+./deploy/up.sh main             # pulls secrets via `infisical run`, builds api + web + app
+```
+
+Fallback without Infisical (local only):
+
+```sh
+cp deploy/.env.main.example deploy/.env.main
+$EDITOR deploy/.env.main
+INFISICAL_ENABLED=0 ./deploy/up.sh main
 ```
 
 Traefik auto-detects the two services, issues HTTPS via Let's Encrypt, and
@@ -53,8 +74,9 @@ ssh root@VPS
 cd /opt/apps/peridot-id
 git clone https://github.com/peridotvault/peridot-id.git peridot-id-test
 cd peridot-id-test
-cp deploy/.env.test.example deploy/.env.test
-$EDITOR deploy/.env.test   # DOKU sandbox creds; Google client + sandbox callback
+# Same as prod but with the test-scoped machine identity (INFISICAL_TOKEN for env test).
+export INFISICAL_TOKEN=$(infisical login --method=universal-auth \
+  --client-id=<test-client-id> --client-secret=<test-client-secret> --silent --plain)
 ./deploy/db-init.sh test   # creates peridot_id_test + migrations
 ./deploy/up.sh test
 ```
@@ -81,8 +103,8 @@ git pull && ./deploy/up.sh test      # sandbox (branch test)
 
 ```sh
 ./deploy/down.sh main
-docker compose -f deploy/compose.yaml --env-file deploy/.env.main ps
-docker compose -f deploy/compose.yaml --env-file deploy/.env.main logs -f api
+docker ps --filter name=peridot-id-api
+docker logs -f peridot-id-api-1
 ```
 
 ## URLs
