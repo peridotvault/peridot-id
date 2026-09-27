@@ -8,7 +8,7 @@
 // NEXT_PUBLIC_PID_CLIENT_ID set.
 
 import { useMemo, useState } from "react";
-import { Peridot, openLoginTab, type CheckoutDepositView, type FiatLedgerEntry } from "@peridotvault/pid-sdk-js";
+import { Peridot, openLoginPopup, type CheckoutDepositView, type FiatLedgerEntry } from "@peridotvault/pid-sdk-js";
 import { Card, ERROR, MUTED } from "../_components/ui";
 import { PageHeader } from "../_components/page-header";
 import { CutButton } from "@/components/landing/cut-button";
@@ -55,7 +55,7 @@ export default function DemoPage() {
 
   const connect = () =>
     run("connect", async () => {
-      const { pidCode } = await openLoginTab({
+      const { pidCode } = await openLoginPopup({
         popupBaseUrl: POPUP_URL,
         params: {
           popup: "login",

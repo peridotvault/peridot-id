@@ -1,5 +1,16 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.4.0
+
+- **Login opens a popup, not a tab.** `peridot.auth.loginPopup()` (and
+  `openLoginPopup()`) now open a centered popup sized for the full flow — Google,
+  the consent card, and the **Create your PID** step for new users. The window
+  stays open through all of it and closes only once the user allows (the opener
+  receives the `pid_code`) or denies/cancels. Falls back to a new tab when the
+  popup is blocked.
+- `auth.loginTab()` / `openLoginTab()` retained for apps that prefer a tab.
+  `openLoginPopup` is no longer an alias of `openLoginTab` — it is the real popup.
+
 ## 1.3.1
 
 - `auth.loginTab({ method })` — pass `method: 'passkey'` to auto-start the

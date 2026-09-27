@@ -147,17 +147,35 @@ export class PeridotAuth {
   }
 
   /**
-   * Sign in via the PeridotID origin in a new tab (full-page Google + PID picker).
-   * Resolves the one-time `pidCode` for `exchange`. Uses the configured popup host —
-   * no URL to pass. Throws `PopupUnavailableError` when none is configured.
+   * Sign in via the PeridotID origin in a centered popup (Google + PID picker,
+   * plus the PID claim step for new users). Resolves the one-time `pidCode` for
+   * `exchange`. Uses the configured popup host — no URL to pass. Falls back to a
+   * new tab when the popup is blocked. Throws `PopupUnavailableError` when no
+   * host is configured.
+   */
+  async loginPopup(opts?: { clientId?: string; returnTo?: string; method?: string }): Promise<{ pidCode?: string }> {
+    return this.openLogin(openLoginPopup, opts);
+  }
+
+  /**
+   * Sign in via the PeridotID origin in a new tab. Same result as `loginPopup`;
+   * opt in when a tab is preferred over a popup.
    */
   async loginTab(opts?: { clientId?: string; returnTo?: string; method?: string }): Promise<{ pidCode?: string }> {
+    return this.openLogin(openLoginTab, opts);
+  }
+
+  /** Shared host guard + login popup params for {@link loginPopup}/{@link loginTab}. */
+  private async openLogin(
+    opener: (opts: { popupBaseUrl: string; params: Record<string, string | undefined> }) => Promise<{ pidCode?: string }>,
+    opts?: { clientId?: string; returnTo?: string; method?: string },
+  ): Promise<{ pidCode?: string }> {
     if (!this.client.popupBaseUrl) {
       throw new PopupUnavailableError("No popup host configured — omit baseUrl so the env preset applies, or pass popupBaseUrl.");
     }
     if (typeof window === "undefined") throw new PopupUnavailableError("Sign-in needs a browser.");
     const clientId = this.appId(opts?.clientId);
-    return openLoginTab({
+    return opener({
       popupBaseUrl: this.client.popupBaseUrl,
       params: {
         popup: "login",

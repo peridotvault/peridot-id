@@ -69,22 +69,32 @@ interface OpenerOpts {
   timeoutMs?: number;
 }
 
+interface WindowOpts {
+  /** "popup" (default, centered) or "tab" (a normal new tab). */
+  mode?: "popup" | "tab";
+  width?: number;
+  height?: number;
+  /** Fall back to a new tab when the popup is blocked (login only). */
+  fallbackToTab?: boolean;
+}
+
 /**
- * Open the auth page in a normal new tab (auth is a full-page flow that may go
- * through Google and the PID picker), or a centered popup for approval
- * ceremonies. `onGone` fires once on timeout or user close.
+ * Open the auth page in a centered popup (approvals + login), or a normal new
+ * tab when `mode: "tab"`. `onGone` fires once on timeout or user close.
  */
-function openWindow(url: string, timeoutMs: number, onGone: () => void, newTab = false): { popup: Window; cancel: () => void } {
+function openWindow(url: string, timeoutMs: number, onGone: () => void, opts: WindowOpts = {}): { popup: Window; cancel: () => void } {
   requireBrowser();
+  const { mode = "popup", width = 420, height = 640, fallbackToTab = false } = opts;
   let popup: Window | null;
-  if (newTab) {
+  if (mode === "tab") {
     popup = window.open(url, "_blank");
   } else {
-    const w = 420;
-    const h = 640;
-    const left = Math.max(0, (window.screenX ?? 0) + ((window.innerWidth ?? w) - w) / 2);
-    const top = Math.max(0, (window.screenY ?? 0) + ((window.innerHeight ?? h) - h) / 2);
-    popup = window.open(url, "peridot-popup", `width=${w},height=${h},left=${left},top=${top},popup=1`);
+    const left = Math.max(0, (window.screenX ?? 0) + ((window.innerWidth ?? width) - width) / 2);
+    const top = Math.max(0, (window.screenY ?? 0) + ((window.innerHeight ?? height) - height) / 2);
+    popup = window.open(url, "peridot-popup", `width=${width},height=${height},left=${left},top=${top},popup=1`);
+    // Blocked popup: login falls back to a tab so the user is never stranded;
+    // approval ceremonies surface the block instead (see openPeridotPopup).
+    if (!popup && fallbackToTab) popup = window.open(url, "_blank");
   }
   if (!popup) throw new PopupBlockedError();
   let done = false;
@@ -154,13 +164,14 @@ export async function openPeridotPopup<T>(opts: OpenerOpts & { request: { action
 }
 
 /**
- * Login opener: opens the PeridotID auth page in a NEW TAB (auth is a full-page
- * flow — Google + PID picker — and must not be a cramped popup). No handshake:
- * the tab goes to Google and, on return, the hosted page mints a pid_code for
- * this app (using our origin + clientId) and posts it back via `window.opener`.
- * Resolves with { pidCode }.
+ * Login opener. No handshake: the window goes to Google and, on return, the
+ * hosted page mints a pid_code for this app (using our origin + clientId) and
+ * posts it back via `window.opener`, then closes. Resolves with { pidCode }.
+ * The window stays open through the whole flow — including the "Create your
+ * PID" step for new users — and only closes once the user allows (code
+ * delivered) or denies/cancels.
  */
-export async function openLoginTab(opts: OpenerOpts): Promise<{ pidCode?: string }> {
+function loginFlow(opts: OpenerOpts, windowOpts: WindowOpts): Promise<{ pidCode?: string }> {
   requireBrowser();
   const selfOrigin = window.location.origin;
   const { url, origin } = buildPopupUrl(opts);
@@ -178,7 +189,7 @@ export async function openLoginTab(opts: OpenerOpts): Promise<{ pidCode?: string
     const { popup, cancel } = openWindow(url, opts.timeoutMs ?? 300_000, () => {
       window.removeEventListener("message", onMessage);
       reject(new PopupClosedError());
-    }, true);
+    }, windowOpts);
     const finish = (fn: () => void): void => {
       cancel();
       window.removeEventListener("message", onMessage);
@@ -193,8 +204,19 @@ export async function openLoginTab(opts: OpenerOpts): Promise<{ pidCode?: string
   });
 }
 
-/** @deprecated Use {@link openLoginTab}. Kept as an alias for existing apps. */
-export const openLoginPopup = openLoginTab;
+/**
+ * Login in a centered popup (preferred). Larger than the approval popup because
+ * the flow is the full page: Google, the consent card, and the PID picker/claim
+ * for new users. Falls back to a new tab when the popup is blocked.
+ */
+export async function openLoginPopup(opts: OpenerOpts): Promise<{ pidCode?: string }> {
+  return loginFlow(opts, { mode: "popup", width: 480, height: 760, fallbackToTab: true });
+}
+
+/** Login in a normal new tab (opt-in, for apps that prefer a tab). */
+export async function openLoginTab(opts: OpenerOpts): Promise<{ pidCode?: string }> {
+  return loginFlow(opts, { mode: "tab" });
+}
 
 /**
  * Dapp-in-popup side: after an OAuth round-trip lands back on the dapp URL

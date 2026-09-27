@@ -17,11 +17,12 @@ your backend --Authorization: Bearer <peridot bearer>--> PeridotID API (reads on
 ## 1. Login (unchanged SSO)
 
 ```ts
-// Frontend: open the PeridotID tab, get the one-time code.
+// Frontend: open the PeridotID popup, get the one-time code.
 import { Peridot } from "@peridotvault/pid-sdk-js";
 const peridot = Peridot({ baseUrl: API_URL, popupBaseUrl: WALLET_URL, clientId: "pidapp_..." });
-const { pidCode } = await peridot.auth.loginTab({ clientId: "pidapp_..." });
-// (or full-page: const url = await peridot.auth.login({ clientId, returnTo }); location.assign(url);)
+const { pidCode } = await peridot.auth.loginPopup({ clientId: "pidapp_..." });
+// (popup falls back to a tab when blocked; loginTab() forces a tab.
+//  Or full-page: const url = await peridot.auth.login({ clientId, returnTo }); location.assign(url);)
 ```
 
 ```ts

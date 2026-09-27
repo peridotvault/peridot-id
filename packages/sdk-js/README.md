@@ -111,18 +111,20 @@ const res = await peridot.auth.loginWithPasskey({ clientId: 'pidapp_...', return
 const identity = await peridot.auth.exchange(code, 'pidapp_...');
 ```
 
-For React apps, wrap the flow in your own button + hook: `openLoginTab()` opens
-the auth page in a **new tab** (Google + the PID picker if the visitor has no
-PeridotID yet) and resolves with the pid_code; `peridot.auth.exchange(code)` gets
-the identity (see "Sign in with PeridotID" in the docs).
+For React apps, wrap the flow in your own button + hook: `peridot.auth.loginPopup()`
+opens the auth page in a **popup** (Google + the PID picker/claim if the visitor
+has no PeridotID yet), falling back to a new tab if the popup is blocked, and
+resolves with the pid_code; `peridot.auth.exchange(code)` gets the identity (see
+"Sign in with PeridotID" in the docs).
 
 ## Popup flow (third-party origins)
 
-**Auth** opens a new tab (`openLoginTab`, alias `openLoginPopup`) — it is a full
-page flow (Google + PID creation) that must not be a cramped popup.
+**Auth** opens a centered popup (`openLoginPopup`; `loginPopup()` on the client)
+that stays open through Google and the PID claim for new users, closing only on
+allow/deny. Use `openLoginTab` if you prefer a new tab outright.
 **Confirmations** — `withdraw`, `execute`, `activate`, `rotate`, `topup`, fiat
 top-up and P2P transfer — never run in the developer's DOM. With `popupBaseUrl`
-set (and no inline `passkeySigner`), they open a small popup on the PeridotID
+set (and no inline `passkeySigner`), they open a smaller popup on the PeridotID
 origin, where the user approves with the address bar visible:
 
 ```ts
