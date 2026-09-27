@@ -40,10 +40,16 @@ ssh root@VPS
 mkdir -p /opt/apps && cd /opt/apps
 git clone https://github.com/peridotvault/peridot-id.git peridot-id && cd peridot-id
 
-# One-time per VPS: authenticate a Universal Auth machine identity scoped to
-# main (prod) — and separately on the sandbox host scoped to test.
-export INFISICAL_TOKEN=$(infisical login --method=universal-auth \
-  --client-id=<client-id> --client-secret=<client-secret> --silent --plain)
+# One-time: persist the machine-identity creds for this host (0600 root).
+# The identity is project-scoped (read) on /apps/{api,web,wallet}; up.sh
+# exchanges these for a short-lived token on every run.
+mkdir -p /etc/peridot-id
+umask 077
+cat > /etc/peridot-id/infisical.env <<'EOF'
+INFISICAL_UNIVERSAL_AUTH_CLIENT_ID=<universal-auth-client-id>
+INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET=<client-secret>
+EOF
+chmod 600 /etc/peridot-id/infisical.env
 
 # Small VPS: ensure swap before the first build or it may OOM.
 fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
@@ -52,13 +58,14 @@ fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /
 ./deploy/up.sh main             # pulls secrets via `infisical run`, builds api + web + app
 ```
 
-Fallback without Infisical (local only):
+No `deploy/.env.*` exists on the VPS — secrets are fetched from Infisical at
+deploy time. `INFISICAL_ENABLED=0 ./deploy/up.sh main` still reads a local
+`deploy/.env.main` for offline/local use only.
 
-```sh
-cp deploy/.env.main.example deploy/.env.main
-$EDITOR deploy/.env.main
-INFISICAL_ENABLED=0 ./deploy/up.sh main
-```
+> Plan note: the org currently allows a **single** machine identity, so both the
+> prod and sandbox hosts share one project-scoped identity (each can read every
+> env). Split into per-env identities once the Infisical plan allows for tighter
+> isolation.
 
 Traefik auto-detects the two services, issues HTTPS via Let's Encrypt, and
 routing goes live. No infra change.
@@ -74,9 +81,13 @@ ssh root@VPS
 cd /opt/apps/peridot-id
 git clone https://github.com/peridotvault/peridot-id.git peridot-id-test
 cd peridot-id-test
-# Same as prod but with the test-scoped machine identity (INFISICAL_TOKEN for env test).
-export INFISICAL_TOKEN=$(infisical login --method=universal-auth \
-  --client-id=<test-client-id> --client-secret=<test-client-secret> --silent --plain)
+# Persist the same project-scoped identity as prod (see the plan note above):
+mkdir -p /etc/peridot-id && umask 077
+cat > /etc/peridot-id/infisical.env <<'EOF'
+INFISICAL_UNIVERSAL_AUTH_CLIENT_ID=<universal-auth-client-id>
+INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET=<client-secret>
+EOF
+chmod 600 /etc/peridot-id/infisical.env
 ./deploy/db-init.sh test   # creates peridot_id_test + migrations
 ./deploy/up.sh test
 ```

@@ -26,9 +26,10 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   `main`; folders `/apps/api` (runtime), `/apps/web` (`NEXT_PUBLIC_*`),
   `/apps/wallet` (`EXPO_PUBLIC_*`). No `/deploy` folder — it duplicated these.
   Local: `infisical login` once, then `pnpm dev:api:cloud` (or `dev:web:cloud` /
-  `dev:wallet:cloud`). Deploy: `./deploy/up.sh main|test` pulls via
-  `infisical run` (needs `INFISICAL_TOKEN` from a per-env Universal Auth
-  identity on the VPS). Fallback: `INFISICAL_ENABLED=0` reads `deploy/.env.$ENV`.
+  `dev:wallet:cloud`). Deploy: `./deploy/up.sh main|test` sources the VPS machine
+  identity at `/etc/peridot-id/infisical.env` (0600 root) and pulls via
+  `infisical run`; no `deploy/.env.*` on the VPS. Fallback:
+  `INFISICAL_ENABLED=0` reads `deploy/.env.$ENV`.
 - **Postgres DB:** `peridot_id` at `localhost:5432` (NOT `peridot`). `DATABASE_URL` in
   Infisical `/apps/api` (env `dev`), legacy fallback `apps/api/.env`.
 - **Solana toolchain:** 2.3.13 at
