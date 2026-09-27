@@ -100,12 +100,12 @@ export class FiatLedgerService {
   // --- fees (global PeridotID + stacked per-app) ---
 
   /** Resolve an active app by public clientId (fee context, model A). */
-  async resolveAppContext(clientId?: string | null): Promise<{ id: string; ownerPid: string } | null> {
+  async resolveAppContext(clientId?: string | null): Promise<{ id: string; ownerPid: string; isVerified: boolean } | null> {
     if (!clientId) return null;
     const app = await this.prisma.pidApp
-      .findUnique({ where: { clientId }, select: { id: true, ownerPid: true, isActive: true } })
+      .findUnique({ where: { clientId }, select: { id: true, ownerPid: true, isActive: true, isVerified: true } })
       .catch(() => null);
-    return app && app.isActive ? { id: app.id, ownerPid: app.ownerPid } : null;
+    return app && app.isActive ? { id: app.id, ownerPid: app.ownerPid, isVerified: app.isVerified } : null;
   }
 
   /** App fee for an amount (0 when no app / not enabled). Clamp: min/max, 0 = unbounded. */
@@ -121,6 +121,8 @@ export class FiatLedgerService {
   /**
    * Fee quote for an operation: the global PeridotID fee plus, when an app
    * context is given, that app's fee (credited to the app's own account).
+   * Verified partners skip the global fee only — their own stacked fee,
+   * DOKU provider fees, and on-chain fees still apply.
    */
   async quoteFees(
     clientId: string | null | undefined,
@@ -128,8 +130,8 @@ export class FiatLedgerService {
     amount: bigint,
   ): Promise<{ globalFee: bigint; appFee: bigint; appId: string | null; appOwnerPid: string | null; policyVersion: number }> {
     const policy = await this.activeFeePolicy();
-    const globalFee = calcServiceFee(amount, policy);
     const app = await this.resolveAppContext(clientId);
+    const globalFee = app?.isVerified ? 0n : calcServiceFee(amount, policy);
     const appFee = await this.appFeeFor(app?.id ?? null, operation, amount);
     return { globalFee, appFee, appId: app?.id ?? null, appOwnerPid: app?.ownerPid ?? null, policyVersion: policy.version };
   }

@@ -85,6 +85,11 @@ export class UpdateChainDto {
   isActive?: boolean;
 }
 
+export class VerifyAppDto {
+  @IsBoolean()
+  verified!: boolean;
+}
+
 export class UpsertContractDto {
   @IsIn(["factory", "account_implementation", "verifier", "paymaster", "program"])
   type!: string;

@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Logger, Param, ParseUUIDPipe, Post, Req, Res, UseGuards } from "@nestjs/common";
-import { BadRequestException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { Request, Response } from "express";
@@ -99,6 +99,20 @@ export class AuthController {
   async pidAvailable(@Req() req: Request): Promise<{ available: boolean; pid: string | null }> {
     const handle = typeof req.query.handle === "string" ? req.query.handle : "";
     return this.authService.isPidAvailable(handle);
+  }
+
+  /**
+   * Public trust signal for login consent screens: an active app's display
+   * name + verified-partner flag. Secrets never leave the server — only these
+   * two fields. 404 for unknown/disabled apps.
+   */
+  @Get("app-info")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async appInfo(@Req() req: Request): Promise<{ name: string; isVerified: boolean }> {
+    const clientId = typeof req.query.clientId === "string" ? req.query.clientId : "";
+    const app = clientId ? await this.apps.findActive(clientId) : null;
+    if (!app) throw new NotFoundException("App not found");
+    return { name: app.name, isVerified: app.isVerified };
   }
 
   @Post("passkey/start")

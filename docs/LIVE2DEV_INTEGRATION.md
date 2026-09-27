@@ -17,6 +17,19 @@
 4. Users sign in via SSO (`pid_code` → `POST /v1/auth/exchange`); money ceremonies
    run through the PeridotID popup (`credit-transfer`) with server-quoted
    Approve/Deny — Live2Dev never touches amounts or account numbers.
+5. Sessions: use the thin-session recipe (`docs/RP_SESSIONS.md`) — the
+   exchange bearer is your per-user session substitute (their reads), kept
+   server-side. It is separate from the machine token below (your escrow).
+
+## Sessions (thin sessions, not shared sessions)
+
+- Live2Dev never sees or shares the PeridotID session (HttpOnly, first-party).
+  After exchange, your backend holds the user's read bearer; your browser holds
+  only your own `httpOnly` cookie. Full recipe + the six limits:
+  `docs/RP_SESSIONS.md`.
+- Rule of thumb: **user bearer = their data** (their balance, their ledger);
+  **machine token = your data** (the `live2dev@pid` escrow balance). Don't mix
+  them up — see the bearer-vs-token table in `docs/RP_SESSIONS.md`.
 
 ## Example: 5 streamers × Rp100.000 = Rp500.000
 
@@ -47,3 +60,11 @@ live2dev@pid --send Rp100.000--> streamer1@pid   (app → user: payout, ×5 on d
 - No direct user→user sends (policy rejects with 403; full P2P = future flag flip).
 - Balances live on the internal fiat ledger (IDR), not yet DOKU POINT — migratable per
   `docs/FUTURE_UNIFIED_LEDGER.md`.
+
+## Verified-partner fee waiver (admin-only)
+
+- Admins flip `isVerified` per app (`PATCH /v1/admin/apps/:id/verify`, workspace
+  Admin card). Verified apps skip the **global PeridotID fiat fee** on
+  topup/transaction/withdraw quotes — the app's own stacked fee, DOKU provider
+  fees, and on-chain fees still apply.
+- Users see a ✓ badge on the login consent screen and in App Connections.

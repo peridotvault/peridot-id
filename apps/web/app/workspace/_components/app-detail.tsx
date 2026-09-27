@@ -194,7 +194,12 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} className={`${FIELD} text-xl font-semibold`} />
         ) : (
           <h1 className="text-2xl font-semibold tracking-tight">
-            {app.name} {!app.isActive && <span className={`text-sm font-normal ${MUTED}`}>(disabled)</span>}
+            {app.name} {!app.isActive && <span className={`text-sm font-normal ${MUTED}`}>(disabled)</span>}{" "}
+            {app.isVerified && (
+              <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 align-middle text-xs font-semibold text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
+                ✓ Verified partner — 0% PeridotID fee
+              </span>
+            )}
           </h1>
         )}
         <div className="flex shrink-0 gap-2">

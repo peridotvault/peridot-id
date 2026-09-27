@@ -84,7 +84,10 @@ export function AppConnectionsScreen({ onDone }: { onDone: () => void }) {
                 <Link2 size={16} color={theme.colors.foreground} />
               </View>
               <View style={styles.meta}>
-                <Text style={styles.site}>{label}</Text>
+                <Text style={styles.site}>
+                  {label}
+                  {g.isVerified ? " ✓" : ""}
+                </Text>
                 {g.name && <Text style={styles.muted}>{host}</Text>}
                 <Text style={styles.muted}>Connected {fmtDate(g.firstSeenAt)}</Text>
                 <Text style={styles.muted}>Last used {fmtDate(g.lastUsedAt)}</Text>

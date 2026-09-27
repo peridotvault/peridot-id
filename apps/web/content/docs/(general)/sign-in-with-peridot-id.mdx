@@ -68,17 +68,32 @@ nothing CORS-related to configure.
 In React, wrap the same two calls in your own button + hook — there is no
 provider component to install.
 
+## Who owns what: auth vs session
+
+**We authenticate the human, you sessionize your user.** PeridotID proves
+"this browser is `rani@pid`" and hands you proof (`pid_code` → exchange →
+`{ pid, profile, accessToken }`). Everything session-shaped is yours: your
+cookie, your expiry, your logout route, your users table keyed by `pid`.
+Our session cookies (`pid_access`/`pid_refresh`) never leave our origin — no
+third-party app can or should read them.
+
+One rule covers most mistakes: **keep the `accessToken` server-side.** It is a
+read-only bearer (identity, profile, balance, ledger — never writes), and
+anything in browser JS or `localStorage` is stealable via XSS. Exchange in the
+browser while prototyping if you like; production backends exchange
+server-side (step 3) and hand the browser only their own `httpOnly` cookie.
+
 ## 3. Handle the login
 
 After login the tab returns a one-time `pid_code` (posted to your opener; a
-full-page `redirect_uri` fallback is also supported). Exchange it as above —
-directly, or via your backend, which then mints your app's own session.
+full-page `redirect_uri` fallback is also supported). Already signed in? A
+consent screen appears first — who you're continuing as, with Allow, a
+different account, or Deny — and only Allow issues the code. Denying returns
+with `?error=access_denied`.
 
-Already signed in? The tab issues the code immediately (a one-tap consent screen
-appears for cross-origin SSO). Denying returns with `?error=access_denied`.
-
-Prefer to mint your own session? Exchange server-side instead of calling
-`peridot.auth.exchange` in the browser:
+For production, exchange server-side instead of calling
+`peridot.auth.exchange` in the browser: verify the code against PeridotID,
+store the bearer server-side, then mint your app's own session:
 
 ```ts
 // your backend: verify the code against PeridotID, then create your session
@@ -88,7 +103,27 @@ const r = await fetch('https://api.pid.peridotvault.com/v1/auth/exchange', {
   body: JSON.stringify({ code, clientId: 'pidapp_...' }),
 });
 const identity = await r.json(); // single-use code, 5-minute expiry
+// identity.accessToken → keep server-side, send as Authorization: Bearer
+// for reads (GET /v1/identity/me, /v1/fiat/balance, …). Set your own
+// httpOnly cookie for the browser — that cookie is your session, not ours.
 ```
+
+Know the limits before promising anything to your users:
+
+- The bearer is **read-only** (`scope: "read"`): balance/ledger/identity/profile
+  are reachable, transfers and writes always return 403.
+- It lasts **30 days, non-refreshable** — afterwards the user re-clicks login
+  (one tap if their PeridotID session is alive). Never log the bearer.
+- There is **no single-token revoke**: a leaked bearer stays valid until expiry
+  unless the whole identity is deactivated. The read-only scope is the
+  containment — the reason this pattern is blessed for reads only.
+- **Verify-or-cache is your call**: live-verify every request (fail-closed when
+  we're down, deactivation honored immediately) or cache identity up to ~15 min
+  per route — never longer.
+- **Logout doesn't propagate**: our sign-out ends our session, not yours —
+  delete your own cookie server-side on your logout route.
+- **Don't confuse it with the machine token**: the user bearer reads *their*
+  data; `POST /v1/auth/token` reads *your app's* data (escrow balance).
 
 ## Notes
 
@@ -98,6 +133,14 @@ const identity = await r.json(); // single-use code, 5-minute expiry
 - No framework? The snippet in step 2 is already framework-free: `openLoginTab`
   (alias `openLoginPopup`), `loginWithPasskey({ clientId, returnTo })`,
   `exchange(code, clientId)`.
+
+## Verified partners
+
+Admins can mark your app as a **verified partner** (in the workspace). Verified
+apps show a ✓ badge on the login consent screen — and your users skip the
+PeridotID fiat fee on top-ups, sends, and withdrawals (0%). Your own app fee,
+DOKU provider fees, and on-chain fees still apply. Interested? Talk to us —
+verification is granted, never self-issued.
 
 ## Next: money
 

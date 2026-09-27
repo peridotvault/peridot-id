@@ -32,12 +32,23 @@ export interface GoogleProfile {
 
 /**
  * Absolute session-family caps by login method (rotation preserves the
- * device, so family age = device.createdAt). Google families expire after 7
- * days and must re-authenticate (passkey-first UI); passkey families follow
- * the 30d refresh TTL. Pre-existing rows (authMethod null) count as google.
+ * device, so family age = device.createdAt). Overridable via
+ * GOOGLE_FAMILY_MAX_AGE / PASSKEY_FAMILY_MAX_AGE (ms-parseable, e.g. "90d").
+ * Defaults are YouTube-like: months-long rotating cookies, with step-up only
+ * past the cap. Pre-existing rows (authMethod null) count as google.
+ * Money safety never rests on this: withdrawals/executes/rotation/authorize
+ * all need fresh per-action passkey signatures or explicit consent.
  */
-const GOOGLE_FAMILY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const PASSKEY_FAMILY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const DEFAULT_GOOGLE_FAMILY_MAX_AGE = "90d";
+const DEFAULT_PASSKEY_FAMILY_MAX_AGE = "365d";
+
+/**
+ * Grace window for the multi-tab rotation race: two tabs refreshing with the
+ * same token near-simultaneously must not log one of them out. The loser
+ * follows the already-issued child (via the rotatedFrom link) instead of
+ * throwing. No schema change — the link column already exists.
+ */
+const ROTATION_GRACE_MS = 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -140,14 +151,41 @@ export class AuthService {
 
     const session = await this.prisma.session.findUnique({ where: { id: payload.jti }, include: { device: true } });
     if (!session || session.revokedAt || session.expiresAt <= new Date()) {
-      throw new UnauthorizedException("Refresh token revoked");
+      // Rotation race: this token was already rotated moments ago (another
+      // tab won). Follow the live child instead of logging the user out.
+      // Anything older than the grace window still fails closed.
+      const child = !session
+        ? null
+        : await this.prisma.session.findFirst({
+            where: {
+              rotatedFrom: payload.jti,
+              revokedAt: null,
+              expiresAt: { gt: new Date() },
+              createdAt: { gt: new Date(Date.now() - ROTATION_GRACE_MS) },
+            },
+            include: { device: true },
+          });
+      if (!child?.device) throw new UnauthorizedException("Refresh token revoked");
+      // Chain from the child: the family keeps a single live head, so the
+      // grace path never forks a second valid chain. (The winner passed the
+      // family-cap check <60s ago when it rotated, so no re-check here.)
+      await this.prisma.session.update({ where: { id: child.id }, data: { revokedAt: new Date() } });
+      await this.issueSession(res, payload.sub, req.headers["user-agent"], child.id);
+      return;
     }
 
     // Absolute family cap: past it, only a fresh login (passkey-first UI)
     // starts a new family. Checked before revoking so a rejected rotation
     // never burns the still-TTL-valid token.
     const method = session.device.authMethod ?? "google";
-    const cap = method === "passkey" ? PASSKEY_FAMILY_MAX_AGE_MS : GOOGLE_FAMILY_MAX_AGE_MS;
+    // Unparseable env falls back to the default (NaN is falsy) — a typo must
+    // never silently disable the cap.
+    const cap =
+      method === "passkey"
+        ? ms(this.config.get<string>("PASSKEY_FAMILY_MAX_AGE", DEFAULT_PASSKEY_FAMILY_MAX_AGE)) ||
+          ms(DEFAULT_PASSKEY_FAMILY_MAX_AGE)
+        : ms(this.config.get<string>("GOOGLE_FAMILY_MAX_AGE", DEFAULT_GOOGLE_FAMILY_MAX_AGE)) ||
+          ms(DEFAULT_GOOGLE_FAMILY_MAX_AGE);
     if (Date.now() - session.device.createdAt.getTime() > cap) {
       throw new UnauthorizedException({
         code: "step_up_required",

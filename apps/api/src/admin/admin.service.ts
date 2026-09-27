@@ -83,4 +83,43 @@ export class AdminService {
     await this.security.log(pid, "admin.contract.upserted", { chainId, type: dto.type });
     return contract;
   }
+
+  /**
+   * Verify (or unverify) a partner app: verified apps skip the global
+   * PeridotID fiat fee. Admin-only — app owners can never set this themselves.
+   */
+  async setAppVerified(pid: string, id: string, verified: boolean) {
+    const app = await this.prisma.pidApp.findUnique({ where: { id } });
+    if (!app) throw new NotFoundException("App not found");
+    const updated = await this.prisma.pidApp.update({ where: { id }, data: { isVerified: verified } });
+    await this.security.log(pid, verified ? "admin.app.verified" : "admin.app.unverified", {
+      appId: id,
+      clientId: app.clientId,
+    });
+    const { webhookSecret: _s, clientSecretHash: _h, ...safe } = updated;
+    return safe;
+  }
+  /** Admin lookup of any app by public client_id (secrets omitted). */
+  async findAppByClientId(clientId: string) {
+    const app = await this.prisma.pidApp.findUnique({ where: { clientId } });
+    if (!app) throw new NotFoundException("App not found");
+    const { webhookSecret: _s, clientSecretHash: _h, ...safe } = app;
+    return safe;
+  }
+
+  /** Every registered app, newest first (secrets omitted). Admin-only.
+   *  Optional substring filter over name (case-insensitive) or clientId. */
+  async listAllApps(q?: string) {
+    const needle = q?.trim() || undefined;
+    const apps = await this.prisma.pidApp.findMany({
+      ...(needle
+        ? { where: { OR: [{ name: { contains: needle, mode: "insensitive" } }, { clientId: { contains: needle } }] } }
+        : {}),
+      orderBy: { createdAt: "desc" },
+    });
+    return apps.map((app) => {
+      const { webhookSecret: _s, clientSecretHash: _h, ...safe } = app;
+      return safe;
+    });
+  }
 }

@@ -28,6 +28,13 @@ export function LoginScreen({
   // pid_code and posts it to the opener instead of navigating.
   const [ctx] = useState<LoginContext | null>(() => loginContext ?? readLoginContext());
   const autoStarted = useRef(false);
+  // Auth-in-a-new-tab consent: a session that already existed at tab open must
+  // not auto-issue — the user picks Allow / different account in the consent
+  // modal. A session created by an explicit login in this tab (no session at
+  // open, or after "different account") delivers without a second prompt.
+  // `delivered` guards the double-mint (inline deliver + effect).
+  const hadSessionAtOpen = useRef<boolean | null>(null);
+  const delivered = useRef(false);
   // Post-auth PID creation: the handle becomes the permanent `<handle>@pid`
   // identity (never changeable, reused, or reassigned). The user must tick the
   // permanence acknowledgement before continuing.
@@ -37,10 +44,31 @@ export function LoginScreen({
   // Post-auth pending claim (verified credential, no identity yet). undefined =
   // still checking, null = none. The claim screen takes over when set.
   const [claim, setClaim] = useState<{ email: string | null; displayName: string | null } | null | undefined>(undefined);
-  // Existing wallet session, if any (SSO mode only): offers one-tap Allow instead
+  // Existing wallet session, if any (SSO / login-tab mode): offers one-tap Allow instead
   // of forcing a redundant login. undefined = still checking, null = none.
   const [session, setSession] = useState<{ label: string } | null | undefined>(sso || ctx ? undefined : null);
   const [showLogin, setShowLogin] = useState(false);
+  // Verified-partner badge (server-sourced trust signal, fail-closed to hidden).
+  const appClientId = sso?.clientId ?? ctx?.clientId;
+  const [appVerified, setAppVerified] = useState(false);
+
+  useEffect(() => {
+    if (!appClientId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await peridot.get<{ isVerified: boolean }>(
+          `/v1/auth/app-info?clientId=${encodeURIComponent(appClientId)}`,
+        );
+        if (!cancelled && res.ok) setAppVerified((res.data as { isVerified: boolean }).isVerified === true);
+      } catch {
+        // fail-closed: no badge
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [appClientId, peridot]);
 
   useEffect(() => {
     if ((!sso && !ctx) || typeof window === "undefined") return;
@@ -54,7 +82,10 @@ export function LoginScreen({
           if ((await peridot.auth.refresh()) === true) me = await peridot.identity.me();
         }
         if (cancelled || typeof me !== "object" || me === null || "statusCode" in me) {
-          if (!cancelled) setSession(null);
+          if (!cancelled) {
+            if (hadSessionAtOpen.current === null) hadSessionAtOpen.current = false;
+            setSession(null);
+          }
           return;
         }
         const profile = await peridot.profile.me();
@@ -62,7 +93,10 @@ export function LoginScreen({
           typeof profile === "object" && profile !== null && !("statusCode" in profile) && profile.displayName
             ? profile.displayName
             : (me as { pid: string }).pid;
-        if (!cancelled) setSession({ label });
+        if (!cancelled) {
+          if (hadSessionAtOpen.current === null) hadSessionAtOpen.current = true;
+          setSession({ label });
+        }
       } catch {
         if (!cancelled) setSession(null);
       }
@@ -73,14 +107,17 @@ export function LoginScreen({
   }, [sso, ctx, peridot]);
 
   /**
-   * Auth-in-a-new-tab: once a session exists (returning user) and there is no
-   * pending PID claim, mint a pid_code for the app and post it to the opener.
+   * Auth-in-a-new-tab delivery: explicit logins in this tab (no session at
+   * open, or after "use a different account") deliver once the session exists.
+   * A pre-existing session waits for the consent modal's Allow instead.
    * New users first pass through the claim screen below.
    */
   useEffect(() => {
-    if (!ctx || !session || claim !== null) return;
+    if (!ctx || !session || claim !== null || delivered.current) return;
+    if (hadSessionAtOpen.current === true && !showLogin) return;
+    delivered.current = true;
     void deliverLoginCode(peridot, ctx);
-  }, [ctx, session, claim, peridot]);
+  }, [ctx, session, claim, showLogin, peridot]);
 
   /** Pending post-auth claim check (server is source of truth). */
   useEffect(() => {
@@ -181,6 +218,7 @@ export function LoginScreen({
       }
       // Auth-in-a-new-tab: PID created — mint the app's pid_code and post it back.
       if (ctx) {
+        delivered.current = true;
         await deliverLoginCode(peridot, ctx);
         return;
       }
@@ -211,6 +249,7 @@ export function LoginScreen({
         return;
       }
       if (ctx) {
+        delivered.current = true;
         await deliverLoginCode(peridot, ctx);
         return;
       }
@@ -288,12 +327,47 @@ export function LoginScreen({
     window.location.assign(withDenied(sso.redirectUri));
   };
 
+  /** Auth-in-a-new-tab consent: user approved the pre-existing session. */
+  const allowCtx = async () => {
+    if (!ctx) return;
+    setBusy(true);
+    setError(null);
+    try {
+      delivered.current = true;
+      const ok = await deliverLoginCode(peridot, ctx);
+      if (!ok) {
+        delivered.current = false;
+        setError("Couldn't authorize — try again.");
+      }
+    } catch (e) {
+      delivered.current = false;
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** "Use a different account": drop the current session, show the login form. */
+  const useDifferentCtx = async () => {
+    setBusy(true);
+    try {
+      await peridot.auth.logout();
+    } catch {
+      // best-effort: still show the login form even if logout fails
+    } finally {
+      delivered.current = false;
+      setSession(null);
+      setShowLogin(true);
+      setBusy(false);
+    }
+  };
+
   // Popup opened from a method button: auto-start that method once the login
   // form is showing (not on the claim/consent screens).
   useEffect(() => {
     if (!ctx?.method || autoStarted.current) return;
     if (claim !== null) return;
-    if (sso && session !== null) return;
+    if ((sso || ctx) && session !== null) return;
     autoStarted.current = true;
     if (ctx.method === "passkey") void signInWithPasskey();
     else void continueWithGoogle();
@@ -390,6 +464,23 @@ export function LoginScreen({
         onAllow={allowApp}
         onDifferent={() => setShowLogin(true)}
         onDeny={denyApp}
+        verified={appVerified}
+      />
+    );
+  }
+
+  // Auth-in-a-new-tab + pre-existing session: explicit consent, same card as SSO.
+  if (ctx && session && !showLogin && claim === null) {
+    return (
+      <SsoConsentModal
+        origin={ctx.origin}
+        sessionLabel={session.label}
+        busy={busy}
+        error={error}
+        onAllow={allowCtx}
+        onDifferent={useDifferentCtx}
+        onDeny={denyApp}
+        verified={appVerified}
       />
     );
   }
@@ -401,7 +492,11 @@ export function LoginScreen({
         <View style={styles.middle}>
           <View style={styles.masthead}>
             <Text style={styles.title}>PeridotID</Text>
-            {sso ? <Text style={styles.subtitle}>Sign in to continue to {ssoOrigin(sso.redirectUri)}</Text> : null}
+            {sso ? (
+              <Text style={styles.subtitle}>Sign in to continue to {ssoOrigin(sso.redirectUri)}</Text>
+            ) : ctx ? (
+              <Text style={styles.subtitle}>Sign in to continue to {ctx.origin}</Text>
+            ) : null}
           </View>
           {error && <Text style={s.error}>{error}</Text>}
           <View style={styles.stack}>

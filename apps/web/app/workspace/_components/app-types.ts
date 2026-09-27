@@ -5,6 +5,7 @@ export interface PidApp {
   name: string;
   allowedOrigins: string[];
   isActive: boolean;
+  isVerified: boolean;
   clientSecretPrefix: string | null;
   clientSecretCreatedAt: string | null;
   webhookUrl: string | null;

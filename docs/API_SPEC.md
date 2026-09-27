@@ -42,11 +42,13 @@ Deprecated (V3 record-only): GET /v1/wallet/me · POST /v1/wallet
 ## Apps (third-party "Sign in with PeridotID")
 
 POST /v1/apps · GET /v1/apps · PATCH /v1/apps/:id · POST /v1/apps/:id/secret
+GET /v1/auth/app-info (public trust signal: app name + verified flag)
 
-## Admin (chain registry)
+## Admin (chain registry + partner verification)
 
 GET /v1/admin/chains · POST /v1/admin/chains · PATCH /v1/admin/chains/:id
 POST /v1/admin/chains/:id/contracts
+GET /v1/admin/apps?clientId=… · PATCH /v1/admin/apps/:id/verify (verified partners skip the PeridotID fiat fee)
 
 ## Client
 

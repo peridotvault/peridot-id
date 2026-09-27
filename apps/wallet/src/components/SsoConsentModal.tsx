@@ -14,6 +14,7 @@ export function SsoConsentModal({
   onAllow,
   onDifferent,
   onDeny,
+  verified,
 }: {
   origin: string;
   sessionLabel: string;
@@ -22,6 +23,8 @@ export function SsoConsentModal({
   onAllow: () => void;
   onDifferent: () => void;
   onDeny: () => void;
+  /** Verified partner: PeridotID fee waived for this app (trust signal). */
+  verified?: boolean;
 }) {
   return (
     <View style={styles.overlay}>
@@ -32,6 +35,7 @@ export function SsoConsentModal({
         </Pressable>
         <Text style={styles.title}>PeridotID</Text>
         <Text style={styles.subtitle}>Allow {origin} to sign in with your PeridotID?</Text>
+        {verified ? <Text style={styles.verified}>✓ Verified partner — 0% PeridotID fee</Text> : null}
         <Text style={styles.hint}>
           Signed in as {sessionLabel}. The app receives your ID, display name and email — never your passkeys.
         </Text>
@@ -90,6 +94,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   subtitle: { fontSize: 14, color: c.foreground, fontFamily: f.sansMedium, textAlign: "center" },
+  verified: { fontSize: 12, color: c.success ?? c.foreground, fontFamily: f.sans, textAlign: "center" },
   hint: { fontSize: 12, color: c.mutedForeground, fontFamily: f.sans, textAlign: "center" },
   actions: { gap: 12, marginTop: 4 },
 });

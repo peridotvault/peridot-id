@@ -73,6 +73,7 @@ export interface SsoGrantView {
   origin: string;
   clientId: string | null;
   name: string | null;
+  isVerified: boolean;
   firstSeenAt: Date;
   lastUsedAt: Date;
 }
@@ -260,16 +261,13 @@ export class SsoService {
     });
     return Promise.all(
       grants.map(async (g) => {
-        let name: string | null = null;
-        if (g.clientId) {
-          const app = await this.apps.findActive(g.clientId).catch(() => null);
-          name = app?.name ?? null;
-        }
+        const app = g.clientId ? await this.apps.findActive(g.clientId).catch(() => null) : null;
         return {
           id: g.id,
           origin: g.origin,
           clientId: g.clientId,
-          name,
+          name: app?.name ?? null,
+          isVerified: app?.isVerified ?? false,
           firstSeenAt: g.firstSeenAt,
           lastUsedAt: g.lastUsedAt,
         };

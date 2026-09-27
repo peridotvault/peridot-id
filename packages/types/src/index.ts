@@ -205,6 +205,7 @@ export interface SsoGrant {
   origin: string;
   clientId: string | null;
   name: string | null;
+  isVerified: boolean;
   firstSeenAt: string;
   lastUsedAt: string;
 }

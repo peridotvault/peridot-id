@@ -231,6 +231,25 @@ describe("FiatLedgerService fees", () => {
     const q = await service.quoteFees("pidapp_x", "transaction", 1_000_000n);
     expect(q.appFee).toBe(0n);
   });
+
+  it("waives the global fee for verified apps but keeps their own fee", async () => {
+    const { service, prisma } = setup();
+    prisma.pidApp.findUnique.mockResolvedValueOnce({ id: "app1", ownerPid: "live2dev@pid", isActive: true, isVerified: true });
+    prisma.pidAppFee.findUnique.mockResolvedValueOnce({ percentBps: 200, minIdr: 0n, maxIdr: 0n, enabled: true });
+    const q = await service.quoteFees("pidapp_x", "transaction", 1_000_000n);
+    expect(q.globalFee).toBe(0n);
+    expect(q.appFee).toBe(20_000n);
+    expect(q.policyVersion).toBeGreaterThan(0);
+  });
+
+  it("keeps the global fee for unverified apps", async () => {
+    const { service, prisma } = setup();
+    prisma.pidApp.findUnique.mockResolvedValueOnce({ id: "app1", ownerPid: "live2dev@pid", isActive: true, isVerified: false });
+    prisma.pidAppFee.findUnique.mockResolvedValueOnce({ percentBps: 0, minIdr: 0n, maxIdr: 0n, enabled: false });
+    const q = await service.quoteFees("pidapp_x", "transaction", 1_000_000n);
+    expect(q.globalFee).toBe(50_000n);
+    expect(q.appFee).toBe(0n);
+  });
 });
 
 describe("FiatLedgerService callbacks", () => {

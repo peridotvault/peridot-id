@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CreateChainDto, UpdateChainDto, UpsertContractDto } from "./admin.dto";
+import { CreateChainDto, UpdateChainDto, UpsertContractDto, VerifyAppDto } from "./admin.dto";
 import { AdminService } from "./admin.service";
 
 @UseGuards(ThrottlerGuard)
@@ -44,5 +44,25 @@ export class AdminController {
     @Body() dto: UpsertContractDto,
   ) {
     return this.adminService.upsertContract(user.pid, id, dto);
+  }
+
+  @Patch("apps/:id/verify")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  setAppVerified(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: VerifyAppDto,
+  ) {
+    return this.adminService.setAppVerified(user.pid, id, dto.verified);
+  }
+
+  @Get("apps")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  listAllApps(@Query("clientId") clientId?: string, @Query("q") q?: string) {
+    // Exact lookup mode for the verify workflow; substring search; else everything.
+    if (clientId) return this.adminService.findAppByClientId(clientId);
+    return this.adminService.listAllApps(q);
   }
 }

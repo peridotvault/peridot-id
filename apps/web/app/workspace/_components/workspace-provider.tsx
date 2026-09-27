@@ -10,7 +10,18 @@ import { Topbar, type WorkspaceTab } from "./topbar";
 const API_BASE = process.env.NEXT_PUBLIC_PID_API_URL ?? "https://api.pid.peridotvault.com";
 // "production" (real money) or "sandbox" (DOKU sandbox). This workspace is bound
 // to one environment at build time; apps are registered separately per env.
-const PID_ENV = process.env.NEXT_PUBLIC_PID_ENV ?? "production";
+// Explicit NEXT_PUBLIC_PID_ENV wins; otherwise the badge follows the API URL
+// (loopback = sandbox) so it can never disagree with where traffic goes.
+function apiHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+const PID_ENV =
+  process.env.NEXT_PUBLIC_PID_ENV ??
+  (["localhost", "127.0.0.1", "::1"].includes(apiHost(API_BASE)) ? "sandbox" : "production");
 const OTHER_WORKSPACE_URL = process.env.NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL;
 
 export type WorkspaceStatus = "checking" | "anonymous" | "owner";
@@ -137,7 +148,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       ? "contracts"
       : pathname?.startsWith("/workspace/chains") === true
         ? "chains"
-        : "apps";
+        : pathname?.startsWith("/workspace/partners") === true
+          ? "partners"
+          : "apps";
   const tabs = useMemo<WorkspaceTab[]>(
     () =>
       isAdmin
@@ -145,6 +158,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             { key: "apps", label: "Apps" },
             { key: "chains", label: "Chains" },
             { key: "contracts", label: "Contracts" },
+            { key: "partners", label: "Partners" },
           ]
         : [{ key: "apps", label: "Apps" }],
     [isAdmin],

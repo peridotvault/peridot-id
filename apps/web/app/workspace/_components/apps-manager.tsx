@@ -63,7 +63,10 @@ export function AppsManager({ client }: { client: PeridotClient }) {
               href={`/workspace/apps/${app.id}`}
               className="flex items-center justify-between border border-border bg-background px-4 py-3 transition-colors hover:bg-muted"
             >
-              <span className="font-semibold tracking-tight">{app.name}</span>
+              <span className="font-semibold tracking-tight">
+                {app.name}{" "}
+                {app.isVerified && <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">✓</span>}
+              </span>
               <span className={`text-xs ${MUTED}`}>{app.isActive ? "Active" : "Disabled"} →</span>
             </Link>
           ))}
