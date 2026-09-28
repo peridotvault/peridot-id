@@ -83,6 +83,10 @@ export default function App() {
   // True when the session family aged out (google families: 7 days) — the
   // login screen then asks for passkey confirmation instead of silently dying.
   const [stepUp, setStepUp] = useState(false);
+  // Whether a first-party session exists, resolved at bootstrap. An approval
+  // popup opened without one renders the login screen first (then resumes the
+  // handshake) instead of dead-ending on a 401.
+  const [authed, setAuthed] = useState(false);
   // Failsafe: a hung gate (fonts or network that never settles with no error)
   // must never trap the app on the loader forever — force it open degraded.
   const [gateForced, setGateForced] = useState(false);
@@ -201,6 +205,7 @@ export default function App() {
         }
       }
       if (alive && me && !("statusCode" in me)) {
+        setAuthed(true);
         if (loginContext) {
           // Auth-in-a-new-tab: keep the login screen mounted so it can deliver
           // the pid_code to the opener (or show the PID picker if none yet).
@@ -215,6 +220,7 @@ export default function App() {
       }
     } catch {
       // not logged in — stay on login
+      setAuthed(false);
     } finally {
       // Drop a spent ?pid_code= so it can't be re-read on re-render (web only).
       if (typeof window !== "undefined") {
@@ -263,7 +269,14 @@ export default function App() {
     <AppContext.Provider value={{ peridot }}>
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.colors.background }]}>
         {popupRequest ? (
-          <ApproveScreen popup={popupRequest} />
+          authed ? (
+            <ApproveScreen popup={popupRequest} onNeedAuth={() => setAuthed(false)} />
+          ) : (
+            // No session in this popup window: sign in here first, then the
+            // approval resumes (popup params are persisted across the OAuth
+            // round-trip by readPopupParams).
+            <LoginScreen onLoggedIn={() => setAuthed(true)} stepUp={stepUp} />
+          )
         ) : (
           <>
             {(screen === "login" || ssoRequest) && (

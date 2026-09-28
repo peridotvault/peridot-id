@@ -14,6 +14,9 @@ export const POPUP_READY = "pid-popup-ready";
 export const POPUP_REQUEST = "pid-popup-request";
 export const POPUP_RESULT = "pid-popup-result";
 
+/** sessionStorage key for an approval popup's params, kept across OAuth. */
+const POPUP_CTX_KEY = "pid_popup_ctx";
+
 export class PopupBlockedError extends Error {
   constructor() {
     super("Popup was blocked — allow popups for this site and try again.");
@@ -254,17 +257,42 @@ export function readPopupParams(): PopupParams | null {
     const q = new URLSearchParams(window.location.search);
     const action = q.get("popup") ?? "";
     const origin = parsePopupOrigin(q.get("origin"));
-    if (!action || !origin) return null;
-    const method = q.get("method") ?? undefined;
-    const clientId = q.get("client_id") ?? undefined;
-    return {
-      action,
-      origin,
-      ...(method ? { method } : {}),
-      ...(clientId ? { clientId } : {}),
-    };
+    if (action && origin) {
+      const method = q.get("method") ?? undefined;
+      const clientId = q.get("client_id") ?? undefined;
+      const params: PopupParams = {
+        action,
+        origin,
+        ...(method ? { method } : {}),
+        ...(clientId ? { clientId } : {}),
+      };
+      // Approval popups must survive the sign-in OAuth round-trip: the callback
+      // returns to the bare wallet origin and drops ?popup=…. Login keeps its
+      // own context (popup-login.ts), so it isn't stored here.
+      if (action !== "login") {
+        try {
+          window.sessionStorage.setItem(POPUP_CTX_KEY, JSON.stringify(params));
+        } catch {
+          // private mode / storage disabled — this load still works
+        }
+      }
+      return params;
+    }
+    const raw = window.sessionStorage.getItem(POPUP_CTX_KEY);
+    if (raw) return JSON.parse(raw) as PopupParams;
   } catch {
-    return null;
+    // ignore
+  }
+  return null;
+}
+
+/** Hosted side: drop a persisted approval popup context once it has resolved. */
+export function clearPopupParams(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(POPUP_CTX_KEY);
+  } catch {
+    // ignore
   }
 }
 
@@ -303,6 +331,7 @@ export async function awaitPopupRequest(targetOrigin: string, timeoutMs = 30_000
 /** Hosted side: deliver the result to the opener and close (unless keepOpen). */
 export function postPopupResult(targetOrigin: string, result: PopupResult, opts?: { keepOpen?: boolean }): void {
   requireBrowser();
+  clearPopupParams();
   if (!window.opener) return;
   window.opener.postMessage({ type: POPUP_RESULT, ...result }, targetOrigin);
   if (!opts?.keepOpen) window.close();

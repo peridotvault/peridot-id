@@ -97,3 +97,47 @@ test("openLoginTab: opens a new tab directly", async () => {
     },
   );
 });
+
+/** Install a fake hosted (wallet-side) window. `store` persists across the
+ *  calls of one tab (sessionStorage survives a navigation, not a new window). */
+async function withHostedWindow(search, fn, store = new Map()) {
+  const saved = globalThis.window;
+  globalThis.window = {
+    location: { search },
+    sessionStorage: {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    },
+  };
+  try {
+    return await fn();
+  } finally {
+    globalThis.window = saved;
+  }
+}
+
+test("readPopupParams: approval params survive the OAuth round-trip", async () => {
+  const { readPopupParams, clearPopupParams } = await import("../dist/esm/popup.js");
+  const store = new Map();
+  await withHostedWindow(`?popup=fiat-transfer&origin=${DAPP_ORIGIN}`, () => {
+    assert.deepEqual(readPopupParams(), { action: "fiat-transfer", origin: DAPP_ORIGIN });
+  }, store);
+  // Callback returns to the bare wallet origin — no query params.
+  await withHostedWindow("", () => {
+    assert.deepEqual(readPopupParams(), { action: "fiat-transfer", origin: DAPP_ORIGIN });
+    clearPopupParams();
+    assert.equal(readPopupParams(), null);
+  }, store);
+});
+
+test("readPopupParams: login is not persisted here (has its own context)", async () => {
+  const { readPopupParams } = await import("../dist/esm/popup.js");
+  const store = new Map();
+  await withHostedWindow(`?popup=login&origin=${DAPP_ORIGIN}`, () => {
+    assert.equal(readPopupParams()?.action, "login");
+  }, store);
+  await withHostedWindow("", () => {
+    assert.equal(readPopupParams(), null);
+  }, store);
+});

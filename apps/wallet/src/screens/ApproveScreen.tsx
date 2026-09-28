@@ -107,7 +107,21 @@ function isFiatAction(action: string): boolean {
   return action === "fiat-transfer" || action === "fiat-checkout";
 }
 
-export function ApproveScreen({ popup }: { popup: PopupParams }) {
+/** A 401/expired-session error, as opposed to a real business failure. */
+function isSessionError(e: unknown): boolean {
+  const message = e instanceof Error ? e.message : String(e);
+  return /401|unauthorized|not registered|not signed in|session/i.test(message);
+}
+
+/** Map a session error to actionable copy; anything else stays verbatim. */
+function signInHint(e: unknown): string {
+  if (isSessionError(e)) {
+    return "Sign in to your PeridotID wallet in this window first, then ask the app to retry.";
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
+export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?: () => void }) {
   const { peridot } = usePeridot();
   const [phase, setPhase] = useState<Phase>("waiting");
   const [action, setAction] = useState(popup.action);
@@ -145,7 +159,7 @@ export function ApproveScreen({ popup }: { popup: PopupParams }) {
         `Send ${fmtIdr(inq.netIdr)} to ${beneficiaryPid} · fee ${fmtIdr(inq.feeIdr)} · total debited ${fmtIdr(inq.grossIdr)}`,
       );
     },
-    [peridot],
+    [peridot, onNeedAuth],
   );
 
   /** Server-side prepare for fiat-checkout: create the intent now (moves no
@@ -188,6 +202,10 @@ export function ApproveScreen({ popup }: { popup: PopupParams }) {
         if (!cancelled) setPhase("review");
       } catch (e) {
         if (!cancelled) {
+          if (isSessionError(e) && onNeedAuth) {
+            onNeedAuth();
+            return;
+          }
           setError(signInHint(e));
           setPhase("failed");
         }
@@ -198,16 +216,6 @@ export function ApproveScreen({ popup }: { popup: PopupParams }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [popup.origin]);
-
-  /** Host has no session (user not logged in here): tell them to sign in
-   *  first instead of surfacing a raw 401. Matches existing withdraw posture. */
-  function signInHint(e: unknown): string {
-    const message = e instanceof Error ? e.message : String(e);
-    if (/401|unauthorized|not registered|not signed in|session/i.test(message)) {
-      return "Sign in to your PeridotID wallet in this window first, then ask the app to retry.";
-    }
-    return message;
-  }
 
   const deny = useCallback(() => {
     // Best-effort cleanup of server state created during prepare (intent /
@@ -246,6 +254,13 @@ export function ApproveScreen({ popup }: { popup: PopupParams }) {
       }
       setPhase("done");
     } catch (e) {
+      // Session gone mid-flow: re-authenticate in this window and retry the
+      // approval (the popup params persist across the OAuth round-trip). Don't
+      // post a failure — the request is still pending.
+      if (isSessionError(e) && onNeedAuth) {
+        onNeedAuth();
+        return;
+      }
       const message = e instanceof Error ? e.message : String(e);
       try {
         postPopupResult(popup.origin, { ok: false, error: message });
@@ -255,7 +270,7 @@ export function ApproveScreen({ popup }: { popup: PopupParams }) {
       setError(signInHint(message));
       setPhase("review");
     }
-  }, [peridot, action, payload, inquiry, intent, popup.origin]);
+  }, [peridot, action, payload, inquiry, intent, popup.origin, onNeedAuth]);
 
   return (
     <View style={s.container}>
