@@ -1,5 +1,13 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.4.1
+
+- **Approval popups survive sign-in.** `readPopupParams()` now persists the
+  popup's request params in `sessionStorage`, so an approval popup can route
+  through the OAuth sign-in round-trip (whose callback returns to the bare
+  wallet origin) and resume the approval. New `clearPopupParams()` drops the
+  persisted context once the ceremony resolves (called by `postPopupResult`).
+
 ## 1.4.0
 
 - **Login opens a popup, not a tab.** `peridot.auth.loginPopup()` (and
