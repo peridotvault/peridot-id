@@ -9,9 +9,12 @@ import {
   accountRefreshCookieNames,
   clearAccountRefreshCookie,
   clearAuthCookies,
+  clearScopedAuthCookies,
   REFRESH_COOKIE,
+  scopeRefreshCookie,
   setActiveAuthCookies,
   setAuthCookies,
+  setScopedAuthCookies,
 } from "../common/cookies";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
@@ -110,6 +113,7 @@ export class AuthService {
     userAgent: string | undefined,
     rotatedFrom?: string,
     authMethod?: "google" | "passkey",
+    scope?: string | null,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const accessTtl = this.config.get<string>("ACCESS_TOKEN_TTL", "15m");
     const refreshTtl = this.config.get<string>("REFRESH_TOKEN_TTL", "30d");
@@ -141,12 +145,27 @@ export class AuthService {
       data: { id: jti, deviceId, rotatedFrom: rotatedFrom ?? null, expiresAt: new Date(Date.now() + ms(refreshTtl)) },
     });
 
-    setAuthCookies(res, this.config, accessToken, refreshToken, pid);
+    if (scope) {
+      // Client app gets its own session cookies, separate from the wallet's.
+      setScopedAuthCookies(res, this.config, scope, accessToken, refreshToken);
+    } else {
+      setAuthCookies(res, this.config, accessToken, refreshToken, pid);
+    }
     return { accessToken, refreshToken };
   }
 
-  async rotateSession(req: Request, res: Response): Promise<void> {
-    const token = (req as Request & { cookies?: Record<string, string> }).cookies?.[REFRESH_COOKIE];
+  /**
+   * Mint an independent session for a first-party client app (carries its own
+   * cookies + session row). The wallet's session is untouched, so logging out of
+   * either side never logs out the other.
+   */
+  async grantAppSession(res: Response, pid: string, scope: string, userAgent: string | undefined): Promise<void> {
+    await this.issueSession(res, pid, userAgent, undefined, undefined, scope);
+  }
+
+  async rotateSession(req: Request, res: Response, scope: string | null = null): Promise<void> {
+    const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
+    const token = scope ? cookies?.[scopeRefreshCookie(scope)] : cookies?.[REFRESH_COOKIE];
     if (!token) throw new UnauthorizedException("Missing refresh token");
 
     let payload: RefreshTokenPayload;
@@ -178,7 +197,7 @@ export class AuthService {
       // grace path never forks a second valid chain. (The winner passed the
       // family-cap check <60s ago when it rotated, so no re-check here.)
       await this.prisma.session.update({ where: { id: child.id }, data: { revokedAt: new Date() } });
-      await this.issueSession(res, payload.sub, req.headers["user-agent"], child.id);
+      await this.issueSession(res, payload.sub, req.headers["user-agent"], child.id, undefined, scope);
       return;
     }
 
@@ -203,22 +222,24 @@ export class AuthService {
 
     await this.prisma.session.update({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
 
-    await this.issueSession(res, payload.sub, req.headers["user-agent"], payload.jti);
+    await this.issueSession(res, payload.sub, req.headers["user-agent"], payload.jti, undefined, scope);
   }
 
-  async logout(req: Request, res: Response): Promise<void> {
-    const token = (req as Request & { cookies?: Record<string, string> }).cookies?.[REFRESH_COOKIE];
+  async logout(req: Request, res: Response, scope: string | null = null): Promise<void> {
+    const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
+    const token = scope ? cookies?.[scopeRefreshCookie(scope)] : cookies?.[REFRESH_COOKIE];
     if (token) {
       try {
         const payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
         await this.prisma.session.updateMany({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
         // Signing out the active identity also drops it from the account list.
-        clearAccountRefreshCookie(res, this.config, payload.sub);
+        if (!scope) clearAccountRefreshCookie(res, this.config, payload.sub);
       } catch {
         // already invalid, just clear
       }
     }
-    clearAuthCookies(res, this.config);
+    if (scope) clearScopedAuthCookies(res, this.config, scope);
+    else clearAuthCookies(res, this.config);
   }
 
   /** Decode a refresh JWT to its identity + session jti (null if invalid). */

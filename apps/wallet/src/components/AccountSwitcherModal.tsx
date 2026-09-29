@@ -24,7 +24,8 @@ export function AccountSwitcherModal({
   onClose: () => void;
   onSelect: (pid: string) => void;
   onAdd: () => void;
-  onSignOut: (pid: string) => void;
+  /** Omit to hide the per-account sign-out affordance (e.g. login picker). */
+  onSignOut?: (pid: string) => void;
 }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -65,7 +66,7 @@ export function AccountSwitcherModal({
               </View>
               {a.isActive ? (
                 <Check size={18} color={theme.colors.foreground} />
-              ) : (
+              ) : onSignOut ? (
                 <Pressable
                   onPress={() => onSignOut(a.pid)}
                   disabled={busy}
@@ -74,7 +75,7 @@ export function AccountSwitcherModal({
                 >
                   <LogOut size={16} color={theme.colors.mutedForeground} />
                 </Pressable>
-              )}
+              ) : null}
             </Pressable>
           ))}
           {accounts.length === 0 && <Text style={s.hint}>No accounts signed in.</Text>}

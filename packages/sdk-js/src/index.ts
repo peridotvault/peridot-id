@@ -92,6 +92,12 @@ export interface PeridotOptions {
   clientId?: string;
   /** Backend-only app secret (`pidsk_…`). NEVER ship in browser code — used by `auth.exchange`. */
   clientSecret?: string;
+  /**
+   * First-party client session namespace. Adds `x-pid-scope` to every request
+   * so this app reads its own session cookies (`pid_access_<scope>`), separate
+   * from the wallet's — logging out of either never logs out the other.
+   */
+  sessionScope?: string;
   /** Force the target environment (e.g. `sandbox` for a staging build). Default: NODE_ENV-derived. */
   env?: PeridotEnv;
   /** Advanced: API origin override (self-host/localhost). Defaults to the env preset. */
@@ -154,7 +160,7 @@ export class PeridotAuth {
    * new tab when the popup is blocked. Throws `PopupUnavailableError` when no
    * host is configured.
    */
-  async loginPopup(opts?: { clientId?: string; returnTo?: string; method?: string }): Promise<{ pidCode?: string }> {
+  async loginPopup(opts?: { clientId?: string; returnTo?: string; method?: string; firstParty?: boolean; sessionScope?: string }): Promise<{ pidCode?: string }> {
     return this.openLogin(openLoginPopup, opts);
   }
 
@@ -162,14 +168,14 @@ export class PeridotAuth {
    * Sign in via the PeridotID origin in a new tab. Same result as `loginPopup`;
    * opt in when a tab is preferred over a popup.
    */
-  async loginTab(opts?: { clientId?: string; returnTo?: string; method?: string }): Promise<{ pidCode?: string }> {
+  async loginTab(opts?: { clientId?: string; returnTo?: string; method?: string; firstParty?: boolean; sessionScope?: string }): Promise<{ pidCode?: string }> {
     return this.openLogin(openLoginTab, opts);
   }
 
   /** Shared host guard + login popup params for {@link loginPopup}/{@link loginTab}. */
   private async openLogin(
     opener: (opts: { popupBaseUrl: string; params: Record<string, string | undefined> }) => Promise<{ pidCode?: string }>,
-    opts?: { clientId?: string; returnTo?: string; method?: string },
+    opts?: { clientId?: string; returnTo?: string; method?: string; firstParty?: boolean; sessionScope?: string },
   ): Promise<{ pidCode?: string }> {
     if (!this.client.popupBaseUrl) {
       throw new PopupUnavailableError("No popup host configured — omit baseUrl so the env preset applies, or pass popupBaseUrl.");
@@ -184,6 +190,8 @@ export class PeridotAuth {
         ...(opts?.method ? { method: opts.method } : {}),
         ...(clientId ? { client_id: clientId } : {}),
         ...(opts?.returnTo ? { redirect_uri: opts.returnTo } : {}),
+        ...(opts?.firstParty ? { first_party: "1" } : {}),
+        ...(opts?.sessionScope ? { session_scope: opts.sessionScope } : {}),
       },
     });
   }
@@ -392,6 +400,16 @@ export class PeridotAuth {
     const res = await this.client.post("/v1/auth/accounts/signout", { pid });
     return res.ok;
   }
+
+  /**
+   * First-party login popup only: mint this app's own session
+   * (`pid_access_<scope>`) from the current wallet session, so the app logs out
+   * independently of the wallet.
+   */
+  async grantSession(scope: string): Promise<boolean> {
+    const res = await this.client.post("/v1/auth/session/scope", { scope });
+    return res.ok;
+  }
 }
 
 export class PeridotIdentity {
@@ -510,6 +528,7 @@ class PeridotClient {
     private walletOptions: PeridotWalletOptions,
     appOptions: { clientId?: string; clientSecret?: string } = {},
     private onUnauthorized?: () => void,
+    private readonly sessionScope?: string,
   ) {
     this.appOptions = appOptions;
     this.auth = new PeridotAuth(this);
@@ -535,7 +554,11 @@ class PeridotClient {
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       credentials: "include",
-      headers: { "Content-Type": "application/json", ...init.headers },
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.sessionScope ? { "x-pid-scope": this.sessionScope } : {}),
+        ...init.headers,
+      },
     });
     if (res.status === 401) {
       if (!path.startsWith("/v1/auth/")) this.onUnauthorized?.();
@@ -630,6 +653,7 @@ export function Peridot(options: PeridotOptions = {}): PeridotClient {
     },
     { clientId: options.clientId, clientSecret: options.clientSecret },
     options.onUnauthorized,
+    options.sessionScope,
   );
 }
 

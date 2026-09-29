@@ -380,6 +380,56 @@ describe("AuthService", () => {
   });
 });
 
+describe("AuthService app sessions (per-first-party logout isolation)", () => {
+  const A = "ifal@pid";
+
+  it("grantAppSession issues scoped cookies and never touches the wallet's unscoped ones", async () => {
+    const { service, res } = setup();
+    await service.grantAppSession(res as never, A, "web", "ua");
+    const names = (res.cookie as jest.Mock).mock.calls.map(([n]) => n);
+    expect(names).toContain("pid_access_web");
+    expect(names).toContain("pid_refresh_web");
+    expect(names).not.toContain("pid_access");
+    expect(names).not.toContain("pid_refresh");
+  });
+
+  it("scoped logout clears only the app session, never the wallet's", async () => {
+    const { service, res } = setup();
+    const wallet = await service.issueSession(res as never, A, "ua");
+    await service.grantAppSession(res as never, A, "web", "ua");
+    const appRefresh = (res.cookie as jest.Mock).mock.calls.filter(([n]) => n === "pid_refresh_web").pop()[1] as string;
+
+    const res2 = resMock();
+    const req = { cookies: { pid_refresh: wallet.refreshToken, pid_refresh_web: appRefresh } } as never;
+    await service.logout(req, res2 as never, "web");
+
+    const cleared = (res2.clearCookie as jest.Mock).mock.calls.map(([n]) => n);
+    expect(cleared).toContain("pid_access_web");
+    expect(cleared).toContain("pid_refresh_web");
+    expect(cleared).not.toContain("pid_access");
+    expect(cleared).not.toContain("pid_refresh");
+
+    // The wallet session survives the app's logout.
+    const still = await service.listAccounts({ cookies: { pid_refresh: wallet.refreshToken } } as never);
+    expect(still.map((x) => x.pid)).toEqual([A]);
+  });
+
+  it("wallet logout leaves the app's scoped session live", async () => {
+    const { service, res } = setup();
+    const wallet = await service.issueSession(res as never, A, "ua");
+    await service.grantAppSession(res as never, A, "web", "ua");
+    const appRefresh = (res.cookie as jest.Mock).mock.calls.filter(([n]) => n === "pid_refresh_web").pop()[1] as string;
+
+    await service.logout({ cookies: { pid_refresh: wallet.refreshToken } } as never, resMock() as never, null);
+
+    // The app's refresh token still resolves to a live session.
+    const accounts = await service.listAccounts({
+      cookies: { pid_refresh: appRefresh, pid_refresh_web: appRefresh },
+    } as never);
+    expect(accounts.map((x) => x.pid)).toContain(A);
+  });
+});
+
 function jwtPayload(token: string): RefreshTokenPayload {
   return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()) as RefreshTokenPayload;
 }

@@ -141,3 +141,20 @@ test("readPopupParams: login is not persisted here (has its own context)", async
     assert.equal(readPopupParams(), null);
   }, store);
 });
+
+test("readPopupParams: parses the first-party flag", async () => {
+  const { readPopupParams } = await import("../dist/esm/popup.js");
+  await withHostedWindow(`?popup=login&origin=${DAPP_ORIGIN}&first_party=1`, () => {
+    const p = readPopupParams();
+    assert.equal(p?.action, "login");
+    assert.equal(p?.firstParty, true);
+    assert.equal(p?.clientId, undefined, "first-party login needs no client_id");
+  });
+});
+
+test("readPopupParams: parses the session scope", async () => {
+  const { readPopupParams } = await import("../dist/esm/popup.js");
+  await withHostedWindow(`?popup=login&origin=${DAPP_ORIGIN}&first_party=1&session_scope=web`, () => {
+    assert.equal(readPopupParams()?.sessionScope, "web");
+  });
+});

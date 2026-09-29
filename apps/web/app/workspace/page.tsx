@@ -13,8 +13,7 @@ export default function WorkspacePage() {
     status,
     busy,
     error,
-    signInWithGoogle,
-    signInWithPasskey,
+    signIn,
   } = useWorkspace();
 
   if (status === "checking") {
@@ -38,20 +37,11 @@ export default function WorkspacePage() {
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <CutButton
               type="button"
-              onClick={signInWithGoogle}
+              onClick={signIn}
               disabled={busy}
               className={busy ? "pointer-events-none opacity-60" : ""}
             >
-              Continue with Google
-            </CutButton>
-            <CutButton
-              type="button"
-              variant="outline"
-              onClick={signInWithPasskey}
-              disabled={busy}
-              className={busy ? "pointer-events-none opacity-60" : ""}
-            >
-              {busy ? "Waiting…" : "Continue with Passkey"}
+              {busy ? "Waiting for wallet…" : "Sign in with PeridotID"}
             </CutButton>
           </div>
         </Card>

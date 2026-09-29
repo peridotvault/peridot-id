@@ -4,7 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { Request, Response } from "express";
 import { LoginResponse } from "@peridotvault/pid-types";
-import { CLAIM_COOKIE, REFRESH_COOKIE, clearClaimCookie, setClaimCookie } from "../common/cookies";
+import { CLAIM_COOKIE, REFRESH_COOKIE, clearClaimCookie, normalizeScope, setClaimCookie } from "../common/cookies";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { AuthenticateFinishDto } from "../credentials/dto/credential.dto";
 import { AuthenticateStartResult, CredentialService } from "../credentials/credential.service";
@@ -13,7 +13,7 @@ import { AuthService } from "./auth.service";
 import { ClaimService } from "./claim.service";
 import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { isPendingGoogleClaim } from "./google.strategy";
-import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto } from "./dto/auth.dto";
+import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto, GrantScopeDto } from "./dto/auth.dto";
 import { PidAppsService } from "./apps.service";
 import { decodeState, encodeState, SsoService } from "./sso.service";
 
@@ -335,14 +335,34 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<void> {
-    await this.authService.rotateSession(req, res);
+    await this.authService.rotateSession(req, res, normalizeScope(req.headers["x-pid-scope"]));
   }
 
   @Post("logout")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<void> {
-    await this.authService.logout(req, res);
+    // A scoped client logs out only its own session — never the wallet's.
+    await this.authService.logout(req, res, normalizeScope(req.headers["x-pid-scope"]));
+  }
+
+  /**
+   * Mint an independent session for a first-party client app: sets that app's
+   * own (`pid_access_<scope>`) cookies from the caller's wallet session. The
+   * wallet session is untouched, so app and wallet log out independently.
+   */
+  @Post("session/scope")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async grantScope(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GrantScopeDto,
+  ): Promise<{ ok: true; scope: string }> {
+    await this.authService.grantAppSession(res, user.pid, dto.scope, req.headers["user-agent"]);
+    return { ok: true, scope: dto.scope };
   }
 
   @Get("sessions")

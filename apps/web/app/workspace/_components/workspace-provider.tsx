@@ -19,10 +19,22 @@ function apiHost(url: string): string {
     return "";
   }
 }
+const LOOPBACK = ["localhost", "127.0.0.1", "::1"].includes(apiHost(API_BASE));
 const PID_ENV =
-  process.env.NEXT_PUBLIC_PID_ENV ??
-  (["localhost", "127.0.0.1", "::1"].includes(apiHost(API_BASE)) ? "sandbox" : "production");
+  process.env.NEXT_PUBLIC_PID_ENV ?? (LOOPBACK ? "sandbox" : "production");
+// The workspace is first-party: it authenticates through the wallet app (popup)
+// and shares the session cookie. In dev that wallet is the local Expo web app.
+const POPUP_URL =
+  process.env.NEXT_PUBLIC_PID_POPUP_URL ??
+  (LOOPBACK
+    ? "http://localhost:8081"
+    : PID_ENV === "production"
+      ? "https://app.pid.peridotvault.com"
+      : "https://app.sandbox.pid.peridotvault.com");
 const OTHER_WORKSPACE_URL = process.env.NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL;
+// The workspace's own session namespace: its cookies/session are separate from
+// the wallet's, so signing out here never signs the user out of the wallet.
+const SESSION_SCOPE = "web";
 
 export type WorkspaceStatus = "checking" | "anonymous" | "owner";
 
@@ -41,8 +53,7 @@ interface WorkspaceContextValue {
   otherWorkspaceUrl?: string;
   busy: boolean;
   error: string | null;
-  signInWithGoogle: () => void;
-  signInWithPasskey: () => void;
+  signIn: () => void;
   signOut: () => void;
 }
 
@@ -56,7 +67,7 @@ export function useWorkspace(): WorkspaceContextValue {
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [client] = useState<PeridotClient>(() =>
-    Peridot({ baseUrl: API_BASE }),
+    Peridot({ baseUrl: API_BASE, popupBaseUrl: POPUP_URL, sessionScope: SESSION_SCOPE }),
   );
   const [status, setStatus] = useState<WorkspaceStatus>("checking");
   const [role, setRole] = useState<Role>("user");
@@ -66,15 +77,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const cleanReturnTo = useCallback(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("pid_code");
-    return url.toString();
-  }, []);
-
   const refreshSession = useCallback(async () => {
     try {
-      const me = await client.identity.me();
+      let me = await client.identity.me();
+      // Access tokens are short-lived; the scoped refresh cookie revives the
+      // workspace session without a fresh popup login.
+      if ("statusCode" in me && (await client.auth.refresh()) === true) {
+        me = await client.identity.me();
+      }
       if ("statusCode" in me) {
         setStatus("anonymous");
       } else {
@@ -91,41 +101,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     void refreshSession();
   }, [refreshSession]);
 
-  const signInWithGoogle = useCallback(() => {
-    setBusy(true);
-    setError(null);
-    client.auth
-      .login({ returnTo: cleanReturnTo() })
-      .then((url) => {
-        if (url) window.location.assign(url);
-        else {
-          setError("Couldn't reach Google — try again.");
-          setBusy(false);
-        }
-      })
-      .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : "Google sign-in failed");
-        setBusy(false);
-      });
-  }, [client, cleanReturnTo]);
-
-  const signInWithPasskey = useCallback(async () => {
+  // First-party sign-in: the wallet app (popup) handles Google + passkey + the
+  // account switcher. No client_id/secret — the session cookie is shared.
+  const signIn = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const res = await client.auth.loginWithPasskey({ returnTo: cleanReturnTo() });
-      if (!res.ok) {
-        setError("Sign-in was cancelled — try again.");
-        return;
-      }
-      // Passkey returns no identity — reload role/id from the fresh session.
+      await client.auth.loginPopup({ firstParty: true, sessionScope: SESSION_SCOPE });
       await refreshSession();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Passkey sign-in failed");
+      const msg = e instanceof Error ? e.message : String(e);
+      // User closed / cancelled the popup stays quiet; real failures surface.
+      if (!/closed|cancel|denied|rejected/i.test(msg)) setError(msg || "Sign-in failed");
     } finally {
       setBusy(false);
     }
-  }, [client, cleanReturnTo, refreshSession]);
+  }, [client, refreshSession]);
 
   const signOut = useCallback(async () => {
     try {
@@ -196,11 +187,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       otherWorkspaceUrl: OTHER_WORKSPACE_URL,
       busy,
       error,
-      signInWithGoogle,
-      signInWithPasskey,
+      signIn,
       signOut,
     }),
-    [client, status, role, isAdmin, pid, tabs, tab, onTab, contractChainId, openContracts, busy, error, signInWithGoogle, signInWithPasskey, signOut],
+    [client, status, role, isAdmin, pid, tabs, tab, onTab, contractChainId, openContracts, busy, error, signIn, signOut],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

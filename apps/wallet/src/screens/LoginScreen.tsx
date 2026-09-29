@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
+import type { AccountView } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { deliverLoginCode, readLoginContext, rejectLogin, type LoginContext } from "../popup-login";
 import { readSsoParams, ssoOrigin, withDenied, withPidCode } from "../sso";
 import { theme, styles as s } from "../theme";
+import { AccountSwitcherModal } from "../components/AccountSwitcherModal";
 import { AsciiRidges } from "../components/AsciiRidges";
 import { LoadingScreen } from "../components/LoadingScreen";
 import { SsoConsentModal } from "../components/SsoConsentModal";
@@ -48,6 +50,9 @@ export function LoginScreen({
   // of forcing a redundant login. undefined = still checking, null = none.
   const [session, setSession] = useState<{ label: string } | null | undefined>(sso || ctx ? undefined : null);
   const [showLogin, setShowLogin] = useState(false);
+  // Client-login account picker ("Use a different account"): null = closed.
+  const [picker, setPicker] = useState<AccountView[] | null>(null);
+  const [pickerError, setPickerError] = useState<string | null>(null);
   // Verified-partner badge (server-sourced trust signal, fail-closed to hidden).
   const appClientId = sso?.clientId ?? ctx?.clientId;
   const [appVerified, setAppVerified] = useState(false);
@@ -114,6 +119,8 @@ export function LoginScreen({
    */
   useEffect(() => {
     if (!ctx || !session || claim !== null || delivered.current) return;
+    // A pre-existing session waits for the consent modal's Allow — the app must
+    // always be approved (never silently signed in).
     if (hadSessionAtOpen.current === true && !showLogin) return;
     delivered.current = true;
     void deliverLoginCode(peridot, ctx);
@@ -347,8 +354,23 @@ export function LoginScreen({
     }
   };
 
-  /** "Use a different account": drop the current session, show the login form. */
+  /** "Use a different account": pick another linked identity (client login) or
+   *  drop the session and log in fresh (third-party SSO). */
   const useDifferentCtx = async () => {
+    if (ctx?.firstParty) {
+      setBusy(true);
+      setPickerError(null);
+      try {
+        const res = await peridot.auth.accounts();
+        setPicker(Array.isArray(res) ? (res as AccountView[]) : []);
+      } catch (e) {
+        setPickerError(e instanceof Error ? e.message : String(e));
+        setPicker([]);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setBusy(true);
     try {
       await peridot.auth.logout();
@@ -360,6 +382,32 @@ export function LoginScreen({
       setShowLogin(true);
       setBusy(false);
     }
+  };
+
+  /** Pick a linked identity for the pending client login, then re-consent. */
+  const pickAccount = async (pid: string) => {
+    setBusy(true);
+    setPickerError(null);
+    try {
+      if (!(await peridot.auth.switchAccount(pid))) throw new Error("Couldn't switch account.");
+      const account = picker?.find((a) => a.pid === pid);
+      delivered.current = false;
+      setPicker(null);
+      setShowLogin(false);
+      setSession({ label: account?.displayName ?? pid });
+    } catch (e) {
+      setPickerError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Add a brand-new identity for this client login (falls back to the form). */
+  const addAccountCtx = () => {
+    delivered.current = false;
+    setPicker(null);
+    setSession(null);
+    setShowLogin(true);
   };
 
   // Popup opened from a method button: auto-start that method once the login
@@ -471,6 +519,19 @@ export function LoginScreen({
 
   // Auth-in-a-new-tab + pre-existing session: explicit consent, same card as SSO.
   if (ctx && session && !showLogin && claim === null) {
+    if (picker !== null) {
+      return (
+        <AccountSwitcherModal
+          visible
+          accounts={picker}
+          busy={busy}
+          error={pickerError}
+          onClose={() => setPicker(null)}
+          onSelect={pickAccount}
+          onAdd={addAccountCtx}
+        />
+      );
+    }
     return (
       <SsoConsentModal
         origin={ctx.origin}

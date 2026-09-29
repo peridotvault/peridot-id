@@ -65,6 +65,43 @@ export function clearAccountRefreshCookie(res: Response, config: ConfigService, 
   res.clearCookie(accountRefreshCookieName(pid), opts);
 }
 
+/**
+ * App-scoped session cookies. A first-party client app (e.g. the workspace)
+ * carries its OWN session under `pid_access_<scope>` / `pid_refresh_<scope>`,
+ * separate from the wallet's unscoped session — so logging out of the app never
+ * touches the wallet, and vice versa. Distinct from the account cookies
+ * (`pid_refresh__<hash>`, double underscore).
+ */
+const SCOPE_RE = /^[a-z0-9_]{1,32}$/;
+
+/** Sanitize an app scope from a request header; null when absent/invalid. */
+export function normalizeScope(scope: string | string[] | undefined): string | null {
+  const raw = Array.isArray(scope) ? scope[0] : scope;
+  const s = (raw ?? "").trim().toLowerCase();
+  return SCOPE_RE.test(s) ? s : null;
+}
+
+export function scopeAccessCookie(scope: string): string {
+  return `pid_access_${scope}`;
+}
+export function scopeRefreshCookie(scope: string): string {
+  return `pid_refresh_${scope}`;
+}
+
+export function setScopedAuthCookies(res: Response, config: ConfigService, scope: string, access: string, refresh: string): void {
+  const opts = baseOpts(config);
+  res.cookie(scopeAccessCookie(scope), access, { ...opts, maxAge: ms(config.get<string>("ACCESS_TOKEN_TTL", "15m")) });
+  res.cookie(scopeRefreshCookie(scope), refresh, { ...opts, path: REFRESH_PATH, maxAge: ms(config.get<string>("REFRESH_TOKEN_TTL", "30d")) });
+}
+
+export function clearScopedAuthCookies(res: Response, config: ConfigService, scope: string): void {
+  const domain = config.get<string>("COOKIE_DOMAIN", "");
+  const opts: Record<string, unknown> = {};
+  if (domain && domain !== "localhost") opts.domain = domain;
+  res.clearCookie(scopeAccessCookie(scope), opts);
+  res.clearCookie(scopeRefreshCookie(scope), { ...opts, path: REFRESH_PATH });
+}
+
 export function clearAuthCookies(res: Response, config: ConfigService): void {
   const domain = config.get<string>("COOKIE_DOMAIN", "");
   const opts: Record<string, unknown> = {};

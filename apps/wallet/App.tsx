@@ -1,5 +1,5 @@
 import "./polyfills";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { useFonts, Geist_400Regular, Geist_500Medium, Geist_600SemiBold, Geist_700Bold } from "@expo-google-fonts/geist";
 import { SourceSerif4_400Regular } from "@expo-google-fonts/source-serif-4";
@@ -168,6 +168,7 @@ export default function App() {
 
   const handleLoggedIn = useCallback(() => {
     setStepUp(false);
+    setAuthed(true);
     void routeAfterAuth();
   }, [routeAfterAuth]);
 
@@ -253,6 +254,40 @@ export default function App() {
     bootstrap();
   }, [bootstrap, sessionEpoch]);
 
+  // Cross-tab / refocus session sync. A login in another tab (or the login
+  // popup, whose cookie write can't notify this tab) leaves an already-open
+  // window showing logged-out. When logged out, re-check on focus, on becoming
+  // visible, or on the popup's session ping.
+  const authedRef = useRef(authed);
+  authedRef.current = authed;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    // Popup windows own their lifecycle — never disturb them.
+    if (popupRequest || loginContext) return;
+    let last = 0;
+    const recheck = () => {
+      if (authedRef.current) return;
+      const now = Date.now();
+      if (now - last < 2000) return;
+      last = now;
+      void bootstrap();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recheck();
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "pid_session_ping") recheck();
+    };
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("focus", recheck);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [bootstrap, popupRequest, loginContext]);
+
   useEffect(() => {
     // Static pre-JS splash handoff: React mounted, drop the template node.
     if (typeof document !== "undefined") document.getElementById("splash")?.remove();
@@ -264,6 +299,7 @@ export default function App() {
     } catch {
       // best-effort: still clear the UI session even if the server call fails
     } finally {
+      setAuthed(false);
       setScreen("login");
     }
   }, []);

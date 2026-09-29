@@ -70,3 +70,9 @@ export class SwitchAccountDto {
   @Matches(PID_REGEX, { message: "pid must be <handle>@pid" })
   pid!: string;
 }
+
+/** Mint an independent session for a first-party client app (its own cookies). */
+export class GrantScopeDto {
+  @Matches(/^[a-z0-9_]{1,32}$/, { message: "scope must be 1-32 chars: lowercase letters, numbers, underscore" })
+  scope!: string;
+}

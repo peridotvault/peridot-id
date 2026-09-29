@@ -248,6 +248,14 @@ export interface PopupParams {
   method?: string;
   /** Registered app this login is for (binds the issued pid_code). */
   clientId?: string;
+  /**
+   * First-party opener (a PeridotID-owned page on the shared cookie domain):
+   * authenticate and close — no pid_code, no consent step. The caller relies on
+   * the shared session cookie. Safe for any opener to request: it yields no code.
+   */
+  firstParty?: boolean;
+  /** First-party opener's session namespace — see `sessionScope` on the client. */
+  sessionScope?: string;
 }
 
 /** Hosted side: parse `?popup=<action>&origin=<origin>&method=…&client_id=…`. */
@@ -260,11 +268,15 @@ export function readPopupParams(): PopupParams | null {
     if (action && origin) {
       const method = q.get("method") ?? undefined;
       const clientId = q.get("client_id") ?? undefined;
+      const firstParty = q.get("first_party") === "1";
+      const sessionScope = q.get("session_scope") ?? undefined;
       const params: PopupParams = {
         action,
         origin,
         ...(method ? { method } : {}),
         ...(clientId ? { clientId } : {}),
+        ...(firstParty ? { firstParty: true } : {}),
+        ...(sessionScope ? { sessionScope } : {}),
       };
       // Approval popups must survive the sign-in OAuth round-trip: the callback
       // returns to the bare wallet origin and drops ?popup=…. Login keeps its

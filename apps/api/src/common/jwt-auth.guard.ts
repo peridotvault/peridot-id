@@ -1,11 +1,27 @@
 import { ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { Request } from "express";
-import { ACCESS_COOKIE } from "./cookies";
+import { ACCESS_COOKIE, normalizeScope, scopeAccessCookie } from "./cookies";
 
-const cookieExtractor = (req: Request): string | null => {
-  const cookie = (req as Request & { cookies?: Record<string, string> }).cookies?.[ACCESS_COOKIE];
-  return cookie ?? null;
+/**
+ * Session cookie selection: a client app sends `x-pid-scope: <app>` and gets its
+ * own scoped session; with no scope header (the wallet) we read the unscoped
+ * session. Scope format is validated so it can never name another cookie.
+ *
+ * `walletOrigin` (CLIENT_SUCCESS_URL) additionally restricts the unscoped wallet
+ * session to the wallet's own origin, so a sibling first-party app can't reach it
+ * by simply dropping the scope header. Requests with no Origin (non-browser) are
+ * unaffected — those authenticate with a Bearer token anyway.
+ */
+const cookieExtractor = (req: Request, walletOrigin?: string | null): string | null => {
+  const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
+  const scope = normalizeScope(req.headers["x-pid-scope"]);
+  if (scope) return cookies?.[scopeAccessCookie(scope)] ?? null;
+  if (walletOrigin) {
+    const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+    if (origin && origin.replace(/\/+$/, "") !== walletOrigin.replace(/\/+$/, "")) return null;
+  }
+  return cookies?.[ACCESS_COOKIE] ?? null;
 };
 
 /**
