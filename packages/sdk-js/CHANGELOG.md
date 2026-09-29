@@ -1,5 +1,21 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.5.0
+
+- **Multi-account auth.** `auth.accounts()` lists the identities signed into the
+  browser; `auth.switchAccount(pid)` makes a linked identity active without
+  re-authenticating; `auth.signOutAccount(pid)` forgets one (leaves the rest).
+  New `AccountView` type (from `@peridotvault/pid-types` ≥ 0.1.5).
+- **Per-app session isolation.** `Peridot({ sessionScope })` adds an
+  `x-pid-scope` header so a first-party client app reads its own session cookies
+  (`pid_access_<scope>`), separate from the wallet's — signing out of either
+  never signs out the other.
+- **First-party login without a client_id/secret.** `loginPopup({ firstParty,
+  sessionScope })` authenticates via the wallet popup and mints the client app's
+  own scoped session (`auth.grantSession(scope)`); no `pid_code`, no consent
+  redirect. The popup always asks the user to approve.
+- `readPopupParams()` now parses `first_party` and `session_scope`.
+
 ## 1.4.1
 
 - **Approval popups survive sign-in.** `readPopupParams()` now persists the
