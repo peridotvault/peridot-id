@@ -13,7 +13,7 @@ import { AuthService } from "./auth.service";
 import { ClaimService } from "./claim.service";
 import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { isPendingGoogleClaim } from "./google.strategy";
-import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto } from "./dto/auth.dto";
+import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto } from "./dto/auth.dto";
 import { PidAppsService } from "./apps.service";
 import { decodeState, encodeState, SsoService } from "./sso.service";
 
@@ -189,6 +189,43 @@ export class AuthController {
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async grants(@CurrentUser() user: AuthenticatedUser) {
     return this.ssoService.listGrants(user.pid);
+  }
+
+  /**
+   * Identities signed into this browser (wallet account switcher). Resolved from
+   * the httpOnly per-identity refresh cookies, so it works even with an expired
+   * access token. Returns only identities this browser actually holds.
+   */
+  @Get("accounts")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async accounts(@Req() req: Request) {
+    return this.authService.listAccounts(req);
+  }
+
+  /** Make a linked identity active without re-authenticating (rotates the access cookie). */
+  @Post("accounts/switch")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async switchAccount(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: SwitchAccountDto,
+  ): Promise<{ ok: true; pid: string }> {
+    await this.authService.switchAccount(req, res, dto.pid);
+    return { ok: true, pid: dto.pid };
+  }
+
+  /** Forget one identity in this browser (revokes its session, leaves the rest). */
+  @Post("accounts/signout")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async signOutAccount(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: SwitchAccountDto,
+  ): Promise<{ ok: true }> {
+    await this.authService.signOutAccount(req, res, dto.pid);
+    return { ok: true };
   }
 
   @Delete("grants/:id")

@@ -4,7 +4,15 @@ import { JwtService } from "@nestjs/jwt";
 import { randomUUID } from "crypto";
 import { Request, Response } from "express";
 import ms from "ms";
-import { clearAuthCookies, REFRESH_COOKIE, setAuthCookies } from "../common/cookies";
+import {
+  accountRefreshCookieName,
+  accountRefreshCookieNames,
+  clearAccountRefreshCookie,
+  clearAuthCookies,
+  REFRESH_COOKIE,
+  setActiveAuthCookies,
+  setAuthCookies,
+} from "../common/cookies";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -133,7 +141,7 @@ export class AuthService {
       data: { id: jti, deviceId, rotatedFrom: rotatedFrom ?? null, expiresAt: new Date(Date.now() + ms(refreshTtl)) },
     });
 
-    setAuthCookies(res, this.config, accessToken, refreshToken);
+    setAuthCookies(res, this.config, accessToken, refreshToken, pid);
     return { accessToken, refreshToken };
   }
 
@@ -204,11 +212,94 @@ export class AuthService {
       try {
         const payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
         await this.prisma.session.updateMany({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
+        // Signing out the active identity also drops it from the account list.
+        clearAccountRefreshCookie(res, this.config, payload.sub);
       } catch {
         // already invalid, just clear
       }
     }
     clearAuthCookies(res, this.config);
+  }
+
+  /** Decode a refresh JWT to its identity + session jti (null if invalid). */
+  private async verifyRefresh(token: string): Promise<{ pid: string; jti: string } | null> {
+    try {
+      const payload = await this.jwt.verifyAsync<RefreshTokenPayload>(token, {
+        secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
+      });
+      if (payload.type !== "refresh") return null;
+      return { pid: payload.sub, jti: payload.jti };
+    } catch {
+      return null;
+    }
+  }
+
+  private async sessionLive(jti: string): Promise<boolean> {
+    const session = await this.prisma.session.findUnique({ where: { id: jti } });
+    return !!session && !session.revokedAt && session.expiresAt > new Date();
+  }
+
+  /**
+   * Identities with a live session in this browser (wallet account switcher).
+   * Sourced from the per-identity refresh cookies; the active identity is
+   * whichever `pid_refresh` currently holds. Legacy single-session browsers
+   * (no per-identity cookie yet) report just the active identity.
+   */
+  async listAccounts(req: Request): Promise<
+    { pid: string; displayName: string | null; avatarUrl: string | null; isActive: boolean }[]
+  > {
+    const cookies = (req as Request & { cookies?: Record<string, string> }).cookies ?? {};
+    const active = cookies[REFRESH_COOKIE] ? await this.verifyRefresh(cookies[REFRESH_COOKIE]) : null;
+    const tokens = accountRefreshCookieNames(cookies).map((n) => cookies[n]);
+    if (tokens.length === 0 && cookies[REFRESH_COOKIE]) tokens.push(cookies[REFRESH_COOKIE]);
+
+    const seen = new Set<string>();
+    const accounts: { pid: string; displayName: string | null; avatarUrl: string | null; isActive: boolean }[] = [];
+    for (const token of tokens) {
+      const v = await this.verifyRefresh(token);
+      if (!v || seen.has(v.pid) || !(await this.sessionLive(v.jti))) continue;
+      seen.add(v.pid);
+      const profile = await this.prisma.profile.findUnique({ where: { pid: v.pid } });
+      accounts.push({
+        pid: v.pid,
+        displayName: profile?.displayName ?? null,
+        avatarUrl: profile?.avatarUrl ?? null,
+        isActive: active?.pid === v.pid,
+      });
+    }
+    return accounts.sort((a, b) => (a.isActive === b.isActive ? a.pid.localeCompare(b.pid) : a.isActive ? -1 : 1));
+  }
+
+  /**
+   * Make a linked identity active without re-authenticating: re-issue the
+   * active access cookie from that identity's own (httpOnly) refresh cookie.
+   */
+  async switchAccount(req: Request, res: Response, pid: string): Promise<void> {
+    const cookies = (req as Request & { cookies?: Record<string, string> }).cookies ?? {};
+    const token = cookies[accountRefreshCookieName(pid)];
+    if (!token) throw new UnauthorizedException("No session for that account");
+    const v = await this.verifyRefresh(token);
+    if (!v || v.pid !== pid || !(await this.sessionLive(v.jti))) {
+      throw new UnauthorizedException("Account session expired — sign in again");
+    }
+    const accessToken = await this.jwt.signAsync(
+      { sub: pid, type: "access" },
+      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: this.config.get<string>("ACCESS_TOKEN_TTL", "15m") },
+    );
+    setActiveAuthCookies(res, this.config, accessToken, token);
+  }
+
+  /** Forget one identity in this browser and revoke its session. */
+  async signOutAccount(req: Request, res: Response, pid: string): Promise<void> {
+    const cookies = (req as Request & { cookies?: Record<string, string> }).cookies ?? {};
+    const token = cookies[accountRefreshCookieName(pid)];
+    if (token) {
+      const v = await this.verifyRefresh(token);
+      if (v) await this.prisma.session.updateMany({ where: { id: v.jti }, data: { revokedAt: new Date() } });
+    }
+    clearAccountRefreshCookie(res, this.config, pid);
+    const active = cookies[REFRESH_COOKIE] ? await this.verifyRefresh(cookies[REFRESH_COOKIE]) : null;
+    if (active?.pid === pid) clearAuthCookies(res, this.config);
   }
 
   /** Decode a refresh JWT to its session jti (null if invalid). */

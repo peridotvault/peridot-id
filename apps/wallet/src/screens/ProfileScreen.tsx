@@ -1,22 +1,33 @@
 import { useCallback, useEffect, useState } from "react";
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ChevronRight, Settings } from "../icons";
-import type { Profile } from "@peridotvault/pid-types";
+import { ChevronRight, RefreshCw, Settings } from "../icons";
+import type { AccountView, Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";
+import { AccountSwitcherModal } from "../components/AccountSwitcherModal";
 
 export function ProfileScreen({
   onLogout,
   goSettings,
   goEditProfile,
+  onSwitched,
+  onAddAccount,
 }: {
   onLogout: () => void;
   goSettings: () => void;
   goEditProfile: () => void;
+  /** Account switch completed — the app re-bootstraps onto the new identity. */
+  onSwitched: () => void;
+  /** Start signing in another identity without leaving the current one. */
+  onAddAccount: () => void;
 }) {
   const { peridot } = usePeridot();
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  const [accounts, setAccounts] = useState<AccountView[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await peridot.profile.me();
@@ -27,6 +38,51 @@ export function ProfileScreen({
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadAccounts = useCallback(async () => {
+    const res = await peridot.auth.accounts();
+    setAccounts(Array.isArray(res) ? (res as AccountView[]) : []);
+  }, [peridot]);
+
+  const openAccounts = () => {
+    setError(null);
+    setAccountsOpen(true);
+    void loadAccounts();
+  };
+
+  const selectAccount = async (pid: string) => {
+    if (pid === profile?.pid) return setAccountsOpen(false);
+    setBusy(true);
+    setError(null);
+    try {
+      if (!(await peridot.auth.switchAccount(pid))) throw new Error("Couldn't switch account.");
+      setAccountsOpen(false);
+      onSwitched();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signOutAccount = async (pid: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const wasActive = pid === profile?.pid;
+      await peridot.auth.signOutAccount(pid);
+      if (wasActive) {
+        setAccountsOpen(false);
+        onLogout();
+        return;
+      }
+      await loadAccounts();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
@@ -44,6 +100,14 @@ export function ProfileScreen({
         <ChevronRight size={16} color={theme.colors.mutedForeground} />
       </TouchableOpacity>
 
+      <TouchableOpacity style={styles.row} onPress={openAccounts}>
+        <View style={styles.rowIcon}>
+          <RefreshCw size={18} color={theme.colors.foreground} />
+        </View>
+        <Text style={styles.rowLabel}>Switch Account</Text>
+        <ChevronRight size={16} color={theme.colors.mutedForeground} />
+      </TouchableOpacity>
+
       <TouchableOpacity style={styles.row} onPress={goSettings}>
         <View style={styles.rowIcon}>
           <Settings size={18} color={theme.colors.foreground} />
@@ -53,6 +117,20 @@ export function ProfileScreen({
       </TouchableOpacity>
 
       <UIButton title="Sign Out" onPress={onLogout} variant="danger" />
+
+      <AccountSwitcherModal
+        visible={accountsOpen}
+        accounts={accounts}
+        busy={busy}
+        error={error}
+        onClose={() => setAccountsOpen(false)}
+        onSelect={selectAccount}
+        onAdd={() => {
+          setAccountsOpen(false);
+          onAddAccount();
+        }}
+        onSignOut={signOutAccount}
+      />
     </ScrollView>
   );
 }

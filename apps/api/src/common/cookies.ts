@@ -1,22 +1,68 @@
 import { Response } from "express";
 import { ConfigService } from "@nestjs/config";
+import { createHash } from "node:crypto";
 import ms from "ms";
 
 export const ACCESS_COOKIE = "pid_access";
 export const REFRESH_COOKIE = "pid_refresh";
 export const CLAIM_COOKIE = "pid_claim";
+/** Prefix for the per-identity refresh cookie of a linked account. */
+export const ACCOUNT_REFRESH_PREFIX = "pid_refresh__";
 const REFRESH_PATH = "/v1/auth";
 const CLAIM_TTL_MS = 10 * 60 * 1000;
 
-export function setAuthCookies(res: Response, config: ConfigService, access: string, refresh: string): void {
+/**
+ * Cookie name for an identity's own refresh token. Cookie names can't contain
+ * `@`, so the pid is hashed — the value is the credential, the name is opaque.
+ */
+export function accountRefreshCookieName(pid: string): string {
+  return ACCOUNT_REFRESH_PREFIX + createHash("sha256").update(pid).digest("hex").slice(0, 16);
+}
+
+/** Names of every linked-account refresh cookie present on the request. */
+export function accountRefreshCookieNames(cookies: Record<string, string> | undefined): string[] {
+  return Object.keys(cookies ?? {}).filter((n) => n.startsWith(ACCOUNT_REFRESH_PREFIX));
+}
+
+function baseOpts(config: ConfigService): Record<string, unknown> {
   const secure = config.get<string>("COOKIE_SECURE", "false") === "true";
   const domain = config.get<string>("COOKIE_DOMAIN", "");
   const sameSite = config.get<string>("COOKIE_SAMESITE", "lax") as "lax" | "strict" | "none";
-  const common: Record<string, unknown> = { httpOnly: true, sameSite, secure };
+  const opts: Record<string, unknown> = { httpOnly: true, sameSite, secure };
   // Omitting `domain` for localhost avoids a known browser cookie-rejection gotcha.
-  if (domain && domain !== "localhost") common.domain = domain;
-  res.cookie(ACCESS_COOKIE, access, { ...common, maxAge: ms(config.get<string>("ACCESS_TOKEN_TTL", "15m")) });
-  res.cookie(REFRESH_COOKIE, refresh, { ...common, path: REFRESH_PATH, maxAge: ms(config.get<string>("REFRESH_TOKEN_TTL", "30d")) });
+  if (domain && domain !== "localhost") opts.domain = domain;
+  return opts;
+}
+
+export function setAuthCookies(res: Response, config: ConfigService, access: string, refresh: string, pid?: string): void {
+  const opts = baseOpts(config);
+  res.cookie(ACCESS_COOKIE, access, { ...opts, maxAge: ms(config.get<string>("ACCESS_TOKEN_TTL", "15m")) });
+  res.cookie(REFRESH_COOKIE, refresh, { ...opts, path: REFRESH_PATH, maxAge: ms(config.get<string>("REFRESH_TOKEN_TTL", "30d")) });
+  // Remember this identity so the wallet can switch back to it without a re-login.
+  if (pid) setAccountRefreshCookie(res, config, pid, refresh);
+}
+
+/** Rotate only the active identity's cookies (used when switching accounts). */
+export function setActiveAuthCookies(res: Response, config: ConfigService, access: string, refresh: string): void {
+  const opts = baseOpts(config);
+  res.cookie(ACCESS_COOKIE, access, { ...opts, maxAge: ms(config.get<string>("ACCESS_TOKEN_TTL", "15m")) });
+  res.cookie(REFRESH_COOKIE, refresh, { ...opts, path: REFRESH_PATH, maxAge: ms(config.get<string>("REFRESH_TOKEN_TTL", "30d")) });
+}
+
+export function setAccountRefreshCookie(res: Response, config: ConfigService, pid: string, refresh: string): void {
+  const opts = baseOpts(config);
+  res.cookie(accountRefreshCookieName(pid), refresh, {
+    ...opts,
+    path: REFRESH_PATH,
+    maxAge: ms(config.get<string>("REFRESH_TOKEN_TTL", "30d")),
+  });
+}
+
+export function clearAccountRefreshCookie(res: Response, config: ConfigService, pid: string): void {
+  const domain = config.get<string>("COOKIE_DOMAIN", "");
+  const opts: Record<string, unknown> = { path: REFRESH_PATH };
+  if (domain && domain !== "localhost") opts.domain = domain;
+  res.clearCookie(accountRefreshCookieName(pid), opts);
 }
 
 export function clearAuthCookies(res: Response, config: ConfigService): void {

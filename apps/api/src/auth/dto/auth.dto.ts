@@ -1,6 +1,6 @@
 import { IsOptional, IsString, Matches } from "class-validator";
 import { Transform } from "class-transformer";
-import { PID_HANDLE_REGEX } from "../../common/pid";
+import { PID_HANDLE_REGEX, PID_REGEX } from "../../common/pid";
 export class LoginDto {
   /** Cross-domain success origin to redirect back to after Google (allowlisted). */
   @IsOptional()
@@ -63,4 +63,10 @@ export class AuthorizeDto {
   @IsOptional()
   @IsString()
   clientId?: string;
+}
+
+/** Wallet account switcher: pick or forget one linked identity. */
+export class SwitchAccountDto {
+  @Matches(PID_REGEX, { message: "pid must be <handle>@pid" })
+  pid!: string;
 }

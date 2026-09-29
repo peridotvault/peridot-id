@@ -1,4 +1,5 @@
 import type {
+  AccountView,
   ApiError,
   AuthenticateStart,
   Authority,
@@ -371,6 +372,24 @@ export class PeridotAuth {
    *  must still expire on its side). Idempotent. */
   async revokeGrant(id: string): Promise<boolean> {
     const res = await this.client.delete(`/v1/auth/grants/${id}`);
+    return res.ok;
+  }
+
+  /** Identities signed into this browser (wallet account switcher). */
+  async accounts(): Promise<AccountView[] | ApiError> {
+    const res = await this.client.get<AccountView[]>("/v1/auth/accounts");
+    return res.data;
+  }
+
+  /** Make a linked identity active without re-authenticating. */
+  async switchAccount(pid: string): Promise<boolean> {
+    const res = await this.client.post("/v1/auth/accounts/switch", { pid });
+    return res.ok;
+  }
+
+  /** Forget one identity in this browser (leaves the others signed in). */
+  async signOutAccount(pid: string): Promise<boolean> {
+    const res = await this.client.post("/v1/auth/accounts/signout", { pid });
     return res.ok;
   }
 }

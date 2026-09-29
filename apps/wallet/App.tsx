@@ -87,6 +87,8 @@ export default function App() {
   // popup opened without one renders the login screen first (then resumes the
   // handshake) instead of dead-ending on a 401.
   const [authed, setAuthed] = useState(false);
+  // Bumped to re-run bootstrap after an account switch (same cookies, new identity).
+  const [sessionEpoch, setSessionEpoch] = useState(0);
   // Failsafe: a hung gate (fonts or network that never settles with no error)
   // must never trap the app on the loader forever — force it open degraded.
   const [gateForced, setGateForced] = useState(false);
@@ -137,6 +139,14 @@ export default function App() {
 
   const goHome = useCallback(() => setScreen("home"), []);
   const go = useCallback((s: Screen) => setScreen(s), []);
+
+  // After an account switch the cookies point at a new identity: re-bootstrap
+  // so every screen re-fetches under it (and drop back to Home).
+  const reloadSession = useCallback(() => {
+    setBootstrapping(true);
+    setScreen("home");
+    setSessionEpoch((n) => n + 1);
+  }, []);
 
   // Post-auth landing: show the stepper only when something actually needs
   // provisioning (fresh account, failed/skipped setup); returning users go
@@ -241,7 +251,7 @@ export default function App() {
 
   useEffect(() => {
     bootstrap();
-  }, [bootstrap]);
+  }, [bootstrap, sessionEpoch]);
 
   useEffect(() => {
     // Static pre-JS splash handoff: React mounted, drop the template node.
@@ -319,6 +329,8 @@ export default function App() {
             onLogout={logout}
             goSettings={() => go("settings")}
             goEditProfile={() => go("edit-profile")}
+            onSwitched={reloadSession}
+            onAddAccount={() => setScreen("login")}
           />
         )}
         {screen === "edit-profile" && <EditProfileScreen onDone={() => go("profile")} />}

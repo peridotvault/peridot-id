@@ -1,5 +1,6 @@
 import { ConflictException, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
+import { accountRefreshCookieName } from "../common/cookies";
 import { AuthService, RefreshTokenPayload } from "./auth.service";
 
 function configMock(overrides: Record<string, unknown> = {}) {
@@ -194,14 +195,15 @@ describe("AuthService", () => {
     expect(prisma.identityCredential.findFirst).not.toHaveBeenCalled();
   });
 
-  it("issueSession creates a session row and sets both cookies", async () => {
+  it("issueSession creates a session row and sets the active + per-identity cookies", async () => {
     const { service, prisma, res } = setup();
     const tokens = await service.issueSession(res as never, "identity-1", "test-agent");
 
     expect(tokens.accessToken).toBeTruthy();
     expect(tokens.refreshToken).toBeTruthy();
     expect(prisma.session.create).toHaveBeenCalled();
-    expect(res.cookie).toHaveBeenCalledTimes(2);
+    const names = (res.cookie as jest.Mock).mock.calls.map(([n]) => n);
+    expect(names).toEqual(["pid_access", "pid_refresh", accountRefreshCookieName("identity-1")]);
   });
 
   it("rotateSession revokes the old token and issues a new one", async () => {
@@ -381,3 +383,77 @@ describe("AuthService", () => {
 function jwtPayload(token: string): RefreshTokenPayload {
   return JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString()) as RefreshTokenPayload;
 }
+
+describe("AuthService account switcher", () => {
+  const A = "ifal@pid";
+  const B = "kupuakz@pid";
+
+  it("issueSession records a per-identity refresh cookie", async () => {
+    const { service, res } = setup();
+    await service.issueSession(res as never, A, "ua");
+    const names = (res.cookie as jest.Mock).mock.calls.map(([n]) => n);
+    expect(names).toContain(accountRefreshCookieName(A));
+  });
+
+  it("lists linked identities with the active one first", async () => {
+    const { service, res } = setup();
+    const a = await service.issueSession(res as never, A, "ua");
+    const b = await service.issueSession(res as never, B, "ua");
+    const req = {
+      cookies: {
+        pid_refresh: b.refreshToken,
+        [accountRefreshCookieName(A)]: a.refreshToken,
+        [accountRefreshCookieName(B)]: b.refreshToken,
+      },
+    } as never;
+
+    const accounts = await service.listAccounts(req);
+
+    expect(accounts.map((x) => x.pid)).toEqual([B, A]);
+    expect(accounts[0].isActive).toBe(true);
+    expect(accounts[1].isActive).toBe(false);
+  });
+
+  it("switches the active cookies from the target identity's own refresh cookie", async () => {
+    const { service, res } = setup();
+    const a = await service.issueSession(res as never, A, "ua");
+    const req = { cookies: { pid_refresh: a.refreshToken, [accountRefreshCookieName(A)]: a.refreshToken } } as never;
+
+    await service.switchAccount(req, res as never, A);
+
+    const activeRefresh = (res.cookie as jest.Mock).mock.calls.filter(([n]) => n === "pid_refresh").pop()[1];
+    expect(activeRefresh).toBe(a.refreshToken);
+  });
+
+  it("rejects switching to an identity with no stored session", async () => {
+    const { service, res } = setup();
+    await expect(service.switchAccount({ cookies: {} } as never, res as never, "nobody@pid")).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it("signs out one identity and leaves the rest signed in", async () => {
+    const { service, res } = setup();
+    const a = await service.issueSession(res as never, A, "ua");
+    const b = await service.issueSession(res as never, B, "ua");
+    const req = {
+      cookies: {
+        pid_refresh: b.refreshToken,
+        [accountRefreshCookieName(A)]: a.refreshToken,
+        [accountRefreshCookieName(B)]: b.refreshToken,
+      },
+    } as never;
+
+    await service.signOutAccount(req, res as never, A);
+
+    (res.clearCookie as jest.Mock).mock.calls.forEach(([n]) => {
+      if (typeof n === "string" && n.startsWith("pid_refresh__")) {
+        expect(n).toBe(accountRefreshCookieName(A));
+      }
+    });
+    const remaining = await service.listAccounts({
+      cookies: { pid_refresh: b.refreshToken, [accountRefreshCookieName(B)]: b.refreshToken },
+    } as never);
+    expect(remaining.map((x) => x.pid)).toEqual([B]);
+  });
+});

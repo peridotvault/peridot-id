@@ -198,6 +198,14 @@ export interface Session {
   isCurrent?: boolean;
 }
 
+/** One identity signed into this browser (wallet account switcher). */
+export interface AccountView {
+  pid: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  isActive: boolean;
+}
+
 /** Third-party site the identity signed in to ("App connections"). Revoking
  *  stops future sign-ins there; it cannot end the site's own session. */
 export interface SsoGrant {
