@@ -64,7 +64,10 @@ live2dev@pid --send Rp100.000--> streamer1@pid   (app → user: payout, ×5 on d
 ## Verified-partner fee waiver (admin-only)
 
 - Admins flip `isVerified` per app (`PATCH /v1/admin/apps/:id/verify`, workspace
-  Admin card). Verified apps skip the **global PeridotID fiat fee** on
+  Admin card). Verified apps **skip the global PeridotID fiat fee** on
   topup/transaction/withdraw quotes — the app's own stacked fee, DOKU provider
   fees, and on-chain fees still apply.
+- The checkout summary still shows the line, as **`PeridotID Fee = Rp0`**, so the
+  breakdown (Amount + PeridotID Fee + App Fee + Payment Gateway Fee = Total) is
+  always transparent. Public apps show the 0.1% (min Rp100, no cap) line instead.
 - Users see a ✓ badge on the login consent screen and in App Connections.

@@ -32,7 +32,11 @@ export { PeridotWallet, type PeridotWalletOptions };
 export type { ExecuteInput, ExecuteMetaInput, RotateInput, TopupInput, WithdrawInput } from "./wallet/wallet-client.js";
 export {
   PeridotFiat,
+  sumTransferFee,
   type CheckoutDepositView,
+  type DepositQuoteView,
+  type PaymentMethodQuote,
+  type TransferFeeParts,
   type FeePolicyView,
   type FiatBalanceView,
   type FiatDepositView,

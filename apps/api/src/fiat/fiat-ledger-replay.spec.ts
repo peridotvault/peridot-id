@@ -51,4 +51,16 @@ describe("replayFiatLedger", () => {
     ]);
     expect(r.errors.some((e) => e.includes("imbalanced"))).toBe(true);
   });
+
+  it("routes fiat_tax to the tax bucket and keeps the send group balanced", () => {
+    const r = replayFiatLedger([
+      row({ kind: "fiat_transfer_out", pid: "dev@pid", idempotencyKey: "CT9", entryGroup: "CT9", amountIdr: 500_000n, direction: "out", replaySeq: 1n }),
+      row({ kind: "fiat_transfer_in", pid: "live2dev@pid", idempotencyKey: "CT9-IN", entryGroup: "CT9", amountIdr: 472_500n, replaySeq: 2n }),
+      row({ kind: "fiat_fee", pid: "dev@pid", idempotencyKey: "CT9-FEE", entryGroup: "CT9", amountIdr: 25_000n, direction: "out", replaySeq: 3n }),
+      row({ kind: "fiat_tax", pid: "dev@pid", idempotencyKey: "CT9-TAX", entryGroup: "CT9", amountIdr: 2_500n, direction: "out", replaySeq: 4n }),
+    ]);
+    expect(r.treasury).toBe(25_000n);
+    expect(r.tax).toBe(2_500n);
+    expect(r.errors.filter((e) => e.includes("imbalanced"))).toEqual([]);
+  });
 });

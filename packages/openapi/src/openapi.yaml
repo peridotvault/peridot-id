@@ -1324,16 +1324,13 @@ paths:
       summary: Create a Checkout deposit intent (DOKU-hosted page, all channels)
       description: |
         netAmountIdr is the NET credited to the user (minimum Rp100.000,
-        API-enforced — no DOKU minimum). Global PeridotID fee = 0.1% of net,
-        min Rp100, no cap; when `clientId` is given the app's topup fee stacks
-        on top. gross = net + fee, quoted upfront and snapshotted on the row.
-        DOKU charges its own provider fee separately.
-        The page is routed to the caller's sub-account. The customer is
-        charged gross; fiat settles 100% to the user IDR account as points
-        backing. On verified payment the backend issues NET points (user)
-        + FEE points (Treasury) on the Unified Ledger — the Saldo is usable
-        in seconds without waiting for fiat settlement. The API never debits
-        a fee after settlement.
+        API-enforced — no DOKU minimum). Total payable = net + PeridotID fee
+        (0.1% min Rp100 no cap; Rp0 for verified apps) + the app's stacked fee
+        (when `clientId` is given) + the selected method's DOKU gateway fee.
+        All quotes are snapshotted on the row. `paymentMethod` is a category key
+        (VIRTUAL_ACCOUNT/EWALLET/CARD/QRIS) or a specific DOKU code; it locks
+        `payment_method_types` at DOKU. Omit it to let DOKU show all channels
+        (no gateway fee added). Quote first via POST /fiat/deposits/quote.
       security:
         - cookieAuth: []
       requestBody:
@@ -1346,6 +1343,12 @@ paths:
               properties:
                 netAmountIdr:
                   type: string
+                clientId:
+                  type: string
+                  description: Optional app context (per-app fee + verified waiver)
+                paymentMethod:
+                  type: string
+                  description: Category key or DOKU payment_method_types code
       responses:
         "200":
           description: Checkout deposit intent
@@ -1353,6 +1356,102 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CheckoutDeposit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/deposits/quote:
+    post:
+      tags: [fiat]
+      summary: Quote a top-up (moves no money) — the PeridotID checkout summary
+      description: |
+        Returns the transparent breakdown shown before DOKU: Amount, PeridotID
+        Fee (Rp0 for verified apps), App Fee, per-method Payment Gateway Fee and
+        Total Payment, plus `paymentMethods[]` (per-category fee + total) so the
+        summary updates on selection. Only **enabled** methods are listed; the
+        wallet blocks the top-up when the list is empty.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [netAmountIdr]
+              properties:
+                netAmountIdr:
+                  type: string
+                clientId:
+                  type: string
+                paymentMethod:
+                  type: string
+      responses:
+        "200":
+          description: Top-up quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepositQuote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/admin/payment-fee-rates:
+    get:
+      tags: [fiat]
+      summary: List DOKU payment methods + gateway fees (admin)
+      description: |
+        The category catalog (Virtual Account / e-Wallet / Card / QRIS), one row
+        each with an `enabled` switch and fee fields, plus any stored extra keys
+        (specific codes / "*"). A method with no row shows as disabled at 0.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Method rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PaymentFeeRate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/admin/payment-fee-rates/{methodKey}:
+    put:
+      tags: [fiat]
+      summary: Upsert one payment method's gateway fee / enabled state (admin)
+      description: |
+        `methodKey` is a DOKU method code, a category
+        (VIRTUAL_ACCOUNT/EWALLET/CARD/QRIS/OTHER), or "*" (default). Resolution:
+        exact code → category → "*". A row with `enabled=false` is an explicit
+        off switch — the method is hidden in the wallet and no fee is charged
+        (it shadows the "*" fallback). 0 min/max = unbounded.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: methodKey
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentFeeRate"
+      responses:
+        "200":
+          description: Stored rate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentFeeRate"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -1484,7 +1583,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [percentBps, minIdr, maxIdr]
+              required: [percentBps, minIdr, maxIdr, taxBps]
               properties:
                 percentBps:
                   type: integer
@@ -1492,6 +1591,9 @@ paths:
                   type: string
                 maxIdr:
                   type: string
+                taxBps:
+                  type: integer
+                  description: PPN (VAT) on the PeridotID fee, basis points (1100 = 11%)
       responses:
         "200":
           description: Fee policy
@@ -1503,6 +1605,47 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+
+  /fiat/admin/doku-tax:
+    get:
+      tags: [fiat]
+      summary: Get the DOKU-wide PPN rate (admin)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: DOKU PPN
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [taxBps]
+                properties:
+                  taxBps:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [fiat]
+      summary: Set the DOKU-wide PPN rate (admin)
+      description: Applied to the payment-gateway fee of every method; shown to users folded into "Fee Transfer".
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taxBps]
+              properties:
+                taxBps:
+                  type: integer
+      responses:
+        "200":
+          description: Saved
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /fiat/balance:
     get:
@@ -3096,10 +3239,26 @@ components:
           nullable: true
         grossIdr:
           type: string
-          description: Gross charged at DOKU (net + fee)
+          description: Total payable at DOKU (net + PeridotID fee + app fee + gateway fee)
+        totalIdr:
+          type: string
+          description: Same as grossIdr (Total Payment)
         feeIdr:
           type: string
-          description: Fee quoted on the entered net (honored at settlement)
+          description: PeridotID fee (Rp0 for verified apps)
+        appFeeIdr:
+          type: string
+          description: The initiating app's own stacked fee (0 when no app context)
+        gatewayFeeIdr:
+          type: string
+          description: DOKU payment-gateway fee for the selected method
+        transferFeeIdr:
+          type: string
+          description: Combined display line — PeridotID fee+PPN + DOKU gateway fee+PPN
+        paymentMethod:
+          type: string
+          nullable: true
+          description: Selected category key or DOKU method code
         netIdr:
           type: string
           description: Net credited to the user (the entered amount)
@@ -3111,9 +3270,112 @@ components:
           type: string
           format: date-time
 
+    DepositQuote:
+      type: object
+      required: [amountIdr, netIdr, peridotFeeIdr, peridotTaxIdr, appFeeIdr, appCategory, gatewayFeeEnabled, gatewayFeeIdr, gatewayTaxIdr, transferFeeIdr, totalIdr, feePolicyVersion, paymentMethods]
+      properties:
+        amountIdr:
+          type: string
+        netIdr:
+          type: string
+        peridotFeeIdr:
+          type: string
+          description: PeridotID platform fee — Rp0 for verified apps (excludes PPN)
+        peridotTaxIdr:
+          type: string
+          description: PPN on the PeridotID fee (wallet folds all fees into one "Transfer Fee" line)
+        appFeeIdr:
+          type: string
+        appCategory:
+          type: string
+          enum: [verified, public]
+        paymentMethod:
+          type: string
+          nullable: true
+        gatewayFeeEnabled:
+          type: boolean
+          description: Selected method's gateway fee is enabled (show the line only when true)
+        gatewayFeeIdr:
+          type: string
+        gatewayTaxIdr:
+          type: string
+          description: DOKU PPN on the gateway fee (wallet folds all fees into one "Transfer Fee" line)
+        transferFeeIdr:
+          type: string
+          description: Combined display line — PeridotID fee+PPN + DOKU gateway fee+PPN
+        totalIdr:
+          type: string
+        feePolicyVersion:
+          type: integer
+        paymentMethods:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentMethodOption"
+
+    PaymentMethodOption:
+      type: object
+      required: [key, label, category, enabled, gatewayFeeIdr, gatewayTaxIdr, rateKey, source, totalIdr]
+      properties:
+        key:
+          type: string
+          description: Category key (pass back as paymentMethod)
+        label:
+          type: string
+        category:
+          type: string
+        enabled:
+          type: boolean
+          description: false = not offered (hidden in the wallet)
+        gatewayFeeIdr:
+          type: string
+        gatewayTaxIdr:
+          type: string
+          description: DOKU PPN on this method's gateway fee
+        rateKey:
+          type: string
+          description: Which rate row applied (method code, category, or "*")
+        source:
+          type: string
+          enum: [doku, config]
+        totalIdr:
+          type: string
+
+    PaymentFeeRate:
+      type: object
+      required: [methodKey, percentBps, flatIdr, minIdr, maxIdr, enabled]
+      properties:
+        methodKey:
+          type: string
+          description: DOKU method code, category, or "*" (default)
+        label:
+          type: string
+          description: Display label (category name for catalog rows)
+        category:
+          type: string
+          nullable: true
+        isCategory:
+          type: boolean
+          description: True for the fixed category catalog rows
+        percentBps:
+          type: integer
+        flatIdr:
+          type: string
+        minIdr:
+          type: string
+          description: Floor, whole IDR (0 = unbounded)
+        maxIdr:
+          type: string
+          description: Cap, whole IDR (0 = unbounded)
+        enabled:
+          type: boolean
+          description: false = method hidden in the wallet and no fee charged
+        updatedAt:
+          type: string
+          format: date-time
+
     FeePolicy:
       type: object
-      required: [version, percentBps, minIdr, maxIdr, active]
+      required: [version, percentBps, minIdr, maxIdr, taxBps, active]
       properties:
         version:
           type: integer
@@ -3126,6 +3388,9 @@ components:
         maxIdr:
           type: string
           description: Fee cap in whole IDR (0 = uncapped). Default 0 (no cap)
+        taxBps:
+          type: integer
+          description: PPN (VAT) on the PeridotID fee, basis points (1100 = 11%)
         active:
           type: boolean
 

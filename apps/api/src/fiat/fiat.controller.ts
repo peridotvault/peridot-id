@@ -1,11 +1,12 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import type { Request } from "express";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { FiatSubAccountService } from "./fiat-subaccount.service";
-import { AdminBackfillDto, CheckoutDepositDto, CreateFeePolicyDto } from "./dto/subaccount.dto";
+import { PaymentFeeService } from "./payment-fee.service";
+import { AdminBackfillDto, CheckoutDepositDto, CreateFeePolicyDto, DepositQuoteDto, SetDokuTaxDto, SetPaymentFeeRateDto } from "./dto/subaccount.dto";
 
 /**
  * Fiat money-in. DOKU Checkout is the funding rail (no Sub-Account): a paid
@@ -16,13 +17,45 @@ import { AdminBackfillDto, CheckoutDepositDto, CreateFeePolicyDto } from "./dto/
 @Controller("v1/fiat")
 @UseGuards(ThrottlerGuard)
 export class FiatController {
-  constructor(private readonly fiat: FiatSubAccountService) {}
+  constructor(private readonly fiat: FiatSubAccountService, private readonly paymentFee: PaymentFeeService) {}
 
   /** Fee policy (PeridotID fee, separate from DOKU's own fee). */
   @Get("fee-policy")
   @UseGuards(JwtAuthGuard)
   feePolicy() {
     return this.fiat.feePolicy();
+  }
+
+  /** Payment-gateway fee rates (DOKU, per method; admin-editable). */
+  @Get("admin/payment-fee-rates")
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  paymentFeeRates() {
+    return this.paymentFee.listRates();
+  }
+
+  /** DOKU-wide PPN (VAT) rate on the payment-gateway fee (admin). */
+  @Get("admin/doku-tax")
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  dokuTax() {
+    return this.paymentFee.getDokuTax();
+  }
+
+  /** Set the DOKU-wide PPN rate, basis points (1100 = 11%). */
+  @Put("admin/doku-tax")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  setDokuTax(@Body() dto: SetDokuTaxDto) {
+    return this.paymentFee.setDokuTax(dto.taxBps);
+  }
+
+  /** Upsert one payment-gateway fee rate (method code, category, or "*"). */
+  @Put("admin/payment-fee-rates/:methodKey")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  setPaymentFeeRate(@Param("methodKey") methodKey: string, @Body() dto: SetPaymentFeeRateDto) {
+    return this.paymentFee.upsertRate(methodKey, dto);
   }
 
   /** Recent deposit intents for the caller (money-in history). */
@@ -33,16 +66,30 @@ export class FiatController {
   }
 
   /**
+   * Quote a top-up (moves no money): Net, PeridotID fee (Rp0 for verified
+   * apps), app fee, per-method DOKU gateway fee and total. Shown on the
+   * PeridotID checkout summary before the user is sent to DOKU.
+   */
+  @Post("deposits/quote")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard)
+  quoteDeposit(@Body() dto: DepositQuoteDto) {
+    return this.fiat.quoteDeposit(dto.netAmountIdr, dto.clientId, dto.paymentMethod);
+  }
+
+  /**
    * Create a Checkout deposit intent: DOKU-hosted page (all banks, QRIS,
    * e-money, cards). netAmountIdr is the NET credited to the user (minimum
-   * Rp100.000); PeridotID fee + gross payable are quoted upfront.
+   * Rp100.000); PeridotID fee + app fee + the selected method's gateway fee
+   * and total payable are quoted upfront.
    */
   @Post("deposits/checkout")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   checkoutDeposit(@CurrentUser() user: AuthenticatedUser, @Body() dto: CheckoutDepositDto) {
-    return this.fiat.createCheckoutDeposit(user.pid, dto.netAmountIdr, dto.clientId);
+    return this.fiat.createCheckoutDeposit(user.pid, dto.netAmountIdr, dto.clientId, dto.paymentMethod);
   }
 
   /**

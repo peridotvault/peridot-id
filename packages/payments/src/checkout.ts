@@ -322,6 +322,18 @@ export class DokuCheckoutClient {
       rawResponse: data,
     };
   }
+
+  /**
+   * Real-time per-method fee inquiry — hook only. DOKU Checkout documents NO
+   * fee-inquiry endpoint: fees are per method, configured in the DOKU dashboard
+   * (Finance Settings → Fee Scheme) and deducted at settlement. This returns
+   * `null` (fee unavailable) so the caller falls back to the internal rate
+   * config. If DOKU ships a fee API, implement it here — the return contract
+   * (whole-IDR bigint, or null = unavailable) stays.
+   */
+  async transactionFee(_methodCode: string, _amountIdr: bigint): Promise<bigint | null> {
+    return null;
+  }
 }
 
 // ponytail: self-check — `node dist/checkout.js` fails loudly if helpers break.

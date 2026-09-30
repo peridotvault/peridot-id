@@ -45,3 +45,7 @@ Notes:
 - EVM permissions (WHITEPAPER.md §10) live in `@peridotvault/pid-evm` + `@peridotvault/pid-core`
   (`buildPermissionId`, grant/revoke/exec payloads, calldata builders) and the
   `v1/permissions` API — not in `sdk-js` wallet-client calls yet.
+- Fiat: `peridot.fiat.quoteDeposit({ netAmountIdr })` returns a top-up quote whose
+  `transferFeeIdr` is the single combined fee (PeridotID fee + PPN, DOKU gateway
+  fee + PPN). `sumTransferFee(parts)` recomputes it from the parts. See
+  [Fiat & payments](/docs/fiat).

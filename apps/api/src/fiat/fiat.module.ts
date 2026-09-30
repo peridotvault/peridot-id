@@ -7,6 +7,7 @@ import { FiatController } from "./fiat.controller";
 import { FiatLedgerController } from "./fiat-ledger.controller";
 import { FiatLedgerService } from "./fiat-ledger.service";
 import { FiatSubAccountService } from "./fiat-subaccount.service";
+import { PaymentFeeService } from "./payment-fee.service";
 import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
 
 @Module({
@@ -42,6 +43,7 @@ import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
     },
     FiatSubAccountService,
     FiatLedgerService,
+    PaymentFeeService,
   ],
 })
 export class FiatModule {}

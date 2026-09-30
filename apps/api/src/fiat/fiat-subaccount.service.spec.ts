@@ -1,6 +1,7 @@
 import { ConfigService } from "@nestjs/config";
 import { calcServiceFee, parseIdrStrict, type DokuCheckoutClient, type SubAccountProvider } from "@peridotvault/pid-payments";
 import { FiatSubAccountService } from "./fiat-subaccount.service";
+import { PaymentFeeService } from "./payment-fee.service";
 
 function configStub(store: Record<string, string> = {}) {
   const base: Record<string, string> = { ...store };
@@ -56,6 +57,8 @@ function checkoutStub() {
       txStatus: "PENDING",
       rawResponse: { order: { invoice_number: invoiceNumber } },
     })),
+    // No live DOKU fee API by contract; PaymentFeeService falls back to config.
+    transactionFee: jest.fn(async () => null),
   } as unknown as jest.Mocked<DokuCheckoutClient>;
 }
 
@@ -99,11 +102,20 @@ function setup(store?: Record<string, string>) {
       update: jest.fn(async (args: any) => ({ ...args.data })),
     },
     fiatFeePolicy: {
-      findFirst: jest.fn(async () => ({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, active: true })),
+      findFirst: jest.fn(async () => ({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0, active: true })),
       findUnique: jest.fn(async () => null),
       aggregate: jest.fn(async () => ({ _max: { version: 1 } })),
       updateMany: jest.fn(async () => ({ count: 1 })),
       create: jest.fn(async (args: any) => ({ createdAt: new Date(), ...args.data })),
+    },
+    paymentGatewayFeeRate: {
+      findMany: jest.fn(async () => []),
+      findUnique: jest.fn(async () => null),
+      upsert: jest.fn(async (args: any) => ({ id: "r1", ...args.create })),
+    },
+    fiatTaxSetting: {
+      findUnique: jest.fn(async () => ({ id: 1, dokuTaxBps: 1100 })),
+      upsert: jest.fn(async (args: any) => ({ id: 1, ...args.create })),
     },
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
   };
@@ -115,12 +127,13 @@ function setup(store?: Record<string, string>) {
   const ledger = {
     issueForDeposit: jest.fn(async () => undefined),
     quoteFees: jest.fn(async (_clientId: string | null | undefined, _op: string, amount: bigint) => ({
-      globalFee: calcServiceFee(amount, { version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n }),
-      appFee: 0n, appId: null, appOwnerPid: null, policyVersion: 3,
+      globalFee: calcServiceFee(amount, { version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0 }),
+      peridotTaxIdr: 0n, appFee: 0n, appId: null, appOwnerPid: null, policyVersion: 3, isVerified: false,
     })),
   };
-  const service = new FiatSubAccountService(prisma as never, configStub(store), sac, checkout, security as never, ledger as never);
-  return { service, prisma, sac, checkout };
+  const paymentFee = new PaymentFeeService(prisma as never, configStub(store), checkout);
+  const service = new FiatSubAccountService(prisma as never, configStub(store), sac, checkout, security as never, ledger as never, paymentFee);
+  return { service, prisma, sac, checkout, ledger };
 }
 
 const ACTIVE = {
@@ -233,7 +246,7 @@ describe("FiatSubAccountService", () => {
     expect(calcServiceFee(1_000_000n)).toBe(1_000n);
     expect(calcServiceFee(100_000_000n)).toBe(100_000n); // no cap
     // Legacy 5% policy still computes correctly from its own row.
-    const five = { version: 4, percentBps: 500, minIdr: 5_000n, maxIdr: 25_000n };
+    const five = { version: 4, percentBps: 500, minIdr: 5_000n, maxIdr: 25_000n, taxBps: 0 };
     expect(calcServiceFee(30_000n, five)).toBe(5_000n);
     expect(calcServiceFee(1_000_000n, five)).toBe(25_000n);
   });
@@ -322,7 +335,7 @@ describe("FiatSubAccountService", () => {
     prisma.fiatProviderTransaction.update.mockImplementation(async (args: any) => ({
       id: "t1", kind: "transfer_internal", providerRef: "ST1", amountIdr: 100000n, feeIdr: 5000n, netIdr: 95000n, createdAt: new Date(), ...args.data,
     }));
-    prisma.fiatFeePolicy.findUnique.mockResolvedValue({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, active: true });
+    prisma.fiatFeePolicy.findUnique.mockResolvedValue({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0, active: true });
     (sac.transferPayment as jest.Mock).mockResolvedValue({ referenceNo: "DOKU-P2P-1", rawResponse: {} });
     (sac.txStatus as jest.Mock).mockResolvedValue({ partnerReferenceNo: "x", latestTransactionStatus: "00", rawResponse: {} });
     await service.transferConfirm("ifal@pid", "t1", { beneficiaryAccountName: "RIA", expectedName: "RIA" });
@@ -347,7 +360,7 @@ describe("FiatSubAccountService", () => {
       providerResponse: { referenceNo: "INQ1", beneficiaryAccountName: "RIA" },
     });
     prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
-    prisma.fiatFeePolicy.findUnique.mockResolvedValue({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, active: true });
+    prisma.fiatFeePolicy.findUnique.mockResolvedValue({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0, active: true });
     (sac.transferPayment as jest.Mock).mockResolvedValue({ referenceNo: "DOKU-P2P-1", rawResponse: {} });
     (sac.txStatus as jest.Mock).mockResolvedValue({ partnerReferenceNo: "x", latestTransactionStatus: "00", rawResponse: {} });
     await Promise.all([
@@ -394,7 +407,7 @@ describe("FiatSubAccountService", () => {
     prisma.fiatProviderTransaction.update.mockImplementation(async (args: any) => ({
       id: "t1", kind: "transfer_internal", providerRef: "ST1", amountIdr: 100000n, feeIdr: 5000n, netIdr: 95000n, createdAt: new Date(), ...args.data,
     }));
-    prisma.fiatFeePolicy.findUnique.mockResolvedValue({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, active: true });
+    prisma.fiatFeePolicy.findUnique.mockResolvedValue({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0, active: true });
     (sac.txStatus as jest.Mock).mockResolvedValue({ partnerReferenceNo: "ST1-PTFEE", latestTransactionStatus: "00", rawResponse: {} });
     const view = await service.transferConfirm("ifal@pid", "t1", { beneficiaryAccountName: "RIA", expectedName: "RIA" });
     // Recipient receives net points, not gross.
@@ -473,6 +486,78 @@ describe("FiatSubAccountService", () => {
     expect(view.netIdr).toBe("1000000");
   });
 
+  it("createCheckoutDeposit adds the selected category's gateway fee and locks it at DOKU", async () => {
+    const { service, prisma, checkout } = setup();
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    prisma.paymentGatewayFeeRate.findMany.mockResolvedValue([
+      { methodKey: "VIRTUAL_ACCOUNT", percentBps: 250, flatIdr: 0n, minIdr: 0n, maxIdr: 0n, enabled: true },
+    ]);
+    prisma.fiatProviderTransaction.create.mockImplementationOnce(async (args: any) => ({
+      id: "t1", providerStatus: "created", createdAt: new Date(), ...args.data,
+    }));
+    (checkout.createPayment as jest.Mock).mockImplementationOnce(async () => ({
+      paymentUrl: "https://pay.example/9", tokenId: "T", rawResponse: {},
+    }));
+    prisma.fiatProviderTransaction.update.mockImplementationOnce(async (args: any) => ({
+      id: "t1", kind: "deposit", providerRef: "DP9", amountIdr: 107775n, createdAt: new Date(), ...args.data,
+    }));
+    // net 100000 + 5% PeridotID 5000 + 2.5% gateway 2500 + 11% DOKU PPN 275 = 107775.
+    const view = await service.createCheckoutDeposit("ifal@pid", "100000", null, "VIRTUAL_ACCOUNT");
+    expect(checkout.createPayment).toHaveBeenCalledWith(expect.objectContaining({
+      grossAmountIdr: 107775n,
+      paymentMethodTypes: expect.arrayContaining(["VIRTUAL_ACCOUNT_BCA"]),
+    }));
+    expect(view.grossIdr).toBe("107775");
+    expect(view.gatewayFeeIdr).toBe("2500");
+    expect(view.gatewayTaxIdr).toBe("275");
+    expect(view.transferFeeIdr).toBe("7775"); // PeridotID 5000 + 0 + gateway 2500 + 275
+    expect(view.paymentMethod).toBe("VIRTUAL_ACCOUNT");
+  });
+
+  it("quoteDeposit exposes the breakdown and per-category totals", async () => {
+    const { service, prisma } = setup();
+    prisma.paymentGatewayFeeRate.findMany.mockResolvedValue([
+      { methodKey: "EWALLET", percentBps: 100, flatIdr: 0n, minIdr: 0n, maxIdr: 0n, enabled: true },
+    ]);
+    const q = await service.quoteDeposit("100000", null, "EWALLET");
+    expect(q.peridotFeeIdr).toBe("5000");
+    expect(q.peridotTaxIdr).toBe("0"); // stub policy taxBps 0
+    expect(q.gatewayFeeEnabled).toBe(true);
+    expect(q.gatewayFeeIdr).toBe("1000");
+    expect(q.gatewayTaxIdr).toBe("110"); // 11% of 1000
+    expect(q.transferFeeIdr).toBe("6110"); // PeridotID 5000 + 0 + gateway 1000 + 110
+    expect(q.totalIdr).toBe("106110");
+    expect(q.appCategory).toBe("public");
+    expect(q.paymentMethods.find((m) => m.key === "EWALLET")).toMatchObject({ enabled: true, totalIdr: "106110" });
+  });
+
+  it("a disabled gateway method is not offered and is rejected when requested", async () => {
+    const { service, prisma } = setup();
+    prisma.paymentGatewayFeeRate.findMany.mockResolvedValue([
+      { methodKey: "EWALLET", percentBps: 100, flatIdr: 0n, minIdr: 0n, maxIdr: 0n, enabled: false },
+    ]);
+    // No method offered when the only row is disabled.
+    const q = await service.quoteDeposit("100000", null);
+    expect(q.gatewayFeeEnabled).toBe(false);
+    expect(q.gatewayFeeIdr).toBe("0");
+    expect(q.paymentMethods).toEqual([]);
+    // 5% PeridotID only — no gateway fee.
+    expect(q.totalIdr).toBe("105000");
+    // Explicitly requesting a disabled method is rejected.
+    await expect(service.quoteDeposit("100000", null, "EWALLET")).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("verified app shows PeridotID fee Rp0 but keeps its own app fee and gateway fee", async () => {
+    const { service, ledger, prisma } = setup();
+    (ledger.quoteFees as jest.Mock).mockResolvedValueOnce({
+      globalFee: 0n, peridotTaxIdr: 0n, appFee: 2000n, appId: "app1", appOwnerPid: "live2dev@pid", policyVersion: 3, isVerified: true,
+    });
+    prisma.paymentGatewayFeeRate.findMany.mockResolvedValue([]);
+    const q = await service.quoteDeposit("100000", "pidapp_x");
+    expect(q.peridotFeeIdr).toBe("0");
+    expect(q.appFeeIdr).toBe("2000");
+    expect(q.appCategory).toBe("verified");
+  });
   it("createCheckoutDeposit opens ledger+settlement as pending (issuance happens on paid)", async () => {
     const { service, prisma, checkout } = setup();
     prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });

@@ -52,6 +52,34 @@ const fresh = await peridot.fiat.syncTransaction(deposit.id);
 
 You can list recent intents with `peridot.fiat.deposits()`.
 
+### Checkout quote & Transfer Fee
+
+`quoteDeposit` returns the full breakdown **without moving money** — use it to
+show the summary before creating the intent:
+
+```ts
+const q = await peridot.fiat.quoteDeposit({ netAmountIdr: "100000" });
+// q.amountIdr        → what the user is credited
+// q.transferFeeIdr   → ONE combined line: PeridotID fee + PPN + DOKU gateway fee + PPN
+// q.appFeeIdr        → the initiating app's own fee (0 with no app context)
+// q.totalIdr         → Amount + Transfer Fee + App Fee
+// q.paymentMethods[] → each enabled method's gateway fee (empty ⇒ block checkout)
+```
+
+`transferFeeIdr` is exactly the "Transfer Fee" line shown to users (PPN folded
+in). The raw parts are also present (`peridotFeeIdr`, `peridotTaxIdr`,
+`gatewayFeeIdr`, `gatewayTaxIdr`); if you hold those, `sumTransferFee` computes
+the same value:
+
+```ts
+import { sumTransferFee } from "@peridotvault/pid-sdk-js";
+sumTransferFee(q); // === q.transferFeeIdr
+```
+
+`checkoutDeposit(netAmountIdr, clientId?, paymentMethod?)` takes the chosen
+method key; the returned intent (`CheckoutDepositView`) also carries
+`transferFeeIdr`.
+
 > In third-party (popup) mode, `checkoutDeposit` opens the PeridotID popup
 > (`fiat-checkout`), shows the server quote, and navigates itself to the DOKU
 > page on Approve — the developer's page never touches the amounts.

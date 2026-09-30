@@ -123,6 +123,20 @@ export class CreateFeePolicyDto {
 
   @Matches(/^\d+$/, { message: "maxIdr must be whole IDR" })
   maxIdr!: string;
+
+  /** PPN (VAT) on the PeridotID fee, basis points (1100 = 11%). 0 = none. */
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  taxBps!: number;
+}
+
+/** DOKU-wide PPN (VAT) rate on the payment-gateway fee, basis points. */
+export class SetDokuTaxDto {
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  taxBps!: number;
 }
 
 export class CheckoutDepositDto {
@@ -135,6 +149,50 @@ export class CheckoutDepositDto {
   @IsString()
   @MaxLength(64)
   clientId?: string;
+
+  /** Optional DOKU payment method (locked at checkout; omitted = DOKU shows all). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  paymentMethod?: string;
+}
+
+export class DepositQuoteDto {
+  /** Net deposit, whole IDR (credited to the user; fees quoted on top). */
+  @Matches(/^\d+$/, { message: "Amount must be whole IDR (positive integer)" })
+  netAmountIdr!: string;
+
+  /** Optional app context (model A): verified apps show PeridotID fee = Rp0. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  clientId?: string;
+
+  /** Optional DOKU payment method to price the gateway fee for. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  paymentMethod?: string;
+}
+
+/** One payment-gateway fee rate row (admin). */
+export class SetPaymentFeeRateDto {
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  percentBps!: number;
+
+  @Matches(/^\d+$/, { message: "flatIdr must be whole IDR" })
+  flatIdr!: string;
+
+  @Matches(/^\d+$/, { message: "minIdr must be whole IDR" })
+  minIdr!: string;
+
+  @Matches(/^\d+$/, { message: "maxIdr must be whole IDR" })
+  maxIdr!: string;
+
+  @IsBoolean()
+  enabled!: boolean;
 }
 
 export class ReconcileDto {

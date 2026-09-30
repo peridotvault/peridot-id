@@ -58,7 +58,7 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
       update: jest.fn(async (args: any) => ({ id: "j0", ...args.data })),
     },
     fiatFeePolicy: {
-      findFirst: jest.fn(async () => ({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, active: true })),
+      findFirst: jest.fn(async () => ({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0, active: true })),
       findUnique: jest.fn(async () => null),
     },
     identity: { findUnique: jest.fn(async () => null) },

@@ -19,3 +19,21 @@ export interface AppFee {
   maxIdr: string;
   enabled: boolean;
 }
+
+/** One payment-gateway (DOKU) fee row (admin). `methodKey` is a DOKU method
+ *  code, a category, or "*" (default). The list is the category catalog plus
+ *  any stored extra keys. */
+export interface PaymentFeeRate {
+  methodKey: string;
+  /** Display label (category name for catalog rows). */
+  label: string;
+  category: string | null;
+  /** True for the fixed category catalog rows. */
+  isCategory: boolean;
+  percentBps: number;
+  flatIdr: string;
+  minIdr: string;
+  maxIdr: string;
+  enabled: boolean;
+  updatedAt?: string | null;
+}

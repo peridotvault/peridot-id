@@ -193,6 +193,8 @@ export interface FeePolicy {
   minIdr: bigint;
   /** Fee cap in whole IDR. 0 = uncapped. */
   maxIdr: bigint;
+  /** PPN (VAT) rate charged on the PeridotID fee, in basis points. 1100 = 11%. */
+  taxBps: number;
 }
 
 export const DEFAULT_FEE_POLICY: FeePolicy = {
@@ -200,6 +202,7 @@ export const DEFAULT_FEE_POLICY: FeePolicy = {
   percentBps: 10, // 0.1%
   minIdr: 100n, // floor Rp100
   maxIdr: 0n, // no cap
+  taxBps: 1100, // 11% PPN on the PeridotID fee
 };
 
 /** PeridotID fee = percent of amount, clamped to [minIdr, maxIdr]
@@ -209,6 +212,12 @@ export function calcServiceFee(amountIdr: bigint, policy: FeePolicy = DEFAULT_FE
   if (policy.minIdr > 0n && fee < policy.minIdr) return policy.minIdr;
   if (policy.maxIdr > 0n && fee > policy.maxIdr) return policy.maxIdr;
   return fee;
+}
+
+/** PPN (VAT) on a fee: round-half-up(fee × taxBps / 10_000). 0/invalid bps = 0. */
+export function calcTaxAmount(feeIdr: bigint, taxBps: number): bigint {
+  if (feeIdr <= 0n || !Number.isFinite(taxBps) || taxBps <= 0) return 0n;
+  return (feeIdr * BigInt(Math.round(taxBps)) + 5_000n) / 10_000n;
 }
 
 /** Provider-agnostic Sub-Account boundary — swapping DOKU later means one new class. */
@@ -634,8 +643,13 @@ if (require.main === module) {
   assert.strictEqual(calcServiceFee(99_999n), 100n, "half-up rounding, floored to 100");
   assert.strictEqual(calcServiceFee(200_000n), 200n, "200k -> 200");
   // Unbounded policy (0/0) keeps the raw percent — legacy/back-compat.
-  const open = { version: 0, percentBps: 500, minIdr: 0n, maxIdr: 0n };
+  const open = { version: 0, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0 };
   assert.strictEqual(calcServiceFee(30_000n, open), 1_500n, "open -> 5% no floor");
   assert.strictEqual(calcServiceFee(1_000_000n, open), 50_000n, "open -> 5% no cap");
+  // PPN on a fee: round-half-up, 0 bps = 0.
+  assert.strictEqual(calcTaxAmount(5_000n, 1100), 550n, "11% of 5k");
+  assert.strictEqual(calcTaxAmount(100n, 1100), 11n, "11% of 100");
+  assert.strictEqual(calcTaxAmount(5_000n, 0), 0n, "0 bps -> 0");
+  assert.strictEqual(calcTaxAmount(0n, 1100), 0n, "no fee -> no tax");
   console.log("pid-payments subaccount self-check OK");
 }

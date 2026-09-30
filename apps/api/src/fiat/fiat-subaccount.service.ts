@@ -8,12 +8,16 @@ import {
   mapSacStatus,
   parseCheckoutNotify,
   parseIdrStrict,
+  paymentMethod as lookupPaymentMethod,
+  codesForCategory,
+  isPaymentMethodCategory,
   ProviderError,
   type DokuCheckoutClient,
   type SubAccountProvider,
 } from "@peridotvault/pid-payments";
 import { replayJournal } from "./ledger-replay";
 import { FiatLedgerService } from "./fiat-ledger.service";
+import { PaymentFeeService } from "./payment-fee.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CHECKOUT_CLIENT } from "./checkout-client.token";
@@ -71,6 +75,7 @@ interface FeeParams {
   percentBps: number;
   minIdr: bigint;
   maxIdr: bigint;
+  taxBps: number;
 }
 
 /**
@@ -144,6 +149,7 @@ export class FiatSubAccountService {
     @Inject(CHECKOUT_CLIENT) private readonly checkout: DokuCheckoutClient,
     private readonly security: SecurityEventService,
     private readonly ledger: FiatLedgerService,
+    private readonly paymentFee: PaymentFeeService,
   ) {}
 
   /**
@@ -366,26 +372,84 @@ export class FiatSubAccountService {
 
   // --- Checkout money-in (bank-agnostic, DOKU-hosted page) ---
 
+  /** Validate/normalize a payment selection: a category key (expands to all
+   *  its DOKU channels) or a specific DOKU method code (null when absent). */
+  private normalizePaymentMethod(raw?: string | null): { key: string; codes: string[] } | null {
+    const key = (raw ?? "").trim().toUpperCase();
+    if (!key) return null;
+    if (isPaymentMethodCategory(key)) return { key, codes: codesForCategory(key) };
+    if (lookupPaymentMethod(key)) return { key, codes: [key] };
+    throw new BadRequestException("Unknown payment method");
+  }
+
+  /**
+   * Quote a Checkout top-up WITHOUT moving money: the Net amount, the PeridotID
+   * fee (0 for verified apps), the app's own stacked fee, and the per-method
+   * DOKU gateway fee. `paymentMethods` carries every catalog method's gateway
+   * fee + total so the summary page can update on selection. The intent is
+   * created only on checkout (user approves this quote first).
+   */
+  async quoteDeposit(netAmountIdr: string, appClientId?: string | null, paymentMethod?: string | null) {
+    const net = this.parseGross(netAmountIdr);
+    if (net < MIN_CHECKOUT_NET_IDR) throw new BadRequestException("Minimum top-up is Rp100.000");
+    const { globalFee, peridotTaxIdr, appFee, policyVersion, isVerified } = await this.ledger.quoteFees(appClientId, "topup", net);
+    const base = net + globalFee + peridotTaxIdr + appFee;
+    const methods = (await this.paymentFee.methodsFor(net)).map((m) => ({
+      ...m,
+      totalIdr: (base + BigInt(m.gatewayFeeIdr) + BigInt(m.gatewayTaxIdr)).toString(),
+    }));
+    const method = this.normalizePaymentMethod(paymentMethod);
+    if (method && !methods.some((m) => m.key === method.key)) throw new BadRequestException("Payment method unavailable");
+    const chosen = method ? methods.find((m) => m.key === method.key) ?? null : null;
+    const gatewayFee = chosen ? BigInt(chosen.gatewayFeeIdr) : 0n;
+    const gatewayTax = chosen ? BigInt(chosen.gatewayTaxIdr) : 0n;
+    const total = base + gatewayFee + gatewayTax;
+    if (total > MAX_CHECKOUT_GROSS) throw new BadRequestException("Amount exceeds Checkout 12-digit limit");
+    return {
+      amountIdr: net.toString(),
+      netIdr: net.toString(),
+      peridotFeeIdr: globalFee.toString(),
+      peridotTaxIdr: peridotTaxIdr.toString(),
+      appFeeIdr: appFee.toString(),
+      appCategory: isVerified ? ("verified" as const) : ("public" as const),
+      paymentMethod: chosen?.key ?? null,
+      gatewayFeeEnabled: chosen?.enabled ?? false,
+      gatewayFeeIdr: gatewayFee.toString(),
+      gatewayTaxIdr: gatewayTax.toString(),
+      // One combined line for consumers: PeridotID (fee+PPN) + DOKU (fee+PPN).
+      transferFeeIdr: (globalFee + peridotTaxIdr + gatewayFee + gatewayTax).toString(),
+      totalIdr: total.toString(),
+      feePolicyVersion: policyVersion,
+      paymentMethods: methods,
+    };
+  }
+
   /**
    * Create a Checkout deposit intent (NET-in): the entered amount is the NET
    * the user wants credited (minimum Rp100.000 — API-enforced, no DOKU
-   * minimum). fee = flat 5% of net, gross = net + fee. Local row first
-   * (gross stored, fee/net quote snapshotted), then the DOKU-hosted payment
-   * page routed to this PID's sub-account. The customer is charged gross;
-   * fiat settles 100% to the user IDR account as POINTS backing (no fiat
-   * split — the fee moves as Treasury points at issuance, never as a
-   * post-settlement fiat debit). No API-side fiat fee debit happens.
+   * minimum). Total charged = net + PeridotID fee + app fee + DOKU gateway fee;
+   * the selected method is locked at DOKU (`payment_method_types`). Local row
+   * first (total stored, all quotes snapshotted), then the DOKU-hosted payment
+   * page. Fiat settles to the merchant account; the user's balance lives on
+   * the internal ledger (issuance on corroborated payment).
    */
-  async createCheckoutDeposit(pid: string, netAmountIdr: string, appClientId?: string | null) {
+  async createCheckoutDeposit(pid: string, netAmountIdr: string, appClientId?: string | null, paymentMethod?: string | null) {
     const net = this.parseGross(netAmountIdr);
     if (net < MIN_CHECKOUT_NET_IDR) throw new BadRequestException("Minimum top-up is Rp100.000");
     // No DOKU Sub-Account required: Checkout money-in lands on the merchant
     // account; every user balance lives on the internal fiat ledger.
-    // Fee = global PeridotID + (when an app initiated this) that app's fee.
-    const { globalFee, appFee, appId, appOwnerPid, policyVersion } = await this.ledger.quoteFees(appClientId, "topup", net);
-    const fee = globalFee + appFee;
-    const gross = net + fee;
-    if (gross > MAX_CHECKOUT_GROSS) throw new BadRequestException("Amount exceeds Checkout 12-digit limit");
+    // PeridotID fee (0 for verified apps) + the app's own stacked fee.
+    const { globalFee, peridotTaxIdr, appFee, appId, appOwnerPid, policyVersion } = await this.ledger.quoteFees(appClientId, "topup", net);
+    const selection = this.normalizePaymentMethod(paymentMethod);
+    // Gateway fee is per-method; when no method is chosen DOKU shows all and no
+    // gateway fee is added to the total (the user picks on DOKU's page). A
+    // disabled method still lets the user pay — just no PeridotID-quoted fee.
+    const gateway = selection
+      ? await this.paymentFee.gatewayFee(selection.key, net)
+      : { feeIdr: 0n, taxIdr: 0n, enabled: false, source: "config" as const, rateKey: "none" };
+    if (selection && !gateway.enabled) throw new BadRequestException("Payment method unavailable");
+    const total = net + globalFee + peridotTaxIdr + appFee + gateway.feeIdr + gateway.taxIdr;
+    if (total > MAX_CHECKOUT_GROSS) throw new BadRequestException("Amount exceeds Checkout 12-digit limit");
     const providerRef = buildInvoiceNumber("DP");
     // Optional: route to a legacy sub-account if one happens to exist.
     const account = await this.prisma.fiatProviderAccount
@@ -394,13 +458,14 @@ export class FiatSubAccountService {
     const row = await this.prisma.fiatProviderTransaction.create({
       data: {
         pid, accountId: account?.providerAccountId ?? null, kind: "deposit", providerRef,
-        providerStatus: "created", amountIdr: gross,
+        providerStatus: "created", amountIdr: total,
         feeIdr: globalFee, netIdr: net, feePolicyVersion: policyVersion,
         ledgerStatus: "pending", settlementStatus: "pending",
         counterparty: {
-          channel: "checkout", feeQuote: globalFee.toString(), netQuote: net.toString(),
+          channel: "checkout", feeQuote: globalFee.toString(), taxQuote: peridotTaxIdr.toString(), netQuote: net.toString(),
           feePolicyVersion: policyVersion,
           ...(appId && appOwnerPid ? { appId, appOwnerPid, appFeeQuote: appFee.toString() } : {}),
+          ...(selection ? { paymentMethod: selection.key, gatewayFeeEnabled: gateway.enabled, gatewayFeeQuote: gateway.feeIdr.toString(), gatewayTaxQuote: gateway.taxIdr.toString(), gatewayRateKey: gateway.rateKey, gatewayFeeSource: gateway.source } : {}),
         },
       },
     });
@@ -409,8 +474,9 @@ export class FiatSubAccountService {
       payment = await this.withRetry(
         () => this.checkout.createPayment({
           invoiceNumber: providerRef,
-          grossAmountIdr: gross,
+          grossAmountIdr: total,
           ...(account?.profileId ? { profileId: account.profileId } : {}),
+          ...(selection ? { paymentMethodTypes: selection.codes } : {}),
           // Customer name rendered by DOKU is always the pid — never the
           // display name (dashboard/label consistency, no impersonation).
           customer: { id: pid, name: pid, phone: account?.phoneNo ?? undefined, email: account?.email ?? undefined },
@@ -424,7 +490,7 @@ export class FiatSubAccountService {
     }
     const updated = await this.markTx(row.id, "created", payment.rawResponse);
     await this.security.log(pid, "fiat.subaccount.checkout", { providerRef }).catch(() => undefined);
-    return this.toCheckoutView(updated, payment, fee, policyVersion);
+    return this.toCheckoutView(updated, payment, { net, peridotFee: globalFee, peridotTax: peridotTaxIdr, appFee, gatewayFee: gateway.feeIdr, gatewayTax: gateway.taxIdr, paymentMethod: selection?.key ?? null, policyVersion });
   }
 
   // --- authoritative reads (DOKU is the ledger) ---
@@ -1122,10 +1188,10 @@ export class FiatSubAccountService {
 
   async feePolicy() {
     const policy = await this.activeFeePolicy();
-    return { version: policy.version, percentBps: policy.percentBps, minIdr: policy.minIdr.toString(), maxIdr: policy.maxIdr.toString(), active: true };
+    return { version: policy.version, percentBps: policy.percentBps, minIdr: policy.minIdr.toString(), maxIdr: policy.maxIdr.toString(), taxBps: policy.taxBps, active: true };
   }
 
-  async createFeePolicy(input: { percentBps: number; minIdr: string; maxIdr: string }) {
+  async createFeePolicy(input: { percentBps: number; minIdr: string; maxIdr: string; taxBps: number }) {
     const minIdr = BigInt(input.minIdr);
     const maxIdr = BigInt(input.maxIdr);
     // 0 = unbounded. A finite floor above a finite cap can never be satisfied.
@@ -1137,9 +1203,9 @@ export class FiatSubAccountService {
     return this.prisma.$transaction(async (tx) => {
       await tx.fiatFeePolicy.updateMany({ where: { active: true }, data: { active: false } });
       const row = await tx.fiatFeePolicy.create({
-        data: { version, percentBps: input.percentBps, minIdr, maxIdr, active: true },
+        data: { version, percentBps: input.percentBps, minIdr, maxIdr, taxBps: input.taxBps, active: true },
       });
-      return { version: row.version, percentBps: row.percentBps, minIdr: row.minIdr.toString(), maxIdr: row.maxIdr.toString(), active: row.active };
+      return { version: row.version, percentBps: row.percentBps, minIdr: row.minIdr.toString(), maxIdr: row.maxIdr.toString(), taxBps: row.taxBps, active: row.active };
     });
   }
 
@@ -2874,14 +2940,14 @@ export class FiatSubAccountService {
 
   private async activeFeePolicy(): Promise<FeeParams> {
     const policy = await this.prisma.fiatFeePolicy.findFirst({ where: { active: true }, orderBy: { version: "desc" } });
-    if (policy) return { version: policy.version, percentBps: policy.percentBps, minIdr: policy.minIdr, maxIdr: policy.maxIdr };
-    return { version: DEFAULT_FEE_POLICY.version, percentBps: DEFAULT_FEE_POLICY.percentBps, minIdr: DEFAULT_FEE_POLICY.minIdr, maxIdr: DEFAULT_FEE_POLICY.maxIdr };
+    if (policy) return { version: policy.version, percentBps: policy.percentBps, minIdr: policy.minIdr, maxIdr: policy.maxIdr, taxBps: policy.taxBps };
+    return { version: DEFAULT_FEE_POLICY.version, percentBps: DEFAULT_FEE_POLICY.percentBps, minIdr: DEFAULT_FEE_POLICY.minIdr, maxIdr: DEFAULT_FEE_POLICY.maxIdr, taxBps: DEFAULT_FEE_POLICY.taxBps };
   }
 
   private async feePolicyByVersion(version: number): Promise<FeeParams> {
     if (version > 0) {
       const row = await this.prisma.fiatFeePolicy.findUnique({ where: { version } }).catch(() => null);
-      if (row) return { version: row.version, percentBps: row.percentBps, minIdr: row.minIdr, maxIdr: row.maxIdr };
+      if (row) return { version: row.version, percentBps: row.percentBps, minIdr: row.minIdr, maxIdr: row.maxIdr, taxBps: row.taxBps };
     }
     return this.activeFeePolicy();
   }
@@ -3025,8 +3091,7 @@ export class FiatSubAccountService {
   private toCheckoutView(
     r: { id: string; providerRef: string; providerStatus: string; amountIdr: bigint; createdAt: Date },
     payment: { paymentUrl: string; tokenId: string; expiredDate?: string },
-    fee: bigint,
-    policyVersion: number,
+    q: { net: bigint; peridotFee: bigint; peridotTax: bigint; appFee: bigint; gatewayFee: bigint; gatewayTax: bigint; paymentMethod: string | null; policyVersion: number },
   ) {
     return {
       id: r.id,
@@ -3035,9 +3100,17 @@ export class FiatSubAccountService {
       tokenId: payment.tokenId,
       expiredDate: payment.expiredDate ?? null,
       grossIdr: r.amountIdr.toString(),
-      feeIdr: fee.toString(),
-      netIdr: (r.amountIdr - fee).toString(),
-      feePolicyVersion: policyVersion,
+      totalIdr: r.amountIdr.toString(),
+      feeIdr: q.peridotFee.toString(),
+      peridotTaxIdr: q.peridotTax.toString(),
+      appFeeIdr: q.appFee.toString(),
+      gatewayFeeIdr: q.gatewayFee.toString(),
+      gatewayTaxIdr: q.gatewayTax.toString(),
+      // One combined line: PeridotID (fee+PPN) + DOKU (fee+PPN).
+      transferFeeIdr: (q.peridotFee + q.peridotTax + q.gatewayFee + q.gatewayTax).toString(),
+      paymentMethod: q.paymentMethod,
+      netIdr: q.net.toString(),
+      feePolicyVersion: q.policyVersion,
       providerStatus: r.providerStatus,
       createdAt: r.createdAt,
     };

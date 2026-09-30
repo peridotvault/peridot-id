@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { ArrowLeft } from "../icons";
-import type { CheckoutDepositView, FeePolicyView } from "@peridotvault/pid-sdk-js";
+import type { CheckoutDepositView, DepositQuoteView } from "@peridotvault/pid-sdk-js";
+import { sumTransferFee } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
 import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";
 
 function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;
+}
+
+/** Sum two whole-IDR strings (PPN folded into the shown fee lines). */
+function sumIdr(a: string, b: string): string {
+  return (BigInt(a || "0") + BigInt(b || "0")).toString();
 }
 
 /** Max input digits (Checkout order.amount is an integer ≤12 digits). */
@@ -28,74 +34,68 @@ function groupDigits(digits: string): string {
   return Number(digits).toLocaleString("id-ID");
 }
 
-/** Client-side fee preview — mirrors calcServiceFee (@peridotvault/pid-payments):
- *  5% of the amount, clamped to policy [minIdr, maxIdr] (0 = unbounded). The
- *  server recomputes authoritatively when the intent is created, so this is
- *  display-only. */
-function previewFee(amount: bigint, policy: FeePolicyView): bigint {
-  const fee = (amount * BigInt(policy.percentBps) + 5_000n) / 10_000n;
-  const min = BigInt(policy.minIdr ?? "0");
-  const max = BigInt(policy.maxIdr ?? "0");
-  if (min > 0n && fee < min) return min;
-  if (max > 0n && fee > max) return max;
-  return fee;
-}
-
-/** Human bounds for the fee copy: " (min Rp5.000, max Rp25.000)". */
-function feeBoundsText(policy: FeePolicyView): string {
-  const min = BigInt(policy.minIdr ?? "0");
-  const max = BigInt(policy.maxIdr ?? "0");
-  const parts: string[] = [];
-  if (min > 0n) parts.push(`min ${fmtIdr(policy.minIdr)}`);
-  if (max > 0n) parts.push(`max ${fmtIdr(policy.maxIdr)}`);
-  return parts.length ? ` (${parts.join(", ")})` : "";
+function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <View style={styles.row}>
+      <Text style={[styles.rowLabel, strong && styles.strong]}>{label}</Text>
+      <Text style={[styles.rowValue, strong && styles.strong]}>{value}</Text>
+    </View>
+  );
 }
 
 /**
- * Deposit into the DOKU Sub-Account (1 PID → 1 User Sub-Account under the
- * `Users` parent). Payments only: enter the NET amount you want credited
- * (minimum Rp100.000), tap Pay, and the DOKU Checkout page opens (all
- * banks, QRIS, e-money, cards). You pay net + the flat 5% platform fee,
- * quoted upfront. After paying, tap Check payment status (auto-checked
- * once on return) — your Saldo updates with the exact quoted net as soon
- * as the payment is confirmed, no waiting for settlement (fiat settlement
- * only backs the balance in the background). The static BRI VA below stays
- * as the always-on rail. DOKU is the ledger.
+ * Top up the internal fiat ledger via DOKU Checkout. Enter the NET amount you
+ * want credited; the PeridotID checkout summary shows Amount, the combined
+ * Transfer Fee (PeridotID fee + PPN, DOKU gateway fee + PPN), any app fee, and
+ * the Total Payment — so you know the final amount before DOKU. Pay opens the
+ * DOKU-hosted page (all banks, QRIS, e-money, cards). After paying, tap Check
+ * payment status (auto-checked once on return) — your Saldo updates with the
+ * exact quoted net once the payment is confirmed.
  */
 export function TopupScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
-  const [policy, setPolicy] = useState<FeePolicyView | null>(null);
   const [net, setNet] = useState("");
+  const [quote, setQuote] = useState<DepositQuoteView | null>(null);
+  const [method, setMethod] = useState<string | null>(null);
   const [pending, setPending] = useState<CheckoutDepositView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setPolicy(await peridot.fiat.feePolicy());
-    } catch {
-      // fee preview is a convenience — deposits still work
-    }
-  }, [peridot]);
-
+  // Quote the top-up (moves no money) once the user pauses on a valid amount.
   useEffect(() => {
-    load();
-  }, [load]);
-
-  const quote = (() => {
     const trimmed = net.replace(/\D/g, "");
-    if (!/^\d+$/.test(trimmed) || !policy) return null;
-    try {
-      const n = BigInt(trimmed);
-      if (n <= 0n) return null;
-      const fee = previewFee(n, policy);
-      return { net: n.toString(), fee: fee.toString(), gross: (n + fee).toString(), belowMin: n < MIN_NET_IDR };
-    } catch {
-      return null;
+    if (!/^\d+$/.test(trimmed) || BigInt(trimmed) < MIN_NET_IDR) {
+      setQuote(null);
+      return;
     }
-  })();
+    let cancelled = false;
+    const t = setTimeout(() => {
+      const n = BigInt(trimmed);
+      peridot.fiat
+        .quoteDeposit({ netAmountIdr: n.toString() })
+        .then((q) => {
+          if (cancelled) return;
+          setQuote(q);
+          setMethod((m) => (m && q.paymentMethods.some((p) => p.key === m) ? m : q.paymentMethods[0]?.key ?? null));
+        })
+        .catch((e) => {
+          if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [net, peridot]);
+
+  const selected = quote?.paymentMethods.find((p) => p.key === method) ?? null;
+  const noMethods = !!quote && quote.paymentMethods.length === 0;
+  // One combined fee line: PeridotID (fee+PPN) + DOKU gateway (fee+PPN).
+  const transferFee = quote ? quote.transferFeeIdr ?? sumTransferFee(quote) : "0";
+  const digits = net.replace(/\D/g, "");
+  const belowMin = /^\d+$/.test(digits) && BigInt(digits) > 0n && BigInt(digits) < MIN_NET_IDR;
 
   const openUrl = (url: string) => {
     Linking.openURL(url).catch(() => setError("Could not open the payment page."));
@@ -142,18 +142,22 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
     setError(null);
     setPending(null);
     try {
-      const trimmed = net.replace(/\D/g, "");
-      if (!/^\d+$/.test(trimmed) || BigInt(trimmed) <= 0n) {
+      if (!/^\d+$/.test(digits) || BigInt(digits) <= 0n) {
         setError("Enter the net amount you want credited.");
         return;
       }
-      if (BigInt(trimmed) < MIN_NET_IDR) {
+      if (BigInt(digits) < MIN_NET_IDR) {
         setError("Minimum top-up is Rp100.000.");
         return;
       }
-      const deposit = await peridot.fiat.checkoutDeposit(trimmed);
+      if (!method) {
+        setError("No payment methods available right now.");
+        return;
+      }
+      const deposit = await peridot.fiat.checkoutDeposit(digits, undefined, method);
       setPending(deposit);
       setNet("");
+      setQuote(null);
       // Take the user straight to payment — the manual button below remains
       // as fallback when deep-linking is blocked.
       openUrl(deposit.paymentUrl);
@@ -171,21 +175,49 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
         <Text style={styles.backLabel}>Back</Text>
       </TouchableOpacity>
       <Text style={s.title}>Top Up</Text>
-      <Text style={s.subtitle}>Enter what you want credited — you pay that plus the service fee.</Text>
+      <Text style={s.subtitle}>Enter what you want credited — you pay that plus the fees shown below.</Text>
 
       <View style={styles.card}>
-        <Text style={s.label}>Net amount (IDR) — credited to you</Text>
+        <Text style={s.label}>Amount credited to you (IDR)</Text>
         <TextInput style={s.input} value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="100.000" placeholderTextColor={theme.colors.mutedForeground} />
+        {belowMin && <Text style={s.error}>Minimum top-up is Rp100.000.</Text>}
+
         {quote && (
-          <Text style={s.hint}>You receive {fmtIdr(quote.net)} · fee {fmtIdr(quote.fee)}</Text>
+          <>
+            {noMethods ? (
+              <Text style={s.error}>No payment methods available right now. Try again later.</Text>
+            ) : (
+              <>
+                <Text style={s.label}>Payment method</Text>
+                <View style={styles.methods}>
+                  {quote.paymentMethods.map((m) => (
+                    <TouchableOpacity
+                      key={m.key}
+                      style={[styles.method, method === m.key && styles.methodActive]}
+                      onPress={() => setMethod(m.key)}
+                      accessibilityLabel={`Pay with ${m.label}`}
+                    >
+                      <Text style={[styles.methodLabel, method === m.key && styles.methodLabelActive]}>{m.label}</Text>
+                      {m.enabled && <Text style={styles.methodFee}>{fmtIdr(sumIdr(m.gatewayFeeIdr, m.gatewayTaxIdr))}</Text>}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <View style={styles.breakdown}>
+                  <Row label="Amount" value={fmtIdr(quote.netIdr)} />
+                  {BigInt(transferFee) > 0n && <Row label="Transfer Fee" value={fmtIdr(transferFee)} />}
+                  {Number(quote.appFeeIdr) > 0 && <Row label="App Fee" value={fmtIdr(quote.appFeeIdr)} />}
+                  <Row label="Total Payment" value={fmtIdr(selected?.totalIdr ?? quote.totalIdr)} strong />
+                </View>
+              </>
+            )}
+          </>
         )}
-        {quote?.belowMin && (
-          <Text style={s.error}>Minimum top-up is Rp100.000.</Text>
-        )}
+
         <UIButton
-          title={busy ? "Creating…" : quote ? `Pay IDR ${Number(quote.gross).toLocaleString("id-ID")}` : "Pay"}
+          title={busy ? "Creating…" : selected ? `Pay ${fmtIdr(selected.totalIdr)}` : "Pay"}
           onPress={createCheckout}
-          disabled={busy || !quote || quote.belowMin}
+          disabled={busy || !quote || belowMin || noMethods}
           variant="primary"
         />
         {pending && (
@@ -202,11 +234,9 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
         {syncMsg && <Text style={s.hint}>{syncMsg}</Text>}
       </View>
 
-      {policy && (
-        <Text style={s.hint}>
-          Service fee {policy.percentBps / 100}% of the credited amount{feeBoundsText(policy)}. Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Tap Check payment status after paying — your Saldo updates once confirmed.
-        </Text>
-      )}
+      <Text style={s.hint}>
+        Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Verified apps pay a Rp0 PeridotID fee. Tap Check payment status after paying — your Saldo updates once confirmed.
+      </Text>
 
       {error && <Text style={s.error}>{error}</Text>}
     </ScrollView>
@@ -216,7 +246,6 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
 const styles = StyleSheet.create({
   back: { flexDirection: "row", alignItems: "center", gap: 6 },
   backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-  va: { fontSize: 22, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
   card: {
     marginTop: 12,
     padding: 12,
@@ -226,4 +255,23 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   pending: { gap: 6 },
+  methods: { gap: 6, marginTop: 2 },
+  method: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  methodActive: { borderColor: theme.colors.foreground },
+  methodLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
+  methodLabelActive: { fontWeight: "600" },
+  methodFee: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.mono },
+  breakdown: { marginTop: 8, gap: 4 },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  rowLabel: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
+  rowValue: { fontSize: 13, color: theme.colors.foreground, fontFamily: theme.fonts.mono },
+  strong: { fontWeight: "700", color: theme.colors.foreground },
 });

@@ -141,7 +141,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ? "chains"
         : pathname?.startsWith("/workspace/partners") === true
           ? "partners"
-          : "apps";
+          : pathname?.startsWith("/workspace/fees") === true
+            ? "fees"
+            : "apps";
   const tabs = useMemo<WorkspaceTab[]>(
     () =>
       isAdmin
@@ -150,6 +152,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             { key: "chains", label: "Chains" },
             { key: "contracts", label: "Contracts" },
             { key: "partners", label: "Partners" },
+            { key: "fees", label: "Fees" },
           ]
         : [{ key: "apps", label: "Apps" }],
     [isAdmin],

@@ -67,12 +67,83 @@ export interface CheckoutDepositView {
   paymentUrl: string;
   tokenId: string;
   expiredDate: string | null;
+  /** Total payable (net + PeridotID fee + app fee + gateway fee). */
   grossIdr: string;
+  totalIdr?: string;
+  /** PeridotID fee (Rp0 for verified apps). */
   feeIdr: string;
+  /** The initiating app's own stacked fee (0 when no app context). */
+  appFeeIdr?: string;
+  /** DOKU payment-gateway fee for the selected method (0 when none selected). */
+  gatewayFeeIdr?: string;
+  /** Combined display line: PeridotID (fee+PPN) + DOKU (fee+PPN). */
+  transferFeeIdr?: string;
+  paymentMethod?: string | null;
   netIdr: string;
   feePolicyVersion: number;
   providerStatus: string;
   createdAt: string;
+}
+
+/** One payment category (what the picker offers) with its gateway fee + total. */
+export interface PaymentMethodQuote {
+  /** Category key; pass back as `paymentMethod` on checkout. */
+  key: string;
+  label: string;
+  category: string;
+  /** false = not offered (hidden in the wallet). */
+  enabled: boolean;
+  gatewayFeeIdr: string;
+  /** DOKU PPN on the gateway fee (folded into `transferFeeIdr`). */
+  gatewayTaxIdr: string;
+  rateKey: string;
+  source: "doku" | "config";
+  totalIdr: string;
+}
+
+/** Parts of a top-up fee breakdown (whole-IDR strings). */
+export interface TransferFeeParts {
+  peridotFeeIdr: string;
+  peridotTaxIdr: string;
+  gatewayFeeIdr?: string;
+  gatewayTaxIdr?: string;
+}
+
+/**
+ * One combined "Transfer Fee" string = PeridotID fee + PeridotID PPN + DOKU
+ * gateway fee + DOKU PPN. Prefer `DepositQuoteView.transferFeeIdr` (server-
+ * computed); use this when you hold the parts. Whole-IDR; missing parts = 0.
+ */
+export function sumTransferFee(parts: TransferFeeParts): string {
+  const sum =
+    BigInt(parts.peridotFeeIdr || "0") +
+    BigInt(parts.peridotTaxIdr || "0") +
+    BigInt(parts.gatewayFeeIdr || "0") +
+    BigInt(parts.gatewayTaxIdr || "0");
+  return sum.toString();
+}
+
+/** Transparent top-up quote (moves no money). */
+export interface DepositQuoteView {
+  amountIdr: string;
+  netIdr: string;
+  /** PeridotID platform fee (Rp0 for verified apps) — excludes PPN. */
+  peridotFeeIdr: string;
+  /** PPN on the PeridotID fee (folded into `transferFeeIdr`). */
+  peridotTaxIdr: string;
+  appFeeIdr: string;
+  appCategory: "verified" | "public";
+  paymentMethod: string | null;
+  /** Whether the selected method's gateway fee is enabled (hide the line if not). */
+  gatewayFeeEnabled: boolean;
+  gatewayFeeIdr: string;
+  /** DOKU PPN on the gateway fee (folded into `transferFeeIdr`). */
+  gatewayTaxIdr: string;
+  /** Combined display line: PeridotID (fee+PPN) + DOKU (fee+PPN). */
+  transferFeeIdr: string;
+  totalIdr: string;
+  feePolicyVersion: number;
+  paymentMethods: PaymentMethodQuote[];
 }
 
 /** A deposit row's corroborated status (sync result). */
@@ -94,6 +165,8 @@ export interface FeePolicyView {
   percentBps: number;
   minIdr: string;
   maxIdr: string;
+  /** PPN (VAT) on the PeridotID fee, basis points (1100 = 11%). */
+  taxBps: number;
   active: boolean;
 }
 
@@ -170,15 +243,35 @@ export class PeridotFiat {
   // --- money-in (DOKU Checkout) ---
 
   /**
-   * Create a Checkout deposit intent: DOKU-hosted page. netAmountIdr is the
-   * NET credited to the user (minimum Rp100.000); PeridotID fee + gross
-   * payable are quoted upfront. Third-party mode opens the PeridotID popup
-   * (`fiat-checkout`) which navigates to the DOKU page on Approve.
+   * Quote a top-up (moves no money): Net, PeridotID fee (Rp0 for verified
+   * apps), app fee, per-method DOKU gateway fee and total. Render this on the
+   * PeridotID checkout summary before creating the deposit.
    */
-  async checkoutDeposit(netAmountIdr: string, clientId?: string): Promise<CheckoutDepositView> {
+  async quoteDeposit(input: { netAmountIdr: string; clientId?: string; paymentMethod?: string }): Promise<DepositQuoteView> {
+    const cid = this.appId(input.clientId);
+    return unwrap(
+      await this.api.post<DepositQuoteView>(`${BASE}/deposits/quote`, {
+        netAmountIdr: input.netAmountIdr,
+        clientId: cid,
+        ...(input.paymentMethod ? { paymentMethod: input.paymentMethod } : {}),
+      }),
+      "Top-up quote failed",
+    );
+  }
+
+  /**
+   * Create a Checkout deposit intent: DOKU-hosted page. netAmountIdr is the
+   * NET credited to the user (minimum Rp100.000); PeridotID fee + app fee +
+   * the selected method's gateway fee and total are quoted upfront.
+   * `paymentMethod` (DOKU code) locks the channel at DOKU. Third-party mode
+   * opens the PeridotID popup (`fiat-checkout`) which navigates to DOKU on
+   * Approve.
+   */
+  async checkoutDeposit(netAmountIdr: string, clientId?: string, paymentMethod?: string): Promise<CheckoutDepositView> {
     const cid = this.appId(clientId);
-    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", { netAmountIdr, clientId: cid });
-    return unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, { netAmountIdr, clientId: cid }), "Checkout deposit failed");
+    const payload = { netAmountIdr, clientId: cid, ...(paymentMethod ? { paymentMethod } : {}) };
+    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", payload);
+    return unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, payload), "Checkout deposit failed");
   }
 
   /** Recent deposit intents for the caller (money-in history). */

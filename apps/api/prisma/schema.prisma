@@ -552,10 +552,22 @@ model FiatFeePolicy {
   percentBps Int      @default(500)
   minIdr     BigInt   @default(0)
   maxIdr     BigInt   @default(25000)
+  /** PPN (VAT) on the PeridotID fee, basis points (1100 = 11%). */
+  taxBps     Int      @default(1100)
   active     Boolean  @default(false)
   createdAt  DateTime @default(now())
 
   @@map("fiat_fee_policies")
+}
+
+// Singleton config for the DOKU payment-gateway PPN (VAT), applied to every
+// method's gateway fee. One rate for all methods (DOKU taxes its fee uniformly).
+model FiatTaxSetting {
+  id         Int      @id @default(1)
+  dokuTaxBps Int      @default(1100)
+  updatedAt  DateTime @updatedAt
+
+  @@map("fiat_tax_settings")
 }
 
 // Fiat ledger — the spendable balance, statement and send/receive. This is
@@ -668,4 +680,24 @@ model PidAppFee {
 
   @@unique([appId, operation])
   @@map("pid_app_fees")
+}
+
+// Payment-gateway (DOKU) fee schedule for top-ups, keyed by DOKU payment
+// method. `methodKey` is an exact DOKU `payment_method_types` code, a category
+// ("VIRTUAL_ACCOUNT" | "EWALLET" | "CARD" | "QRIS" | "OTHER"), or "*" (default).
+// Resolution: exact code → category → "*". 0 min/max = unbounded. Admin-edited;
+// this is the fallback when DOKU exposes no real-time fee. See
+// apps/api/src/fiat/payment-fee.service.ts.
+model PaymentGatewayFeeRate {
+  id         String   @id @default(uuid())
+  methodKey  String   @unique
+  percentBps Int      @default(0)
+  flatIdr    BigInt   @default(0)
+  minIdr     BigInt   @default(0)
+  maxIdr     BigInt   @default(0)
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("payment_gateway_fee_rates")
 }

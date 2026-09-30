@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 import {
   buildInvoiceNumber,
   calcServiceFee,
+  calcTaxAmount,
   DEFAULT_FEE_POLICY,
   type DokuCheckoutClient,
 } from "@peridotvault/pid-payments";
@@ -27,6 +28,7 @@ interface FeeParams {
   percentBps: number;
   minIdr: bigint;
   maxIdr: bigint;
+  taxBps: number;
 }
 
 /** One immutable double-entry leg. The statement amount is `amountIdr` on the
@@ -115,7 +117,7 @@ export class FiatLedgerService {
       .findUnique({ where: { appId_operation: { appId, operation } } })
       .catch(() => null);
     if (!f || !f.enabled || f.percentBps <= 0) return 0n;
-    return calcServiceFee(amount, { version: 0, percentBps: f.percentBps, minIdr: f.minIdr, maxIdr: f.maxIdr });
+    return calcServiceFee(amount, { version: 0, percentBps: f.percentBps, minIdr: f.minIdr, maxIdr: f.maxIdr, taxBps: 0 });
   }
 
   /**
@@ -128,12 +130,13 @@ export class FiatLedgerService {
     clientId: string | null | undefined,
     operation: "topup" | "transaction" | "withdraw",
     amount: bigint,
-  ): Promise<{ globalFee: bigint; appFee: bigint; appId: string | null; appOwnerPid: string | null; policyVersion: number }> {
+  ): Promise<{ globalFee: bigint; peridotTaxIdr: bigint; appFee: bigint; appId: string | null; appOwnerPid: string | null; policyVersion: number; isVerified: boolean }> {
     const policy = await this.activeFeePolicy();
     const app = await this.resolveAppContext(clientId);
     const globalFee = app?.isVerified ? 0n : calcServiceFee(amount, policy);
+    const peridotTaxIdr = calcTaxAmount(globalFee, policy.taxBps);
     const appFee = await this.appFeeFor(app?.id ?? null, operation, amount);
-    return { globalFee, appFee, appId: app?.id ?? null, appOwnerPid: app?.ownerPid ?? null, policyVersion: policy.version };
+    return { globalFee, peridotTaxIdr, appFee, appId: app?.id ?? null, appOwnerPid: app?.ownerPid ?? null, policyVersion: policy.version, isVerified: app?.isVerified ?? false };
   }
 
   // --- issue: Checkout SUCCESS → NET becomes internal credit ---
@@ -199,6 +202,7 @@ export class FiatLedgerService {
 
     const net = this.quotedBigint(cp["netQuote"]) ?? row.netIdr ?? null;
     const fee = this.quotedBigint(cp["feeQuote"]) ?? row.feeIdr ?? 0n;
+    const tax = this.quotedBigint(cp["taxQuote"]) ?? 0n;
     const appFee = this.quotedBigint(cp["appFeeQuote"]) ?? 0n;
     const appOwnerPid = typeof cp["appOwnerPid"] === "string" ? (cp["appOwnerPid"] as string) : null;
     if (net === null || net < MIN_FIAT_DEPOSIT_NET_IDR) {
@@ -228,6 +232,18 @@ export class FiatLedgerService {
                   direction: "out", idempotencyKey: `${issueKey}-FEE`, parentRef: row.providerRef,
                   feePolicyVersion: policyVersion,
                   counterparty: json({ parentRef: row.providerRef, destination: "treasury", treasury }),
+                  source,
+                },
+              }]
+            : []),
+          // PeridotID PPN (VAT) on the global fee → the tax bucket (a liability).
+          ...(tax > 0n
+            ? [{
+                data: {
+                  entryGroup: group, kind: "fiat_tax", pid: row.pid, amountIdr: tax,
+                  direction: "out", idempotencyKey: `${issueKey}-TAX`, parentRef: row.providerRef,
+                  feePolicyVersion: policyVersion,
+                  counterparty: json({ parentRef: row.providerRef, destination: "tax" }),
                   source,
                 },
               }]
@@ -274,9 +290,9 @@ export class FiatLedgerService {
     if (beneficiaryPid === pid) throw new BadRequestException("Cannot transfer to yourself");
     const recipient = await this.prisma.identity.findUnique({ where: { pid: beneficiaryPid } }).catch(() => null);
     if (!recipient) throw new NotFoundException("Recipient has no PeridotID account yet");
-    // Global PeridotID fee + (when an app initiated this) the app's own fee.
-    const { globalFee, appFee, appId, appOwnerPid, policyVersion } = await this.quoteFees(appClientId, "transaction", gross);
-    const totalFee = globalFee + appFee;
+    // Global PeridotID fee (+ its PPN) + (when an app initiated this) the app's own fee.
+    const { globalFee, peridotTaxIdr, appFee, appId, appOwnerPid, policyVersion } = await this.quoteFees(appClientId, "transaction", gross);
+    const totalFee = globalFee + peridotTaxIdr + appFee;
     const net = gross - totalFee;
     if (net <= 0n) throw new BadRequestException("Amount too small — net must be positive");
     const entryGroup = buildInvoiceNumber("CT");
@@ -286,7 +302,7 @@ export class FiatLedgerService {
         amountIdr: gross, direction: "out", idempotencyKey: entryGroup,
         status: "created", feePolicyVersion: policyVersion,
         counterparty: json({
-          beneficiaryPid, feeQuote: globalFee.toString(), netQuote: net.toString(),
+          beneficiaryPid, feeQuote: globalFee.toString(), taxQuote: peridotTaxIdr.toString(), netQuote: net.toString(),
           feePolicyVersion: policyVersion,
           ...(appId && appOwnerPid ? { appId, appOwnerPid, appFeeQuote: appFee.toString() } : {}),
           ...(input.remark ? { remark: input.remark } : {}),
@@ -297,6 +313,7 @@ export class FiatLedgerService {
     await this.security.log(pid, "fiat.transfer_inquiry", { entryGroup, gross: gross.toString() }).catch(() => undefined);
     return {
       id: row.id, entryGroup, grossIdr: gross.toString(), feeIdr: totalFee.toString(),
+      peridotFeeIdr: globalFee.toString(), peridotTaxIdr: peridotTaxIdr.toString(),
       appFeeIdr: appFee.toString(), netIdr: net.toString(), feePolicyVersion: policyVersion, beneficiaryPid,
     };
   }
@@ -321,9 +338,10 @@ export class FiatLedgerService {
     const gross = intent.amountIdr;
     // Honor the inquiry snapshot (user approved it); fall back to recompute.
     const fee = this.quotedBigint(cp["feeQuote"]) ?? calcServiceFee(gross, policy);
+    const tax = this.quotedBigint(cp["taxQuote"]) ?? calcTaxAmount(fee, policy.taxBps);
     const appFee = this.quotedBigint(cp["appFeeQuote"]) ?? 0n;
     const appOwnerPid = typeof cp["appOwnerPid"] === "string" ? (cp["appOwnerPid"] as string) : null;
-    const net = this.quotedBigint(cp["netQuote"]) ?? (gross - fee - appFee);
+    const net = this.quotedBigint(cp["netQuote"]) ?? (gross - fee - tax - appFee);
     const remark = typeof cp["remark"] === "string" ? (cp["remark"] as string) : undefined;
     const treasury = this.treasuryPid();
 
@@ -367,6 +385,19 @@ export class FiatLedgerService {
                 },
               }]
             : []),
+          // PeridotID PPN (VAT) on the global fee → the tax bucket.
+          ...(tax > 0n
+            ? [{
+                data: {
+                  entryGroup: intent.entryGroup, kind: "fiat_tax", pid,
+                  amountIdr: tax, direction: "out",
+                  idempotencyKey: `${intent.entryGroup}-TAX`, parentRef: intent.entryGroup,
+                  feePolicyVersion: policy.version,
+                  counterparty: json({ parentRef: intent.entryGroup, destination: "tax" }),
+                  source: "transfer-confirm",
+                },
+              }]
+            : []),
           // Per-app fee → the app's own account (stacks on the global fee).
           ...(appFee > 0n && appOwnerPid
             ? [{
@@ -391,7 +422,7 @@ export class FiatLedgerService {
     }
     await this.security.log(pid, "fiat.transfer", { entryGroup: intent.entryGroup, gross: gross.toString() }).catch(() => undefined);
     // Third-party callbacks (escrow apps): notify on the committed movement.
-    await this.enqueueTransferEvents({ entryGroup: intent.entryGroup, fromPid: pid, toPid: beneficiaryPid, grossIdr: gross, feeIdr: fee + appFee, netIdr: net });
+    await this.enqueueTransferEvents({ entryGroup: intent.entryGroup, fromPid: pid, toPid: beneficiaryPid, grossIdr: gross, feeIdr: fee + tax + appFee, netIdr: net });
     const done = await this.prisma.fiatLedgerEntry.findFirst({ where: { id, pid } });
     if (!done) throw new NotFoundException("Transfer not found");
     return this.toTxView(done as never);
@@ -454,6 +485,7 @@ export class FiatLedgerService {
       pid,
       balanceIdr: (replayed.balances.get(pid) ?? 0n).toString(),
       treasuryCreditedIdr: replayed.treasury.toString(),
+      taxCreditedIdr: replayed.tax.toString(),
       inFlight: replayed.inFlight,
       errors: replayed.errors,
       rows: rows.map((r) => ({
@@ -474,7 +506,7 @@ export class FiatLedgerService {
       kind: r.kind, pid: r.pid, idempotencyKey: r.idempotencyKey, entryGroup: r.entryGroup,
       amountIdr: r.amountIdr, direction: r.direction, status: r.status, replaySeq: r.replaySeq,
     })));
-    let total = replayed.treasury;
+    let total = replayed.treasury + replayed.tax;
     const balances: Record<string, string> = {};
     for (const [owner, bal] of replayed.balances) {
       balances[owner] = bal.toString();
@@ -488,6 +520,7 @@ export class FiatLedgerService {
       truncated: rows.length >= 5000,
       outstandingIdr: total.toString(),
       treasuryIdr: replayed.treasury.toString(),
+      taxIdr: replayed.tax.toString(),
       balances,
       inFlight: replayed.inFlight.length,
       errors: replayed.errors,
@@ -723,14 +756,14 @@ export class FiatLedgerService {
 
   private async activeFeePolicy(): Promise<FeeParams> {
     const policy = await this.prisma.fiatFeePolicy.findFirst({ where: { active: true }, orderBy: { version: "desc" } });
-    if (policy) return { version: policy.version, percentBps: policy.percentBps, minIdr: policy.minIdr, maxIdr: policy.maxIdr };
-    return { version: DEFAULT_FEE_POLICY.version, percentBps: DEFAULT_FEE_POLICY.percentBps, minIdr: DEFAULT_FEE_POLICY.minIdr, maxIdr: DEFAULT_FEE_POLICY.maxIdr };
+    if (policy) return { version: policy.version, percentBps: policy.percentBps, minIdr: policy.minIdr, maxIdr: policy.maxIdr, taxBps: policy.taxBps };
+    return { version: DEFAULT_FEE_POLICY.version, percentBps: DEFAULT_FEE_POLICY.percentBps, minIdr: DEFAULT_FEE_POLICY.minIdr, maxIdr: DEFAULT_FEE_POLICY.maxIdr, taxBps: DEFAULT_FEE_POLICY.taxBps };
   }
 
   private async feePolicyByVersion(version: number): Promise<FeeParams> {
     if (version > 0) {
       const row = await this.prisma.fiatFeePolicy.findUnique({ where: { version } }).catch(() => null);
-      if (row) return { version: row.version, percentBps: row.percentBps, minIdr: row.minIdr, maxIdr: row.maxIdr };
+      if (row) return { version: row.version, percentBps: row.percentBps, minIdr: row.minIdr, maxIdr: row.maxIdr, taxBps: row.taxBps };
     }
     return this.activeFeePolicy();
   }

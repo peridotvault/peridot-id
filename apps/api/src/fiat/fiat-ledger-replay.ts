@@ -6,12 +6,14 @@
 // Row kinds (anything else is an error — new kinds must register here):
 //   fiat_issue        credit pid (mint from a corroborated Checkout deposit)
 //   fiat_fee          credit synthetic TREASURY (sender pid on the row is incidental)
+//   fiat_tax          credit synthetic TAX bucket (PPN/VAT — a liability, not revenue)
 //   fiat_app_fee      credit pid (per-app fee → the app's own account)
 //   fiat_transfer_in  credit pid (send recipient leg)
 //   fiat_transfer_out debit pid gross (send sender leg)
 //   fiat_adjust       signed correction leg (direction decides the side)
 
 export const FIAT_LEDGER_TREASURY_KEY = "treasury";
+export const FIAT_LEDGER_TAX_KEY = "tax";
 
 export interface FiatLedgerRow {
   kind: string;
@@ -27,6 +29,7 @@ export interface FiatLedgerRow {
 export interface FiatLedgerReplayResult {
   balances: Map<string, bigint>;
   treasury: bigint;
+  tax: bigint;
   inFlight: string[];
   errors: string[];
 }
@@ -42,6 +45,7 @@ function seqOf(r: FiatLedgerRow): bigint {
 export function replayFiatLedger(rows: FiatLedgerRow[]): FiatLedgerReplayResult {
   const balances = new Map<string, bigint>();
   let treasury = 0n;
+  let tax = 0n;
   const inFlight: string[] = [];
   const errors: string[] = [];
   const groups = new Map<string, { out: bigint; in: bigint }>();
@@ -57,7 +61,7 @@ export function replayFiatLedger(rows: FiatLedgerRow[]): FiatLedgerReplayResult 
 
   for (const r of ordered) {
     if (r.status !== "posted") {
-      if (CREDIT_IN.has(r.kind) || CREDIT_OUT.has(r.kind) || r.kind === "fiat_fee" || r.kind === "fiat_adjust") {
+      if (CREDIT_IN.has(r.kind) || CREDIT_OUT.has(r.kind) || r.kind === "fiat_fee" || r.kind === "fiat_tax" || r.kind === "fiat_adjust") {
         inFlight.push(r.idempotencyKey);
       }
       continue;
@@ -86,6 +90,10 @@ export function replayFiatLedger(rows: FiatLedgerRow[]): FiatLedgerReplayResult 
     } else if (r.kind === "fiat_fee") {
       checkDirection("out"); // debited from the sender's ownership…
       treasury += r.amountIdr; // …and credited to Treasury
+      bump("in");
+    } else if (r.kind === "fiat_tax") {
+      checkDirection("out"); // debited from the sender's ownership…
+      tax += r.amountIdr; // …and held in the PPN (VAT) bucket
       bump("in");
     } else if (r.kind === "fiat_app_fee") {
       checkDirection("in"); // per-app fee credited to the app's own account
@@ -127,13 +135,14 @@ export function replayFiatLedger(rows: FiatLedgerRow[]): FiatLedgerReplayResult 
     if (bal < 0n) errors.push(`owner ${owner} negative outstanding ${bal}`);
   }
   if (treasury < 0n) errors.push(`treasury negative outstanding ${treasury}`);
+  if (tax < 0n) errors.push(`tax negative outstanding ${tax}`);
 
-  return { balances, treasury, inFlight, errors };
+  return { balances, treasury, tax, inFlight, errors };
 }
 
-/** Total outstanding across all owners (treasury included). */
+/** Total outstanding across all owners (treasury + tax bucket included). */
 export function totalFiatOutstanding(replayed: FiatLedgerReplayResult): bigint {
-  let total = replayed.treasury;
+  let total = replayed.treasury + replayed.tax;
   for (const bal of replayed.balances.values()) total += bal;
   return total;
 }

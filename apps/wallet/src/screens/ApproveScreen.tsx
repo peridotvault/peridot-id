@@ -4,18 +4,20 @@
 // action runs here on the PeridotID origin with this session + passkey (the
 // trusted DOM), and the result is posted back to the opener's origin.
 import { useCallback, useEffect, useState } from "react";
-import { Text, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import {
   awaitPopupRequest,
   postPopupReady,
   postPopupResult,
   type CheckoutDepositView,
+  type DepositQuoteView,
   type FiatTransferInquiryView,
   type PeridotClient,
   type PopupParams,
 } from "@peridotvault/pid-sdk-js";
+import { sumTransferFee } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../AppContext";
-import { styles as s } from "../theme";
+import { theme, styles as s } from "../theme";
 import { UIButton } from "../components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
@@ -36,6 +38,11 @@ function fmtAmount(amount: string, asset: string): string {
 
 function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;
+}
+
+/** Sum two whole-IDR strings (PPN folded into the shown fee lines). */
+function sumIdr(a: string, b: string): string {
+  return (BigInt(a || "0") + BigInt(b || "0")).toString();
 }
 
 /** Human summary of the intent the user is about to sign. */
@@ -90,15 +97,10 @@ async function runFiatAction(
   peridot: PeridotClient,
   action: string,
   inquiry: FiatTransferInquiryView | null,
-  intent: CheckoutDepositView | null,
 ): Promise<unknown> {
   if (action === "fiat-transfer") {
     if (!inquiry) throw new Error("Verified transfer missing — request rejected.");
     return peridot.fiat.transferConfirm(inquiry.id);
-  }
-  if (action === "fiat-checkout") {
-    if (!intent) throw new Error("Verified top-up missing — request rejected.");
-    return intent;
   }
   throw new Error(`Unknown action "${action}"`);
 }
@@ -132,7 +134,14 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
   // truth), never from opener-supplied amounts — a malicious opener can't
   // display one amount while submitting another.
   const [inquiry, setInquiry] = useState<FiatTransferInquiryView | null>(null);
-  const [intent, setIntent] = useState<CheckoutDepositView | null>(null);
+  // Top-up checkout: a server quote (moves no money) shown before approval; the
+  // intent is created only on Approve, with the chosen method.
+  const [checkout, setCheckout] = useState<DepositQuoteView | null>(null);
+  const [checkoutReq, setCheckoutReq] = useState<{ netAmountIdr: string; clientId?: string } | null>(null);
+  const [checkoutMethod, setCheckoutMethod] = useState<string | null>(null);
+  const selectedQuote = checkout?.paymentMethods.find((m) => m.key === checkoutMethod) ?? null;
+  // One combined fee line: PeridotID (fee+PPN) + DOKU gateway (fee+PPN).
+  const transferFee = checkout ? checkout.transferFeeIdr ?? sumTransferFee(checkout) : "0";
   // popup.origin is handshake-validated (awaitPopupRequest only accepts
   // messages from window.opener at exactly this origin), so displaying it
   // as the requester is accurate — never trust the URL alone.
@@ -162,20 +171,24 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
     [peridot, onNeedAuth],
   );
 
-  /** Server-side prepare for fiat-checkout: create the intent now (moves no
-   *  money), show the server quote, navigate to payment on Approve. */
+  /** Server-side prepare for fiat-checkout: quote the top-up now (moves no
+   *  money), show the transparent breakdown, and create the intent on Approve. */
   const prepareCheckout = useCallback(
     async (p: Record<string, unknown>) => {
       const netAmountIdr = typeof p.netAmountIdr === "string" ? p.netAmountIdr : "";
       if (!/^\d+$/.test(netAmountIdr)) throw new Error("Top-up request is malformed.");
-      const created = await peridot.fiat.checkoutDeposit(netAmountIdr, typeof p.clientId === "string" ? p.clientId : undefined);
-      if (created.netIdr !== netAmountIdr || !created.paymentUrl || !created.grossIdr || !created.feeIdr) {
+      const clientId = typeof p.clientId === "string" ? p.clientId : undefined;
+      const quote = await peridot.fiat.quoteDeposit({ netAmountIdr, ...(clientId ? { clientId } : {}) });
+      if (quote.netIdr !== netAmountIdr || !quote.totalIdr || !quote.peridotFeeIdr) {
         throw new Error("Quote mismatch — request rejected.");
       }
-      setIntent(created);
-      setSummary(
-        `Top up ${fmtIdr(created.netIdr)} — you pay ${fmtIdr(created.grossIdr)} (incl. ${fmtIdr(created.feeIdr)} fee). You complete payment on the DOKU page after approval.`,
-      );
+      if (!quote.paymentMethods?.length) {
+        throw new Error("No payment methods available for this top-up right now.");
+      }
+      setCheckout(quote);
+      setCheckoutReq({ netAmountIdr, ...(clientId ? { clientId } : {}) });
+      setCheckoutMethod((m) => (m && quote.paymentMethods.some((x) => x.key === m) ? m : quote.paymentMethods[0]?.key ?? null));
+      setSummary(`Top up ${fmtIdr(quote.netIdr)} — total payment ${fmtIdr(quote.totalIdr)}. You complete payment on the DOKU page after approval.`);
     },
     [peridot],
   );
@@ -218,30 +231,39 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
   }, [popup.origin]);
 
   const deny = useCallback(() => {
-    // Best-effort cleanup of server state created during prepare (intent /
-    // inquiry rows are harmless if this fails — they expire server-side).
-    if (action === "fiat-checkout" && intent) {
-      void peridot.fiat.cancelTransaction(intent.id).catch(() => undefined);
-    }
+    // Best-effort cleanup of server state created during prepare. The checkout
+    // quote moves no money (no row), so only a transfer inquiry needs cancelling.
     if (action === "fiat-transfer" && inquiry) {
       void peridot.fiat.cancelTransaction(inquiry.id).catch(() => undefined);
     }
     postPopupResult(popup.origin, { ok: false, error: "access_denied" });
     setPhase("done");
-  }, [popup.origin, peridot, action, intent, inquiry]);
+  }, [popup.origin, peridot, action, inquiry]);
 
   const approve = useCallback(async () => {
     setPhase("busy");
     setError(null);
     try {
-      const result = isFiatAction(action)
-        ? await runFiatAction(peridot, action, inquiry, intent)
-        : await runAction(peridot, action, payload);
+      let result: unknown;
+      let checkoutUrl: string | null = null;
+      if (action === "fiat-checkout") {
+        // Create the intent now, with the approved method, then navigate.
+        if (!checkoutReq) throw new Error("Verified top-up missing — request rejected.");
+        const created: CheckoutDepositView = await peridot.fiat.checkoutDeposit(
+          checkoutReq.netAmountIdr,
+          checkoutReq.clientId,
+          checkoutMethod ?? undefined,
+        );
+        result = created;
+        checkoutUrl = created.paymentUrl ?? null;
+      } else if (isFiatAction(action)) {
+        result = await runFiatAction(peridot, action, inquiry);
+      } else {
+        result = await runAction(peridot, action, payload);
+      }
       // Checkout keeps the window open and navigates itself to the DOKU
       // payment page: same-window navigation from the Approve click can't be
       // popup-blocked, unlike a dapp-side async popup.
-      const checkoutUrl =
-        action === "fiat-checkout" && intent?.paymentUrl ? intent.paymentUrl : null;
       postPopupResult(
         popup.origin,
         { ok: true, data: result },
@@ -270,7 +292,7 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
       setError(signInHint(message));
       setPhase("review");
     }
-  }, [peridot, action, payload, inquiry, intent, popup.origin, onNeedAuth]);
+  }, [peridot, action, payload, inquiry, checkoutReq, checkoutMethod, popup.origin, onNeedAuth]);
 
   return (
     <View style={s.container}>
@@ -283,6 +305,32 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
         <>
           <Text style={s.label}>Requested action</Text>
           <Text selectable style={s.mono}>{summary}</Text>
+          {action === "fiat-checkout" && checkout && (
+            <View style={styles.breakdown}>
+              <Row label="Amount" value={fmtIdr(checkout.netIdr)} />
+              {BigInt(transferFee) > 0n && <Row label="Transfer Fee" value={fmtIdr(transferFee)} />}
+              {Number(checkout.appFeeIdr) > 0 && <Row label="App Fee" value={fmtIdr(checkout.appFeeIdr)} />}
+              <Row label="Total Payment" value={fmtIdr(selectedQuote?.totalIdr ?? checkout.totalIdr)} strong />
+            </View>
+          )}
+          {action === "fiat-checkout" && checkout && phase === "review" && (
+            <>
+              <Text style={s.label}>Payment method</Text>
+              <View style={styles.methods}>
+                {checkout.paymentMethods.map((m) => (
+                  <TouchableOpacity
+                    key={m.key}
+                    style={[styles.method, checkoutMethod === m.key && styles.methodActive]}
+                    onPress={() => setCheckoutMethod(m.key)}
+                    accessibilityLabel={`Pay with ${m.label}`}
+                  >
+                    <Text style={[styles.methodLabel, checkoutMethod === m.key && styles.methodLabelActive]}>{m.label}</Text>
+                    {m.enabled && <Text style={styles.methodFee}>{fmtIdr(sumIdr(m.gatewayFeeIdr, m.gatewayTaxIdr))}</Text>}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
           <Text style={s.hint}>Requested by {popup.origin}</Text>
           <Text style={s.hint}>Review carefully — approving signs with your passkey.</Text>
         </>
@@ -297,3 +345,35 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
     </View>
   );
 }
+
+/** One label/value line of the top-up breakdown. */
+function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <View style={styles.row}>
+      <Text style={[styles.rowLabel, strong && styles.strong]}>{label}</Text>
+      <Text style={[styles.rowValue, strong && styles.strong]}>{value}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  breakdown: { marginTop: 8, gap: 4 },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  rowLabel: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
+  rowValue: { fontSize: 13, color: theme.colors.foreground, fontFamily: theme.fonts.mono },
+  strong: { fontWeight: "700", color: theme.colors.foreground },
+  methods: { gap: 6, marginTop: 2 },
+  method: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  methodActive: { borderColor: theme.colors.foreground },
+  methodLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
+  methodLabelActive: { fontWeight: "600" },
+  methodFee: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.mono },
+});
