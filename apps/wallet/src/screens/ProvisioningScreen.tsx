@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 type StepKey = "identity" | "wallet";
 type StepStatus = "pending" | "running" | "done" | "failed";

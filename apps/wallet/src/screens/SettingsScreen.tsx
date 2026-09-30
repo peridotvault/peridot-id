@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ChevronRight, KeyRound, Monitor, Link2, ArrowLeft } from "../icons";
+import { ChevronRight, KeyRound, Monitor, Link2, ArrowLeft, Check, Banknote } from "../shared/icons";
 import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { CURRENCIES, getCurrency, setCurrency, type Currency } from "../shared/currency";
 
 interface Props {
   goPasskeys: () => void;
@@ -17,6 +18,7 @@ export function SettingsScreen({ goPasskeys, goSessions, goConnected, onDone }: 
   const [passkeys, setPasskeys] = useState<Authority[]>([]);
   const [credentials, setCredentials] = useState<IdentityCredential[]>([]);
   const [sessions, setSessions] = useState<unknown[]>([]);
+  const [currency, setCurrencyState] = useState<Currency>(getCurrency);
 
   const load = useCallback(async () => {
     const [pk, creds, sess] = await Promise.all([
@@ -35,6 +37,11 @@ export function SettingsScreen({ goPasskeys, goSessions, goConnected, onDone }: 
 
   const google = credentials.find((c) => c.provider === "google");
 
+  const pickCurrency = useCallback((c: Currency) => {
+    setCurrencyState(c);
+    setCurrency(c);
+  }, []);
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
       <TouchableOpacity style={styles.back} onPress={onDone}>
@@ -48,6 +55,25 @@ export function SettingsScreen({ goPasskeys, goSessions, goConnected, onDone }: 
       <Row icon={KeyRound} label="Passkeys" value={`${passkeys.length} active`} onPress={goPasskeys} />
       <Row icon={Link2} label="Recovery" value={google ? "Google · Connected" : "Add Google"} onPress={goConnected} />
       <Row icon={Monitor} label="Sessions / Devices" value={`${sessions.length} active`} onPress={goSessions} />
+
+      <Text style={styles.section}>Preferences</Text>
+      <View style={styles.currencyCard}>
+        <View style={styles.icon}>
+          <Banknote size={18} color={theme.colors.foreground} />
+        </View>
+        <Text style={styles.label}>Currency</Text>
+        {CURRENCIES.map((c) => (
+          <TouchableOpacity
+            key={c}
+            style={[styles.currencyOpt, currency === c && styles.currencyOptActive]}
+            onPress={() => pickCurrency(c)}
+            accessibilityState={{ selected: currency === c }}
+          >
+            {currency === c && <Check size={14} color={theme.colors.foreground} />}
+            <Text style={[styles.currencyText, currency === c && styles.currencyTextActive]}>{c}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
     </ScrollView>
   );
 }
@@ -112,4 +138,26 @@ const styles = StyleSheet.create({
   },
   label: { flex: 1, fontSize: 15, fontWeight: "500", color: c.foreground, fontFamily: f.sansMedium },
   value: { fontSize: 13, color: c.mutedForeground, fontFamily: f.sans },
+  currencyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 14,
+    borderRadius: 0,
+    borderWidth: 1,
+    borderColor: c.border,
+    backgroundColor: c.surface,
+  },
+  currencyOpt: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: c.border,
+  },
+  currencyOptActive: { borderColor: c.foreground },
+  currencyText: { fontSize: 13, color: c.mutedForeground, fontFamily: f.sansMedium },
+  currencyTextActive: { color: c.foreground },
 });

@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { ArrowLeft } from "../icons";
+import { ArrowLeft } from "../shared/icons";
 import type { FiatTransferInquiryView } from "@peridotvault/pid-sdk-js";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;

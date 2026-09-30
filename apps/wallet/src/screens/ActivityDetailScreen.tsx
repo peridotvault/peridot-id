@@ -1,8 +1,8 @@
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ArrowLeft } from "../icons";
+import { ArrowLeft } from "../shared/icons";
 import type { WalletTransaction } from "@peridotvault/pid-types";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
 

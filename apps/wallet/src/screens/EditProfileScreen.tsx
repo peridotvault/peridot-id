@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Image, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { Profile } from "@peridotvault/pid-types";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 export function EditProfileScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();

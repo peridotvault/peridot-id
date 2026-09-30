@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { StyleSheet, Text, TextInput, View } from "react-native";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
 

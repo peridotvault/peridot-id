@@ -1,20 +1,19 @@
 import "./polyfills";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { StatusBar } from "expo-status-bar";
-import { useFonts, Geist_400Regular, Geist_500Medium, Geist_600SemiBold, Geist_700Bold } from "@expo-google-fonts/geist";
-import { SourceSerif4_400Regular } from "@expo-google-fonts/source-serif-4";
-import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import { SafeAreaView, StyleSheet, View } from "react-native";
 import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
 import { readPopupParams } from "@peridotvault/pid-sdk-js";
-import { API_BASE_URL } from "./src/config";
-import { AppContext } from "./src/AppContext";
-import { needsProvisioning } from "./src/fiat-ensure";
-import { readLoginContext } from "./src/popup-login";
-import { theme } from "./src/theme";
+import { API_BASE_URL } from "./src/shared/config";
+import { AppContext } from "./src/shared/AppContext";
+import { readLoginContext } from "./src/feat/auth/popup-login";
+import { theme } from "./src/shared/theme";
+import { useStartupGate } from "./src/shared/hooks/useStartupGate";
+import { useSessionBootstrap, type Screen } from "./src/shared/hooks/useSessionBootstrap";
+import { useSessionSync } from "./src/shared/hooks/useSessionSync";
 import { LoginScreen } from "./src/screens/LoginScreen";
-import { LoadingScreen } from "./src/components/LoadingScreen";
-import { readSsoParams } from "./src/sso";
+import { LoadingScreen } from "./src/shared/components/LoadingScreen";
+import { readSsoParams } from "./src/feat/auth/sso";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { ApproveScreen } from "./src/screens/ApproveScreen";
 import { SendScreen } from "./src/screens/SendScreen";
@@ -34,89 +33,13 @@ import { ActivityDetailScreen } from "./src/screens/ActivityDetailScreen";
 import { FiatDetailScreen } from "./src/screens/FiatDetailScreen";
 import { FiatTransferScreen } from "./src/screens/FiatTransferScreen";
 import { FiatLedgerDetailScreen } from "./src/screens/FiatLedgerDetailScreen";
-import { TabBar } from "./src/components/TabBar";
+import { TabBar } from "./src/shared/components/TabBar";
 import { ActivationScreen } from "./src/screens/ActivationScreen";
 import type { WalletTransaction } from "@peridotvault/pid-types";
-import type { FiatItem, FiatLedgerItem } from "./src/screens/ActivityScreen";
-
-type Screen =
-  | "login"
-  | "home"
-  | "send"
-  | "receive"
-  | "swap"
-  | "topup"
-  | "provisioning"
-  | "passkey"
-  | "settings"
-  | "profile"
-  | "edit-profile"
-  | "sessions"
-  | "connected"
-  | "app-connections"
-  | "activity"
-  | "activity-detail"
-  | "fiat-detail"
-  | "fiat-transfer"
-  | "fiat-ledger-detail"
-  | "activation";
+import type { FiatItem, FiatLedgerItem } from "./src/shared/fiat";
 
 export default function App() {
-  // Built in-state (not module scope): any 401 outside /v1/auth/* kicks back
-  // to login instead of stranding the app on a dead session. Idempotent —
-  // the login screen makes no auto-auth calls outside SSO, so no loops.
-  const [peridot] = useState(() =>
-    Peridot({
-      baseUrl: API_BASE_URL,
-      // Chains/RPC resolved from the API registry.
-      // First-party origin: inline ceremonies are legitimate here (this IS the
-      // trusted DOM). Third-party dapps omit the signer and use the popup.
-      passkeySigner: new BrowserPasskeySigner(),
-      onUnauthorized: () => {
-        setStepUp(false);
-        setScreen("login");
-      },
-    }),
-  );
   const [screen, setScreen] = useState<Screen>("login");
-  const [bootstrapping, setBootstrapping] = useState(true);
-  // True when the session family aged out (google families: 7 days) — the
-  // login screen then asks for passkey confirmation instead of silently dying.
-  const [stepUp, setStepUp] = useState(false);
-  // Whether a first-party session exists, resolved at bootstrap. An approval
-  // popup opened without one renders the login screen first (then resumes the
-  // handshake) instead of dead-ending on a 401.
-  const [authed, setAuthed] = useState(false);
-  // Bumped to re-run bootstrap after an account switch (same cookies, new identity).
-  const [sessionEpoch, setSessionEpoch] = useState(0);
-  // Failsafe: a hung gate (fonts or network that never settles with no error)
-  // must never trap the app on the loader forever — force it open degraded.
-  const [gateForced, setGateForced] = useState(false);
-  // Web type system (Geist + Source Serif 4, same as apps/web). Bundled via
-  // expo-font so it works offline on web + native; splash holds until loaded.
-  const [fontsLoaded, fontError] = useFonts({
-    Geist_400Regular,
-    Geist_500Medium,
-    Geist_600SemiBold,
-    Geist_700Bold,
-    SourceSerif4_400Regular,
-    JetBrainsMono_400Regular,
-  });
-
-  useEffect(() => {
-    if (!fontError) return;
-    // eslint-disable-next-line no-console
-    console.warn("[startup] font load failed — continuing with system fallbacks", fontError);
-  }, [fontError]);
-
-  useEffect(() => {
-    const id = setTimeout(() => {
-      // eslint-disable-next-line no-console
-      console.warn("[startup] gate timed out after 8s — opening degraded");
-      setGateForced(true);
-    }, 8000);
-    return () => clearTimeout(id);
-  }, []);
   // Third-party SSO request (?redirect_uri=…): LoginScreen handles it even when logged
   // in (consent flow) — otherwise a logged-in user landing here would sit on HomeScreen
   // with the request silently ignored.
@@ -132,6 +55,31 @@ export default function App() {
     const p = readPopupParams();
     return p && p.action !== "login" ? p : null;
   });
+
+  // Built in-state (not module scope): any 401 outside /v1/auth/* kicks back
+  // to login instead of stranding the app on a dead session. Idempotent —
+  // the login screen makes no auto-auth calls outside SSO, so no loops.
+  const [peridot] = useState(() =>
+    Peridot({
+      baseUrl: API_BASE_URL,
+      // Chains/RPC resolved from the API registry.
+      // First-party origin: inline ceremonies are legitimate here (this IS the
+      // trusted DOM). Third-party dapps omit the signer and use the popup.
+      passkeySigner: new BrowserPasskeySigner(),
+      onUnauthorized: () => {
+        session.setStepUp(false);
+        setScreen("login");
+      },
+    }),
+  );
+  const session = useSessionBootstrap(peridot, { loginContext, setScreen });
+  const gate = useStartupGate();
+  useSessionSync({
+    bootstrap: session.bootstrap,
+    disabled: !!popupRequest || !!loginContext,
+    isAuthed: session.authed,
+  });
+
   const [activityTx, setActivityTx] = useState<WalletTransaction | null>(null);
   const [fiatItem, setFiatItem] = useState<FiatItem | null>(null);
   const [ledgerItem, setLedgerItem] = useState<FiatLedgerItem | null>(null);
@@ -139,38 +87,6 @@ export default function App() {
 
   const goHome = useCallback(() => setScreen("home"), []);
   const go = useCallback((s: Screen) => setScreen(s), []);
-
-  // After an account switch the cookies point at a new identity: re-bootstrap
-  // so every screen re-fetches under it (and drop back to Home).
-  const reloadSession = useCallback(() => {
-    setBootstrapping(true);
-    setScreen("home");
-    setSessionEpoch((n) => n + 1);
-  }, []);
-
-  // Post-auth landing: show the stepper only when something actually needs
-  // provisioning (fresh account, failed/skipped setup); returning users go
-  // straight home. The check is read-only — never traps at login.
-  const routeAfterAuth = useCallback(async () => {
-    // Auth-in-a-new-tab stays on the login screen: it must deliver the pid_code.
-    if (loginContext) {
-      setScreen("login");
-      return;
-    }
-    let need = false;
-    try {
-      need = await needsProvisioning(peridot);
-    } catch {
-      need = false;
-    }
-    setScreen(need ? "provisioning" : "home");
-  }, [peridot, loginContext]);
-
-  const handleLoggedIn = useCallback(() => {
-    setStepUp(false);
-    setAuthed(true);
-    void routeAfterAuth();
-  }, [routeAfterAuth]);
 
   const openPasskey = useCallback((from: Screen) => {
     setPasskeyReturn(from);
@@ -192,144 +108,43 @@ export default function App() {
     setScreen("fiat-ledger-detail");
   }, []);
 
-  // After a Google OAuth redirect returns, detect the existing session and go straight home.
-  // Short-lived access tokens are revived via the refresh cookie first, so a
-  // valid session survives app restarts instead of bouncing to login.
-  // A hung request (no resolve, no reject, no error) must not freeze the
-  // splash: the timer forces the gate open and late resolves are ignored.
-  const bootstrap = useCallback(async () => {
-    let alive = true;
-    const timer = setTimeout(() => {
-      alive = false;
-      // eslint-disable-next-line no-console
-      console.warn("[startup] bootstrap timed out after 10s — continuing logged-out");
-      setBootstrapping(false);
-    }, 10000);
-    try {
-      let me = await peridot.identity.me();
-      if (typeof me === "object" && me !== null && "statusCode" in me) {
-        const refreshed = await peridot.auth.refresh();
-        if (refreshed === "step-up") {
-          if (alive) setStepUp(true);
-        } else if (refreshed === true) {
-          me = await peridot.identity.me();
-        }
-      }
-      if (alive && me && !("statusCode" in me)) {
-        setAuthed(true);
-        if (loginContext) {
-          // Auth-in-a-new-tab: keep the login screen mounted so it can deliver
-          // the pid_code to the opener (or show the PID picker if none yet).
-          setScreen("login");
-        } else {
-          try {
-            setScreen((await needsProvisioning(peridot)) ? "provisioning" : "home");
-          } catch {
-            setScreen("home");
-          }
-        }
-      }
-    } catch {
-      // not logged in — stay on login
-      setAuthed(false);
-    } finally {
-      // Drop a spent ?pid_code= so it can't be re-read on re-render (web only).
-      if (typeof window !== "undefined") {
-        try {
-          const url = new URL(window.location.href);
-          if (url.searchParams.has("pid_code")) {
-            url.searchParams.delete("pid_code");
-            window.history.replaceState({}, "", url.toString());
-          }
-        } catch {
-          // non-fatal
-        }
-      }
-      clearTimeout(timer);
-      if (alive) setBootstrapping(false);
-    }
-  }, [peridot, loginContext]);
-
-  useEffect(() => {
-    bootstrap();
-  }, [bootstrap, sessionEpoch]);
-
-  // Cross-tab / refocus session sync. A login in another tab (or the login
-  // popup, whose cookie write can't notify this tab) leaves an already-open
-  // window showing logged-out. When logged out, re-check on focus, on becoming
-  // visible, or on the popup's session ping.
-  const authedRef = useRef(authed);
-  authedRef.current = authed;
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    // Popup windows own their lifecycle — never disturb them.
-    if (popupRequest || loginContext) return;
-    let last = 0;
-    const recheck = () => {
-      if (authedRef.current) return;
-      const now = Date.now();
-      if (now - last < 2000) return;
-      last = now;
-      void bootstrap();
-    };
-    const onVisible = () => {
-      if (document.visibilityState === "visible") recheck();
-    };
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "pid_session_ping") recheck();
-    };
-    window.addEventListener("focus", recheck);
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener("focus", recheck);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, [bootstrap, popupRequest, loginContext]);
-
-  useEffect(() => {
-    // Static pre-JS splash handoff: React mounted, drop the template node.
-    if (typeof document !== "undefined") document.getElementById("splash")?.remove();
-  }, []);
-
   const logout = useCallback(async () => {
     try {
       await peridot.auth.logout();
     } catch {
       // best-effort: still clear the UI session even if the server call fails
     } finally {
-      setAuthed(false);
+      session.setAuthed(false);
       setScreen("login");
     }
-  }, []);
+  }, [peridot, session]);
 
   // Paint first, complete later: the branded loader shows instantly (system
   // fallbacks) while fonts download and the session check runs in parallel.
   // fontError skips the font wait; gateForced opens after 8s no matter what.
-  if ((bootstrapping || (!fontsLoaded && !fontError)) && !gateForced) {
-    return <LoadingScreen fontsReady={fontsLoaded} />;
+  if ((session.bootstrapping || (!gate.fontsLoaded && !gate.fontError)) && !gate.gateForced) {
+    return <LoadingScreen fontsReady={gate.fontsLoaded} />;
   }
 
   return (
     <AppContext.Provider value={{ peridot }}>
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.colors.background }]}>
         {popupRequest ? (
-          authed ? (
-            <ApproveScreen popup={popupRequest} onNeedAuth={() => setAuthed(false)} />
+          session.authed ? (
+            <ApproveScreen popup={popupRequest} onNeedAuth={() => session.setAuthed(false)} />
           ) : (
             // No session in this popup window: sign in here first, then the
             // approval resumes (popup params are persisted across the OAuth
             // round-trip by readPopupParams).
-            <LoginScreen onLoggedIn={() => setAuthed(true)} stepUp={stepUp} />
+            <LoginScreen onLoggedIn={() => session.setAuthed(true)} stepUp={session.stepUp} />
           )
         ) : (
           <>
             {(screen === "login" || ssoRequest) && (
           <LoginScreen
-            onLoggedIn={loginContext ? () => {} : handleLoggedIn}
+            onLoggedIn={loginContext ? () => {} : session.handleLoggedIn}
             loginContext={loginContext}
-            stepUp={stepUp}
+            stepUp={session.stepUp}
           />
         )}
         {screen === "home" && (
@@ -339,14 +154,13 @@ export default function App() {
             goSwap={() => go("swap")}
             goBuy={() => go("topup")}
             goTransfer={() => go("fiat-transfer")}
-            goActivation={() => go("activation")}
             goPasskeys={() => openPasskey("settings")}
             goAppConnections={() => go("app-connections")}
           />
         )}
         {screen === "send" && <SendScreen onDone={goHome} />}
         {screen === "fiat-transfer" && <FiatTransferScreen onDone={goHome} />}
-        {screen === "receive" && <ReceiveScreen onDone={goHome} />}
+        {screen === "receive" && <ReceiveScreen onDone={goHome} goPasskey={() => openPasskey("receive")} />}
         {screen === "swap" && <SwapScreen onDone={goHome} />}
         {screen === "topup" && <TopupScreen onDone={goHome} />}
         {screen === "provisioning" && <ProvisioningScreen onContinue={goHome} />}
@@ -365,7 +179,7 @@ export default function App() {
             onLogout={logout}
             goSettings={() => go("settings")}
             goEditProfile={() => go("edit-profile")}
-            onSwitched={reloadSession}
+            onSwitched={session.reloadSession}
             onAddAccount={() => setScreen("login")}
           />
         )}

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ArrowLeft, Monitor, LogOut } from "../icons";
+import { ArrowLeft, Monitor, LogOut } from "../shared/icons";
 import type { Session } from "@peridotvault/pid-types";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });

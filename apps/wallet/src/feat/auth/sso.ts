@@ -48,3 +48,12 @@ export function ssoOrigin(redirectUri: string): string {
     return redirectUri;
   }
 }
+
+/** In SSO mode, leave this page: the app exchanges the code for its own session. */
+export function finishSso(sso: SsoRequest | null, pidCode: string | undefined): boolean {
+  if (sso && pidCode && typeof window !== "undefined") {
+    window.location.assign(withPidCode(sso.redirectUri, pidCode));
+    return true;
+  }
+  return false;
+}

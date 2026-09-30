@@ -1,87 +1,22 @@
-import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ArrowLeft, Rocket, Info, Copy } from "../icons";
-import type { Authority, ChainAccount } from "@peridotvault/pid-types";
-import type { ActivationView } from "@peridotvault/pid-sdk-js";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
-
-const LAMPORTS_PER_SOL = 1e9;
+import { ArrowLeft, Rocket } from "../shared/icons";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
+import { useActivationGate } from "../feat/wallet/hooks/useActivationGate";
+import { useCopyAddress } from "../feat/wallet/hooks/useCopyAddress";
+import { DepositAddressCard } from "../feat/wallet/components/DepositAddressCard";
+import { ActivationStatusCard } from "../feat/wallet/components/ActivationStatusCard";
 
 export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {
   const { peridot } = usePeridot();
-  const [chains, setChains] = useState<ChainAccount[] | null>(null);
-  const [activation, setActivation] = useState<ActivationView | null>(null);
-  const [passkeys, setPasskeys] = useState<Authority[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const gate = useActivationGate(peridot);
+  const { copy, isCopied } = useCopyAddress();
 
-  const load = useCallback(async () => {
-    try {
-      let acc = await peridot.wallet.me();
-      if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
-      if ("statusCode" in acc) throw new Error("Failed to create account");
-      setChains(acc as ChainAccount[]);
-      try {
-        const act = await peridot.wallet.activation();
-        if (!("statusCode" in act)) setActivation(act as ActivationView);
-      } catch {
-        /* activation read failed — leave null */
-      }
-      try {
-        const creds = await peridot.passkey.list();
-        setPasskeys(Array.isArray(creds) ? (creds as Authority[]) : []);
-      } catch {
-        setPasskeys([]);
-      }
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [peridot]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const copyAddress = async () => {
-    const addr = activation?.smartAccountAddress;
-    if (!addr) return;
-    try {
-      await navigator.clipboard.writeText(addr);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // clipboard unavailable — nothing to do
-    }
+  const copyAddress = () => {
+    const addr = gate.activation?.smartAccountAddress;
+    if (addr) void copy("address", addr);
   };
-
-  const activate = async () => {
-    if (!chains) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await peridot.wallet.activate();
-      if ("statusCode" in res) {
-        const msg = Array.isArray(res.message) ? res.message.join(" ") : (res.message as string);
-        throw new Error(msg);
-      }
-      await load();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const st = activation?.status;
-  const requiredSol = activation ? Number(activation.requiredLamports) / LAMPORTS_PER_SOL : 0;
-  const balanceSol = activation ? Number(activation.balanceLamports) / LAMPORTS_PER_SOL : 0;
-  const ready = st === "ready";
-  const active = st === "active";
-  const hasPasskey = passkeys.length > 0;
-  const addr = activation?.smartAccountAddress ?? null;
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
@@ -113,52 +48,23 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
         </Text>
       </View>
 
-      {!active && (
-        <View style={s.card}>
-          <Text style={[s.label, { marginBottom: 6 }]}>Your deposit address</Text>
-          <Text style={styles.desc}>
-            Send SOL to this address to fund your wallet and cover activation. The cost
-            currently requires about {requiredSol.toFixed(4)} SOL.
-          </Text>
-          <TouchableOpacity style={styles.addressBox} onPress={copyAddress}>
-            <Text selectable style={[s.mono, styles.addressText]}>
-              {addr ? `${addr.slice(0, 8)}…${addr.slice(-8)}` : "—"}
-            </Text>
-            {copied ? (
-              <Text style={styles.copied}>Copied</Text>
-            ) : (
-              <Copy size={14} color={theme.colors.mutedForeground} />
-            )}
-          </TouchableOpacity>
-          <Text style={s.hint}>
-            Balance: {balanceSol.toFixed(4)} SOL{balanceSol < requiredSol ? ` — top up to at least ${requiredSol.toFixed(4)} SOL` : ""}.
-          </Text>
-        </View>
+      {!gate.isActive && (
+        <DepositAddressCard
+          address={gate.activation?.smartAccountAddress ?? null}
+          balanceSol={gate.balanceSol}
+          requiredSol={gate.requiredSol}
+          copied={isCopied("address")}
+          onCopy={copyAddress}
+        />
       )}
 
-      {error && <Text style={s.error}>{error}</Text>}
+      {gate.error && <Text style={s.error}>{gate.error}</Text>}
 
-      {activation && !active && (
-        <View style={s.card}>
-          <Text style={[s.label, { marginBottom: 6 }]}>Status</Text>
-          <View style={styles.statusRow}>
-            <Info size={16} color={theme.colors.mutedForeground} />
-            <Text style={styles.desc}>
-              {ready
-                ? `Ready to activate.`
-                : st === "inactivated"
-                  ? "Deposit SOL to your address above first."
-                  : st === "insufficient"
-                    ? `Need at least ${requiredSol.toFixed(4)} SOL to cover activation (you have ${balanceSol.toFixed(4)}).`
-                    : st === "activating"
-                      ? "Activating on-chain…"
-                      : "Funds received — activation is checked shortly."}
-            </Text>
-          </View>
-        </View>
+      {gate.activation && !gate.isActive && (
+        <ActivationStatusCard status={gate.st} requiredSol={gate.requiredSol} balanceSol={gate.balanceSol} />
       )}
 
-      {active && (
+      {gate.isActive && (
         <View style={styles.activeCard}>
           <Text style={styles.activeTitle}>Account activated</Text>
           <Text style={styles.desc}>
@@ -168,13 +74,13 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
         </View>
       )}
 
-      {!hasPasskey ? (
-        <UIButton title="Create a passkey first" onPress={goPasskey} disabled={busy} variant="primary" />
-      ) : ready ? (
-        <UIButton title={busy ? "Activating…" : "Activate Account"} onPress={activate} disabled={busy} variant="primary" />
+      {!gate.hasPasskey ? (
+        <UIButton title="Create a passkey first" onPress={goPasskey} disabled={gate.busy} variant="primary" />
+      ) : gate.ready ? (
+        <UIButton title={gate.busy ? "Activating…" : "Activate Account"} onPress={gate.activate} disabled={gate.busy} variant="primary" />
       ) : null}
 
-      {error && <Text style={styles.errHint}>Activation failures deduct nothing — your deposit stays in place. Retry if the message suggests so.</Text>}
+      {gate.error && <Text style={styles.errHint}>Activation failures deduct nothing — your deposit stays in place. Retry if the message suggests so.</Text>}
 
       <UIButton title="Back" onPress={onDone} />
     </ScrollView>
@@ -188,21 +94,6 @@ const styles = StyleSheet.create({
   backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   desc: { fontSize: 13, color: theme.colors.mutedForeground, lineHeight: 19, fontFamily: theme.fonts.sans },
-  statusRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
-  addressBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.muted,
-    borderRadius: 0,
-    marginTop: 4,
-  },
-  addressText: { flex: 1 },
-  copied: { fontSize: 12, color: theme.colors.success, fontFamily: theme.fonts.sans },
   errHint: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   activeCard: {
     backgroundColor: theme.colors.success + "14",

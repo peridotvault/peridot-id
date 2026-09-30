@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View, Alert } from "react-native";
-import { ArrowLeft, Link2 } from "../icons";
+import { ArrowLeft, Link2 } from "../shared/icons";
 import type { IdentityCredential } from "@peridotvault/pid-types";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();

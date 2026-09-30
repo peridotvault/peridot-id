@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { KeyRound, Plus, Trash2 } from "../icons";
+import { KeyRound, Plus, Trash2 } from "../shared/icons";
 import type { Authority } from "@peridotvault/pid-types";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "Never";

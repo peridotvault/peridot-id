@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { ArrowDownUp } from "../icons";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
+import { ArrowDownUp } from "../shared/icons";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 export function SwapScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();

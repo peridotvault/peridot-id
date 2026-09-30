@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { X } from "../icons";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "./UIButton";
+import { X } from "../../../shared/icons";
+import { theme, styles as s } from "../../../shared/theme";
+import { UIButton } from "../../../shared/components/UIButton";
 
 // One-tap SSO consent as an overlay modal: dimmed scrim + centered card.
 // Rendered over the live app screen (and the login backdrop) — the login

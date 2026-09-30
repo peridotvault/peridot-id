@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ChevronRight, RefreshCw, Settings } from "../icons";
+import { ChevronRight, RefreshCw, Settings } from "../shared/icons";
 import type { AccountView, Profile } from "@peridotvault/pid-types";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
-import { AccountSwitcherModal } from "../components/AccountSwitcherModal";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
+import { AccountSwitcherModal } from "../shared/components/AccountSwitcherModal";
 
 export function ProfileScreen({
   onLogout,

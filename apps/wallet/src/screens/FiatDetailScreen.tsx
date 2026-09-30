@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ArrowLeft } from "../icons";
-import { usePeridot } from "../AppContext";
-import { theme, styles as s } from "../theme";
-import { UIButton } from "../components/UIButton";
-import type { FiatItem } from "./ActivityScreen";
-import { fiatStatusLabel } from "./ActivityScreen";
+import { ArrowLeft } from "../shared/icons";
+import { usePeridot } from "../shared/AppContext";
+import { theme, styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
+import type { FiatItem } from "../shared/fiat";
+import { fiatStatusLabel } from "../shared/fiat";
 
 function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;

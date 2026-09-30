@@ -6,6 +6,6 @@ declare module "react-native-qrcode-svg" {
   const QRCode: ComponentType<Record<string, unknown>>;
   export default QRCode;
 }
-// NOTE: lucide icons come from per-icon deep imports via src/icons.ts
+// NOTE: lucide icons come from per-icon deep imports via src/shared/icons.ts
 // (package's own types) — never from the "lucide-react-native" root, which
 // defeats tree-shaking and ships all ~1500 icons.
