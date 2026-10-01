@@ -1,5 +1,20 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.6.0
+
+- **Read-only bearer mode.** `Peridot({ bearer })` / `client.setBearer(token)`
+  send `Authorization: Bearer …` and drop cookies, for embedded wallet clients
+  on a third-party origin where the httpOnly session cookies are cross-site and
+  SameSite would drop them. Additive — cookie mode is unchanged when no bearer
+  is set.
+- **Embed bridge.** New `EmbedBridge` (hosted/iframe side), `readEmbedParams()`,
+  and the `EMBED_READY` / `EMBED_LOGIN` / `EMBED_TOKEN` protocol constants for
+  `@peridotvault/pid-react-embed`. The parent authenticates in the popup and
+  hands the exchanged read-only bearer to the frame; trust-critical writes open
+  the PeridotID popup (no inline signer in the frame).
+- **`fiat.isDelegated`.** Public flag for popup (third-party) mode so send
+  screens can use `transferViaPopup` in one ceremony.
+
 ## 1.5.0
 
 - **Multi-account auth.** `auth.accounts()` lists the identities signed into the

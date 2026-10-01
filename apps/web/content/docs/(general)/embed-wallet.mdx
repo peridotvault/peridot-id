@@ -1,0 +1,83 @@
+---
+title: Embed the wallet
+description: Render the PeridotID wallet inside your React app; sign-in and money actions open the PeridotID popup
+---
+
+Drop the PeridotID wallet into any React app (Vite, Next, …) with one component.
+The wallet renders in an `<iframe>` on the PeridotID origin; **every
+trust-critical action — sign-in, send, top-up, transfer — opens a popup on the
+PeridotID origin**, so the browser address bar stays visible as the unforgeable
+trust signal. Nothing that signs or moves money runs in your DOM.
+
+```bash
+npm install @peridotvault/pid-react-embed
+```
+
+```tsx
+import { PeridotWalletEmbed } from "@peridotvault/pid-react-embed";
+
+export function WalletPage() {
+  return (
+    <div style={{ width: 420, height: 720 }}>
+      <PeridotWalletEmbed
+        clientId="pidapp_…" // your registered app id
+        onIdentity={(id) => console.log("signed in as", id.pid)}
+        onError={(e) => console.error(e)}
+      />
+    </div>
+  );
+}
+```
+
+The component owns the whole ceremony:
+
+1. The iframe announces itself; the wallet shows a **Connect** button.
+2. Clicking it opens the PeridotID **login popup** (Google or passkey). On
+   return the component exchanges the one-time `pid_code` for a **read-only
+   bearer** and hands it to the iframe.
+3. The wallet renders, reading identity / profile / balance / activity with that
+   bearer.
+4. Any write (send, top-up, transfer, activate, register) opens the PeridotID
+   **approval popup** on the PeridotID origin; the result flows back into the
+   embedded UI.
+
+## Register your app first
+
+Create the app with `POST /v1/apps` and add the **exact origin** of the page
+that will host the embed to its allowed origins (see
+[Sign in with PeridotID](/docs/sign-in-with-peridot-id)). Login codes are only
+issued to registered origins — an unregistered page cannot obtain a bearer, so
+the embed stays inert there.
+
+## Why an iframe (not our React in your tree)
+
+WebAuthn binds passkeys to the PeridotID domain (`rpId`), and the httpOnly
+session cookies (`pid_access`/`pid_refresh`) are first-party to our origin. A
+frame keeps both invariants: the wallet is same-origin with itself, and every
+signing ceremony pops out to a top-level window you can verify by its address
+bar. Reads inside the frame use a delegated **read-only** bearer
+(`scope: "read"`, GET-only) — writes always return 403 and must go through the
+popup.
+
+## Deployment: allow the frame
+
+By default the wallet host sends no `frame-ancestors` allowance for
+third-party sites. To enable embeds, the wallet host's security headers
+(Traefik `security-headers@file` middleware on `app.pid.peridotvault.com`) must
+set:
+
+```
+Content-Security-Policy: frame-ancestors <your-origin> https://app.pid.peridotvault.com
+```
+
+List only the origins of apps that registered for embedding. Without this, the
+browser blocks the frame.
+
+## Notes
+
+- `env`, `baseUrl`, and `popupBaseUrl` mirror the SDK options; omit them in
+  production and the environment preset applies.
+- `onIdentity` fires after each successful connect (carries `pid`, `profile`,
+  `credentials` — never the bearer).
+- The read-only bearer lasts 30 days and is non-refreshable; when it expires the
+  user re-connects (one tap if their PeridotID session is alive).

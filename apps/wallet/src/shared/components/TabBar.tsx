@@ -3,6 +3,7 @@ import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Activity, House } from "../icons";
 import { usePeridot } from "../AppContext";
 import { theme } from "../theme";
+import { useWideLayout } from "../hooks/useWideLayout";
 
 export type TabKey = "home" | "activity" | "profile";
 
@@ -33,6 +34,26 @@ export function TabBar({ current, go }: { current: TabKey; go: (s: TabKey) => vo
   }, [peridot, current]);
 
   const profileActive = current === "profile";
+  const wide = useWideLayout();
+
+  if (wide) {
+    return (
+      <View style={styles.side}>
+        <Tab side icon={House} label="Home" active={current === "home"} onPress={() => go("home")} />
+        <Tab side icon={Activity} label="Activity" active={current === "activity"} onPress={() => go("activity")} />
+        <Pressable onPress={() => go("profile")} style={[styles.sideTab, profileActive && styles.sideTabActive]} accessibilityState={{ selected: profileActive }}>
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={[styles.avatar, profileActive && styles.avatarActive]} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarFallback, profileActive && styles.avatarActive]}>
+              <Text style={styles.avatarText}>{initial}</Text>
+            </View>
+          )}
+          <Text style={[styles.sideLabel, profileActive && styles.labelActive]}>Profile</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.bar}>
@@ -57,17 +78,23 @@ function Tab({
   label,
   active,
   onPress,
+  side,
 }: {
   icon: typeof House;
   label: string;
   active: boolean;
   onPress: () => void;
+  side?: boolean;
 }) {
   const color = active ? theme.colors.foreground : theme.colors.mutedForeground;
   return (
-    <Pressable onPress={onPress} style={styles.tab} accessibilityState={{ selected: active }}>
+    <Pressable
+      onPress={onPress}
+      style={[side ? styles.sideTab : styles.tab, side && active && styles.sideTabActive]}
+      accessibilityState={{ selected: active }}
+    >
       <Icon size={20} color={color} />
-      <Text style={[styles.label, active && styles.labelActive]}>{label}</Text>
+      <Text style={[side ? styles.sideLabel : styles.label, active && styles.labelActive]}>{label}</Text>
     </Pressable>
   );
 }
@@ -87,6 +114,21 @@ const styles = StyleSheet.create({
   tab: { flex: 1, alignItems: "center", gap: 4 },
   label: { fontSize: 11, color: c.mutedForeground, fontFamily: f.sansMedium },
   labelActive: { color: c.foreground },
+  side: {
+    width: theme.layout.sidebarWidth,
+    backgroundColor: c.background,
+    paddingVertical: 20,
+    paddingHorizontal: 12,
+    gap: 4,
+  },
+  sideTab: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 12,
+  },
+  sideTabActive: { backgroundColor: c.muted },
+  sideLabel: { fontSize: 14, color: c.mutedForeground, fontFamily: f.sansMedium },
   avatar: {
     width: 24,
     height: 24,

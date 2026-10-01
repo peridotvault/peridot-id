@@ -38,8 +38,10 @@ jobs:
         run: |
           # First-party wallet must never use the popup / hosted flow (third-party only).
           # Docs (*.md) may name it — only code is checked. window.opener (answering
-          # a popup) is fine; window.open (opening one) is banned.
-          if rg -n 'popupBaseUrl|openLoginPopup|HOSTED_LOGIN_URL|PROD_BASE_URL|window\.open\b' apps/wallet --glob '!*.md'; then
+          # a popup) is fine; window.open (opening one) is banned. Exception: the
+          # embed module (src/feat/embed/**) runs the wallet in a THIRD-PARTY iframe,
+          # where delegating writes to the popup is exactly the required flow.
+          if rg -n 'popupBaseUrl|openLoginPopup|HOSTED_LOGIN_URL|PROD_BASE_URL|window\.open\b' apps/wallet --glob '!*.md' --glob '!apps/wallet/src/feat/embed/**'; then
             echo "::error::apps/wallet must not use the popup/hosted flow — see apps/wallet README"
             exit 1
           fi

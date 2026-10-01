@@ -49,11 +49,19 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
         setError("Enter a recipient PID like rani@pid.");
         return;
       }
-      const inq = await peridot.fiat.transferInquiry({
-        amountIdr: trimmed,
-        beneficiaryPid: pid,
-        ...(remark.trim() ? { remark: remark.trim() } : {}),
-      });
+      const input = { amountIdr: trimmed, beneficiaryPid: pid, ...(remark.trim() ? { remark: remark.trim() } : {}) };
+      // Popup mode (third-party embed): one popup ceremony does inquiry +
+      // verified review + confirm; the inline two-phase path is first-party only.
+      if (peridot.fiat.isDelegated) {
+        const res = await peridot.fiat.transferViaPopup(input);
+        setResult(
+          res.status === "posted"
+            ? `Sent ${fmtIdr(res.amountIdr)} to ${pid}.`
+            : "Transfer submitted — check Activity for its status.",
+        );
+        return;
+      }
+      const inq = await peridot.fiat.transferInquiry(input);
       setInquiry(inq);
     } catch (e) {
       setError(friendly(e));

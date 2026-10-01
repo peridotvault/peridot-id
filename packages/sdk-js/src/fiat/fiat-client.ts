@@ -207,6 +207,11 @@ export class PeridotFiat {
     return this.api.popupBaseUrl != null && this.api.popupRequest != null;
   }
 
+  /** True in popup (third-party) mode — send screens should use `transferViaPopup`. */
+  get isDelegated(): boolean {
+    return this.delegated;
+  }
+
   /** Delegate one trust-critical fiat action to the PeridotID popup. */
   private viaPopup<T>(action: string, payload?: unknown): Promise<T> {
     if (!this.api.popupRequest) {

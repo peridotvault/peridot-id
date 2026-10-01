@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { theme, styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
 import { UIButton } from "../../../shared/components/UIButton";
+import { Plus } from "../../../shared/icons";
 import {
   formatIdrWhole,
   formatTotal,
@@ -19,7 +20,7 @@ export function BalanceCard({
   busy,
   rates,
   onRetry,
-  onTransfer,
+  onTopup,
 }: {
   currency: Currency;
   totalValue: number;
@@ -28,7 +29,7 @@ export function BalanceCard({
   busy: boolean;
   rates: Rates | null;
   onRetry: () => void;
-  onTransfer: () => void;
+  onTopup: () => void;
 }) {
   return (
     <View style={styles.balanceCard}>
@@ -40,7 +41,6 @@ export function BalanceCard({
         <View style={styles.balanceCardVeil} />
       </View>
       <View style={styles.balanceCardContent}>
-        <Text style={styles.fiatLabel}>All Balance · {currency}</Text>
         {balanceError ? (
           <>
             <Text style={s.error}>{balanceError}</Text>
@@ -48,18 +48,16 @@ export function BalanceCard({
           </>
         ) : (
           <>
-            <Text style={styles.fiatAmount}>
-              {busy && balanceIdr === null ? "…" : formatTotal(totalValue, currency)}
-            </Text>
             <View style={styles.breakdown}>
+              <Text style={styles.fiatLabel}>PeridotID</Text>
+              <Text style={styles.fiatAmount}>
+                {busy && balanceIdr === null ? "…" : formatTotal(totalValue, currency)}
+              </Text>
               <Text style={styles.fiatLeft}>
                 {balanceIdr === null ? (busy ? "…" : "—") : formatIdrWhole(balanceIdr, "IDR", rates)}
               </Text>
-              {!rates && !busy && (
-                <Text style={s.hint}>Prices unavailable — total excludes crypto.</Text>
-              )}
             </View>
-            <UIButton title="Transfer" onPress={onTransfer} />
+            <UIButton title="Top Up" icon={<Plus size={16} color={theme.colors.foreground} />} onPress={onTopup} />
           </>
         )}
       </View>
@@ -82,16 +80,16 @@ const styles = StyleSheet.create({
   },
   balanceCardVeil: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(10, 10, 10, 0.55)",
+    backgroundColor: "rgba(10, 10, 10, 0.1)",
   },
   balanceCardContent: {
     flex: 1,
     justifyContent: "space-between",
-    padding: 16,
+    padding: 20,
     gap: 6,
   },
   fiatLabel: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   fiatAmount: { fontSize: 38, fontWeight: "400", color: theme.colors.foreground, fontFamily: theme.fonts.serif },
-  breakdown: { gap: 2, paddingVertical: 4 },
+  breakdown: { gap: 6 },
   fiatLeft: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono, textAlign: "left" },
 });

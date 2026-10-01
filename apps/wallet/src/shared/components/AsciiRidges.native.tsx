@@ -126,7 +126,7 @@ export function AsciiRidges({
       .then((v) => {
         if (alive) setReduced(!!v);
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       alive = false;
     };

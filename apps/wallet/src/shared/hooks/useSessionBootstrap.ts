@@ -34,9 +34,11 @@ export function useSessionBootstrap(
     /** Auth-in-a-new-tab context (shape owned by feat/auth; only truthiness matters here). */
     loginContext: unknown;
     setScreen: (s: Screen) => void;
+    /** Hold bootstrap until true (embedded wallet waits for the parent's bearer). */
+    paused?: boolean;
   },
 ) {
-  const { loginContext, setScreen } = opts;
+  const { loginContext, setScreen, paused = false } = opts;
   const [bootstrapping, setBootstrapping] = useState(true);
   // True when the session family aged out (google families: 7 days) — the
   // login screen then asks for passkey confirmation instead of silently dying.
@@ -139,8 +141,9 @@ export function useSessionBootstrap(
   }, [peridot, loginContext, setScreen]);
 
   useEffect(() => {
+    if (paused) return;
     bootstrap();
-  }, [bootstrap, sessionEpoch]);
+  }, [bootstrap, sessionEpoch, paused]);
 
   return {
     bootstrapping,

@@ -3,13 +3,11 @@ import { ArrowDownLeft, ArrowUpRight, Banknote, Coins } from "../../../shared/ic
 import { theme } from "../../../shared/theme";
 
 export function QuickActions({
-  activated,
   onSend,
   onReceive,
   onSwap,
   onBuy,
 }: {
-  activated: boolean;
   onSend: () => void;
   onReceive: () => void;
   onSwap: () => void;
@@ -17,7 +15,7 @@ export function QuickActions({
 }) {
   return (
     <View style={styles.actions}>
-      <ActionButton icon={ArrowUpRight} label="Send" onPress={onSend} disabled={!activated} />
+      <ActionButton icon={ArrowUpRight} label="Send" onPress={onSend} />
       <ActionButton icon={ArrowDownLeft} label="Receive" onPress={onReceive} />
       <ActionButton icon={Coins} label="Swap" onPress={onSwap} />
       <ActionButton icon={Banknote} label="Buy" onPress={onBuy} />

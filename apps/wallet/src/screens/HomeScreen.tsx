@@ -1,11 +1,12 @@
+import { useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
 import { usePeridot } from "../shared/AppContext";
 import { theme, styles as s } from "../shared/theme";
 import { useHomeData } from "../feat/wallet/hooks/useHomeData";
 import { buildCoins, calcTotal } from "../feat/wallet/utils/assets";
-import { HomeHeader } from "../feat/wallet/components/HomeHeader";
 import { BalanceCard } from "../feat/wallet/components/BalanceCard";
 import { QuickActions } from "../feat/wallet/components/QuickActions";
+import { SendChoiceModal } from "../feat/wallet/components/SendChoiceModal";
 import { AssetSection } from "../feat/wallet/components/AssetSection";
 
 interface HomeScreenProps {
@@ -15,7 +16,6 @@ interface HomeScreenProps {
   goBuy: () => void;
   goTransfer: () => void;
   goPasskeys: () => void;
-  goAppConnections: () => void;
 }
 
 export function HomeScreen({
@@ -25,10 +25,10 @@ export function HomeScreen({
   goBuy,
   goTransfer,
   goPasskeys,
-  goAppConnections,
 }: HomeScreenProps) {
   const { peridot } = usePeridot();
   const d = useHomeData(peridot);
+  const [choice, setChoice] = useState(false);
   const coins = buildCoins(d.solLamports, d.tokens);
   const totalValue = calcTotal({
     solLamports: d.solLamports,
@@ -40,8 +40,6 @@ export function HomeScreen({
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <HomeHeader pid={d.pid} displayName={d.profile?.displayName ?? null} onConnections={goAppConnections} />
-
       <BalanceCard
         currency={d.currency}
         totalValue={totalValue}
@@ -50,10 +48,24 @@ export function HomeScreen({
         busy={d.busy}
         rates={d.rates}
         onRetry={d.load}
-        onTransfer={goTransfer}
+        onTopup={goBuy}
       />
 
-      <QuickActions activated={d.activated} onSend={goSend} onReceive={goReceive} onSwap={goSwap} onBuy={goBuy} />
+      <QuickActions onSend={() => setChoice(true)} onReceive={goReceive} onSwap={goSwap} onBuy={goBuy} />
+
+      <SendChoiceModal
+        visible={choice}
+        activated={d.activated}
+        onPickOnChain={() => {
+          setChoice(false);
+          goSend();
+        }}
+        onPickIdr={() => {
+          setChoice(false);
+          goTransfer();
+        }}
+        onClose={() => setChoice(false)}
+      />
 
       {d.error && <Text style={s.error}>{d.error}</Text>}
 

@@ -1,13 +1,17 @@
 import "./polyfills";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaView, StyleSheet, View } from "react-native";
 import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
 import { readPopupParams } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL } from "./src/shared/config";
 import { AppContext } from "./src/shared/AppContext";
+import { readEmbedParams, createEmbedClient } from "./src/feat/embed/embed-client";
+import { useEmbedBridge } from "./src/feat/embed/useEmbedBridge";
+import { EmbedConnectScreen } from "./src/feat/embed/EmbedConnectScreen";
 import { readLoginContext } from "./src/feat/auth/popup-login";
 import { theme } from "./src/shared/theme";
+import { AppColumn } from "./src/shared/components/AppColumn";
 import { useStartupGate } from "./src/shared/hooks/useStartupGate";
 import { useSessionBootstrap, type Screen } from "./src/shared/hooks/useSessionBootstrap";
 import { useSessionSync } from "./src/shared/hooks/useSessionSync";
@@ -33,7 +37,8 @@ import { ActivityDetailScreen } from "./src/screens/ActivityDetailScreen";
 import { FiatDetailScreen } from "./src/screens/FiatDetailScreen";
 import { FiatTransferScreen } from "./src/screens/FiatTransferScreen";
 import { FiatLedgerDetailScreen } from "./src/screens/FiatLedgerDetailScreen";
-import { TabBar } from "./src/shared/components/TabBar";
+import { TabBar, type TabKey } from "./src/shared/components/TabBar";
+import { TopBar } from "./src/feat/wallet/components/TopBar";
 import { ActivationScreen } from "./src/screens/ActivationScreen";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import type { FiatItem, FiatLedgerItem } from "./src/shared/fiat";
@@ -55,58 +60,149 @@ export default function App() {
     const p = readPopupParams();
     return p && p.action !== "login" ? p : null;
   });
+  // Third-party embed (`?embed=1&origin=…`): the wallet renders inside a dapp's
+  // iframe. No inline signer — writes open the PeridotID popup; reads use the
+  // read-only bearer the parent hands over.
+  const [embedParams] = useState(readEmbedParams);
+  const embed = useEmbedBridge(embedParams);
 
   // Built in-state (not module scope): any 401 outside /v1/auth/* kicks back
   // to login instead of stranding the app on a dead session. Idempotent —
   // the login screen makes no auto-auth calls outside SSO, so no loops.
   const [peridot] = useState(() =>
-    Peridot({
-      baseUrl: API_BASE_URL,
-      // Chains/RPC resolved from the API registry.
-      // First-party origin: inline ceremonies are legitimate here (this IS the
-      // trusted DOM). Third-party dapps omit the signer and use the popup.
-      passkeySigner: new BrowserPasskeySigner(),
-      onUnauthorized: () => {
-        session.setStepUp(false);
-        setScreen("login");
-      },
-    }),
+    embedParams
+      ? createEmbedClient(API_BASE_URL)
+      : Peridot({
+          baseUrl: API_BASE_URL,
+          // Chains/RPC resolved from the API registry.
+          // First-party origin: inline ceremonies are legitimate here (this IS the
+          // trusted DOM). Third-party dapps omit the signer and use the popup.
+          passkeySigner: new BrowserPasskeySigner(),
+          onUnauthorized: () => {
+            session.setStepUp(false);
+            setScreen("login");
+          },
+        }),
   );
-  const session = useSessionBootstrap(peridot, { loginContext, setScreen });
+  // Feed the delegated bearer into the client once the parent sends it.
+  useEffect(() => {
+    if (embed.bearer) peridot.setBearer(embed.bearer);
+  }, [embed.bearer, peridot]);
+  const session = useSessionBootstrap(peridot, {
+    loginContext,
+    setScreen,
+    paused: !!embedParams && !embed.bearer,
+  });
   const gate = useStartupGate();
   useSessionSync({
     bootstrap: session.bootstrap,
-    disabled: !!popupRequest || !!loginContext,
+    disabled: !!popupRequest || !!loginContext || !!embedParams,
     isAuthed: session.authed,
   });
 
   const [activityTx, setActivityTx] = useState<WalletTransaction | null>(null);
   const [fiatItem, setFiatItem] = useState<FiatItem | null>(null);
   const [ledgerItem, setLedgerItem] = useState<FiatLedgerItem | null>(null);
-  const [passkeyReturn, setPasskeyReturn] = useState<Screen>("settings");
 
-  const goHome = useCallback(() => setScreen("home"), []);
-  const go = useCallback((s: Screen) => setScreen(s), []);
-
-  const openPasskey = useCallback((from: Screen) => {
-    setPasskeyReturn(from);
-    setScreen("passkey");
+  // Overlay stack: pushes render as opaque overlays over the sm content box
+  // instead of replacing the tab root beneath (chrome stays visible). pop()
+  // doubles as overlay dismiss for every screen's onDone — and remounts the
+  // base (epoch) so data is exactly as fresh as the old replace-navigation.
+  const [stack, setStack] = useState<Screen[]>([]);
+  const [epoch, setEpoch] = useState(0);
+  const push = useCallback((s: Screen) => setStack((prev) => [...prev, s]), []);
+  const pop = useCallback(() => {
+    setStack((prev) => prev.slice(0, -1));
+    setEpoch((n) => n + 1);
   }, []);
-
-  const openActivityDetail = useCallback((tx: WalletTransaction) => {
-    setActivityTx(tx);
-    setScreen("activity-detail");
+  const goTab = useCallback((t: TabKey) => {
+    setStack([]);
+    setScreen(t);
   }, []);
+  // Persistent shell chrome (top bar + tab bar/sidebar) mounts on tab roots
+  // only — pushes render chromeless, as before.
+  const isTabRoot = screen === "home" || screen === "activity" || screen === "profile";
 
-  const openFiatDetail = useCallback((item: FiatItem) => {
-    setFiatItem(item);
-    setScreen("fiat-detail");
-  }, []);
+  // The stack only lives under tab roots: leaving them (login, provisioning)
+  // drops any stale overlay so it can never resurface on the next identity.
+  useEffect(() => {
+    if (!isTabRoot) setStack([]);
+  }, [isTabRoot]);
 
-  const openLedgerDetail = useCallback((item: FiatLedgerItem) => {
-    setLedgerItem(item);
-    setScreen("fiat-ledger-detail");
-  }, []);
+  const openPasskey = useCallback(() => {
+    push("passkey");
+  }, [push]);
+
+  const openActivityDetail = useCallback(
+    (tx: WalletTransaction) => {
+      setActivityTx(tx);
+      push("activity-detail");
+    },
+    [push],
+  );
+
+  const openFiatDetail = useCallback(
+    (item: FiatItem) => {
+      setFiatItem(item);
+      push("fiat-detail");
+    },
+    [push],
+  );
+
+  const openLedgerDetail = useCallback(
+    (item: FiatLedgerItem) => {
+      setLedgerItem(item);
+      push("fiat-ledger-detail");
+    },
+    [push],
+  );
+
+  // Top-of-stack overlay screen. Every push keeps its existing onDone
+  // contract — Back buttons dismiss the overlay with zero screen changes.
+  const renderOverlay = () => {
+    const top = stack[stack.length - 1];
+    switch (top) {
+      case "send":
+        return <SendScreen onDone={pop} />;
+      case "fiat-transfer":
+        return <FiatTransferScreen onDone={pop} />;
+      case "receive":
+        return <ReceiveScreen onDone={pop} goPasskey={openPasskey} />;
+      case "swap":
+        return <SwapScreen onDone={pop} />;
+      case "topup":
+        return <TopupScreen onDone={pop} />;
+      case "passkey":
+        return <PasskeyScreen onDone={pop} />;
+      case "activation":
+        return <ActivationScreen onDone={pop} goPasskey={openPasskey} />;
+      case "settings":
+        return (
+          <SettingsScreen
+            goPasskeys={openPasskey}
+            goSessions={() => push("sessions")}
+            goConnected={() => push("connected")}
+            onDone={pop}
+          />
+        );
+      case "edit-profile":
+        return <EditProfileScreen onDone={pop} />;
+      case "sessions":
+        return <SessionsScreen onDone={pop} />;
+      case "connected":
+        return <ConnectedAccountsScreen onDone={pop} />;
+      case "app-connections":
+        return <AppConnectionsScreen onDone={pop} />;
+      case "activity-detail":
+        return activityTx ? <ActivityDetailScreen tx={activityTx} onDone={pop} /> : undefined;
+      case "fiat-detail":
+        return fiatItem ? <FiatDetailScreen item={fiatItem} onDone={pop} /> : undefined;
+      case "fiat-ledger-detail":
+        return ledgerItem ? <FiatLedgerDetailScreen item={ledgerItem} onDone={pop} /> : undefined;
+      default:
+        return undefined;
+    }
+  };
 
   const logout = useCallback(async () => {
     try {
@@ -118,6 +214,11 @@ export default function App() {
       setScreen("login");
     }
   }, [peridot, session]);
+
+  // Embedded and not yet authenticated: ask the parent to run the login popup.
+  if (embedParams && !embed.bearer) {
+    return <EmbedConnectScreen onConnect={embed.requestLogin} />;
+  }
 
   // Paint first, complete later: the branded loader shows instantly (system
   // fallbacks) while fonts download and the session check runs in parallel.
@@ -138,63 +239,61 @@ export default function App() {
             // round-trip by readPopupParams).
             <LoginScreen onLoggedIn={() => session.setAuthed(true)} stepUp={session.stepUp} />
           )
-        ) : (
-          <>
-            {(screen === "login" || ssoRequest) && (
+        ) : screen === "login" ? (
+          // Standalone login (plain, SSO entry, auth-in-a-new-tab): full-bleed
+          // public page. The in-column LoginScreen below then only serves the
+          // authed SSO consent overlay over the app.
           <LoginScreen
             onLoggedIn={loginContext ? () => {} : session.handleLoggedIn}
             loginContext={loginContext}
             stepUp={session.stepUp}
           />
-        )}
-        {screen === "home" && (
-          <HomeScreen
-            goSend={() => go("send")}
-            goReceive={() => go("receive")}
-            goSwap={() => go("swap")}
-            goBuy={() => go("topup")}
-            goTransfer={() => go("fiat-transfer")}
-            goPasskeys={() => openPasskey("settings")}
-            goAppConnections={() => go("app-connections")}
-          />
-        )}
-        {screen === "send" && <SendScreen onDone={goHome} />}
-        {screen === "fiat-transfer" && <FiatTransferScreen onDone={goHome} />}
-        {screen === "receive" && <ReceiveScreen onDone={goHome} goPasskey={() => openPasskey("receive")} />}
-        {screen === "swap" && <SwapScreen onDone={goHome} />}
-        {screen === "topup" && <TopupScreen onDone={goHome} />}
-        {screen === "provisioning" && <ProvisioningScreen onContinue={goHome} />}
-        {screen === "passkey" && <PasskeyScreen onDone={() => setScreen(passkeyReturn)} />}
-        {screen === "activation" && <ActivationScreen onDone={goHome} goPasskey={() => openPasskey("activation")} />}
-        {screen === "settings" && (
-          <SettingsScreen
-            goPasskeys={() => openPasskey("settings")}
-            goSessions={() => go("sessions")}
-            goConnected={() => go("connected")}
-            onDone={() => go("profile")}
-          />
-        )}
-        {screen === "profile" && (
-          <ProfileScreen
-            onLogout={logout}
-            goSettings={() => go("settings")}
-            goEditProfile={() => go("edit-profile")}
-            onSwitched={session.reloadSession}
-            onAddAccount={() => setScreen("login")}
-          />
-        )}
-        {screen === "edit-profile" && <EditProfileScreen onDone={() => go("profile")} />}
-        {screen === "sessions" && <SessionsScreen onDone={() => go("settings")} />}
-        {screen === "connected" && <ConnectedAccountsScreen onDone={() => go("settings")} />}
-        {screen === "app-connections" && <AppConnectionsScreen onDone={goHome} />}
-        {screen === "activity" && <ActivityScreen onSelect={openActivityDetail} onSelectFiat={openFiatDetail} onSelectLedger={openLedgerDetail} />}
-        {screen === "activity-detail" && activityTx && <ActivityDetailScreen tx={activityTx} onDone={() => go("activity")} />}
-        {screen === "fiat-detail" && fiatItem && <FiatDetailScreen item={fiatItem} onDone={() => go("activity")} />}
-        {screen === "fiat-ledger-detail" && ledgerItem && <FiatLedgerDetailScreen item={ledgerItem} onDone={() => go("activity")} />}
-        {(screen === "home" || screen === "activity" || screen === "profile") && (
-          <TabBar current={screen} go={go} />
-        )}
-          </>
+        ) : (
+          <AppColumn
+            top={
+              isTabRoot ? (
+                <TopBar onConnections={() => push("app-connections")} refreshKey={`${screen}-${epoch}`} />
+              ) : undefined
+            }
+            side={isTabRoot ? <TabBar current={screen} go={goTab} /> : undefined}
+            overlay={isTabRoot ? renderOverlay() : undefined}
+          >
+            <View key={epoch} style={styles.base}>
+              {ssoRequest && (
+                <LoginScreen
+                  onLoggedIn={loginContext ? () => {} : session.handleLoggedIn}
+                  loginContext={loginContext}
+                  stepUp={session.stepUp}
+                />
+              )}
+              {screen === "home" && (
+                <HomeScreen
+                  goSend={() => push("send")}
+                  goReceive={() => push("receive")}
+                  goSwap={() => push("swap")}
+                  goBuy={() => push("topup")}
+                  goTransfer={() => push("fiat-transfer")}
+                  goPasskeys={openPasskey}
+                />
+              )}
+              {screen === "activity" && (
+                <ActivityScreen onSelect={openActivityDetail} onSelectFiat={openFiatDetail} onSelectLedger={openLedgerDetail} />
+              )}
+              {screen === "profile" && (
+                <ProfileScreen
+                  onLogout={logout}
+                  goSettings={() => push("settings")}
+                  goEditProfile={() => push("edit-profile")}
+                  onSwitched={() => {
+                    setStack([]);
+                    session.reloadSession();
+                  }}
+                  onAddAccount={() => setScreen("login")}
+                />
+              )}
+              {screen === "provisioning" && <ProvisioningScreen onContinue={() => goTab("home")} />}
+            </View>
+          </AppColumn>
         )}
         <StatusBar style="light" />
       </SafeAreaView>
@@ -204,4 +303,5 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  base: { flex: 1 },
 });

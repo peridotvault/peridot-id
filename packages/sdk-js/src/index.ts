@@ -63,6 +63,8 @@ export {
   PopupUnavailableError,
 } from "./popup.js";
 export type { PopupParams, PopupResult } from "./popup.js";
+export { EMBED_LOGIN, EMBED_READY, EMBED_TOKEN, EmbedBridge, readEmbedParams } from "./embed.js";
+export type { EmbedParams } from "./embed.js";
 export { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 export { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
 
@@ -118,6 +120,13 @@ export interface PeridotOptions {
   passkeySigner?: PasskeySigner;
   /** On-chain activity cache (defaults to localStorage-backed). */
   historyStore?: HistoryStore;
+  /**
+   * Read-only bearer (`scope: "read"`) instead of session cookies. Used by
+   * embedded wallet clients on a third-party origin, where the httpOnly
+   * session cookies are cross-site and would be dropped by SameSite. Mutable
+   * via {@link PeridotClient.setBearer} — an embed receives it after mount.
+   */
+  bearer?: string;
   onUnauthorized?: () => void;
 }
 
@@ -533,6 +542,7 @@ class PeridotClient {
     appOptions: { clientId?: string; clientSecret?: string } = {},
     private onUnauthorized?: () => void,
     private readonly sessionScope?: string,
+    private bearer?: string,
   ) {
     this.appOptions = appOptions;
     this.auth = new PeridotAuth(this);
@@ -554,13 +564,23 @@ class PeridotClient {
     return this.appOptions.clientSecret;
   }
 
+  /**
+   * Swap the read-only bearer (or clear it with `undefined`). The embedded
+   * wallet calls this once the parent hands over the exchanged token, so the
+   * client authenticates reads without cross-site cookies.
+   */
+  setBearer(token?: string): void {
+    this.bearer = token;
+  }
+
   private async request<T>(path: string, init: RequestInit): Promise<{ ok: boolean; data: T | ApiError }> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,
-      credentials: "include",
+      credentials: this.bearer ? "omit" : "include",
       headers: {
         "Content-Type": "application/json",
         ...(this.sessionScope ? { "x-pid-scope": this.sessionScope } : {}),
+        ...(this.bearer ? { Authorization: `Bearer ${this.bearer}` } : {}),
         ...init.headers,
       },
     });
@@ -658,6 +678,7 @@ export function Peridot(options: PeridotOptions = {}): PeridotClient {
     { clientId: options.clientId, clientSecret: options.clientSecret },
     options.onUnauthorized,
     options.sessionScope,
+    options.bearer,
   );
 }
 

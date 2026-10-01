@@ -333,6 +333,19 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
 
+  packages/react-embed:
+    dependencies:
+      '@peridotvault/pid-sdk-js':
+        specifier: workspace:^
+        version: link:../sdk-js
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.18
+      react:
+        specifier: ^19.0.0
+        version: 19.2.8
+
   packages/sdk-js:
     dependencies:
       '@peridotvault/pid-core':

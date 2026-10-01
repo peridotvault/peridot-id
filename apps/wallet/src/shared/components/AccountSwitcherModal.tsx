@@ -1,7 +1,8 @@
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { AccountView } from "@peridotvault/pid-types";
-import { Check, LogOut, Plus, X } from "../icons";
+import { Check, LogOut, Plus } from "../icons";
 import { theme, styles as s } from "../theme";
+import { BottomSheet } from "./BottomSheet";
 import { UIButton } from "./UIButton";
 
 // Bottom-sheet account switcher: every identity signed into this browser, the
@@ -28,68 +29,64 @@ export function AccountSwitcherModal({
   onSignOut?: (pid: string) => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.scrim} onPress={busy ? undefined : onClose} accessibilityLabel="Close account switcher" />
-      <View style={styles.sheet}>
-        <View style={styles.head}>
-          <Text style={styles.title}>Switch Account</Text>
-          <Pressable onPress={onClose} disabled={busy} style={styles.close} accessibilityLabel="Close">
-            <X size={18} color={theme.colors.mutedForeground} />
-          </Pressable>
-        </View>
+    <BottomSheet
+      visible={visible}
+      title="Switch Account"
+      onClose={onClose}
+      closeDisabled={busy}
+      scrimLabel="Close account switcher"
+    >
+      {error && <Text style={s.error}>{error}</Text>}
 
-        {error && <Text style={s.error}>{error}</Text>}
-
-        <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-          {accounts.map((a) => (
-            <Pressable
-              key={a.pid}
-              style={styles.row}
-              onPress={() => onSelect(a.pid)}
-              disabled={busy || a.isActive}
-              accessibilityLabel={`Switch to ${a.pid}`}
-            >
-              {a.avatarUrl ? (
-                <Image source={{ uri: a.avatarUrl }} style={styles.thumb} />
-              ) : (
-                <View style={[styles.thumb, styles.thumbFallback]}>
-                  <Text style={styles.thumbText}>{(a.displayName ?? a.pid).slice(0, 1).toUpperCase()}</Text>
-                </View>
-              )}
-              <View style={styles.meta}>
-                <Text style={styles.name} numberOfLines={1}>
-                  {a.displayName ?? a.pid}
-                </Text>
-                <Text style={styles.pid} numberOfLines={1}>
-                  {a.pid}
-                </Text>
+      <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+        {accounts.map((a) => (
+          <Pressable
+            key={a.pid}
+            style={styles.row}
+            onPress={() => onSelect(a.pid)}
+            disabled={busy || a.isActive}
+            accessibilityLabel={`Switch to ${a.pid}`}
+          >
+            {a.avatarUrl ? (
+              <Image source={{ uri: a.avatarUrl }} style={styles.thumb} />
+            ) : (
+              <View style={[styles.thumb, styles.thumbFallback]}>
+                <Text style={styles.thumbText}>{(a.displayName ?? a.pid).slice(0, 1).toUpperCase()}</Text>
               </View>
-              {a.isActive ? (
-                <Check size={18} color={theme.colors.foreground} />
-              ) : onSignOut ? (
-                <Pressable
-                  onPress={() => onSignOut(a.pid)}
-                  disabled={busy}
-                  style={styles.rowAction}
-                  accessibilityLabel={`Sign out ${a.pid}`}
-                >
-                  <LogOut size={16} color={theme.colors.mutedForeground} />
-                </Pressable>
-              ) : null}
-            </Pressable>
-          ))}
-          {accounts.length === 0 && <Text style={s.hint}>No accounts signed in.</Text>}
-        </ScrollView>
+            )}
+            <View style={styles.meta}>
+              <Text style={styles.name} numberOfLines={1}>
+                {a.displayName ?? a.pid}
+              </Text>
+              <Text style={styles.pid} numberOfLines={1}>
+                {a.pid}
+              </Text>
+            </View>
+            {a.isActive ? (
+              <Check size={18} color={theme.colors.foreground} />
+            ) : onSignOut ? (
+              <Pressable
+                onPress={() => onSignOut(a.pid)}
+                disabled={busy}
+                style={styles.rowAction}
+                accessibilityLabel={`Sign out ${a.pid}`}
+              >
+                <LogOut size={16} color={theme.colors.mutedForeground} />
+              </Pressable>
+            ) : null}
+          </Pressable>
+        ))}
+        {accounts.length === 0 && <Text style={s.hint}>No accounts signed in.</Text>}
+      </ScrollView>
 
-        <UIButton
-          title="Add Account"
-          onPress={onAdd}
-          disabled={busy}
-          variant="primary"
-          icon={<Plus size={16} color={theme.colors.foreground} />}
-        />
-      </View>
-    </Modal>
+      <UIButton
+        title="Add Account"
+        onPress={onAdd}
+        disabled={busy}
+        variant="primary"
+        icon={<Plus size={16} color={theme.colors.foreground} />}
+      />
+    </BottomSheet>
   );
 }
 
@@ -97,23 +94,6 @@ const c = theme.colors;
 const f = theme.fonts;
 
 const styles = StyleSheet.create({
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0, 0, 0, 0.6)" },
-  sheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    maxHeight: "75%",
-    backgroundColor: c.surface,
-    borderTopWidth: 1,
-    borderColor: c.border,
-    padding: 20,
-    paddingBottom: 28,
-    gap: 12,
-  },
-  head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  title: { fontSize: 22, color: c.foreground, fontFamily: f.serif, letterSpacing: -0.3 },
-  close: { padding: 6 },
   list: { flexGrow: 0 },
   listContent: { gap: 8, paddingVertical: 4 },
   row: {
