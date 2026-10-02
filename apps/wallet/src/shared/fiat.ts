@@ -2,7 +2,7 @@
 // (activity domain) and the fiat detail screens (fiat domain) — so they live
 // in shared/, not in any single screen (feat/ may never import another feat,
 // screens/ may never import another screen).
-import type { DepositQuoteView, FiatDepositView, FiatLedgerEntry } from "@peridotvault/pid-sdk-js";
+import type { DepositQuoteView, FiatDepositView, FiatLedgerEntry, PaymentMethodQuote } from "@peridotvault/pid-sdk-js";
 import { sumTransferFee } from "@peridotvault/pid-sdk-js";
 
 export type FiatKind = "deposit" | "withdraw" | "transfer" | "debit" | "fee";
@@ -65,6 +65,19 @@ export function fmtIdr(units: string): string {
 /** One combined fee line: quoted transfer fee, else PeridotID + gateway sum. */
 export function transferFeeOf(quote: DepositQuoteView): string {
   return quote.transferFeeIdr ?? sumTransferFee(quote);
+}
+
+/**
+ * The fee line for the SELECTED payment method: PeridotID (fee+PPN) + the
+ * method's DOKU gateway fee+PPN. The checkout quote is fetched without a method
+ * (the user picks client-side), so its own `transferFeeIdr` excludes the gateway
+ * fee — derive the fee from the selected method's total instead:
+ * total = net + PeridotID fee+PPN + appFee + gateway fee+PPN.
+ */
+export function selectedTransferFee(quote: DepositQuoteView, method: PaymentMethodQuote | null): string {
+  const total = BigInt(method?.totalIdr ?? quote.totalIdr);
+  const fee = total - BigInt(quote.netIdr) - BigInt(quote.appFeeIdr);
+  return (fee < 0n ? 0n : fee).toString();
 }
 
 /** Keep the previous payment method if still offered, else the first one. */

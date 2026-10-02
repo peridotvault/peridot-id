@@ -5,7 +5,7 @@ import type {
   FiatTransferInquiryView,
   PeridotClient,
 } from "@peridotvault/pid-sdk-js";
-import { fmtIdr, pickMethod, transferFeeOf } from "../../../shared/fiat";
+import { fmtIdr, pickMethod, selectedTransferFee } from "../../../shared/fiat";
 
 // Server-quoted fiat state for popup approvals. Summaries are built from
 // THESE (DOKU-side truth), never from opener-supplied amounts — a malicious
@@ -18,8 +18,14 @@ export function useFiatPrepare(peridot: PeridotClient) {
   const [checkoutReq, setCheckoutReq] = useState<{ netAmountIdr: string; clientId?: string } | null>(null);
   const [checkoutMethod, setCheckoutMethod] = useState<string | null>(null);
   const selectedQuote = checkout?.paymentMethods.find((m) => m.key === checkoutMethod) ?? null;
-  // One combined fee line: PeridotID (fee+PPN) + DOKU gateway (fee+PPN).
-  const transferFee = checkout ? transferFeeOf(checkout) : "0";
+  // One combined fee line for the SELECTED method: PeridotID (fee+PPN) + DOKU
+  // gateway (fee+PPN). The quote was fetched method-less, so derive it from the
+  // selected method's total — keeps the fee line reconciled with the total.
+  const transferFee = checkout ? selectedTransferFee(checkout, selectedQuote) : "0";
+  // Live summary so the "Requested action" total tracks the method selection.
+  const checkoutSummary = checkout
+    ? `Top up ${fmtIdr(checkout.netIdr)} — total payment ${fmtIdr(selectedQuote?.totalIdr ?? checkout.totalIdr)}. You complete payment on the DOKU page after approval.`
+    : null;
 
   /** Server-side prepare: inquiry/quote now, returns the verified summary text. */
   const prepare = useCallback(async (action: string, p: Record<string, unknown>): Promise<string> => {
@@ -32,6 +38,8 @@ export function useFiatPrepare(peridot: PeridotClient) {
         beneficiaryPid,
         ...(typeof p.remark === "string" ? { remark: p.remark } : {}),
         ...(typeof p.clientId === "string" ? { clientId: p.clientId } : {}),
+        // Escrow legs (campaign funding/refund) carry no app fee.
+        ...(p.operation === "escrow" ? { operation: "escrow" as const } : {}),
       });
       // Tamper guard: the quote must match what the opener asked for.
       if (inq.grossIdr !== amountIdr) throw new Error("Quote mismatch — request rejected.");
@@ -55,7 +63,8 @@ export function useFiatPrepare(peridot: PeridotClient) {
       setCheckout(quote);
       setCheckoutReq({ netAmountIdr, ...(clientId ? { clientId } : {}) });
       setCheckoutMethod((m) => pickMethod(m, quote.paymentMethods));
-      return `Top up ${fmtIdr(quote.netIdr)} — total payment ${fmtIdr(quote.totalIdr)}. You complete payment on the DOKU page after approval.`;
+      // Total lives in the live `checkoutSummary` (tracks the selected method).
+      return `Top up ${fmtIdr(quote.netIdr)}. You complete payment on the DOKU page after approval.`;
     }
     throw new Error(`Not a fiat action "${action}"`);
   }, [peridot]);
@@ -90,6 +99,7 @@ export function useFiatPrepare(peridot: PeridotClient) {
     setCheckoutMethod,
     selectedQuote,
     transferFee,
+    checkoutSummary,
     prepare,
     execute,
     cancelInquiry,

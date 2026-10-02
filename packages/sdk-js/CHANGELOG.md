@@ -1,5 +1,12 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.7.0
+
+- **Transfer fee operation.** `fiat.transferInquiry` / `fiat.transferViaPopup`
+  accept `operation: "transaction" | "escrow"` (default `transaction`).
+  `escrow` carries no app fee and — for a verified app — also skips the global
+  PeridotID fee, so campaign funding/refund legs are exact (used by Live2Dev).
+
 ## 1.6.0
 
 - **Read-only bearer mode.** `Peridot({ bearer })` / `client.setBearer(token)`

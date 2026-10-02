@@ -318,3 +318,21 @@ describe("FiatLedgerService callbacks", () => {
     );
   });
 });
+
+describe("FiatLedgerService escrow fee operation", () => {
+  it("escrow legs carry no app fee; a verified app also skips the global fee", async () => {
+    const { service, prisma } = setup();
+    // Verified app, no app-fee row for `escrow` → both fees zero (exact refund).
+    prisma.pidApp.findUnique.mockResolvedValue({ id: "app1", ownerPid: "live2dev@pid", isActive: true, isVerified: true });
+    prisma.pidAppFee.findUnique.mockResolvedValue(null);
+    const verified = await service.quoteFees("pidapp_x", "escrow", 100_000n);
+    expect(verified.globalFee).toBe(0n);
+    expect(verified.appFee).toBe(0n);
+
+    // Non-verified: the global fee still applies, but still no app fee.
+    prisma.pidApp.findUnique.mockResolvedValue({ id: "app1", ownerPid: "live2dev@pid", isActive: true, isVerified: false });
+    const publicApp = await service.quoteFees("pidapp_x", "escrow", 100_000n);
+    expect(publicApp.globalFee).toBeGreaterThan(0n);
+    expect(publicApp.appFee).toBe(0n);
+  });
+});

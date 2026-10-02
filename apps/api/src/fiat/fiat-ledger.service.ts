@@ -31,6 +31,15 @@ interface FeeParams {
   taxBps: number;
 }
 
+/**
+ * App-fee operations. `escrow` is internal-only (campaign funding/refund legs):
+ * it is deliberately NOT in the settable `FEE_OPERATIONS`, so it always
+ * resolves to a 0 app fee. It exists so an escrow transfer can still carry the
+ * app context (`clientId`) — a verified app then also skips the global fee,
+ * giving an exact full refund and an exact streamer/platform split.
+ */
+export type FeeOperation = "topup" | "transaction" | "withdraw" | "escrow";
+
 /** One immutable double-entry leg. The statement amount is `amountIdr` on the
  *  row's `direction` side — NOT a gross/fee/net quote (that belongs to the
  *  pre-confirmation transfer inquiry). */
@@ -111,7 +120,7 @@ export class FiatLedgerService {
   }
 
   /** App fee for an amount (0 when no app / not enabled). Clamp: min/max, 0 = unbounded. */
-  private async appFeeFor(appId: string | null, operation: "topup" | "transaction" | "withdraw", amount: bigint): Promise<bigint> {
+  private async appFeeFor(appId: string | null, operation: FeeOperation, amount: bigint): Promise<bigint> {
     if (!appId) return 0n;
     const f = await this.prisma.pidAppFee
       .findUnique({ where: { appId_operation: { appId, operation } } })
@@ -128,7 +137,7 @@ export class FiatLedgerService {
    */
   async quoteFees(
     clientId: string | null | undefined,
-    operation: "topup" | "transaction" | "withdraw",
+    operation: FeeOperation,
     amount: bigint,
   ): Promise<{ globalFee: bigint; peridotTaxIdr: bigint; appFee: bigint; appId: string | null; appOwnerPid: string | null; policyVersion: number; isVerified: boolean }> {
     const policy = await this.activeFeePolicy();
@@ -281,7 +290,7 @@ export class FiatLedgerService {
    */
   async transferInquiry(
     pid: string,
-    input: { amountIdr: string; beneficiaryPid: string; remark?: string },
+    input: { amountIdr: string; beneficiaryPid: string; remark?: string; operation?: FeeOperation },
     appClientId?: string | null,
   ) {
     this.requireUsable();
@@ -290,8 +299,9 @@ export class FiatLedgerService {
     if (beneficiaryPid === pid) throw new BadRequestException("Cannot transfer to yourself");
     const recipient = await this.prisma.identity.findUnique({ where: { pid: beneficiaryPid } }).catch(() => null);
     if (!recipient) throw new NotFoundException("Recipient has no PeridotID account yet");
-    // Global PeridotID fee (+ its PPN) + (when an app initiated this) the app's own fee.
-    const { globalFee, peridotTaxIdr, appFee, appId, appOwnerPid, policyVersion } = await this.quoteFees(appClientId, "transaction", gross);
+    // Global PeridotID fee (+ its PPN) + (when an app initiated this) the app's own
+    // fee for the operation (default "transaction"; "escrow" legs carry no app fee).
+    const { globalFee, peridotTaxIdr, appFee, appId, appOwnerPid, policyVersion } = await this.quoteFees(appClientId, input.operation ?? "transaction", gross);
     const totalFee = globalFee + peridotTaxIdr + appFee;
     const net = gross - totalFee;
     if (net <= 0n) throw new BadRequestException("Amount too small — net must be positive");

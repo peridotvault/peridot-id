@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from "class-validator";
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from "class-validator";
 import { PID_REGEX } from "../../common/pid";
 
 export class LedgerTransferInquiryDto {
@@ -19,6 +19,15 @@ export class LedgerTransferInquiryDto {
   @IsString()
   @MaxLength(64)
   clientId?: string;
+
+  /**
+   * Fee operation for the app context. Defaults to `transaction`. `escrow`
+   * carries no app fee (used for campaign funding/refund legs) and, for a
+   * verified app, also skips the global fee — giving an exact full refund.
+   */
+  @IsOptional()
+  @IsIn(["transaction", "escrow"])
+  operation?: "transaction" | "escrow";
 }
 
 export class LedgerFreezeDto {

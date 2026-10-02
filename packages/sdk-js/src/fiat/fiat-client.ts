@@ -45,6 +45,12 @@ export interface FiatTransferInput {
   remark?: string;
   /** App context (model A): when set, this app's fee applies and stacks. */
   clientId?: string;
+  /**
+   * Fee operation for the app context. Defaults to `transaction`. `escrow`
+   * carries no app fee (campaign funding/refund legs) and, for a verified app,
+   * also skips the global fee.
+   */
+  operation?: "transaction" | "escrow";
 }
 
 export interface FiatTransferInquiryView {

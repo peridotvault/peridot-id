@@ -50,7 +50,7 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
             />
           )}
           <PopupReview
-            summary={req.summary}
+            summary={req.action === "fiat-checkout" ? (fiat.checkoutSummary ?? req.summary) : req.summary}
             origin={popup.origin}
             busy={req.phase === "busy"}
             onApprove={req.approve}

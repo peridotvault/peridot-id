@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { DepositQuoteView, PeridotClient } from "@peridotvault/pid-sdk-js";
-import { pickMethod, transferFeeOf } from "../../../shared/fiat";
+import { pickMethod, selectedTransferFee } from "../../../shared/fiat";
 import { MIN_NET_IDR } from "../utils/topup-amount";
 
 // Server quote for the entered NET amount (moves no money), debounced until
@@ -43,8 +43,9 @@ export function useDepositQuote(
 
   const selected = quote?.paymentMethods.find((p) => p.key === method) ?? null;
   const noMethods = !!quote && quote.paymentMethods.length === 0;
-  // One combined fee line: PeridotID (fee+PPN) + DOKU gateway (fee+PPN).
-  const transferFee = quote ? transferFeeOf(quote) : "0";
+  // One combined fee line for the selected method: PeridotID (fee+PPN) + DOKU
+  // gateway (fee+PPN). The quote is method-less, so derive from the selection.
+  const transferFee = quote ? selectedTransferFee(quote, selected) : "0";
 
   return { quote, setQuote, method, setMethod, selected, noMethods, transferFee };
 }
