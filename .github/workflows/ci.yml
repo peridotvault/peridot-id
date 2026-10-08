@@ -76,15 +76,16 @@ jobs:
         run: |
           # Every third-party fiat write ceremony must exist on BOTH sides:
           # the SDK delegation (fiat-client routes viaPopup) and the host
-          # approval screen (server-quoted summary + Approve/Deny). A dangling
-          # action string means approvals silently never happen.
+          # approval path (useFiatPrepare builds the server-quoted summary and
+          # executes the action). A dangling action string means approvals
+          # silently never happen.
           for action in fiat-checkout fiat-transfer; do
             if ! rg -q "viaPopup.*\"$action\"" packages/sdk-js/src/fiat/fiat-client.ts; then
               echo "::error::SDK missing viaPopup delegation for $action"
               exit 1
             fi
-            if ! rg -q "\"$action\"" apps/wallet/src/screens/ApproveScreen.tsx; then
-              echo "::error::ApproveScreen missing handler for $action"
+            if ! rg -q "\"$action\"" apps/wallet/src/feat/fiat/hooks/useFiatPrepare.ts; then
+              echo "::error::useFiatPrepare missing handler for $action"
               exit 1
             fi
           done

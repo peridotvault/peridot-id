@@ -3,11 +3,14 @@ import { ConfigService } from "@nestjs/config";
 
 const BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email";
 const SEND_TIMEOUT_MS = 10_000;
+const EMAIL_FROM = "no-reply@peridotvault.com";
+const EMAIL_FROM_NAME = "PeridotID";
 
 /**
  * Transactional email via the Brevo REST API (no SDK — plain fetch).
  * Auth-only sender; the sender address must be verified in the Brevo
- * dashboard or every call fails. Only BREVO_API_KEY + EMAIL_FROM are env.
+ * dashboard or every call fails. Sender identity is static; only
+ * BREVO_API_KEY is env.
  */
 @Injectable()
 export class EmailService {
@@ -18,10 +21,8 @@ export class EmailService {
   /** Send the 6-digit login code. Never logs the code itself. */
   async sendOtp(to: string, code: string): Promise<void> {
     const apiKey = this.config.get<string>("BREVO_API_KEY", "");
-    const from = this.config.get<string>("EMAIL_FROM", "");
-    const fromName = this.config.get<string>("EMAIL_FROM_NAME", "PeridotID");
 
-    if (!apiKey || !from) {
+    if (!apiKey) {
       // Local dev without Brevo keys: surface the code in the server log so
       // the flow stays testable without burning quota. Never in production —
       // verify() refuses to issue sessions when the sender is unconfigured.
@@ -41,7 +42,7 @@ export class EmailService {
         method: "POST",
         headers: { accept: "application/json", "api-key": apiKey, "content-type": "application/json" },
         body: JSON.stringify({
-          sender: { name: fromName, email: from },
+          sender: { name: EMAIL_FROM_NAME, email: EMAIL_FROM },
           to: [{ email: to }],
           subject: "Your PeridotID login code",
           htmlContent,
@@ -62,6 +63,6 @@ export class EmailService {
 
   /** True when the Brevo sender is configured (verify() issues sessions only then). */
   isConfigured(): boolean {
-    return !!this.config.get<string>("BREVO_API_KEY", "") && !!this.config.get<string>("EMAIL_FROM", "");
+    return !!this.config.get<string>("BREVO_API_KEY", "");
   }
 }
