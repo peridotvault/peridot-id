@@ -66,11 +66,20 @@ export function isFiatAction(action: string): boolean {
 /** A 401/expired-session error, as opposed to a real business failure. */
 export function isSessionError(e: unknown): boolean {
   const message = e instanceof Error ? e.message : String(e);
-  return /401|unauthorized|not registered|not signed in|session/i.test(message);
+  return /401|unauthorized|not registered|not signed in|session|step_up_required|confirm with your passkey/i.test(message);
+}
+
+/** Family-cap expiry: refresh says step-up, user keeps cookies but must confirm via passkey. */
+export function isStepUpError(e: unknown): boolean {
+  const message = e instanceof Error ? e.message : String(e);
+  return /step_up_required|confirm with your passkey|session expired — confirm/i.test(message);
 }
 
 /** Map a session error to actionable copy; anything else stays verbatim. */
 export function signInHint(e: unknown): string {
+  if (isStepUpError(e)) {
+    return "Session expired — confirm it's you with your passkey, then ask the app to retry.";
+  }
   if (isSessionError(e)) {
     return "Sign in to your PeridotID wallet in this window first, then ask the app to retry.";
   }

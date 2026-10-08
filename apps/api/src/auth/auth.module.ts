@@ -7,6 +7,8 @@ import { SecurityModule } from "../security/security-event.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { ClaimService } from "./claim.service";
+import { EmailOtpService } from "./email/email-otp.service";
+import { EmailService } from "./email/email.service";
 import { PidAppsController } from "./apps.controller";
 import { PidAppsService } from "./apps.service";
 import { GoogleGuard } from "./google.guard";
@@ -25,6 +27,8 @@ import { SsoService } from "./sso.service";
   providers: [
     AuthService,
     ClaimService,
+    EmailOtpService,
+    EmailService,
     PidAppsService,
     SsoService,
     JwtStrategy,

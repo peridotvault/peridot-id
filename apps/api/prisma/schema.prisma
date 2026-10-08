@@ -119,7 +119,7 @@ model Device {
   pid        String
   identity   Identity  @relation(fields: [pid], references: [pid], onDelete: Cascade)
   userAgent  String?
-  // How this session family authenticated ("google" | "passkey"). Null on
+  // How this session family authenticated ("google" | "email" | "passkey"). Null on
   // pre-existing rows, treated as "google" (shorter cap). Preserved across
   // refresh rotations, which keep the same device.
   authMethod String?
@@ -285,10 +285,10 @@ model SecurityEvent {
   @@map("security_events")
 }
 
-// Pending post-auth PID claims (Google-only entry). A verified credential with no
-// identity yet: the claim UI picks a handle, then one transaction creates the
-// identity + profile + credential and consumes the ticket. 10-min TTL, single-use,
-// nothing is created until claim — abandoning restarts cleanly on next login.
+// Pending post-auth PID claims (Google + email-OTP entry). A verified credential
+// with no identity yet: the claim UI picks a handle, then one transaction creates
+// the identity + profile + credential and consumes the ticket. 10-min TTL,
+// single-use, nothing is created until claim — abandoning restarts cleanly.
 model ClaimTicket {
   id             String    @id @default(uuid())
   provider       String
@@ -304,6 +304,25 @@ model ClaimTicket {
 
   @@index([expiresAt])
   @@map("claim_tickets")
+}
+
+// Email-OTP login challenges (Brevo sender, auth-only). One row per request:
+// the 6-digit code is never stored — only its SHA-256 hash. 10-min TTL,
+// max 5 verify attempts, single-use via consumedAt. Rate limits are enforced
+// from these rows (resend cooldown + per-email hourly cap).
+model EmailOtp {
+  id         String    @id @default(uuid())
+  email      String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  requestIp  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("email_otps")
 }
 
 // One-time, expiring authorization codes for cross-domain SSO (OAuth-like). Issued

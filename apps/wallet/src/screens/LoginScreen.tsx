@@ -8,9 +8,11 @@ import { SsoConsentModal } from "../feat/auth/components/SsoConsentModal";
 import { useAppVerified } from "../feat/auth/hooks/useAppVerified";
 import { useLoginSession } from "../feat/auth/hooks/useLoginSession";
 import { usePidClaim } from "../feat/auth/hooks/usePidClaim";
+import { useEmailSignIn } from "../feat/auth/hooks/useEmailSignIn";
 import { useSignInMethods } from "../feat/auth/hooks/useSignInMethods";
 import { useConsentActions } from "../feat/auth/hooks/useConsentActions";
 import { PidClaimForm } from "../feat/auth/components/PidClaimForm";
+import { EmailOtpForm } from "../feat/auth/components/EmailOtpForm";
 import { LoginOptions } from "../feat/auth/components/LoginOptions";
 import { readOAuthError, stripOAuthError } from "../feat/auth/utils/parseOAuthError";
 
@@ -44,6 +46,15 @@ export function LoginScreen({
   const appVerified = useAppVerified(peridot, appClientId);
 
   const claim = usePidClaim(peridot, { sso, ctx, flags, onLoggedIn, setBusy, setError });
+  const emailSignIn = useEmailSignIn(peridot, {
+    sso,
+    ctx,
+    flags,
+    onLoggedIn,
+    refreshClaim: claim.refreshClaim,
+    setBusy,
+    setError,
+  });
   const { session, setSession, showLogin, setShowLogin } = useLoginSession(peridot, { sso, ctx, flags, claim: claim.claim });
   const consent = useConsentActions(peridot, { sso, ctx, flags, setSession, setShowLogin, setBusy, setError });
   const signIn = useSignInMethods(peridot, { sso, ctx, flags, onLoggedIn, setBusy, setError });
@@ -147,6 +158,29 @@ export function LoginScreen({
     );
   }
 
+  // Email OTP: address is entered inline on LoginOptions (arrow submit);
+  // a sent code flips `step` to "code" and swaps in the OTP screen.
+  if (emailSignIn.step === "code") {
+    return (
+      <EmailOtpForm
+        step={emailSignIn.step}
+        email={emailSignIn.email}
+        code={emailSignIn.code}
+        resendIn={emailSignIn.resendIn}
+        busy={busy}
+        error={error}
+        onEmail={emailSignIn.setEmail}
+        onCode={emailSignIn.setCode}
+        onStart={() => emailSignIn.start()}
+        onVerify={() => emailSignIn.verify()}
+        onBack={() => {
+          emailSignIn.reset();
+          setError(null);
+        }}
+      />
+    );
+  }
+
   return (
     <LoginOptions
       busy={busy}
@@ -154,7 +188,13 @@ export function LoginScreen({
       stepUp={!!stepUp}
       ssoOrigin={sso ? ssoOrigin(sso.redirectUri) : null}
       ctxOrigin={ctx?.origin ?? null}
+      email={emailSignIn.email}
       onGoogle={() => signIn.continueWithGoogle()}
+      onEmailChange={(t) => {
+        if (error) setError(null);
+        emailSignIn.setEmail(t);
+      }}
+      onSubmitEmail={() => emailSignIn.start()}
       onPasskey={signIn.signInWithPasskey}
     />
   );

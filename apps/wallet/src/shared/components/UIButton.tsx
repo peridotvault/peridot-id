@@ -14,6 +14,7 @@ export function UIButton({
   onPress,
   disabled,
   variant = "outline",
+  align = "center",
 }: {
   title: string;
   note?: string;
@@ -21,9 +22,11 @@ export function UIButton({
   onPress?: () => void;
   disabled?: boolean;
   variant?: Variant;
+  align?: "center" | "left";
 }) {
   const primary = variant === "primary";
   const danger = variant === "danger";
+  const left = align === "left";
   return (
     <Pressable
       onPress={onPress}
@@ -34,9 +37,10 @@ export function UIButton({
         danger && styles.danger,
         disabled && styles.disabled,
         pressed && !disabled && styles.pressed,
+        left && styles.btnLeft,
       ]}
     >
-      <View style={styles.content}>
+      <View style={[styles.content, left && styles.contentLeft]}>
         {icon}
         <Text
           style={[
@@ -84,6 +88,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 10,
   },
+  btnLeft: { alignItems: "stretch" },
+  contentLeft: { justifyContent: "flex-start" },
   label: {
     fontSize: 14,
     fontWeight: "500",

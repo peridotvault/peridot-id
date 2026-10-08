@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, rejectLogin, type LoginContext } from "../popup-login";
 import { finishSso, withPidCode, type SsoRequest } from "../sso";
@@ -29,6 +29,16 @@ export function usePidClaim(
   const [handleStatus, setHandleStatus] = useState<HandleStatus>("idle");
   const [ackPermanent, setAckPermanent] = useState(false);
   const [claim, setClaim] = useState<ClaimState>(undefined);
+
+  /** Re-read the pending claim (used after email-OTP verify mints a ticket). */
+  const refreshClaim = useCallback(async () => {
+    try {
+      const st = await peridot.auth.claimStatus();
+      setClaim(st.pending ? { email: st.email ?? null, displayName: st.displayName ?? null } : null);
+    } catch {
+      setClaim(null);
+    }
+  }, [peridot]);
 
   /** Pending post-auth claim check (server is source of truth). */
   useEffect(() => {
@@ -131,5 +141,5 @@ export function usePidClaim(
     }
   };
 
-  return { handle, setHandle, handleStatus, ackPermanent, setAckPermanent, claim, claimPid, claimSignOut };
+  return { handle, setHandle, handleStatus, ackPermanent, setAckPermanent, claim, claimPid, claimSignOut, refreshClaim };
 }

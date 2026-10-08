@@ -230,15 +230,27 @@ export default function App() {
   return (
     <AppContext.Provider value={{ peridot }}>
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.colors.background }]}>
-        {popupRequest ? (
-          session.authed ? (
-            <ApproveScreen popup={popupRequest} onNeedAuth={() => session.setAuthed(false)} />
-          ) : (
-            // No session in this popup window: sign in here first, then the
-            // approval resumes (popup params are persisted across the OAuth
-            // round-trip by readPopupParams).
-            <LoginScreen onLoggedIn={() => session.setAuthed(true)} stepUp={session.stepUp} />
-          )
+          {popupRequest ? (
+            session.authed ? (
+              <ApproveScreen
+                popup={popupRequest}
+                onNeedAuth={(reason) => {
+                  session.setStepUp(reason === "step-up");
+                  session.setAuthed(false);
+                }}
+              />
+            ) : (
+              // No session in this popup window: sign in here first, then the
+              // approval resumes (popup params are persisted across the OAuth
+              // round-trip by readPopupParams).
+              <LoginScreen
+                onLoggedIn={() => {
+                  session.setStepUp(false);
+                  session.setAuthed(true);
+                }}
+                stepUp={session.stepUp}
+              />
+            )
         ) : screen === "login" ? (
           // Standalone login (plain, SSO entry, auth-in-a-new-tab): full-bleed
           // public page. The in-column LoginScreen below then only serves the

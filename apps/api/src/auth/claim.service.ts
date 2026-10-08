@@ -1,4 +1,4 @@
-// Pending post-auth PID claims (Google-only entry point).
+// Pending post-auth PID claims (Google + email-OTP entry points).
 //
 // A verified credential with no identity mints a single-use ticket (10-min TTL).
 // The claim UI picks a handle; one transaction then creates identity + profile +
@@ -45,15 +45,28 @@ export class ClaimService {
 
   /** Mint a ticket from a verified Google profile (+ SSO targets). Returns the opaque id. */
   async mint(profile: GoogleProfile, opts?: { redirectTo?: string; clientId?: string }): Promise<string> {
+    return this.mintCredential(
+      { provider: "google", providerUserId: profile.id, email: profile.emails?.[0]?.value ?? null },
+      { displayName: profile.displayName ?? null, avatarUrl: profile.photos?.[0]?.value ?? null },
+      opts,
+    );
+  }
+
+  /** Mint a ticket from any verified credential (email-OTP uses provider "email"). */
+  async mintCredential(
+    credential: { provider: string; providerUserId: string; email: string | null },
+    profile?: { displayName?: string | null; avatarUrl?: string | null },
+    opts?: { redirectTo?: string; clientId?: string },
+  ): Promise<string> {
     const id = `ct_${randomBytes(24).toString("base64url")}`;
     await this.prisma.claimTicket.create({
       data: {
         id,
-        provider: "google",
-        providerUserId: profile.id,
-        email: profile.emails?.[0]?.value ?? null,
-        displayName: profile.displayName ?? null,
-        avatarUrl: profile.photos?.[0]?.value ?? null,
+        provider: credential.provider,
+        providerUserId: credential.providerUserId,
+        email: credential.email,
+        displayName: profile?.displayName ?? null,
+        avatarUrl: profile?.avatarUrl ?? null,
         redirectTo: opts?.redirectTo ?? null,
         clientId: opts?.clientId ?? null,
         expiresAt: new Date(Date.now() + CLAIM_TTL_MS),
@@ -84,7 +97,7 @@ export class ClaimService {
    * Claim the ticket's credential under a fresh handle: one transaction creates
    * identity + profile + credential and consumes the ticket. Returns the new pid.
    */
-  async claim(ticketId: string, handle: string): Promise<{ pid: string; redirectTo: string | null; clientId?: string }> {
+  async claim(ticketId: string, handle: string): Promise<{ pid: string; redirectTo: string | null; clientId?: string; provider: string }> {
     const normalized = normalizePidHandle(handle ?? "");
     if (!isPidHandle(normalized)) {
       throw new BadRequestException(
@@ -127,7 +140,7 @@ export class ClaimService {
       });
       await tx.claimTicket.update({ where: { id: ticket.id }, data: { consumedAt: new Date() } });
       await this.security.log(pid, "identity.claimed", { provider: ticket.provider }, tx);
-      return { pid, redirectTo: ticket.redirectTo, clientId: ticket.clientId ?? undefined };
+      return { pid, redirectTo: ticket.redirectTo, clientId: ticket.clientId ?? undefined, provider: ticket.provider };
     });
   }
 }

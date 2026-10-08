@@ -55,7 +55,7 @@ providers you link or unlink later. **Choose the handle carefully: it is permane
 
 ## Login credentials
 
-Every way to log in — Google, Discord, Apple, email+password, passkeys — is a
+Every way to log in — Google, email OTP, passkeys (Apple coming soon) — is a
 **credential**. Credentials belong to an identity:
 
 - The pair `(provider, providerUserId)` is unique — it is the source of truth.
@@ -79,6 +79,24 @@ An identity must always keep **at least one credential** — unlinking the last 
 `400`. This prevents a user from locking themselves out. Unlinking a credential never
 touches the identity or its wallet (if any) — the wallet belongs to the PID, not to a
 provider.
+
+## Email OTP login
+
+`POST /v1/auth/email/start` sends a 6-digit code to the address (Brevo sender,
+10-minute TTL, 60-second resend cooldown, 5 requests/hour per address), then
+`POST /v1/auth/email/verify` consumes it (single-use, locked after 5 wrong
+attempts). Returning addresses land straight on a session; new addresses get a
+claim ticket and continue through the same PID picker as Google. The code itself
+is never stored — only its SHA-256 hash — and both endpoints answer generically
+so they never reveal whether an address has an account.
+
+```ts
+await peridot.auth.emailStart("ifal@example.com");
+const res = await peridot.auth.emailVerify("ifal@example.com", "428311");
+if (res.pendingClaim) {
+  await peridot.auth.claim("ifal"); // new address → pick a handle
+}
+```
 
 ## Refreshing tokens
 

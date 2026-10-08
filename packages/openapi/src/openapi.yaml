@@ -218,6 +218,114 @@ paths:
         "503":
           $ref: "#/components/responses/GoogleNotConfigured"
 
+  /auth/email/start:
+    post:
+      tags: [auth]
+      summary: Send an email login code
+      description: |
+        Sends a 6-digit login code to the address via the Brevo sender
+        (10-minute TTL, 60-second resend cooldown, 5 requests/hour per address).
+        Always returns `{ ok: true }` — even for unknown addresses — so the
+        response never reveals whether an address has an account. New addresses
+        verify the same way, then land on the PID picker
+        (`POST /v1/auth/claim` creates the permanent `<handle>@pid` identity).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "ifal@example.com"
+      responses:
+        "200":
+          description: Code sent (or send skipped silently for abuse control)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+              example:
+                ok: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: Email sender not configured or Brevo rejected the send
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                statusCode: 503
+                message: "Couldn't send the code — please try again."
+
+  /auth/email/verify:
+    post:
+      tags: [auth]
+      summary: Verify an email login code
+      description: |
+        Consumes the 6-digit code (single-use, max 5 attempts, then locked).
+        Returning credentials get `pid_access`/`pid_refresh` cookies directly;
+        new addresses get `{ pendingClaim: true }` plus the `pid_claim` cookie
+        for the PID picker. With `returnTo` (allowlisted, or registered to your
+        app via `clientId`), returning logins also receive a one-time
+        `pidCode` for SSO exchange.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "ifal@example.com"
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                  example: "428311"
+                returnTo:
+                  type: string
+                  format: uri
+                  description: Cross-origin URL to bind a pid_code to
+                clientId:
+                  type: string
+                  description: Registered app id (binds the pid_code to your app)
+      responses:
+        "200":
+          description: Verified — session cookies set, or claim pending
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                  pidCode:
+                    type: string
+                    description: One-time SSO code (returning logins with returnTo only)
+                  pendingClaim:
+                    type: boolean
+                    description: True for new addresses — continue via claimStatus + claim
+              example:
+                ok: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /auth/claim/status:
     get:
       tags: [auth]

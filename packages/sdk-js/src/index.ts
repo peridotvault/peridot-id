@@ -279,6 +279,47 @@ export class PeridotAuth {
   }
 
   /**
+   * Start email-OTP login: the server sends a 6-digit code (Brevo) to the
+   * address. Always resolves true (never reveals whether the address has an
+   * account); throws on rate limits or send failures.
+   */
+  async emailStart(email: string): Promise<boolean> {
+    const res = await this.client.post<{ ok: boolean }>("/v1/auth/email/start", { email });
+    if (!res.ok) {
+      const msg = (res.data as ApiError)?.message;
+      throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Couldn't send the code"));
+    }
+    return true;
+  }
+
+  /**
+   * Verify the 6-digit email code. Returning users get a session (plus a
+   * one-time `pidCode` when `returnTo` is passed for SSO); new addresses get
+   * `{ pendingClaim: true }` — call `claimStatus()` then `claim(handle)`.
+   */
+  async emailVerify(
+    email: string,
+    code: string,
+    opts?: { returnTo?: string; clientId?: string },
+  ): Promise<{ ok: boolean; pidCode?: string; pendingClaim?: boolean }> {
+    const clientId = this.appId(opts?.clientId);
+    const res = await this.client.post<{ ok: boolean; pidCode?: string; pendingClaim?: boolean }>(
+      "/v1/auth/email/verify",
+      {
+        email,
+        code,
+        ...(opts?.returnTo ? { returnTo: opts.returnTo } : {}),
+        ...(clientId ? { clientId } : {}),
+      },
+    );
+    if (!res.ok) {
+      const msg = (res.data as ApiError)?.message;
+      throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Email sign-in failed"));
+    }
+    return res.data as { ok: boolean; pidCode?: string; pendingClaim?: boolean };
+  }
+
+  /**
    * Exchange a one-time SSO pid_code for the identity (for cross-origin relying parties).
    * `clientSecret` is backend-only (never ship it in frontend code) and required only
    * when the bound app has a secret set.

@@ -9,12 +9,12 @@ import type { PopupParams } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { isFiatAction, runAction } from "../feat/auth/utils/popupAction";
-import { usePopupRequest } from "../feat/auth/hooks/usePopupRequest";
+import { usePopupRequest, type PopupAuthReason } from "../feat/auth/hooks/usePopupRequest";
 import { useFiatPrepare } from "../feat/fiat/hooks/useFiatPrepare";
 import { PopupReview } from "../feat/auth/components/PopupReview";
 import { FiatQuoteBreakdown } from "../feat/fiat/components/FiatQuoteBreakdown";
 
-export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?: () => void }) {
+export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?: (reason?: PopupAuthReason) => void }) {
   const { peridot } = usePeridot();
   const fiat = useFiatPrepare(peridot);
 

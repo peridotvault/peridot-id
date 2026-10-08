@@ -11,6 +11,8 @@ import { AuthenticateStartResult, CredentialService } from "../credentials/crede
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { AuthService } from "./auth.service";
 import { ClaimService } from "./claim.service";
+import { EmailStartDto, EmailVerifyDto } from "./email/dto/email.dto";
+import { EmailOtpService } from "./email/email-otp.service";
 import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { isPendingGoogleClaim } from "./google.strategy";
 import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto, GrantScopeDto } from "./dto/auth.dto";
@@ -55,6 +57,7 @@ export class AuthController {
     private readonly credentialService: CredentialService,
     private readonly ssoService: SsoService,
     private readonly claimService: ClaimService,
+    private readonly emailOtp: EmailOtpService,
     private readonly apps: PidAppsService,
     private readonly config: ConfigService,
   ) {}
@@ -144,6 +147,48 @@ export class AuthController {
       return { ok: true, pidCode };
     }
     return { ok: true };
+  }
+
+  @Post("email/start")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async emailStart(@Req() req: Request, @Body() dto: EmailStartDto): Promise<{ ok: true }> {
+    return this.emailOtp.request(dto.email, req.ip);
+  }
+
+  @Post("email/verify")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async emailVerify(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() dto: EmailVerifyDto,
+  ): Promise<{ ok: true; pidCode?: string; pendingClaim?: boolean }> {
+    const email = await this.emailOtp.verify(dto.email, dto.code);
+    const resolved = await this.ssoService.resolveReturnTo(dto.returnTo, dto.clientId);
+    if (dto.returnTo && !resolved) {
+      throw new BadRequestException("returnTo is not an allowed origin");
+    }
+
+    // Returning credential → session, same as Google/passkey.
+    const identity = await this.authService.findCredentialIdentity("email", email);
+    if (identity) {
+      await this.authService.issueSession(res, identity.pid, req.headers["user-agent"], undefined, "email");
+      if (resolved) {
+        const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, { clientId: resolved.clientId });
+        return { ok: true, pidCode };
+      }
+      return { ok: true };
+    }
+
+    // New credential → claim ticket + PID picker, same as the Google branch.
+    const ticketId = await this.claimService.mintCredential(
+      { provider: "email", providerUserId: email, email },
+      undefined,
+      ...(resolved ? [{ redirectTo: resolved.redirectTo, clientId: resolved.clientId }] : []),
+    );
+    setClaimCookie(res, this.config, ticketId);
+    return { ok: true, pendingClaim: true };
   }
 
   @Post("exchange")
@@ -304,9 +349,8 @@ export class AuthController {
   ): Promise<{ ok: true; pid: string; pidCode?: string; redirectTo?: string }> {
     const ticketId = (req as Request & { cookies?: Record<string, string> }).cookies?.[CLAIM_COOKIE];
     if (!ticketId) throw new BadRequestException("No pending claim — sign in again to get a fresh one.");
-    const { pid, redirectTo, clientId } = await this.claimService.claim(ticketId, dto.handle);
-    // Claim entry is Google-only today, hence the google family.
-    await this.authService.issueSession(res, pid, req.headers["user-agent"], undefined, "google");
+    const { pid, redirectTo, clientId, provider } = await this.claimService.claim(ticketId, dto.handle);
+    await this.authService.issueSession(res, pid, req.headers["user-agent"], undefined, provider === "email" ? "email" : "google");
     clearClaimCookie(res, this.config);
     if (redirectTo) {
       const resolved = await this.ssoService.resolveReturnTo(redirectTo, clientId);

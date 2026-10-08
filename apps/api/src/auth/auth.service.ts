@@ -45,7 +45,7 @@ export interface GoogleProfile {
  * Absolute session-family caps by login method (rotation preserves the
  * device, so family age = device.createdAt). Overridable via
  * GOOGLE_FAMILY_MAX_AGE / PASSKEY_FAMILY_MAX_AGE (ms-parseable, e.g. "90d").
- * Defaults are YouTube-like: months-long rotating cookies, with step-up only
+ * Email-OTP shares the Google cap. Defaults are YouTube-like: months-long rotating cookies, with step-up only
  * past the cap. Pre-existing rows (authMethod null) count as google.
  * Money safety never rests on this: withdrawals/executes/rotation/authorize
  * all need fresh per-action passkey signatures or explicit consent.
@@ -89,8 +89,17 @@ export class AuthService {
    * Used by the claim flow to tell returning users apart from new ones.
    */
   async findGoogleIdentity(providerUserId: string) {
+    return this.findCredentialIdentity("google", providerUserId);
+  }
+
+  /**
+   * Existing identity for any credential (google | email), if any (bumps
+   * lastLoginAt). Email-OTP uses provider "email" with the lowercased email
+   * as providerUserId — covered by the same @@unique([provider, providerUserId]).
+   */
+  async findCredentialIdentity(provider: string, providerUserId: string) {
     const existing = await this.prisma.identityCredential.findUnique({
-      where: { provider_providerUserId: { provider: "google", providerUserId } },
+      where: { provider_providerUserId: { provider, providerUserId } },
       include: { identity: true },
     });
     if (!existing) return null;
@@ -112,7 +121,7 @@ export class AuthService {
     pid: string,
     userAgent: string | undefined,
     rotatedFrom?: string,
-    authMethod?: "google" | "passkey",
+    authMethod?: "google" | "email" | "passkey",
     scope?: string | null,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     const accessTtl = this.config.get<string>("ACCESS_TOKEN_TTL", "15m");
