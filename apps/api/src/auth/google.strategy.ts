@@ -39,9 +39,15 @@ export class GoogleStrategy extends PassportStrategy(Strategy, "google") {
 
   async validate(req: unknown, accessToken: string, refreshToken: string, profile: GoogleProfile, done: VerifyCallback): Promise<void> {
     try {
-      // Returning credential → session as usual. New credentials defer to the
-      // claim screen (ClaimService) — handles are only ever chosen there.
-      const identity = await this.authService.findGoogleIdentity(profile.id);
+      // Returning credential → session as usual. Else reconcile by the verified
+      // Google email to an existing identity (one email = one PID) so the same
+      // person who claimed via email-OTP isn't sent to the picker. New
+      // credentials defer to the claim screen — handles are only ever chosen there.
+      const identity =
+        (await this.authService.findGoogleIdentity(profile.id)) ??
+        ((profile.emails?.[0]?.verified === true && profile.emails[0].value)
+          ? await this.authService.findIdentityByEmail(profile.emails[0].value)
+          : null);
       if (identity) {
         done(null, identity);
         return;

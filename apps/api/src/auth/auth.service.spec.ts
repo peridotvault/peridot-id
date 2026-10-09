@@ -195,6 +195,32 @@ describe("AuthService", () => {
     expect(prisma.identityCredential.findFirst).not.toHaveBeenCalled();
   });
 
+  it("findIdentityByEmail reconciles the same email across providers", async () => {
+    const { service, prisma } = setup();
+    prisma.identityCredential.findFirst.mockResolvedValue({
+      id: "cred-google",
+      identity: { pid: "ifal@pid", status: "active" },
+    });
+
+    const identity = await service.findIdentityByEmail("ifal@gmail.com");
+
+    expect(identity).toMatchObject({ pid: "ifal@pid" });
+    expect(prisma.identityCredential.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { email: { equals: "ifal@gmail.com", mode: "insensitive" } } }),
+    );
+    expect(prisma.identityCredential.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ lastLoginAt: expect.any(Date) }) }),
+    );
+  });
+
+  it("findIdentityByEmail returns null when no credential owns the email", async () => {
+    const { service, prisma } = setup();
+    prisma.identityCredential.findFirst.mockResolvedValue(null);
+
+    await expect(service.findIdentityByEmail("nobody@gmail.com")).resolves.toBeNull();
+    expect(prisma.identityCredential.update).not.toHaveBeenCalled();
+  });
+
   it("issueSession creates a session row and sets the active + per-identity cookies", async () => {
     const { service, prisma, res } = setup();
     const tokens = await service.issueSession(res as never, "identity-1", "test-agent");

@@ -170,8 +170,12 @@ export class AuthController {
       throw new BadRequestException("returnTo is not an allowed origin");
     }
 
-    // Returning credential → session, same as Google/passkey.
-    const identity = await this.authService.findCredentialIdentity("email", email);
+    // Returning credential → session, same as Google/passkey. Reconcile by
+    // verified email too: the same person who claimed via Google keeps their PID
+    // (one email = one PID) rather than being sent to the picker.
+    const identity =
+      (await this.authService.findCredentialIdentity("email", email)) ??
+      (await this.authService.findIdentityByEmail(email));
     if (identity) {
       await this.authService.issueSession(res, identity.pid, req.headers["user-agent"], undefined, "email");
       if (resolved) {

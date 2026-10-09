@@ -37,7 +37,7 @@ export interface RefreshTokenPayload {
 export interface GoogleProfile {
   id: string;
   displayName?: string;
-  emails?: { value: string }[];
+  emails?: { value: string; verified?: boolean }[];
   photos?: { value: string }[];
 }
 
@@ -100,6 +100,23 @@ export class AuthService {
   async findCredentialIdentity(provider: string, providerUserId: string) {
     const existing = await this.prisma.identityCredential.findUnique({
       where: { provider_providerUserId: { provider, providerUserId } },
+      include: { identity: true },
+    });
+    if (!existing) return null;
+    await this.prisma.identityCredential.update({ where: { id: existing.id }, data: { lastLoginAt: new Date() } });
+    return existing.identity;
+  }
+
+  /**
+   * Identity that already owns this verified email, across ANY provider. Since a
+   * non-null email is globally unique (one email = one PID), the same person
+   * signing in with Google and with email-OTP reconciles here instead of minting
+   * a second identity. Not used to persist a second credential — the global
+   * email index forbids two rows with the same email.
+   */
+  async findIdentityByEmail(email: string) {
+    const existing = await this.prisma.identityCredential.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
       include: { identity: true },
     });
     if (!existing) return null;

@@ -45,9 +45,9 @@ describe("GoogleStrategy.validate", () => {
   const opts = { clientID: "id", clientSecret: "secret", callbackURL: "http://localhost/cb" };
   const profile = { id: "google-1", displayName: "New" };
 
-  function doneValue(strategy: GoogleStrategy, req: unknown): Promise<unknown> {
+  function doneValue(strategy: GoogleStrategy, req: unknown, p: unknown = profile): Promise<unknown> {
     return new Promise((resolve, reject) => {
-      void strategy.validate(req, "at", "rt", profile, (err: unknown, user?: unknown) => (err ? reject(err) : resolve(user)));
+      void strategy.validate(req, "at", "rt", p as never, (err: unknown, user?: unknown) => (err ? reject(err) : resolve(user)));
     });
   }
 
@@ -60,11 +60,41 @@ describe("GoogleStrategy.validate", () => {
   });
 
   it("returns a claim marker for a new credential (handles are only chosen at claim)", async () => {
-    const auth = { findGoogleIdentity: jest.fn(async () => null) };
+    const auth = { findGoogleIdentity: jest.fn(async () => null), findIdentityByEmail: jest.fn(async () => null) };
     const strategy = new GoogleStrategy(opts, auth as never);
 
     const user = await doneValue(strategy, { query: {} });
     expect(isPendingGoogleClaim(user)).toBe(true);
     if (isPendingGoogleClaim(user)) expect(user.claimProfile).toMatchObject({ id: "google-1" });
+  });
+
+  it("reconciles a verified Google email to the identity that already owns it", async () => {
+    const auth = {
+      findGoogleIdentity: jest.fn(async () => null),
+      findIdentityByEmail: jest.fn(async () => ({ pid: "ifal@pid" })),
+    };
+    const strategy = new GoogleStrategy(opts, auth as never);
+
+    const user = await doneValue(strategy, { query: {} }, {
+      id: "google-2",
+      emails: [{ value: "ifal@gmail.com", verified: true }],
+    });
+    expect(user).toMatchObject({ pid: "ifal@pid" });
+    expect(auth.findIdentityByEmail).toHaveBeenCalledWith("ifal@gmail.com");
+  });
+
+  it("does not reconcile an unverified Google email", async () => {
+    const auth = {
+      findGoogleIdentity: jest.fn(async () => null),
+      findIdentityByEmail: jest.fn(async () => ({ pid: "someone@pid" })),
+    };
+    const strategy = new GoogleStrategy(opts, auth as never);
+
+    const user = await doneValue(strategy, { query: {} }, {
+      id: "google-3",
+      emails: [{ value: "unverified@gmail.com", verified: false }],
+    });
+    expect(isPendingGoogleClaim(user)).toBe(true);
+    expect(auth.findIdentityByEmail).not.toHaveBeenCalled();
   });
 });
