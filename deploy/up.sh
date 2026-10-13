@@ -7,7 +7,7 @@ set -euo pipefail
 # Secrets come from Infisical Cloud (project peridot-id-uf-w9):
 #   /apps/api    — runtime secrets (DATABASE_URL, JWT_*, GOOGLE_*, DOKU_*, PID_*)
 #   /apps/web    — NEXT_PUBLIC_* (public build args)
-#   /apps/wallet — EXPO_PUBLIC_* (public build args)
+#   /apps/wallet — VITE_* (public build args)
 # No /deploy folder — it only duplicated the above (delete it in the UI).
 # Env slugs match the script arg: main -> main, test -> test, local dev -> dev.
 #

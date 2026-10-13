@@ -126,7 +126,7 @@ services:
       context: ..
       dockerfile: Dockerfile.app
       args:
-        EXPO_PUBLIC_API_URL: ${EXPO_PUBLIC_API_URL}
+        VITE_API_URL: ${VITE_API_URL}
     image: peridot-id-app${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
     networks: [proxy]

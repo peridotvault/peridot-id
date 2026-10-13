@@ -1,4 +1,4 @@
-import { useWindowDimensions } from "react-native";
+import { useWindowDimensions } from "../primitives";
 import { theme } from "../theme";
 
 // True past the md breakpoint: the tab bar docks left as a sidebar.

@@ -1,0 +1,33 @@
+/* Base document styles: dark shell + full-height root so flex:1 screens work. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #0a0a0a;
+  color: #fafafa;
+  font-family: Geist, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* ScrollViews own their scroll areas; the page itself never scrolls. */
+  overflow: hidden;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Touch feedback for pressables without their own pressed style. */
+button:not(:disabled):active {
+  opacity: 0.7;
+}
+
+/* Per-input placeholder color via --placeholder (see TextInput shim). */
+input::placeholder,
+textarea::placeholder {
+  color: var(--placeholder, #71717a);
+  opacity: 1;
+}

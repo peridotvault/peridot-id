@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "../shared/primitives";
 import { ArrowDownUp } from "../shared/icons";
 import { usePeridot } from "../shared/AppContext";
 import { theme, styles as s } from "../shared/theme";

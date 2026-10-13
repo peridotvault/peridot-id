@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
 import { theme, styles as s } from "../shared/theme";
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  glyph: { fontSize: 20, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sansSemiBold, width: 28, textAlign: "center" },
+  glyph: { fontSize: 20, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sansSemiBold, fontWeight: "600", width: 28, textAlign: "center" },
   glyphDone: { color: theme.colors.success ?? theme.colors.foreground },
   glyphFailed: { color: theme.colors.danger ?? theme.colors.foreground },
   meta: { flex: 1, gap: 2 },
@@ -131,5 +131,5 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.background,
   },
-  retryLabel: { fontSize: 13, color: theme.colors.foreground, fontFamily: theme.fonts.sansMedium },
+  retryLabel: { fontSize: 13, color: theme.colors.foreground, fontFamily: theme.fonts.sansMedium, fontWeight: "500" },
 });

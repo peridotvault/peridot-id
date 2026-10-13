@@ -1,7 +1,7 @@
 # PeridotID VPS deployment
 
-Deploys `api` (NestJS), `docs` (Next.js homepage/marketing), and `app` (Expo web
-static export) onto the Antigane infra
+Deploys `api` (NestJS), `docs` (Next.js homepage/marketing), and `app` (Vite
+static build) onto the Antigane infra
 VPS. Conforms to the infra platform contract (`infra/docs/application.md`): joins
 the external `proxy` network, exposes internal ports only, owns its Traefik
 labels. No infra repo changes are ever required.
@@ -29,7 +29,7 @@ Secrets live in Infisical Cloud, project `peridot-id-uf-w9`
 
 - `/apps/api` — runtime secrets (`DATABASE_URL`, `JWT_*`, `GOOGLE_*`, `DOKU_*`, `PID_*`, …)
 - `/apps/web` — `NEXT_PUBLIC_*` (public build args)
-- `/apps/wallet` — `EXPO_PUBLIC_*` (public build args)
+- `/apps/wallet` — `VITE_*` (public build args)
 
 There is no `/deploy` folder — it only duplicated the above. Delete it in the
 Infisical UI for every env if it still exists. Deploy meta (`ENV_SUFFIX`,
@@ -136,7 +136,7 @@ the `peridot_id` role + database, then runs `prisma migrate deploy`.
 ## Notes
 
 - Images build from source on the VPS (serially via `./deploy/up.sh`: api, docs, app); the
-  app's `EXPO_PUBLIC_API_URL` is baked in at build via a Docker build arg. Changing it
+  app's `VITE_API_URL` is baked in at build via a Docker build arg. Changing it
   requires a rebuild.
 - Solana is `devnet` for now (relayer funded on devnet). The Solana chain, its
   RPC endpoints, and the smart-account program id live in the DB chain registry

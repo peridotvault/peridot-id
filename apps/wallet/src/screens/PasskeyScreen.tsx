@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
 import { KeyRound, Plus, Trash2 } from "../shared/icons";
 import type { Authority } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";

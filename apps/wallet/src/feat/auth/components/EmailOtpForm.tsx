@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "../../../shared/primitives";
 import { theme, styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
 import { UIButton } from "../../../shared/components/UIButton";
@@ -99,15 +99,15 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "400",
     color: theme.colors.foreground,
-    fontFamily: "SourceSerif4_400Regular",
+    fontFamily: theme.fonts.serif,
     letterSpacing: -0.4,
   },
-  subtitle: { fontSize: 14, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular", textAlign: "center" },
+  subtitle: { fontSize: 14, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans, textAlign: "center" },
   stack: { width: "100%", maxWidth: 343, gap: 12 },
   codeInput: { textAlign: "center", letterSpacing: 8, fontSize: 20 },
   // Web-only: kill the default outer focus ring (border stays as-is).
   noGlow: { outlineWidth: 0, outlineColor: "transparent" },
-  resend: { fontSize: 13, color: theme.colors.foreground, textAlign: "center", fontFamily: "Geist_400Regular" },
+  resend: { fontSize: 13, color: theme.colors.foreground, textAlign: "center", fontFamily: theme.fonts.sans },
   resendDisabled: { color: theme.colors.mutedForeground },
-  back: { fontSize: 13, color: theme.colors.mutedForeground, textAlign: "center", fontFamily: "Geist_400Regular" },
+  back: { fontSize: 13, color: theme.colors.mutedForeground, textAlign: "center", fontFamily: theme.fonts.sans },
 });

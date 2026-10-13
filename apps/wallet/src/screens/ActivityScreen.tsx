@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text } from "react-native";
+import { ScrollView, StyleSheet, Text } from "../shared/primitives";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
 import { theme, styles as s } from "../shared/theme";

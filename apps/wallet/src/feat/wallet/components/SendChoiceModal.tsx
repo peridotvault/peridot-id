@@ -1,4 +1,4 @@
-import { Text } from "react-native";
+import { Text } from "../../../shared/primitives";
 import { styles as s, theme } from "../../../shared/theme";
 import { BottomSheet } from "../../../shared/components/BottomSheet";
 import { UIButton } from "../../../shared/components/UIButton";

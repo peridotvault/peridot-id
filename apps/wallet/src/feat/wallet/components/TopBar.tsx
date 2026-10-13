@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "../../../shared/primitives";
 import type { Identity, Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../../../shared/AppContext";
 import { HomeHeader } from "./HomeHeader";

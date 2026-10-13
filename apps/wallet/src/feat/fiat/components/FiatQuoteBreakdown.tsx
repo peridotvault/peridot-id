@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
 import type { DepositQuoteView } from "@peridotvault/pid-sdk-js";
 import { theme, styles as s } from "../../../shared/theme";
 import { fmtIdr, sumIdr } from "../../../shared/fiat";

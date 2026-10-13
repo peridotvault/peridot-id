@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { Check } from "../../../shared/icons";
 import { theme, styles as s } from "../../../shared/theme";
 import type { DepositTarget } from "../utils/deposit-targets";
@@ -74,5 +74,5 @@ const styles = StyleSheet.create({
   solCardAlert: {
     borderColor: theme.colors.danger,
   },
-  solHint: { fontSize: 12, color: theme.colors.danger, fontFamily: theme.fonts.sansMedium, marginBottom: 8 },
+  solHint: { fontSize: 12, color: theme.colors.danger, fontFamily: theme.fonts.sansMedium, fontWeight: "500", marginBottom: 8 },
 });

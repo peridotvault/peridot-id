@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { StyleSheet, Text, TextInput, View } from "react-native";
+import { StyleSheet, Text, TextInput, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
 import { theme, styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";

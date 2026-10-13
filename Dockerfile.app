@@ -31,19 +31,19 @@ ENV NODE_OPTIONS=--max-old-space-size=1536
 
 COPY . .
 
-# Expo inlines EXPO_PUBLIC_* at export time — bake in the API URL the browser calls.
-ARG EXPO_PUBLIC_API_URL
-ENV EXPO_PUBLIC_API_URL=${EXPO_PUBLIC_API_URL:-https://api.pid.peridotvault.com}
+# Vite inlines VITE_* at build time — bake in the API URL the browser calls.
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL:-https://api.pid.peridotvault.com}
 
 RUN pnpm --filter @peridotvault/pid-types build
 RUN pnpm --filter @peridotvault/pid-core build
 RUN pnpm --filter @peridotvault/pid-solana build
 RUN pnpm --filter @peridotvault/pid-sdk-js build
-RUN pnpm --filter @peridotvault/pid-wallet export
+RUN pnpm --filter @peridotvault/pid-wallet build
 
 FROM nginx:1.27-alpine AS runner
 
-# SPA: any unknown path falls back to index.html (Expo uses hash/history-less routes).
+# SPA: any unknown path falls back to index.html.
 COPY --from=builder /app/apps/wallet/dist /usr/share/nginx/html
 
 COPY <<'NGINX' /etc/nginx/conf.d/default.conf
@@ -57,8 +57,8 @@ server {
     gzip_types application/javascript text/css image/svg+xml application/json;
     gzip_min_length 1024;
 
-    # Expo emits content-hashed filenames: immutable, cache for a year.
-    location /_expo/static/ {
+    # Vite emits content-hashed filenames: immutable, cache for a year.
+    location /assets/ {
         expires 1y;
         add_header Cache-Control "public, immutable";
     }

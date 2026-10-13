@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
 import { theme, styles as s } from "../shared/theme";
 import { useHomeData } from "../feat/wallet/hooks/useHomeData";

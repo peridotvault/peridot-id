@@ -1,6 +1,6 @@
 # `@peridotvault/pid-wallet`
 
-PeridotID wallet client — an **Expo / React Native** app (web + iOS + Android) that
+PeridotID wallet client — a **Vite + React** web app (single-page) that
 demonstrates the passkey-driven smart-account wallet on top of `@peridotvault/pid-sdk-js`.
 
 EVM support status: passkey-owned counterfactual accounts are live on-chain, but
@@ -14,13 +14,15 @@ follow-up work, not silently missing.
 
 | Script | Description |
 |---|---|
-| `dev` | `expo start` |
-| `dev:web` | `expo start --web` (browser on `:8081`) |
-| `typecheck` | `tsc -p tsconfig.json --noEmit` |
+| `dev` | `vite` dev server (browser on `:8081`) |
+| `dev:web` | alias of `dev` |
+| `build` | `tsc -b && vite build` → `dist/` |
+| `preview` | serve the production build on `:8081` |
+| `typecheck` | `tsc -b` |
 
 ## Stack
 
-- Expo SDK 57 / React Native 0.81 / React 19 (web via `react-native-web`)
+- Vite 8 / React 19 (plain DOM + inline styles via `src/shared/primitives.tsx`)
 - `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`, `@peridotvault/pid-types`
 
 ## Local

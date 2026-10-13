@@ -4,7 +4,7 @@
 // action runs here on the PeridotID origin with this session + passkey (the
 // trusted DOM), and the result is posted back to the opener's origin.
 import { useCallback } from "react";
-import { Text, View } from "react-native";
+import { Text, View } from "../shared/primitives";
 import type { PopupParams } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";

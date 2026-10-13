@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "../primitives";
 import { theme } from "../theme";
 
 // Shared button — web CutButton feel: sharp corners, 14px medium

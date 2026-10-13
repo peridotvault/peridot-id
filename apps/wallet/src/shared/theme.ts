@@ -1,4 +1,4 @@
-import { StyleSheet } from "react-native";
+import { StyleSheet } from "./primitives";
 
 // PeridotID brand theme — mirrors the marketing site (apps/docs): monochrome
 // premium dark, serif display numerals, cut-corner aesthetic.
@@ -25,12 +25,14 @@ export const theme = {
   // The whole wallet frame caps wider (frameMaxWidth) while content stays sm.
   layout: { maxWidth: 576, sidebarBreakpoint: 768, sidebarWidth: 232, frameMaxWidth: 1400 },
   fonts: {
-    sans: "Geist_400Regular",
-    sansMedium: "Geist_500Medium",
-    sansSemiBold: "Geist_600SemiBold",
-    sansBold: "Geist_700Bold",
-    serif: "SourceSerif4_400Regular",
-    mono: "JetBrainsMono_400Regular",
+    // Single variable families (Google Fonts <link> in index.html) — weight
+    // comes from fontWeight at each call site, not the family name.
+    sans: "Geist, system-ui, -apple-system, sans-serif",
+    sansMedium: "Geist, system-ui, -apple-system, sans-serif",
+    sansSemiBold: "Geist, system-ui, -apple-system, sans-serif",
+    sansBold: "Geist, system-ui, -apple-system, sans-serif",
+    serif: "'Source Serif 4', Georgia, serif",
+    mono: "'JetBrains Mono', ui-monospace, monospace",
   },
 };
 

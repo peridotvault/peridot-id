@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
 import type { NftItem } from "@peridotvault/pid-solana";
 import { theme, styles as s } from "../../../shared/theme";
 import type { Coin } from "../utils/assets";

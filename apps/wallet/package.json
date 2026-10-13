@@ -2,38 +2,28 @@
   "name": "@peridotvault/pid-wallet",
   "version": "0.1.0",
   "private": true,
-  "main": "node_modules/expo/AppEntry.js",
   "scripts": {
-    "dev": "expo start",
-    "dev:web": "expo start --web",
-    "export": "expo export --platform web",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "dev": "vite --port 8081",
+    "dev:web": "vite --port 8081",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 8081",
+    "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@expo-google-fonts/geist": "^0.4.2",
-    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
-    "@expo-google-fonts/source-serif-4": "^0.4.1",
-    "@expo/vector-icons": "^15.1.1",
     "@peridotvault/pid-sdk-js": "workspace:*",
     "@peridotvault/pid-solana": "workspace:*",
     "@peridotvault/pid-types": "workspace:*",
-    "buffer": "^6.0.3",
-    "dijkstrajs": "^1.0.3",
-    "expo": "~57.0.18",
-    "expo-font": "^57.0.3",
-    "expo-status-bar": "~3.0.0",
-    "libphonenumber-js": "^1.13.13",
-    "lucide-react-native": "^1.39.0",
+    "lucide-react": "^1.55.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
-    "react-native": "0.81.0",
-    "react-native-country-picker-modal": "^3.0.0",
-    "react-native-qrcode-svg": "^6.3.21",
-    "react-native-web": "^0.21.0"
+    "react-qr-code": "^2.2.0"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.0",
-    "typescript": "~5.9.0"
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "~5.9.0",
+    "vite": "^8.3.4"
   }
 }

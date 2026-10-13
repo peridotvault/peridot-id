@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { ArrowDownLeft, ArrowUpRight, Banknote, Coins } from "../../../shared/icons";
 import { theme } from "../../../shared/theme";
 

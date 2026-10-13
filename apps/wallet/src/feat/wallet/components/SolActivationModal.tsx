@@ -1,5 +1,5 @@
-import { Modal, StyleSheet, Text, View } from "react-native";
-import QRCode from "react-native-qrcode-svg";
+import { Modal, StyleSheet, Text, View } from "../../../shared/primitives";
+import QRCode from "react-qr-code";
 import { theme, styles as s } from "../../../shared/theme";
 import { UIButton } from "../../../shared/components/UIButton";
 import type { useActivationGate } from "../hooks/useActivationGate";
@@ -29,7 +29,7 @@ export function SolActivationModal({
           <Text style={styles.chainLabel}>{target?.label}</Text>
           {target && (
             <View style={styles.qrWrap}>
-              <QRCode value={target.qrValue} size={220} backgroundColor={theme.colors.foreground} color={theme.colors.background} />
+              <QRCode value={target.qrValue} size={220} bgColor={theme.colors.foreground} fgColor={theme.colors.background} />
             </View>
           )}
           <Text selectable style={s.mono}>{target?.address}</Text>

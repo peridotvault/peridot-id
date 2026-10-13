@@ -1,6 +1,6 @@
 # AGENTS.md — wallet (`apps/wallet`) foldering
 
-First-party wallet app (Expo). Hand-rolled navigation in `App.tsx` (shell);
+First-party wallet app (Vite + React web SPA). Hand-rolled navigation in `App.tsx` (shell);
 screens communicate via callback props (`onDone`, `goSend`, …), never imports.
 
 ## Layout

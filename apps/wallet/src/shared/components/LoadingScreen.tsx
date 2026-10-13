@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "../primitives";
 import { theme } from "../theme";
 import { AsciiRidges } from "./AsciiRidges";
 
@@ -32,7 +32,7 @@ const styles = StyleSheet.create({
     fontSize: 40,
     fontWeight: "400",
     color: c.foreground,
-    fontFamily: "SourceSerif4_400Regular",
+    fontFamily: theme.fonts.serif,
     letterSpacing: -0.4,
   },
   logoFallback: {

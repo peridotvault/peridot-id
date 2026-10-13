@@ -25,7 +25,7 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
 
 - **Secrets (Infisical Cloud, project `peridot-id-uf-w9`):** envs `dev` / `test` /
   `main`; folders `/apps/api` (runtime), `/apps/web` (`NEXT_PUBLIC_*`),
-  `/apps/wallet` (`EXPO_PUBLIC_*`). No `/deploy` folder — it duplicated these.
+  `/apps/wallet` (`VITE_*`). No `/deploy` folder — it duplicated these.
   Local: `infisical login` once, then `pnpm dev:api:cloud` (or `dev:web:cloud` /
   `dev:wallet:cloud`). Deploy: `./deploy/up.sh main|test` sources the VPS machine
   identity at `/etc/peridot-id/infisical.env` (0600 root) and pulls via
@@ -53,7 +53,7 @@ PID_BACKEND=<backend-pubkey> cargo build-sbf # backend allowlist baked in (build
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot_smart_account-keypair.json
 pnpm --filter @peridotvault/pid-api dev        # API on :3301
-cd apps/wallet && pnpm dev:web         # Expo web on :8081
+cd apps/wallet && pnpm dev:web         # Vite dev server on :8081
 ```
 
 After pulling (or whenever Prisma complains about a missing column, e.g.

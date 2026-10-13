@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { RefreshCw } from "../../../shared/icons";
 import { theme, styles as s } from "../../../shared/theme";
 import type { Tab } from "../utils/feed";

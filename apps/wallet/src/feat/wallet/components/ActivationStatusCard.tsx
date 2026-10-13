@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "../../../shared/primitives";
 import { Info } from "../../../shared/icons";
 import { theme, styles as s } from "../../../shared/theme";
 

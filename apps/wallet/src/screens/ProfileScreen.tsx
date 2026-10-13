@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
 import { ChevronRight, RefreshCw, Settings } from "../shared/icons";
 import type { AccountView, Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";

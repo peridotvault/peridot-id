@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
 import { ChevronRight, KeyRound, Monitor, Link2, ArrowLeft, Check, Banknote } from "../shared/icons";
 import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
@@ -158,6 +158,6 @@ const styles = StyleSheet.create({
     borderColor: c.border,
   },
   currencyOptActive: { borderColor: c.foreground },
-  currencyText: { fontSize: 13, color: c.mutedForeground, fontFamily: f.sansMedium },
+  currencyText: { fontSize: 13, color: c.mutedForeground, fontFamily: f.sansMedium, fontWeight: "500" },
   currencyTextActive: { color: c.foreground },
 });

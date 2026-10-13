@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "../../../shared/primitives";
 import { X } from "../../../shared/icons";
 import { theme, styles as s } from "../../../shared/theme";
 import { UIButton } from "../../../shared/components/UIButton";
@@ -89,11 +89,11 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "400",
     color: c.foreground,
-    fontFamily: "SourceSerif4_400Regular",
+    fontFamily: f.serif,
     letterSpacing: -0.3,
     textAlign: "center",
   },
-  subtitle: { fontSize: 14, color: c.foreground, fontFamily: f.sansMedium, textAlign: "center" },
+  subtitle: { fontSize: 14, color: c.foreground, fontFamily: f.sansMedium, fontWeight: "500", textAlign: "center" },
   verified: { fontSize: 12, color: c.success ?? c.foreground, fontFamily: f.sans, textAlign: "center" },
   hint: { fontSize: 12, color: c.mutedForeground, fontFamily: f.sans, textAlign: "center" },
   actions: { gap: 12, marginTop: 4 },

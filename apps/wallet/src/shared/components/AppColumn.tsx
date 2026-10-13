@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { View } from "react-native";
+import { View } from "../primitives";
 import { styles as s } from "../theme";
 import { useWideLayout } from "../hooks/useWideLayout";
 

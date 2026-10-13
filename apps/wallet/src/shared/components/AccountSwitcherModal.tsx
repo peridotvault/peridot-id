@@ -1,4 +1,4 @@
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "../primitives";
 import type { AccountView } from "@peridotvault/pid-types";
 import { Check, LogOut, Plus } from "../icons";
 import { theme, styles as s } from "../theme";

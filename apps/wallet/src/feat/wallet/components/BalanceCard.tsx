@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "../../../shared/primitives";
 import { theme, styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
 import { UIButton } from "../../../shared/components/UIButton";
@@ -33,7 +33,7 @@ export function BalanceCard({
 }) {
   return (
     <View style={styles.balanceCard}>
-      {/* ponytail: native AsciiRidges renders a full-window grid clipped by
+      {/* ponytail: AsciiRidges renders a full-window grid clipped by
           overflow hidden — same cost as login screens, card shows a center
           crop. Add cols/rows props only if the crop ever looks wrong. */}
       <View style={styles.balanceCardBg} pointerEvents="none">

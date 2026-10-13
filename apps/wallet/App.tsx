@@ -1,7 +1,5 @@
-import "./polyfills";
 import { useCallback, useEffect, useState } from "react";
-import { StatusBar } from "expo-status-bar";
-import { SafeAreaView, StyleSheet, View } from "react-native";
+import { SafeAreaView, StyleSheet, View } from "./src/shared/primitives";
 import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
 import { readPopupParams } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL } from "./src/shared/config";
@@ -307,7 +305,6 @@ export default function App() {
             </View>
           </AppColumn>
         )}
-        <StatusBar style="light" />
       </SafeAreaView>
     </AppContext.Provider>
   );

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "../shared/primitives";
 import { ArrowLeft } from "../shared/icons";
 import type { FiatTransferInquiryView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";

@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { Link2 } from "../../../shared/icons";
 import { theme } from "../../../shared/theme";
 

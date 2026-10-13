@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
 import { ArrowLeft, Monitor, LogOut } from "../shared/icons";
 import type { Session } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";

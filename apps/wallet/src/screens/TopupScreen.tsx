@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "../shared/primitives";
 import { ArrowLeft } from "../shared/icons";
 import { usePeridot } from "../shared/AppContext";
 import { theme, styles as s } from "../shared/theme";

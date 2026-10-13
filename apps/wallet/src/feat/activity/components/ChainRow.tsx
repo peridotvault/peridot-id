@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { ChevronRight } from "../../../shared/icons";
 import { theme, styles as s } from "../../../shared/theme";

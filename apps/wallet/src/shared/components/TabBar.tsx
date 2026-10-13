@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "../primitives";
 import { Activity, House } from "../icons";
 import { usePeridot } from "../AppContext";
 import { theme } from "../theme";
@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   tab: { flex: 1, alignItems: "center", gap: 4 },
-  label: { fontSize: 11, color: c.mutedForeground, fontFamily: f.sansMedium },
+  label: { fontSize: 11, color: c.mutedForeground, fontFamily: f.sansMedium, fontWeight: "500" },
   labelActive: { color: c.foreground },
   side: {
     width: theme.layout.sidebarWidth,
@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   sideTabActive: { backgroundColor: c.muted },
-  sideLabel: { fontSize: 14, color: c.mutedForeground, fontFamily: f.sansMedium },
+  sideLabel: { fontSize: 14, color: c.mutedForeground, fontFamily: f.sansMedium, fontWeight: "500" },
   avatar: {
     width: 24,
     height: 24,

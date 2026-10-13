@@ -1,4 +1,4 @@
-import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
 import { ArrowLeft } from "../shared/icons";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { theme, styles as s } from "../shared/theme";

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Image, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, ScrollView, StyleSheet, Text, TextInput, View } from "../shared/primitives";
 import type { Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
 import { theme, styles as s } from "../shared/theme";

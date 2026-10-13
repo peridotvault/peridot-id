@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "../../../shared/primitives";
 import { theme, styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
 import { UIButton } from "../../../shared/components/UIButton";
@@ -102,13 +102,13 @@ const styles = StyleSheet.create({
     fontSize: 40,
     fontWeight: "400",
     color: theme.colors.foreground,
-    fontFamily: "SourceSerif4_400Regular",
+    fontFamily: theme.fonts.serif,
     letterSpacing: -0.4,
   },
-  subtitle: { fontSize: 14, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
+  subtitle: { fontSize: 14, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   stack: { width: "100%", maxWidth: 343, gap: 12 },
   claimHeader: { width: "100%", flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: 8 },
-  signOut: { fontSize: 14, color: theme.colors.danger ?? theme.colors.mutedForeground, fontFamily: "Geist_400Regular" },
+  signOut: { fontSize: 14, color: theme.colors.danger ?? theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
   handleWrap: { position: "relative", flex: 1, justifyContent: "center" },
   handleInput: { flex: 1, paddingRight: 64 },
   suffixInside: {
@@ -116,10 +116,10 @@ const styles = StyleSheet.create({
     right: 12,
     fontSize: 15,
     color: theme.colors.mutedForeground,
-    fontFamily: "Geist_400Regular",
+    fontFamily: theme.fonts.sans,
   },
-  free: { fontSize: 12, color: theme.colors.success ?? theme.colors.foreground, fontFamily: "Geist_400Regular" },
-  warn: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: "Geist_400Regular", flex: 1 },
+  free: { fontSize: 12, color: theme.colors.success ?? theme.colors.foreground, fontFamily: theme.fonts.sans },
+  warn: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans, flex: 1 },
   ackRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   ackBox: {
     width: 22,
@@ -130,5 +130,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   ackBoxChecked: { borderColor: theme.colors.foreground },
-  ackTick: { fontSize: 14, color: theme.colors.foreground, fontFamily: "Geist_400Regular" },
+  ackTick: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
 });
