@@ -3,8 +3,9 @@ name: Publish packages
 # Publishes the public npm packages on a version tag (e.g. `v1.0.0`) or manual
 # dispatch. Requires an NPM_TOKEN repo secret with publish access to the
 # @peridotvault scope. Leaves first: pid-types → pid-core → pid-solana →
-# pid-payments → pid-sdk-js. Packages already at their current version on the
-# registry are skipped, so a dispatch is safe when only some were bumped.
+# pid-payments → pid-evm → pid-sdk-js → pid-react-embed. Packages already at
+# their current version on the registry are skipped, so a dispatch is safe
+# when only some were bumped.
 
 on:
   push:
@@ -31,7 +32,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: pnpm --filter @peridotvault/pid-types --filter @peridotvault/pid-core --filter @peridotvault/pid-payments --filter @peridotvault/pid-solana --filter @peridotvault/pid-sdk-js build
+        run: pnpm --filter @peridotvault/pid-types --filter @peridotvault/pid-core --filter @peridotvault/pid-payments --filter @peridotvault/pid-solana --filter @peridotvault/pid-evm --filter @peridotvault/pid-sdk-js --filter @peridotvault/pid-react-embed build
 
       - name: Publish (leaves first)
         env:
@@ -42,7 +43,9 @@ jobs:
             @peridotvault/pid-core \
             @peridotvault/pid-solana \
             @peridotvault/pid-payments \
-            @peridotvault/pid-sdk-js; do
+            @peridotvault/pid-evm \
+            @peridotvault/pid-sdk-js \
+            @peridotvault/pid-react-embed; do
             ver=$(pnpm --filter "$pkg" exec node -e "process.stdout.write(require('./package.json').version)")
             if npm view "$pkg@$ver" version >/dev/null 2>&1; then
               echo "skip $pkg@$ver (already published)"
