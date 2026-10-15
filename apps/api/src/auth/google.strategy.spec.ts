@@ -31,7 +31,7 @@ describe("googleOAuthOptionsFactory", () => {
     expect(opts).toEqual({
       clientID: "my-id",
       clientSecret: "my-secret",
-      callbackURL: "http://localhost:3301/v1/auth/google/callback",
+      callbackURL: "http://localhost:3300/v1/auth/google/callback",
     });
   });
 
