@@ -1,6 +1,6 @@
 # Changelog — @peridotvault/pid-sdk-js
 
-## Unreleased
+## 1.8.0
 
 - **Popup approval binds to the dapp's account.** `popupRequest()` and every
   delegating write (`wallet.topup/withdraw/execute/activate/rotate`,

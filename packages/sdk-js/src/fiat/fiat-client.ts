@@ -26,6 +26,8 @@ export interface FiatLedgerEntry {
   /** created | posted | failed | cancelled */
   status: string;
   createdAt: string;
+  /** Popup echo: the pid that approved, when the dapp passed `expectedPid`. */
+  approvedPid?: string;
 }
 
 export interface FiatLedgerView {
@@ -89,6 +91,8 @@ export interface CheckoutDepositView {
   feePolicyVersion: number;
   providerStatus: string;
   createdAt: string;
+  /** Popup echo: the pid that approved, when the dapp passed `expectedPid`. */
+  approvedPid?: string;
 }
 
 /** One payment category (what the picker offers) with its gateway fee + total. */
