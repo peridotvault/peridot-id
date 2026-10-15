@@ -673,15 +673,24 @@ class PeridotClient {
 
   /**
    * Run one trust-critical action inside the PeridotID popup (handshake flow).
+   * Pass `expectedPid` (the dapp's connected pid) so the popup approves as
+   * that exact account: it auto-switches when the pid is signed in this
+   * browser and refuses otherwise, instead of signing as the wallet tab's
+   * active account. The result echoes it back as `approvedPid` — verify it.
    * Throws PopupUnavailableError without a popupBaseUrl or off-browser.
    */
-  async popupRequest<T>(action: string, payload?: unknown): Promise<T> {
+  async popupRequest<T>(action: string, payload?: unknown, opts?: { expectedPid?: string }): Promise<T> {
     if (!this.popupBaseUrl) {
       throw new PopupUnavailableError(
         `Cannot ${action} here — pass popupBaseUrl to delegate to the PeridotID popup, or passkeySigner for first-party inline use.`,
       );
     }
-    return openPeridotPopup<T>({ popupBaseUrl: this.popupBaseUrl, params: { popup: action }, request: { action, payload } });
+    const expectedPid = opts?.expectedPid || undefined;
+    return openPeridotPopup<T>({
+      popupBaseUrl: this.popupBaseUrl,
+      params: { popup: action, ...(expectedPid ? { expected_pid: expectedPid } : {}) },
+      request: { action, payload, ...(expectedPid ? { expectedPid } : {}) },
+    });
   }
 }
 

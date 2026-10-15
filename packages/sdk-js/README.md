@@ -137,6 +137,16 @@ const peridot = Peridot({
 await peridot.wallet.withdraw({ amount: '5000000', asset: 'SOL', to: '...' });
 // ^ opens the popup; resolves with { signature, … } after user approval.
 
+// Approving as the exact account: pass the dapp's connected pid and the popup
+// approves as THAT account — it auto-switches when the pid is signed in on the
+// wallet browser and refuses (`wrong_account`) otherwise, instead of silently
+// signing as the wallet tab's active account. The result echoes `approvedPid:
+// verify it before treating the write as the user's.
+await peridot.wallet.withdraw(
+  { amount: '5000000', asset: 'SOL', to: '...' },
+  { expectedPid: 'live2dev@pid' },
+);
+
 // Fiat (internal ledger): the popup shows server-quoted amounts + origin.
 // Top-up navigates the popup itself to the DOKU payment page on Approve.
 const deposit = await peridot.fiat.checkoutDeposit('100000'); // { paymentUrl, grossIdr, feeIdr, netIdr, … }

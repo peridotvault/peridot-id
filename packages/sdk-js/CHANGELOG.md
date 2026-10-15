@@ -1,5 +1,16 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## Unreleased
+
+- **Popup approval binds to the dapp's account.** `popupRequest()` and every
+  delegating write (`wallet.topup/withdraw/execute/activate/rotate`,
+  `fiat.checkoutDeposit/transferViaPopup`) accept `{ expectedPid }` — the
+  dapp's connected pid. The popup approves as that exact account (auto-switch
+  when it is signed in on the wallet browser, `wrong_account` refusal when it
+  isn't) and echoes `approvedPid` in the result — verify it. Without the opt-in
+  the flow is byte-identical to before. Hosted side shows "Approving as …" on
+  every approval popup.
+
 ## 1.7.0
 
 - **Transfer fee operation.** `fiat.transferInquiry` / `fiat.transferViaPopup`

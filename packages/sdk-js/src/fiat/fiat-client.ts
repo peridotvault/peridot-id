@@ -180,7 +180,7 @@ interface ApiLike {
   get<T>(path: string): Promise<{ ok: boolean; data: T | ApiError }>;
   post<T>(path: string, body?: unknown): Promise<{ ok: boolean; data: T | ApiError }>;
   /** Present on PeridotClient: run a trust-critical action in the PeridotID popup. */
-  popupRequest?<T>(action: string, payload?: unknown): Promise<T>;
+  popupRequest?<T>(action: string, payload?: unknown, opts?: { expectedPid?: string }): Promise<T>;
   /** Present on PeridotClient: popup host origin, set in third-party mode only. */
   popupBaseUrl?: string;
 }
@@ -219,13 +219,13 @@ export class PeridotFiat {
   }
 
   /** Delegate one trust-critical fiat action to the PeridotID popup. */
-  private viaPopup<T>(action: string, payload?: unknown): Promise<T> {
+  private viaPopup<T>(action: string, payload?: unknown, opts?: { expectedPid?: string }): Promise<T> {
     if (!this.api.popupRequest) {
       throw new Error(
         `Cannot ${action} here — pass popupBaseUrl to approve in the PeridotID popup (third-party origin).`,
       );
     }
-    return this.api.popupRequest<T>(action, payload);
+    return this.api.popupRequest<T>(action, payload, opts);
   }
 
   /** Inline-only guard: inquiry/confirm have no popup equivalent. */
@@ -278,10 +278,10 @@ export class PeridotFiat {
    * opens the PeridotID popup (`fiat-checkout`) which navigates to DOKU on
    * Approve.
    */
-  async checkoutDeposit(netAmountIdr: string, clientId?: string, paymentMethod?: string): Promise<CheckoutDepositView> {
+  async checkoutDeposit(netAmountIdr: string, clientId?: string, paymentMethod?: string, opts?: { expectedPid?: string }): Promise<CheckoutDepositView> {
     const cid = this.appId(clientId);
     const payload = { netAmountIdr, clientId: cid, ...(paymentMethod ? { paymentMethod } : {}) };
-    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", payload);
+    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", payload, opts);
     return unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, payload), "Checkout deposit failed");
   }
 
@@ -316,9 +316,9 @@ export class PeridotFiat {
    * the inquiry, shows the server-verified recipient + amounts, and confirms
    * on Approve.
    */
-  async transferViaPopup(input: FiatTransferInput): Promise<FiatLedgerEntry> {
+  async transferViaPopup(input: FiatTransferInput, opts?: { expectedPid?: string }): Promise<FiatLedgerEntry> {
     const clientId = this.appId(input.clientId);
-    return this.viaPopup<FiatLedgerEntry>("fiat-transfer", { ...input, ...(clientId ? { clientId } : {}) });
+    return this.viaPopup<FiatLedgerEntry>("fiat-transfer", { ...input, ...(clientId ? { clientId } : {}) }, opts);
   }
 
   /** Cancel a created (not yet posted) transfer intent. */

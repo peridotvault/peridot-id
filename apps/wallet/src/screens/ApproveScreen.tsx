@@ -8,6 +8,7 @@ import { Text, View } from "../shared/primitives";
 import type { PopupParams } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 import { isFiatAction, runAction } from "../feat/auth/utils/popupAction";
 import { usePopupRequest, type PopupAuthReason } from "../feat/auth/hooks/usePopupRequest";
 import { useFiatPrepare } from "../feat/fiat/hooks/useFiatPrepare";
@@ -55,8 +56,13 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
             busy={req.phase === "busy"}
             onApprove={req.approve}
             onDeny={req.deny}
+            approvingPid={req.approvingPid}
+            switched={req.switched}
           />
         </>
+      )}
+      {req.phase === "failed" && (
+        <UIButton title="Close" onPress={() => void req.deny(req.expectedPid ? "wrong_account" : "access_denied")} />
       )}
       {req.error && <Text style={s.error}>{req.error}</Text>}
     </View>

@@ -131,10 +131,10 @@ function buildPopupUrl(opts: OpenerOpts): { url: string; origin: string } {
  * Handshake: popup posts READY → opener posts REQUEST → popup posts RESULT.
  * Rejects on block / close / timeout / explicit deny.
  */
-export async function openPeridotPopup<T>(opts: OpenerOpts & { request: { action: string; payload?: unknown } }): Promise<T> {
+export async function openPeridotPopup<T>(opts: OpenerOpts & { request: { action: string; payload?: unknown; expectedPid?: string } }): Promise<T> {
   requireBrowser();
   const selfOrigin = window.location.origin;
-  const { url, origin } = buildPopupUrl({ ...opts, params: { ...opts.params, origin: selfOrigin } });
+  const { url, origin } = buildPopupUrl({ ...opts, params: { ...opts.params, origin: selfOrigin, expected_pid: opts.request.expectedPid } });
   return new Promise<T>((resolve, reject) => {
     const onMessage = (e: MessageEvent): void => {
       if (e.source !== popup || e.origin !== origin) return;
@@ -256,6 +256,14 @@ export interface PopupParams {
   firstParty?: boolean;
   /** First-party opener's session namespace — see `sessionScope` on the client. */
   sessionScope?: string;
+  /**
+   * PID the opener expects approval from (e.g. `live2dev@pid`). Sent as
+   * `?expected_pid=` (survives the OAuth round-trip) and inside the REQUEST
+   * handshake. The host auto-switches to it when it is signed in this browser
+   * and refuses otherwise — the popup never silently signs as the wrong
+   * account. Opaque here; verified browser-side against linked identities.
+   */
+  expectedPid?: string;
 }
 
 /** Hosted side: parse `?popup=<action>&origin=<origin>&method=…&client_id=…`. */
@@ -270,6 +278,8 @@ export function readPopupParams(): PopupParams | null {
       const clientId = q.get("client_id") ?? undefined;
       const firstParty = q.get("first_party") === "1";
       const sessionScope = q.get("session_scope") ?? undefined;
+      const rawPid = q.get("expected_pid");
+      const expectedPid = rawPid && rawPid.length <= 256 ? rawPid : undefined;
       const params: PopupParams = {
         action,
         origin,
@@ -277,6 +287,7 @@ export function readPopupParams(): PopupParams | null {
         ...(clientId ? { clientId } : {}),
         ...(firstParty ? { firstParty: true } : {}),
         ...(sessionScope ? { sessionScope } : {}),
+        ...(expectedPid ? { expectedPid } : {}),
       };
       // Approval popups must survive the sign-in OAuth round-trip: the callback
       // returns to the bare wallet origin and drops ?popup=…. Login keeps its
@@ -316,19 +327,23 @@ export function postPopupReady(targetOrigin: string): void {
 }
 
 /** Hosted side: wait for the opener's REQUEST (origin + source validated). */
-export async function awaitPopupRequest(targetOrigin: string, timeoutMs = 30_000): Promise<{ action: string; payload?: unknown }> {
+export async function awaitPopupRequest(targetOrigin: string, timeoutMs = 30_000): Promise<{ action: string; payload?: unknown; expectedPid?: string }> {
   requireBrowser();
   if (!window.opener) throw new PopupUnavailableError("No opener — open this page from a dapp popup.");
   return new Promise((resolve, reject) => {
     const onMessage = (e: MessageEvent): void => {
       if (e.source !== window.opener || e.origin !== targetOrigin) return;
-      const msg = e.data as { type?: unknown; request?: { action?: unknown; payload?: unknown } };
+      const msg = e.data as { type?: unknown; request?: { action?: unknown; payload?: unknown; expectedPid?: unknown } };
       const req = msg?.request;
       if (msg?.type !== POPUP_REQUEST || typeof req?.action !== "string") return;
       // Copy out: property narrowing doesn't survive into the closure below.
       const action: string = req.action;
       const payload: unknown = req.payload;
-      finish(() => resolve({ action, payload }));
+      const expectedPid: string | undefined =
+        typeof req.expectedPid === "string" && req.expectedPid.length > 0 && req.expectedPid.length <= 256
+          ? req.expectedPid
+          : undefined;
+      finish(() => resolve({ action, payload, ...(expectedPid ? { expectedPid } : {}) }));
     };
     const finish = (fn: () => void): void => {
       clearTimeout(timer);

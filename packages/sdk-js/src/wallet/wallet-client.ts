@@ -47,7 +47,7 @@ interface ApiLike {
   get<T>(path: string): Promise<{ ok: boolean; data: T | ApiError }>;
   post<T>(path: string, body?: unknown): Promise<{ ok: boolean; data: T | ApiError }>;
   /** Popup delegation (present on PeridotClient; absent on bare mocks). */
-  popupRequest?<T>(action: string, payload?: unknown): Promise<T>;
+  popupRequest?<T>(action: string, payload?: unknown, opts?: { expectedPid?: string }): Promise<T>;
 }
 
 export type ActivationStatus =
@@ -136,13 +136,13 @@ export class PeridotWallet {
   }
 
   /** Delegate one trust-critical action to the PeridotID popup. */
-  private viaPopup<T>(action: string, payload?: unknown): Promise<T> {
+  private viaPopup<T>(action: string, payload?: unknown, opts?: { expectedPid?: string }): Promise<T> {
     if (!this.api.popupRequest) {
       throw new Error(
         `Cannot ${action} without a passkey signer or popup — pass popupBaseUrl (popup flow) or passkeySigner (first-party origin).`,
       );
     }
-    return this.api.popupRequest<T>(action, payload);
+    return this.api.popupRequest<T>(action, payload, opts);
   }
 
   private cachedPid: string | null = null;
@@ -212,8 +212,8 @@ export class PeridotWallet {
    * backend-gated + passkey-signed step (`activate()`), so topping up an
    * uninitialized address just funds it for later activation.
    */
-  async topup(input: TopupInput): Promise<{ signature: string }> {
-    if (!this.passkeySigner) return this.viaPopup("topup", input);
+  async topup(input: TopupInput, opts?: { expectedPid?: string }): Promise<{ signature: string }> {
+    if (!this.passkeySigner) return this.viaPopup("topup", input, opts);
     const pid = await this.pid();
     const feePayer = await this.feePayer.getOrCreate();
     const lamports = BigInt(input.amount);
@@ -233,8 +233,8 @@ export class PeridotWallet {
    * the fee policy (never amounts) and echoes the quoted network fee as the drift
    * reference; the server re-quotes once if fees moved beyond the drift bound.
    */
-  async withdraw(input: WithdrawInput): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
-    if (!this.passkeySigner) return this.viaPopup("withdraw", input);
+  async withdraw(input: WithdrawInput, opts?: { expectedPid?: string }): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
+    if (!this.passkeySigner) return this.viaPopup("withdraw", input, opts);
     const pid = await this.pid();
     const amount = BigInt(input.amount);
     const destination = new PublicKey(input.to);
@@ -317,8 +317,8 @@ export class PeridotWallet {
    * the PDA as signer. The client signs `call_hash` (target ‖ metas ‖ data) plus
    * the fee policy; the server re-quotes once if fees moved beyond the drift bound.
    */
-  async execute(input: ExecuteInput): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
-    if (!this.passkeySigner) return this.viaPopup("execute", input);
+  async execute(input: ExecuteInput, opts?: { expectedPid?: string }): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
+    if (!this.passkeySigner) return this.viaPopup("execute", input, opts);
     const pid = await this.pid();
     const accountId = pidToSeed32(pid);
     const adapter = await this.solana();
@@ -414,8 +414,8 @@ export class PeridotWallet {
    * squat the PDA or change the fee policy; the server's relayer only submits.
    * Reads the live view first for policy + chain time.
    */
-  async activate(): Promise<ActivationView | ApiError> {
-    if (!this.passkeySigner) return this.viaPopup("activate");
+  async activate(opts?: { expectedPid?: string }): Promise<ActivationView | ApiError> {
+    if (!this.passkeySigner) return this.viaPopup("activate", undefined, opts);
     const pid = await this.pid();
     const viewRes = await this.activation();
     if (isApiError(viewRes)) return viewRes;
@@ -450,8 +450,8 @@ export class PeridotWallet {
    * authorization; the server submits it and revokes the old credential only after
    * the chain confirms the new authority.
    */
-  async rotate(input: RotateInput): Promise<{ signature: string; status: "confirmed" | "pending" }> {
-    if (!this.passkeySigner) return this.viaPopup("rotate", input);
+  async rotate(input: RotateInput, opts?: { expectedPid?: string }): Promise<{ signature: string; status: "confirmed" | "pending" }> {
+    if (!this.passkeySigner) return this.viaPopup("rotate", input, opts);
     const pid = await this.pid();
     const credsRes = await this.api.get<Authority[]>("/v1/credentials");
     if (!credsRes.ok || isApiError(credsRes.data) || !Array.isArray(credsRes.data)) {

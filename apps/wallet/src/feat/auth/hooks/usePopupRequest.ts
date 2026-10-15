@@ -6,6 +6,7 @@ import {
   type PeridotClient,
   type PopupParams,
 } from "@peridotvault/pid-sdk-js";
+import type { AccountView } from "@peridotvault/pid-types";
 import { isFiatAction, isSessionError, isStepUpError, signInHint, summarize } from "../utils/popupAction";
 
 export type PopupPhase = "waiting" | "preparing" | "review" | "busy" | "redirecting" | "done" | "failed";
@@ -29,6 +30,11 @@ export function usePopupRequest(
   const [payload, setPayload] = useState<unknown>(undefined);
   const [summary, setSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The pid this popup will sign as (label for every flow; binding when the
+  // opener sent one). True when we switched to it just for this approval.
+  const [approvingPid, setApprovingPid] = useState<string | null>(null);
+  const [expectedPid, setExpectedPid] = useState<string | null>(null);
+  const [switched, setSwitched] = useState(false);
 
   // Handlers close over per-render fiat state — the handshake effect must not
   // re-subscribe, so it reads through a ref (same reason as the old
@@ -37,6 +43,11 @@ export function usePopupRequest(
   optsRef.current = opts;
   const peridotRef = useRef(peridot);
   peridotRef.current = peridot;
+  // Account the last approve/deny must restore: a popup-only switch must not
+  // re-target an open wallet tab. Refs (not state): the approve/deny
+  // callbacks read them without re-subscribing.
+  const restoreRef = useRef<string | null>(null);
+  const approverRef = useRef<string | null>(null);
 
   // One silent refresh attempt: turns an expired 15m access into a live
   // session (30d refresh) without bouncing to login. Max once per call site
@@ -64,6 +75,59 @@ export function usePopupRequest(
         if (cancelled) return;
         setAction(req.action);
         setPayload(req.payload);
+        // Best-effort active pid via /v1/auth/* (never fires onUnauthorized —
+        // the client only calls it off that namespace). Null when signed out.
+        const activePid = async (): Promise<string | null> => {
+          try {
+            const res = await peridotRef.current.auth.accounts();
+            if (!Array.isArray(res)) return null;
+            return (res as AccountView[]).find((a) => a.isActive)?.pid ?? null;
+          } catch {
+            return null;
+          }
+        };
+        // Bind the approval to the dapp's account (REQUEST wins, URL param is
+        // the OAuth-round-trip fallback): auto-switch when it is signed in
+        // this browser, refuse when it isn't — never sign as the wallet tab's
+        // account by accident. Without a binding, just label the approver.
+        const expected = req.expectedPid ?? popup.expectedPid ?? null;
+        if (expected) setExpectedPid(expected);
+        let approver = await activePid();
+        if (expected) {
+          if (!approver) {
+            if (await tryRefreshOnce()) approver = await activePid();
+            else return; // refresh failed: onNeedAuth already fired
+          }
+          if (!approver) {
+            optsRef.current.onNeedAuth?.("login");
+            return;
+          }
+          if (approver !== expected) {
+            let ok = false;
+            try {
+              ok = await peridotRef.current.auth.switchAccount(expected);
+            } catch {
+              ok = false;
+            }
+            if (ok) ok = (await activePid()) === expected;
+            if (!ok) {
+              if (!cancelled) {
+                setError(
+                  `This request is for ${expected}, which isn't signed in here (this window is ${approver}). Deny it, add ${expected} on the wallet, then retry from the app.`,
+                );
+                setPhase("failed");
+              }
+              return;
+            }
+            restoreRef.current = approver;
+            if (!cancelled) setSwitched(true);
+            approver = expected;
+          }
+        }
+        if (!cancelled && approver) {
+          approverRef.current = approver;
+          setApprovingPid(approver);
+        }
         const p = (req.payload ?? {}) as Record<string, unknown>;
         if (isFiatAction(req.action)) {
           setPhase("preparing");
@@ -103,13 +167,23 @@ export function usePopupRequest(
     return () => {
       cancelled = true;
     };
-  }, [popup.origin, tryRefreshOnce]);
+  }, [popup.origin, popup.expectedPid, tryRefreshOnce]);
 
-  const deny = useCallback(() => {
+  const deny = useCallback(async (error = "access_denied") => {
     // Best-effort cleanup of server state created during prepare. The checkout
     // quote moves no money (no row), so only a transfer inquiry needs cancelling.
     optsRef.current.cancelFiat();
-    postPopupResult(popup.origin, { ok: false, error: "access_denied" });
+    // Leave the wallet on the account we found (see restoreRef).
+    const restore = restoreRef.current;
+    restoreRef.current = null;
+    if (restore) {
+      try {
+        await peridotRef.current.auth.switchAccount(restore);
+      } catch {
+        // best-effort: the denial still stands
+      }
+    }
+    postPopupResult(popup.origin, { ok: false, error });
     setPhase("done");
   }, [popup.origin]);
 
@@ -117,22 +191,38 @@ export function usePopupRequest(
     setPhase("busy");
     setError(null);
     const run = () => optsRef.current.execute(action, payload);
-    try {
-      const { result, checkoutUrl } = await run();
+    // Deliver success: restore a popup-only account switch first (an open
+    // wallet tab keeps its account), then echo the approving pid so the dapp
+    // can verify it got the exact account it asked for.
+    const deliver = async (result: unknown, checkoutUrl: string | null) => {
+      const restore = restoreRef.current;
+      restoreRef.current = null;
+      if (restore) {
+        try {
+          await peridotRef.current.auth.switchAccount(restore);
+        } catch {
+          // best-effort: the approval already succeeded
+        }
+      }
+      const approver = approverRef.current;
+      const data =
+        result && typeof result === "object"
+          ? { ...(result as Record<string, unknown>), ...(approver ? { approvedPid: approver } : {}) }
+          : result;
       // Checkout keeps the window open and navigates itself to the DOKU
       // payment page: same-window navigation from the Approve click can't be
       // popup-blocked, unlike a dapp-side async popup.
-      postPopupResult(
-        popup.origin,
-        { ok: true, data: result },
-        checkoutUrl ? { keepOpen: true } : undefined,
-      );
+      postPopupResult(popup.origin, { ok: true, data }, checkoutUrl ? { keepOpen: true } : undefined);
       if (checkoutUrl && typeof window !== "undefined") {
         setPhase("redirecting");
         window.location.assign(checkoutUrl);
         return;
       }
       setPhase("done");
+    };
+    try {
+      const { result, checkoutUrl } = await run();
+      await deliver(result, checkoutUrl);
     } catch (e) {
       // Session gone mid-flow (e.g. access expired while reviewing): revive via
       // refresh cookie and retry once. The popup params persist across the OAuth
@@ -141,17 +231,7 @@ export function usePopupRequest(
       if (isSessionError(e) && (await tryRefreshOnce())) {
         try {
           const { result, checkoutUrl } = await run();
-          postPopupResult(
-            popup.origin,
-            { ok: true, data: result },
-            checkoutUrl ? { keepOpen: true } : undefined,
-          );
-          if (checkoutUrl && typeof window !== "undefined") {
-            setPhase("redirecting");
-            window.location.assign(checkoutUrl);
-            return;
-          }
-          setPhase("done");
+          await deliver(result, checkoutUrl);
           return;
         } catch (retryError) {
           if (isSessionError(retryError) && optsRef.current.onNeedAuth) {
@@ -183,5 +263,5 @@ export function usePopupRequest(
     }
   }, [popup.origin, action, payload, tryRefreshOnce]);
 
-  return { phase, action, summary, error, approve, deny };
+  return { phase, action, summary, error, approve, deny, approvingPid, expectedPid, switched };
 }

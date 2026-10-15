@@ -158,3 +158,45 @@ test("readPopupParams: parses the session scope", async () => {
     assert.equal(readPopupParams()?.sessionScope, "web");
   });
 });
+
+test("readPopupParams: expected_pid is parsed and survives the OAuth round-trip", async () => {
+  const { readPopupParams, clearPopupParams } = await import("../dist/esm/popup.js");
+  const store = new Map();
+  await withHostedWindow(`?popup=withdraw&origin=${DAPP_ORIGIN}&expected_pid=live2dev@pid`, () => {
+    assert.deepEqual(readPopupParams(), { action: "withdraw", origin: DAPP_ORIGIN, expectedPid: "live2dev@pid" });
+  }, store);
+  // Callback returns to the bare wallet origin — no query params.
+  await withHostedWindow("", () => {
+    assert.deepEqual(readPopupParams(), { action: "withdraw", origin: DAPP_ORIGIN, expectedPid: "live2dev@pid" });
+    clearPopupParams();
+    assert.equal(readPopupParams(), null);
+  }, store);
+});
+
+test("openPeridotPopup: binds expectedPid in the URL and REQUEST", async () => {
+  const { openPeridotPopup } = await import("../dist/esm/popup.js");
+  const sent = [];
+  const win = popupMock();
+  win.postMessage = (msg, target) => sent.push({ msg, target });
+  const calls = [];
+  await withOpener(
+    (url, name, features) => (calls.push({ url, name, features }), win),
+    async (opener) => {
+      const p = openPeridotPopup({
+        popupBaseUrl: POPUP_ORIGIN,
+        params: { popup: "withdraw" },
+        request: { action: "withdraw", payload: { to: "x" }, expectedPid: "live2dev@pid" },
+      });
+      assert.match(calls[0].url, /expected_pid=live2dev%40pid/);
+      opener.emit("message", { source: win, origin: POPUP_ORIGIN, data: { type: "pid-popup-ready" } });
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0].msg.request.expectedPid, "live2dev@pid");
+      opener.emit("message", {
+        source: win,
+        origin: POPUP_ORIGIN,
+        data: { type: "pid-popup-result", ok: true, data: { signature: "s", approvedPid: "live2dev@pid" } },
+      });
+      assert.deepEqual(await p, { signature: "s", approvedPid: "live2dev@pid" });
+    },
+  );
+});
