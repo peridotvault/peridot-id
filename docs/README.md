@@ -51,9 +51,9 @@ packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
 docker compose up -d        # Postgres (refresh-token state lives in Postgres — no Redis)
 pnpm install
 pnpm --filter @peridotvault/pid-api db:deploy  # apply Prisma migrations
-pnpm --filter @peridotvault/pid-api dev        # API on http://localhost:3301
+pnpm --filter @peridotvault/pid-api dev        # API on http://localhost:3300
 pnpm --filter @peridotvault/pid-web dev        # docs on http://localhost:3300
-pnpm --filter @peridotvault/pid-wallet dev:web # wallet on http://localhost:8081
+pnpm --filter @peridotvault/pid-wallet dev:web # wallet on http://localhost:3302
 ```
 
 Copy `apps/api/.env.example` to `apps/api/.env` and add Google OAuth credentials to test the

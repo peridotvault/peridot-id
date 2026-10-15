@@ -1,6 +1,6 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { Check } from "../../../shared/icons";
-import { theme, styles as s } from "../../../shared/theme";
+import { styles as s } from "../../../shared/theme";
 import type { DepositTarget } from "../utils/deposit-targets";
 
 export function DepositCardList({
@@ -21,58 +21,26 @@ export function DepositCardList({
     <>
       {targets.map((t) => {
         const isSol = t.key.startsWith("solana-");
+        const alert = isSol && solAlert;
         return (
-          <View key={t.key} style={[styles.card, isSol && solAlert && styles.solCardAlert]}>
-            <View style={styles.cardHead}>
-              <Text style={styles.chainLabel}>{t.label}</Text>
+          <View key={t.key} className={`mt-4 border bg-surface p-3 ${alert ? "border-danger" : "border-border"}`}>
+            <View style={{ flexDirection: "row" }} className="mb-2 items-baseline justify-between">
+              <Text className="font-sans text-[15px] font-semibold">{t.label}</Text>
               <Text style={s.hint}>{t.sublabel}</Text>
             </View>
-            {isSol && solAlert && <Text style={styles.solHint}>Top up here to activate</Text>}
+            {alert && <Text className="mb-2 font-sans text-xs font-medium text-danger">Top up here to activate</Text>}
             <TouchableOpacity
-              style={styles.addressBox}
               onPress={() => (isSol ? onOpen(t) : onCopy(t.key, t.address))}
             >
-              <Text selectable style={s.mono}>{t.address}</Text>
-              {copiedKey === t.key && <Check size={16} color={theme.colors.success} />}
+              <View style={{ flexDirection: "row" }} className="w-full items-center justify-between gap-2 border border-border bg-background p-3">
+                <Text selectable style={s.mono}>{t.address}</Text>
+                {copiedKey === t.key && <Check size={16} className="text-success" />}
+              </View>
             </TouchableOpacity>
-            {copiedKey === t.key && <Text style={styles.copied}>Copied to clipboard</Text>}
+            {copiedKey === t.key && <Text className="text-center font-sans text-[13px] text-success">Copied to clipboard</Text>}
           </View>
         );
       })}
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    marginTop: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 0,
-  },
-  cardHead: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  chainLabel: { fontSize: 15, fontWeight: "600", fontFamily: theme.fonts.sans },
-  addressBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.background,
-    borderRadius: 0,
-  },
-  copied: { color: theme.colors.success, fontSize: 13, textAlign: "center", fontFamily: theme.fonts.sans },
-  solCardAlert: {
-    borderColor: theme.colors.danger,
-  },
-  solHint: { fontSize: 12, color: theme.colors.danger, fontFamily: theme.fonts.sansMedium, fontWeight: "500", marginBottom: 8 },
-});

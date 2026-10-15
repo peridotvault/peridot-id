@@ -19,15 +19,15 @@
 //
 // Hosts: api-sandbox.doku.com / api.doku.com (documented servers for V2).
 
-import { ProviderError } from "./provider";
-import { parseIdrStrict } from "./money";
+import { ProviderError } from "./provider.js";
+import { parseIdrStrict } from "./money.js";
 import {
   b2bSignature,
   snapAmount,
   snapExternalId,
   snapSignature,
   snapTimestamp,
-} from "./doku/snap";
+} from "./doku/snap.js";
 
 export const DOKU_SANDBOX_URL = "https://api-sandbox.doku.com";
 export const DOKU_PROD_URL = "https://api.doku.com";

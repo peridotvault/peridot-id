@@ -1,9 +1,62 @@
 // WebGL backdrop: raw-WebGL port of the R3F AsciiRidges ridge field
 // (apps/web/components/landing/ascii-ridges.tsx — same shaders, same
 // uniforms, same motion). Zero dependencies: three/fiber only ever provided
-// scaffolding.
+// scaffolding. Where shader compile fails (software GL drivers), a Canvas2D
+// port below renders the same field per cell.
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+
+// GL probe: compile AND link the real shaders on an offscreen canvas, once
+// per page load. A trivial probe is useless here — this driver's failure hits
+// the real vertex shader while toys compile fine. Same source + same driver
+// makes the verdict airtight: pass means the real setup will succeed, fail
+// takes the Canvas2D path. (No SSR in this app, so render-time probe is safe.)
+let glProbe: boolean | null = null;
+// Log the software-GL fallback once per page load: every backdrop mount
+// (×2 under StrictMode) hits the same driver failure and would repeat it.
+let shaderWarned = false;
+function glAvailable(): boolean {
+  if (glProbe !== null) return glProbe;
+  glProbe = false;
+  try {
+    if (typeof document === "undefined") return glProbe;
+    const c = document.createElement("canvas");
+    const gl = (c.getContext("webgl2") ?? c.getContext("webgl")) as WebGLRenderingContext | null;
+    if (!gl) return glProbe;
+    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+    const renderer = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : "unknown";
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    const prog = gl.createProgram();
+    if (!vs || !fs || !prog) return glProbe;
+    // Mirror the real path below: some drivers lack highp in fragment
+    // shaders, so probe the mediump fallback too before giving up.
+    const fragMed = fragmentShader.replace("precision highp float;", "precision mediump float;");
+    gl.shaderSource(vs, vertexShader);
+    gl.compileShader(vs);
+    gl.shaderSource(fs, fragmentShader);
+    gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+      gl.shaderSource(fs, fragMed);
+      gl.compileShader(fs);
+    }
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    glProbe =
+      (gl.getShaderParameter(vs, gl.COMPILE_STATUS) as boolean) &&
+      (gl.getShaderParameter(fs, gl.COMPILE_STATUS) as boolean) &&
+      (gl.getProgramParameter(prog, gl.LINK_STATUS) as boolean);
+    if (!glProbe) {
+      // eslint-disable-next-line no-console
+      console.warn("[AsciiRidges] GL probe failed; renderer:", renderer, "— using Canvas2D");
+    }
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  } catch {
+    glProbe = false;
+  }
+  return glProbe;
+}
 
 const MAX_LAYERS = 15;
 const MAX_DETAIL = 10;
@@ -203,7 +256,7 @@ export interface AsciiRidgesProps {
   paused?: boolean;
 }
 
-export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
+export const AsciiRidgesGL: React.FC<AsciiRidgesProps> = (props) => {
   const {
     characters = " .:-+*=%@#",
     color = "#87ee83",
@@ -236,6 +289,9 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouse = useRef({ x: 0, y: 0 });
+  // Set when the real context fails to compile/link (software GL, context
+  // exhaustion from many mounts): render the Canvas2D port instead of black.
+  const [failed, setFailed] = useState(false);
 
   const reduced =
     typeof window !== "undefined" &&
@@ -268,7 +324,10 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
     } catch {
       gl = null;
     }
-    if (!gl) return;
+    if (!gl) {
+      setFailed(true);
+      return;
+    }
     const ctx: WebGLRenderingContext = gl;
 
     const compile = (type: number, src: string) => {
@@ -277,7 +336,9 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
       ctx.shaderSource(sh, src);
       ctx.compileShader(sh);
       if (!ctx.getShaderParameter(sh, ctx.COMPILE_STATUS)) {
-        throw new Error(String(ctx.getShaderInfoLog(sh)));
+        // Info log is null (not "") on several software-GL drivers — fall
+        // back to a readable message instead of "Error: null".
+        throw new Error(ctx.getShaderInfoLog(sh) || "compile failed (empty info log)");
       }
       return sh;
     };
@@ -285,14 +346,30 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
     try {
       program = ctx.createProgram() as WebGLProgram;
       ctx.attachShader(program, compile(ctx.VERTEX_SHADER, vertexShader));
-      ctx.attachShader(program, compile(ctx.FRAGMENT_SHADER, fragmentShader));
+      // Some laptop/mobile GPUs lack highp precision in fragment shaders
+      // (compile fails with an empty info log). Query first, fall back to
+      // mediump — visually identical for this ASCII field.
+      const highpOk = (ctx.getShaderPrecisionFormat?.(ctx.FRAGMENT_SHADER, ctx.HIGH_FLOAT)?.precision ?? 0) > 0;
+      const fragSrc = highpOk
+        ? fragmentShader
+        : fragmentShader.replace("precision highp float;", "precision mediump float;");
+      try {
+        ctx.attachShader(program, compile(ctx.FRAGMENT_SHADER, fragSrc));
+      } catch {
+        ctx.attachShader(program, compile(ctx.FRAGMENT_SHADER, fragmentShader.replace("precision highp float;", "precision mediump float;")));
+      }
       ctx.linkProgram(program);
       if (!ctx.getProgramParameter(program, ctx.LINK_STATUS)) {
-        throw new Error(String(ctx.getProgramInfoLog(program)));
+        throw new Error(ctx.getProgramInfoLog(program) || "link failed (empty info log)");
       }
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error("[AsciiRidges] shader failed", e);
+      // Not fatal: the Canvas2D port below renders the same field.
+      if (!shaderWarned) {
+        shaderWarned = true;
+        // eslint-disable-next-line no-console
+        console.warn("[AsciiRidges] shader failed — using Canvas2D", e);
+      }
+      setFailed(true);
       return;
     }
     ctx.useProgram(program);
@@ -499,6 +576,8 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (failed) return <AsciiRidges2D {...props} />;
+
   return (
     <div
       ref={wrapRef}
@@ -510,6 +589,9 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
         bottom: 0,
         overflow: "hidden",
         opacity: 0.25,
+        // Backdrop must never intercept clicks: it paints above static
+        // siblings (e.g. the login buttons) in DOM order.
+        pointerEvents: "none",
       }}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: "100%" }} />
@@ -529,5 +611,257 @@ export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) => {
     </div>
   );
 };
+
+// Canvas2D fallback: the same ridge field evaluated per cell on the CPU.
+// Mirrors the fragment main() above operation-for-operation (same defaults,
+// same advance rates) — keep the two in sync.
+const AsciiRidges2D: React.FC<AsciiRidgesProps> = (props) => {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mouse = useRef({ x: 0, y: 0 });
+  const propsRef = useRef(props);
+  propsRef.current = props;
+
+  const reduced =
+    typeof window !== "undefined" &&
+    typeof window.matchMedia !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const still = props.paused || reduced;
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    const canvas = canvasRef.current;
+    if (!wrap || !canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const frac = (x: number) => x - Math.floor(x);
+    const hash2 = (x: number, y: number) => {
+      let px = frac(x * 443.897);
+      let py = frac(y * 441.423);
+      const d = px * (py + 19.19) + py * (px + 19.19);
+      px += d;
+      py += d;
+      return frac(px * py);
+    };
+    // Reversed smoothstep(0.45, 0.0, x), formula-literal like ANGLE evaluates it.
+    const russell = (x: number) => {
+      const t = clamp((x - 0.45) / (0.0 - 0.45), 0, 1);
+      return t * t * (3 - 2 * t);
+    };
+
+    const resize = () => {
+      const w = Math.max(1, Math.floor(wrap.clientWidth));
+      const h = Math.max(1, Math.floor(wrap.clientHeight));
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+    };
+    resize();
+
+    let flow = 0;
+    let churn = 0;
+    let mx = 0;
+    let my = 0;
+    let raf = 0;
+    let inView = true;
+    let last = -1;
+    let lastDraw = -1;
+    const FRAME_MS = 1000 / 30;
+
+    const draw = (p: AsciiRidgesProps) => {
+      const raw = p.characters ?? " .:-+*=%@#";
+      const chars = raw.length > 0 ? raw : " ";
+      const size = p.elementSize ?? 10;
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.font = `bold ${size}px monospace`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = p.color ?? "#87ee83";
+
+      const rot = ((p.rotation ?? 0) * Math.PI) / 180;
+      const c = Math.cos(rot);
+      const sn = Math.sin(rot);
+      const zoom = Math.max(p.zoom ?? 1.1, 0.05);
+      const shx = p.shiftX ?? 0.45;
+      const shy = p.shiftY ?? 0.5;
+      const layers = Math.round(clamp(p.layers ?? 12, 1, MAX_LAYERS));
+      const detail = Math.round(clamp(p.detail ?? 5, 1, MAX_DETAIL));
+      const turbulence = Math.max(p.turbulence ?? 0.6, 0);
+      const exposure = Math.max(p.exposure ?? 0.3, 0);
+      const gain = Math.max(p.gain ?? 0, 0);
+      const swirl = p.swirl ?? 16;
+      const density = Math.max(p.density ?? 11, 0.1);
+      const grain = clamp(p.grain ?? 0.25, 0, 2);
+      const opacity = clamp(p.opacity ?? 0.9, 0, 1);
+      const hasMouse = p.hasCursorInteraction ? 1 : 0;
+      const intensity = p.interactIntensity ?? 1;
+      const ridgeFreq = p.ridgeFrequency ?? 1;
+      const ridgePhase = p.ridgePhase ?? 2;
+      const invert = p.invert ?? false;
+      const churnF = frac(churn);
+
+      mx += (mouse.current.x - mx) * 0.1;
+      my += (mouse.current.y - my) * 0.1;
+
+      for (let gy = 0, cy = size / 2; cy < h + size / 2; gy++, cy += size) {
+        for (let gx = 0, cx = size / 2; cx < w + size / 2; gx++, cx += size) {
+          const vUvx = cx / w;
+          const vUvy = cy / h;
+          // mat2(c, -sn, sn, c) is column-major: rows are (c, sn), (-sn, c).
+          const tx = (vUvx - 0.5) * c + (vUvy - 0.5) * sn + 0.5;
+          const ty = (vUvx - 0.5) * -sn + (vUvy - 0.5) * c + 0.5;
+          let uvx = (tx - 1.0) * zoom - shx;
+          let uvy = (ty - 1.0) * zoom - shy;
+
+          const muvx = mx / Math.max(w, 1);
+          const muvy = my / Math.max(h, 1);
+          const mdx = vUvx - muvx;
+          const mdy = vUvy - muvy;
+          const mdist = Math.hypot(mdx * (w / Math.max(h, 1)), mdy);
+          const interaction = russell(mdist) * hasMouse;
+          const push = Math.max(mdist, 1e-4);
+          uvx += ((mdx / push) * interaction * intensity * 0.08);
+          uvy += ((mdy / push) * interaction * intensity * 0.08);
+
+          const px = (uvx + 0.6) * density;
+          const py = (uvy - 0.1) * density;
+          // Scalar multiply, like the shader — applies to both components.
+          const ridge = Math.sin(Math.log(Math.max(Math.abs(uvy), 1e-4)) * ridgeFreq + ridgePhase);
+          uvx *= ridge;
+          uvy *= ridge;
+
+          const L = Math.hypot(uvx, uvy);
+          const radius = L / Math.hypot(L, 0.1, 0.51);
+          const drift = (Math.log2(radius) * 15.0 + flow) * swirl;
+          const bearing = Math.sin(Math.atan2(uvy, uvx));
+          const pushx = Math.sin(bearing);
+          const pushy = Math.sin(drift);
+
+          let film = 0;
+          for (let i = 0; i < MAX_LAYERS; i++) {
+            if (i >= layers) break;
+            const layer = i + 1;
+            let vx = px;
+            let vy = py;
+            let f = 1;
+            for (let k = 0; k < MAX_DETAIL; k++) {
+              if (k >= detail) break;
+              // GLSL evaluates both components from the old v — snapshot first.
+              const ox = vx;
+              const oy = vy;
+              vx += ((Math.tan(Math.cos(oy * f + f + layer - churn)) * turbulence + 2.5) / f + pushx);
+              vy += ((Math.tan(Math.cos(ox * f + f + layer - churn)) * turbulence + 2.5) / f + pushy);
+              f *= 1.5;
+            }
+            film += 1 / (5 * Math.hypot(vx, vy));
+          }
+
+          let light = Math.tanh(Math.max(film, 0) * exposure) * gain;
+          light *= 1 + (hash2(cx + churnF * 1000, cy + churnF * 1000) - 0.5) * grain;
+          light *= opacity;
+          let gray = clamp(light, 0, 1);
+          if (invert) gray = 1 - gray;
+          const ci = clamp(Math.floor(gray * (chars.length - 1)), 0, chars.length - 1);
+          const ch = chars[ci] ?? " ";
+          if (ch === " ") continue;
+          ctx.globalAlpha = clamp(gray + 0.1, 0, 1);
+          ctx.fillText(ch, gx * size, gy * size);
+        }
+      }
+      ctx.globalAlpha = 1;
+    };
+
+    const p0 = propsRef.current;
+    if (still) {
+      draw(p0);
+    } else {
+      const loop = (t: number) => {
+        raf = requestAnimationFrame(loop);
+        if (!inView) return;
+        const p = propsRef.current;
+        if (!p.paused) {
+          const dt = last < 0 ? 0.016 : Math.min((t - last) / 1000, 0.05);
+          flow += dt * (p.flowSpeed ?? 0.1);
+          churn += dt * (p.churnSpeed ?? 1);
+        }
+        last = t;
+        if (lastDraw >= 0 && t - lastDraw < FRAME_MS) return;
+        lastDraw = t;
+        draw(p);
+      };
+      raf = requestAnimationFrame(loop);
+    }
+
+    const onMove = (e: MouseEvent) => {
+      const rect = wrap.getBoundingClientRect();
+      mouse.current = {
+        x: e.clientX - rect.left,
+        y: rect.height - (e.clientY - rect.top),
+      };
+    };
+    wrap.addEventListener("mousemove", onMove);
+
+    const ro = new ResizeObserver(() => {
+      resize();
+      if (still) draw(propsRef.current);
+    });
+    ro.observe(wrap);
+
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        inView = entry?.isIntersecting ?? true;
+      },
+      { rootMargin: "120px" }
+    );
+    io.observe(wrap);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      wrap.removeEventListener("mousemove", onMove);
+      ro.disconnect();
+      io.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        overflow: "hidden",
+        opacity: 0.25,
+        // Backdrop must never intercept clicks: it paints above static
+        // siblings (e.g. the login buttons) in DOM order.
+        pointerEvents: "none",
+      }}
+    >
+      <canvas ref={canvasRef} style={{ width: "100%", height: "100%" }} />
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          pointerEvents: "none",
+          background:
+            "linear-gradient(to bottom, #0a0a0a 0%, transparent 25%, transparent 80%, #0a0a0a 100%)",
+        }}
+      />
+    </div>
+  );
+};
+
+export const AsciiRidges: React.FC<AsciiRidgesProps> = (props) =>
+  glAvailable() ? <AsciiRidgesGL {...props} /> : <AsciiRidges2D {...props} />;
 
 export default AsciiRidges;

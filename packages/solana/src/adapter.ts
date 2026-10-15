@@ -31,9 +31,9 @@ import {
   buildWithdrawTokenInstructionV2,
   buildWithdrawSolInstructionV3,
   buildWithdrawTokenInstructionV3,
-} from "./instructions";
-import type { NftItem, ParsedTx, SolanaRpc, TokenBalance } from "./rpc";
-import { getNftsOf } from "./rpc";
+} from "./instructions.js";
+import type { NftItem, ParsedTx, SolanaRpc, TokenBalance } from "./rpc.js";
+import { getNftsOf } from "./rpc.js";
 import type { PasskeyAssertion, PasskeySigner } from "@peridotvault/pid-core";
 
 export interface TransactionStatus {

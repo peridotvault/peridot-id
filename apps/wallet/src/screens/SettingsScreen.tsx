@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
-import { ChevronRight, KeyRound, Monitor, Link2, ArrowLeft, Check, Banknote } from "../shared/icons";
+import { ScrollView, Text, TouchableOpacity, View } from "../shared/primitives";
+import { ChevronRight, KeyRound, Monitor, Link2, Check, Banknote } from "../shared/icons";
 import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
+import { BackButton } from "../shared/components/BackButton";
 import { CURRENCIES, getCurrency, setCurrency, type Currency } from "../shared/currency";
 
 interface Props {
@@ -43,34 +44,32 @@ export function SettingsScreen({ goPasskeys, goSessions, goConnected, onDone }: 
   }, []);
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone}>
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 10 }}>
+      <BackButton onPress={onDone} />
 
       <Text style={s.title}>Settings</Text>
 
-      <Text style={styles.section}>Security</Text>
+      <Text className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Security</Text>
       <Row icon={KeyRound} label="Passkeys" value={`${passkeys.length} active`} onPress={goPasskeys} />
       <Row icon={Link2} label="Recovery" value={google ? "Google · Connected" : "Add Google"} onPress={goConnected} />
       <Row icon={Monitor} label="Sessions / Devices" value={`${sessions.length} active`} onPress={goSessions} />
 
-      <Text style={styles.section}>Preferences</Text>
-      <View style={styles.currencyCard}>
-        <View style={styles.icon}>
-          <Banknote size={18} color={theme.colors.foreground} />
+      <Text className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Preferences</Text>
+      <View style={{ flexDirection: "row" }} className="items-center gap-2 border border-border bg-surface p-3.5">
+        <View className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
+          <Banknote size={18} className="text-foreground" />
         </View>
-        <Text style={styles.label}>Currency</Text>
+        <Text className="flex-1 font-sans text-[15px] font-medium text-foreground">Currency</Text>
         {CURRENCIES.map((c) => (
           <TouchableOpacity
             key={c}
-            style={[styles.currencyOpt, currency === c && styles.currencyOptActive]}
             onPress={() => pickCurrency(c)}
             accessibilityState={{ selected: currency === c }}
           >
-            {currency === c && <Check size={14} color={theme.colors.foreground} />}
-            <Text style={[styles.currencyText, currency === c && styles.currencyTextActive]}>{c}</Text>
+            <View style={{ flexDirection: "row" }} className={`items-center gap-1 border px-2.5 py-1.5 ${currency === c ? "border-foreground" : "border-border"}`}>
+              {currency === c && <Check size={14} className="text-foreground" />}
+              <Text className={`font-sans text-[13px] font-medium ${currency === c ? "text-foreground" : "text-muted-foreground"}`}>{c}</Text>
+            </View>
           </TouchableOpacity>
         ))}
       </View>
@@ -90,74 +89,15 @@ function Row({
   onPress: () => void;
 }) {
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress}>
-      <View style={styles.icon}>
-        <Icon size={18} color={theme.colors.foreground} />
+    <TouchableOpacity onPress={onPress}>
+      <View style={{ flexDirection: "row" }} className="w-full items-center gap-3 border border-border bg-surface p-3.5">
+        <View className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
+          <Icon size={18} className="text-foreground" />
+        </View>
+        <Text className="flex-1 font-sans text-[15px] font-medium text-foreground">{label}</Text>
+        {value && <Text className="font-sans text-[13px] text-muted-foreground">{value}</Text>}
+        <ChevronRight size={16} className="text-muted-foreground" />
       </View>
-      <Text style={styles.label}>{label}</Text>
-      {value && <Text style={styles.value}>{value}</Text>}
-      <ChevronRight size={16} color={theme.colors.mutedForeground} />
     </TouchableOpacity>
   );
 }
-
-const c = theme.colors;
-const f = theme.fonts;
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.background },
-  container: { padding: 24, gap: 10 },
-  back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: c.foreground, fontFamily: f.sans },
-  section: {
-    fontSize: 12,
-    color: c.mutedForeground,
-    fontWeight: "600",
-    fontFamily: f.sansSemiBold,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-    marginTop: 16,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 14,
-    borderRadius: 0,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surface,
-  },
-  icon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: c.muted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  label: { flex: 1, fontSize: 15, fontWeight: "500", color: c.foreground, fontFamily: f.sansMedium },
-  value: { fontSize: 13, color: c.mutedForeground, fontFamily: f.sans },
-  currencyCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    padding: 14,
-    borderRadius: 0,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surface,
-  },
-  currencyOpt: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  currencyOptActive: { borderColor: c.foreground },
-  currencyText: { fontSize: 13, color: c.mutedForeground, fontFamily: f.sansMedium, fontWeight: "500" },
-  currencyTextActive: { color: c.foreground },
-});

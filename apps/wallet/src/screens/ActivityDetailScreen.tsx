@@ -1,7 +1,7 @@
-import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
-import { ArrowLeft } from "../shared/icons";
+import { Linking, ScrollView, Text, View } from "../shared/primitives";
 import type { WalletTransaction } from "@peridotvault/pid-types";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
+import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
@@ -20,21 +20,18 @@ function fmtDate(iso: string | null): string {
 
 export function ActivityDetailScreen({ tx, onDone }: { tx: WalletTransaction; onDone: () => void }) {
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone}>
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
+      <BackButton onPress={onDone} />
 
       <Text style={s.title}>
         {tx.type === "DEPOSIT" ? "Receive" : tx.type === "WITHDRAW" ? "Send" : tx.type === "ACTIVATION" ? "Activation" : "Transaction"}
       </Text>
 
-      {tx.amount != null && <Text style={styles.bigAmount}>{fmtAmount(tx)}</Text>}
+      {tx.amount != null && <Text className="my-2 font-serif text-[32px] text-foreground">{fmtAmount(tx)}</Text>}
 
       {tx.type === "ACTIVATION" && (
         <View style={s.card}>
-          <Text style={styles.desc}>
+          <Text className="font-sans text-[13px] leading-[19px] text-muted-foreground">
             Peridot paid the SOL to create your on-chain smart account (PDA). The activation
             cost — rent + network fee + margin — was reimbursed from your wallet to the
             Peridot treasury in the same transaction.
@@ -68,9 +65,9 @@ export function ActivityDetailScreen({ tx, onDone }: { tx: WalletTransaction; on
 
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <View style={styles.field}>
+    <View className="gap-1">
       <Text style={s.label}>{label}</Text>
-      <Text style={[styles.value, mono && styles.mono]} selectable>{value}</Text>
+      <Text className={mono ? "font-mono text-[13px] text-foreground" : "font-sans text-sm text-foreground"} selectable>{value}</Text>
     </View>
   );
 }
@@ -79,21 +76,3 @@ function shorten(v: string | null): string {
   if (!v) return "—";
   return v.length > 24 ? `${v.slice(0, 12)}…${v.slice(-8)}` : v;
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.colors.background },
-  container: { padding: 24, gap: 12 },
-  back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-  bigAmount: {
-    fontSize: 32,
-    fontWeight: "400",
-    color: theme.colors.foreground,
-    fontFamily: theme.fonts.serif,
-    marginVertical: 8,
-  },
-  desc: { fontSize: 13, color: theme.colors.mutedForeground, lineHeight: 19, fontFamily: theme.fonts.sans },
-  field: { gap: 4 },
-  value: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-  mono: { fontFamily: theme.fonts.mono, fontSize: 13 },
-});

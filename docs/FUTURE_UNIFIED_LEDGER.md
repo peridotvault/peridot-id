@@ -13,7 +13,7 @@
   `settlementStatus` vs `ledgerStatus`, `direction/sourceAccount/destAccount/
   entryGroup/replaySeq/extinguished`), `FiatWebhookEvent` (persist-first inbox),
   `FiatFeePolicy` (versioned; v5 = 0.1% min Rp100, no cap).
-- Money: Checkout NET-in (min Rp100.000 NET, `gross = net + fee` charged at DOKU);
+- Money: Checkout NET-in (min Rp50.000 NET, `gross = net + fee` charged at DOKU);
   POINT P2P GROSS-in (`transfer_internal` + `points_credit` mirror + `points_fee`
   to Treasury, group invariant `G == N + F`); spendable = `DOKU_MERCHANT_POINT`.
 - Issuance gate (`issuePointsForDeposit`, backend-only, CI-guarded): payment

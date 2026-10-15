@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
-import { ArrowLeft, Monitor, LogOut } from "../shared/icons";
+import { ScrollView, Text, TouchableOpacity, View } from "../shared/primitives";
+import { Monitor, LogOut } from "../shared/icons";
 import type { Session } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
+import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
 
 function fmtDate(iso: string): string {
@@ -52,11 +53,8 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone}>
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
+      <BackButton onPress={onDone} />
 
       <Text style={s.title}>Sessions / Devices</Text>
       <Text style={s.subtitle}>Devices currently signed in to your Peridot ID.</Text>
@@ -69,21 +67,23 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
 
       {sessions.map((se) => (
         <View key={se.id} style={s.card}>
-          <View style={styles.head}>
-            <View style={styles.icon}>
-              <Monitor size={16} color={theme.colors.foreground} />
+          <View style={{ flexDirection: "row" }} className="items-center gap-3">
+            <View className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+              <Monitor size={16} className="text-foreground" />
             </View>
-            <View style={styles.meta}>
-              <Text style={styles.device}>
+            <View className="flex-1 gap-0.5">
+              <Text className="font-sans text-sm font-semibold text-foreground">
                 {se.userAgent ?? "Unknown device"}
                 {se.isCurrent ? "  ·  this device" : ""}
               </Text>
-              <Text style={styles.muted}>Signed in {fmtDate(se.createdAt)}</Text>
-              <Text style={styles.muted}>Seen {se.lastSeenAt ? fmtDate(se.lastSeenAt) : "—"} · Expires {fmtDate(se.expiresAt)}</Text>
+              <Text className="font-sans text-xs text-muted-foreground">Signed in {fmtDate(se.createdAt)}</Text>
+              <Text className="font-sans text-xs text-muted-foreground">Seen {se.lastSeenAt ? fmtDate(se.lastSeenAt) : "—"} · Expires {fmtDate(se.expiresAt)}</Text>
             </View>
             {!se.isCurrent && (
-              <TouchableOpacity style={styles.signOut} onPress={() => revoke(se.id)} disabled={busy} accessibilityLabel="Sign out session">
-                <LogOut size={16} color={theme.colors.danger} />
+              <TouchableOpacity onPress={() => revoke(se.id)} disabled={busy} accessibilityLabel="Sign out session">
+                <View className="p-2">
+                  <LogOut size={16} className="text-danger" />
+                </View>
               </TouchableOpacity>
             )}
           </View>
@@ -96,23 +96,3 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.colors.background },
-  container: { padding: 24, gap: 14 },
-  back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-  head: { flexDirection: "row", alignItems: "center", gap: 12 },
-  icon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: theme.colors.muted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  meta: { flex: 1, gap: 2 },
-  device: { fontSize: 14, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  muted: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  signOut: { padding: 8 },
-});

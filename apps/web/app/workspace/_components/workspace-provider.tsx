@@ -6,8 +6,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { Peridot } from "@peridotvault/pid-sdk-js";
 import type { PeridotClient, Role } from "@peridotvault/pid-sdk-js";
 import { Topbar, type WorkspaceTab } from "./topbar";
+import { resolveBrowserUrl } from "@/lib/api-base";
 
-const API_BASE = process.env.NEXT_PUBLIC_PID_API_URL ?? "https://api.pid.peridotvault.com";
+const CONFIGURED_API_BASE = process.env.NEXT_PUBLIC_PID_API_URL ?? "https://api.pid.peridotvault.com";
+const API_BASE = resolveBrowserUrl(CONFIGURED_API_BASE);
 // "production" (real money) or "sandbox" (DOKU sandbox). This workspace is bound
 // to one environment at build time; apps are registered separately per env.
 // Explicit NEXT_PUBLIC_PID_ENV wins; otherwise the badge follows the API URL
@@ -19,18 +21,21 @@ function apiHost(url: string): string {
     return "";
   }
 }
-const LOOPBACK = ["localhost", "127.0.0.1", "::1"].includes(apiHost(API_BASE));
+// Badge follows the *configured* URL, not the LAN-resolved one — a LAN page
+// still talks to the dev API.
+const LOOPBACK = ["localhost", "127.0.0.1", "::1"].includes(apiHost(CONFIGURED_API_BASE));
 const PID_ENV =
   process.env.NEXT_PUBLIC_PID_ENV ?? (LOOPBACK ? "sandbox" : "production");
 // The workspace is first-party: it authenticates through the wallet app (popup)
-// and shares the session cookie. In dev that wallet is the local Expo web app.
-const POPUP_URL =
+// and shares the session cookie. In dev that wallet is the local Vite web app.
+const POPUP_URL = resolveBrowserUrl(
   process.env.NEXT_PUBLIC_PID_POPUP_URL ??
-  (LOOPBACK
-    ? "http://localhost:8081"
-    : PID_ENV === "production"
-      ? "https://app.pid.peridotvault.com"
-      : "https://app.sandbox.pid.peridotvault.com");
+    (LOOPBACK
+      ? "http://localhost:3302"
+      : PID_ENV === "production"
+        ? "https://app.pid.peridotvault.com"
+        : "https://app.sandbox.pid.peridotvault.com"),
+);
 const OTHER_WORKSPACE_URL = process.env.NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL;
 // The workspace's own session namespace: its cookies/session are separate from
 // the wallet's, so signing out here never signs the user out of the wallet.

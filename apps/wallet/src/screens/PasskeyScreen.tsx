@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
+import { ScrollView, Text, TouchableOpacity, View } from "../shared/primitives";
 import { KeyRound, Plus, Trash2 } from "../shared/icons";
 import type { Authority } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
 
 function fmtDate(iso: string | null): string {
@@ -56,7 +56,7 @@ export function PasskeyScreen({ onDone }: { onDone: () => void }) {
   const onlyOne = authorities.length <= 1;
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 16 }}>
       <Text style={s.title}>Passkeys</Text>
       <Text style={s.subtitle}>
         Passkeys authorize your on-chain wallet (secp256r1). Register one on this device to
@@ -64,9 +64,11 @@ export function PasskeyScreen({ onDone }: { onDone: () => void }) {
       </Text>
       {error && <Text style={s.error}>{error}</Text>}
 
-      <TouchableOpacity style={styles.addBtn} onPress={register} disabled={busy}>
-        <Plus size={16} color={theme.colors.foreground} />
-        <Text style={styles.addLabel}>{busy ? "Waiting for passkey…" : "Add Passkey"}</Text>
+      <TouchableOpacity onPress={register} disabled={busy}>
+        <View style={{ flexDirection: "row" }} className="w-full items-center justify-center gap-2 border border-border bg-surface py-3">
+          <Plus size={16} className="text-foreground" />
+          <Text className="font-sans text-sm font-medium text-foreground">{busy ? "Waiting for passkey…" : "Add Passkey"}</Text>
+        </View>
       </TouchableOpacity>
       {authorities.length > 0 && (
         <Text style={s.hint}>One platform passkey per device — add extras from another device or a security key.</Text>
@@ -74,31 +76,32 @@ export function PasskeyScreen({ onDone }: { onDone: () => void }) {
 
       {authorities.map((a) => (
         <View key={a.id} style={s.card}>
-          <View style={styles.row}>
-            <View style={styles.icon}>
-              <KeyRound size={16} color={theme.colors.foreground} />
+          <View style={{ flexDirection: "row" }} className="items-center gap-3">
+            <View className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+              <KeyRound size={16} className="text-foreground" />
             </View>
-            <View style={styles.meta}>
-              <Text style={styles.device}>Passkey</Text>
-              <Text style={styles.muted}>Added {fmtDate(a.createdAt)}</Text>
-              <Text style={styles.muted}>Last used {fmtDate(a.lastUsedAt)}</Text>
+            <View className="flex-1 gap-0.5">
+              <Text className="font-sans text-[15px] font-semibold text-foreground">Passkey</Text>
+              <Text className="font-sans text-xs text-muted-foreground">Added {fmtDate(a.createdAt)}</Text>
+              <Text className="font-sans text-xs text-muted-foreground">Last used {fmtDate(a.lastUsedAt)}</Text>
               {a.credentialId && (
-                <Text style={[styles.muted, styles.short]} numberOfLines={1}>
+                <Text className="font-mono text-xs text-muted-foreground" numberOfLines={1}>
                   ID {a.credentialId}
                 </Text>
               )}
             </View>
             <TouchableOpacity
-              style={[styles.remove, onlyOne && styles.removeDisabled]}
               onPress={() => revoke(a.id)}
               disabled={busy || onlyOne}
               accessibilityLabel={`Remove passkey ${a.credentialId ?? a.id}`}
             >
-              <Trash2 size={16} color={onlyOne ? theme.colors.mutedForeground : theme.colors.danger} />
+              <View className={`p-2 ${onlyOne ? "opacity-40" : ""}`}>
+                <Trash2 size={16} className={onlyOne ? "text-muted-foreground" : "text-danger"} />
+              </View>
             </TouchableOpacity>
           </View>
           {onlyOne && (
-            <Text style={styles.lastHint}>This is your only passkey — keep it to stay able to sign in.</Text>
+            <Text className="font-sans text-xs text-muted-foreground">This is your only passkey — keep it to stay able to sign in.</Text>
           )}
         </View>
       ))}
@@ -109,36 +112,3 @@ export function PasskeyScreen({ onDone }: { onDone: () => void }) {
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.colors.background },
-  container: { padding: 24, gap: 16 },
-  addBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 0,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-  },
-  addLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.sansMedium },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  icon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: theme.colors.muted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  meta: { flex: 1, gap: 2 },
-  device: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  muted: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  short: { fontFamily: theme.fonts.mono },
-  remove: { padding: 8 },
-  removeDisabled: { opacity: 0.4 },
-  lastHint: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-});

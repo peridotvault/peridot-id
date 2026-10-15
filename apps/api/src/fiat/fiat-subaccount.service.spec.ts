@@ -456,15 +456,17 @@ describe("FiatSubAccountService", () => {
     expect(view.paymentUrl).toBe("https://pay.example/1");
   });
 
-  it("createCheckoutDeposit rejects net below Rp100.000 with a clear minimum error", async () => {
+  it("createCheckoutDeposit rejects net below Rp50.000 with a clear minimum error", async () => {
     const { service, prisma, checkout } = setup();
     prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
-    await expect(service.createCheckoutDeposit("ifal@pid", "99999")).rejects.toMatchObject({
+    await expect(service.createCheckoutDeposit("ifal@pid", "49999")).rejects.toMatchObject({
       status: 400,
-      message: expect.stringContaining("Minimum top-up is Rp100.000"),
+      message: expect.stringContaining("Minimum top-up is Rp50.000"),
     });
     expect(checkout.createPayment).not.toHaveBeenCalled();
     expect(prisma.fiatProviderTransaction.create).not.toHaveBeenCalled();
+    // Boundary: exactly Rp50.000 passes the minimum (quotes without error).
+    await expect(service.quoteDeposit("50000")).resolves.toMatchObject({ netIdr: "50000" });
   });
 
   it("createCheckoutDeposit applies flat 5% with no cap (net 1M → gross 1.05M)", async () => {
@@ -624,12 +626,12 @@ describe("FiatSubAccountService", () => {
     expect(prisma.fiatWebhookEvent.update).toHaveBeenCalledWith(expect.objectContaining({ where: { externalId: "ext-3" } }));
   });
 
-  it("webhook flags VA credits below the Rp100.000 net minimum (funds preserved)", async () => {
+  it("webhook flags VA credits below the Rp50.000 net minimum (funds preserved)", async () => {
     const { service, prisma } = setup();
     prisma.fiatProviderTransaction.findUnique.mockResolvedValueOnce(null);
     prisma.fiatProviderAccount.findFirst.mockResolvedValueOnce(null);
     prisma.fiatProviderAccount.findMany.mockResolvedValueOnce([{ ...ACTIVE }]);
-    // Gross 50.000 → fee 2.500 → net 47.500 < 100.000: kept, flagged.
+    // Gross 50.000 → fee 2.500 → net 47.500 < 50.000: kept, flagged.
     await expect(
       service.webhook("ext-4", JSON.stringify({ partnerReferenceNo: "VA2", toAccount: "888001140340010", amount: { value: "50000.00", currency: "IDR" } })),
     ).resolves.toEqual({ ok: true });
@@ -639,7 +641,7 @@ describe("FiatSubAccountService", () => {
         create: expect.objectContaining({ counterparty: expect.objectContaining({ belowMinimumNet: true }) }),
       }),
     );
-    // Gross 200.000 → fee 10.000 → net 190.000 ≥ 100.000: kept, unflagged.
+    // Gross 200.000 → fee 10.000 → net 190.000 ≥ 50.000: kept, unflagged.
     prisma.fiatProviderTransaction.findUnique.mockResolvedValueOnce(null);
     prisma.fiatProviderAccount.findFirst.mockResolvedValueOnce(null);
     prisma.fiatProviderAccount.findMany.mockResolvedValueOnce([{ ...ACTIVE }]);

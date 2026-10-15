@@ -231,7 +231,7 @@ async function fixtureB(ctx: Ctx, pidB: string, email: string) {
 
 async function depositCreate(ctx: Ctx, pidA: string, netStr: string) {
   const net = parseIdrStrict(netStr, "net");
-  if (net < 100_000n) throw new Error("net must be >= Rp100.000");
+  if (net < 50_000n) throw new Error("net must be >= Rp50.000");
   const before = { A: await userPoint(ctx, pidA), treasury: await treasuryPoint(ctx) };
   const res = await ctx.service.createCheckoutDeposit(pidA, netStr);
   const state = {

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
+import { Text, TouchableOpacity, View } from "../shared/primitives";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
 
 type StepKey = "identity" | "wallet";
@@ -83,18 +83,20 @@ export function ProvisioningScreen({ onContinue }: { onContinue: () => void }) {
       {STEPS.map((step) => {
         const st = states[step.key];
         return (
-          <View key={step.key} style={styles.card}>
-            <View style={styles.row}>
-              <Text style={[styles.glyph, st.status === "done" && styles.glyphDone, st.status === "failed" && styles.glyphFailed]}>
+          <View key={step.key} className="mt-3 gap-2 border border-border bg-surface p-3">
+            <View style={{ flexDirection: "row" }} className="items-center gap-3">
+              <Text className={`w-7 text-center font-sans text-xl font-semibold ${st.status === "done" ? "text-success" : st.status === "failed" ? "text-danger" : "text-muted-foreground"}`}>
                 {glyph(st.status)}
               </Text>
-              <View style={styles.meta}>
-                <Text style={styles.label}>{step.label}</Text>
-                <Text style={styles.hint}>{step.hint}</Text>
+              <View className="flex-1 gap-0.5">
+                <Text className="font-sans text-[15px] font-semibold text-foreground">{step.label}</Text>
+                <Text className="font-sans text-xs text-muted-foreground">{step.hint}</Text>
               </View>
               {st.status === "failed" && (
-                <TouchableOpacity style={styles.retry} onPress={() => run(step.key)} accessibilityLabel={`Retry ${step.label}`}>
-                  <Text style={styles.retryLabel}>Retry</Text>
+                <TouchableOpacity onPress={() => run(step.key)} accessibilityLabel={`Retry ${step.label}`}>
+                  <View className="border border-border bg-background px-3 py-1.5">
+                    <Text className="font-sans text-[13px] font-medium text-foreground">Retry</Text>
+                  </View>
                 </TouchableOpacity>
               )}
             </View>
@@ -107,29 +109,3 @@ export function ProvisioningScreen({ onContinue }: { onContinue: () => void }) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    marginTop: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    gap: 8,
-  },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  glyph: { fontSize: 20, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sansSemiBold, fontWeight: "600", width: 28, textAlign: "center" },
-  glyphDone: { color: theme.colors.success ?? theme.colors.foreground },
-  glyphFailed: { color: theme.colors.danger ?? theme.colors.foreground },
-  meta: { flex: 1, gap: 2 },
-  label: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  hint: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  retry: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.background,
-  },
-  retryLabel: { fontSize: 13, color: theme.colors.foreground, fontFamily: theme.fonts.sansMedium, fontWeight: "500" },
-});

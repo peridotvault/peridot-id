@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity } from "../shared/primitives";
+import { ScrollView, Text, TouchableOpacity, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
 import { useHomeData } from "../feat/wallet/hooks/useHomeData";
 import { buildCoins, calcTotal } from "../feat/wallet/utils/assets";
 import { BalanceCard } from "../feat/wallet/components/BalanceCard";
@@ -39,7 +39,7 @@ export function HomeScreen({
   });
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
       <BalanceCard
         currency={d.currency}
         totalValue={totalValue}
@@ -70,8 +70,10 @@ export function HomeScreen({
       {d.error && <Text style={s.error}>{d.error}</Text>}
 
       {d.activated && d.passkeys.length === 0 && !d.busy && (
-        <TouchableOpacity style={styles.passkeyWarn} onPress={goPasskeys}>
-          <Text style={styles.passkeyWarnText}>No passkey — add one in Security to authorize withdrawals.</Text>
+        <TouchableOpacity onPress={goPasskeys}>
+          <View className="border border-border bg-muted p-3">
+            <Text className="text-center font-sans text-[13px] text-muted-foreground">No passkey — add one in Security to authorize withdrawals.</Text>
+          </View>
         </TouchableOpacity>
       )}
 
@@ -79,16 +81,3 @@ export function HomeScreen({
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.colors.background },
-  container: { padding: 24, gap: 14 },
-  passkeyWarn: {
-    backgroundColor: theme.colors.muted,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 0,
-    padding: 12,
-  },
-  passkeyWarnText: { color: theme.colors.mutedForeground, fontSize: 13, textAlign: "center", fontFamily: theme.fonts.sans },
-});

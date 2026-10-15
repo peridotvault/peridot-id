@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "../shared/primitives";
-import { ArrowLeft } from "../shared/icons";
+import { ScrollView, Text, TextInput, View } from "../shared/primitives";
 import type { FiatTransferInquiryView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
+import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
 
 function fmtIdr(units: string): string {
@@ -105,7 +105,7 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
     return (
       <View style={s.container}>
         <Text style={s.title}>Sent</Text>
-        <Text selectable style={styles.desc}>{result}</Text>
+        <Text selectable className="font-sans text-sm leading-5 text-muted-foreground">{result}</Text>
         <UIButton title="Done" onPress={onDone} variant="primary" />
       </View>
     );
@@ -114,12 +114,9 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
   if (inquiry) {
     return (
       <ScrollView contentContainerStyle={s.container}>
-        <TouchableOpacity style={styles.back} onPress={cancel} accessibilityLabel="Back">
-          <ArrowLeft size={18} color={theme.colors.foreground} />
-          <Text style={styles.backLabel}>Back</Text>
-        </TouchableOpacity>
+        <BackButton onPress={cancel} />
         <Text style={s.title}>Review transfer</Text>
-        <View style={styles.card}>
+        <View className="gap-2.5 border border-border bg-surface p-3">
           <Row label="To" value={inquiry.beneficiaryPid} />
           <Row label="They receive" value={fmtIdr(inquiry.netIdr)} />
           <Row label="Service fee" value={fmtIdr(inquiry.feeIdr)} />
@@ -134,18 +131,15 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
 
   return (
     <ScrollView contentContainerStyle={s.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone} accessibilityLabel="Back">
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
+      <BackButton onPress={onDone} />
       <Text style={s.title}>Transfer</Text>
       <Text style={s.subtitle}>Send from your balance to any PeridotID user. The fee is quoted from the amount you enter.</Text>
       <Text style={s.label}>Recipient PID</Text>
-      <TextInput style={s.input} value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid" placeholderTextColor={theme.colors.mutedForeground} />
+      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid" />
       <Text style={s.label}>Amount (IDR)</Text>
-      <TextInput style={s.input} value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000" placeholderTextColor={theme.colors.mutedForeground} />
+      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000" />
       <Text style={s.label}>Note (optional)</Text>
-      <TextInput style={s.input} value={remark} onChangeText={setRemark} placeholder="What this is for" placeholderTextColor={theme.colors.mutedForeground} />
+      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for" />
       <Text style={s.hint}>Recipient must have a PeridotID account.</Text>
       {error && <Text style={s.error}>{error}</Text>}
       <UIButton title={busy ? "Checking…" : "Continue"} onPress={prepare} disabled={busy || !to || !amount} variant="primary" />
@@ -155,18 +149,9 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <View style={styles.field}>
+    <View className="gap-1">
       <Text style={s.label}>{label}</Text>
-      <Text style={styles.value} selectable>{value}</Text>
+      <Text className="font-mono text-[15px] text-foreground" selectable>{value}</Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-  card: { padding: 12, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface, gap: 10 },
-  field: { gap: 4 },
-  value: { fontSize: 15, color: theme.colors.foreground, fontFamily: theme.fonts.mono },
-  desc: { fontSize: 14, color: theme.colors.mutedForeground, lineHeight: 20, fontFamily: theme.fonts.sans },
-});

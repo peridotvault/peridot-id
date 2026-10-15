@@ -1,5 +1,5 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from "../../../shared/primitives";
-import { theme, styles as s } from "../../../shared/theme";
+import { Pressable, Text, TextInput, View } from "../../../shared/primitives";
+import { styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
 import { UIButton } from "../../../shared/components/UIButton";
 
@@ -30,39 +30,39 @@ export function EmailOtpForm({
   onBack: () => void;
 }) {
   return (
-    <View style={styles.screen}>
+    <View className="flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
       <View style={s.container}>
-        <View style={styles.middle}>
-          <View style={styles.masthead}>
-            <Text style={styles.title}>Sign in with email</Text>
-            <Text style={styles.subtitle}>
+        <View className="flex-1 w-full items-center justify-center gap-5">
+          <View className="items-center gap-2">
+            <Text className="font-serif text-[28px] tracking-[-0.4px] text-foreground">Sign in with email</Text>
+            <Text className="text-center font-sans text-sm text-muted-foreground">
               {step === "email" ? "We'll send you a 6-digit code." : `Code sent to ${email}`}
             </Text>
           </View>
           {error && <Text style={s.error}>{error}</Text>}
-          <View style={styles.stack}>
+          <View className="w-full max-w-[343px] gap-3">
             {step === "email" ? (
               <TextInput
-                style={[s.input, styles.noGlow]}
+                style={s.input}
+                className="[--placeholder:var(--color-muted-foreground)] outline-none"
                 value={email}
                 onChangeText={onEmail}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
                 placeholder="you@example.com"
-                placeholderTextColor={theme.colors.mutedForeground}
                 editable={!busy}
                 onSubmitEditing={onStart}
               />
             ) : (
               <TextInput
-                style={[s.input, styles.codeInput, styles.noGlow]}
+                style={s.input}
+                className="text-center text-xl tracking-[8px] [--placeholder:var(--color-muted-foreground)] outline-none"
                 value={code}
                 onChangeText={(t) => onCode(t.replace(/[^0-9]/g, "").slice(0, 6))}
                 keyboardType="number-pad"
                 placeholder="––––––"
-                placeholderTextColor={theme.colors.mutedForeground}
                 editable={!busy}
                 maxLength={6}
                 onSubmitEditing={onVerify}
@@ -76,13 +76,13 @@ export function EmailOtpForm({
             />
             {step === "code" && (
               <Pressable onPress={onStart} disabled={busy || resendIn > 0}>
-                <Text style={[styles.resend, (busy || resendIn > 0) && styles.resendDisabled]}>
+                <Text className={`text-center font-sans text-[13px] ${busy || resendIn > 0 ? "text-muted-foreground" : "text-foreground"}`}>
                   {resendIn > 0 ? `Resend in ${resendIn}s` : "Resend code"}
                 </Text>
               </Pressable>
             )}
             <Pressable onPress={onBack} disabled={busy}>
-              <Text style={styles.back}>← All sign-in options</Text>
+              <Text className="text-center font-sans text-[13px] text-muted-foreground">← All sign-in options</Text>
             </Pressable>
           </View>
         </View>
@@ -90,24 +90,3 @@ export function EmailOtpForm({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  middle: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 20 },
-  masthead: { alignItems: "center", gap: 8 },
-  title: {
-    fontSize: 28,
-    fontWeight: "400",
-    color: theme.colors.foreground,
-    fontFamily: theme.fonts.serif,
-    letterSpacing: -0.4,
-  },
-  subtitle: { fontSize: 14, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans, textAlign: "center" },
-  stack: { width: "100%", maxWidth: 343, gap: 12 },
-  codeInput: { textAlign: "center", letterSpacing: 8, fontSize: 20 },
-  // Web-only: kill the default outer focus ring (border stays as-is).
-  noGlow: { outlineWidth: 0, outlineColor: "transparent" },
-  resend: { fontSize: 13, color: theme.colors.foreground, textAlign: "center", fontFamily: theme.fonts.sans },
-  resendDisabled: { color: theme.colors.mutedForeground },
-  back: { fontSize: 13, color: theme.colors.mutedForeground, textAlign: "center", fontFamily: theme.fonts.sans },
-});

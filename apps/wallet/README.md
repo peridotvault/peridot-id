@@ -14,10 +14,10 @@ follow-up work, not silently missing.
 
 | Script | Description |
 |---|---|
-| `dev` | `vite` dev server (browser on `:8081`) |
+| `dev` | `vite` dev server (browser on `:3302`) |
 | `dev:web` | alias of `dev` |
 | `build` | `tsc -b && vite build` → `dist/` |
-| `preview` | serve the production build on `:8081` |
+| `preview` | serve the production build on `:3302` |
 | `typecheck` | `tsc -b` |
 
 ## Stack
@@ -28,11 +28,11 @@ follow-up work, not silently missing.
 ## Local
 
 ```sh
-pnpm --filter @peridotvault/pid-wallet dev:web   # http://localhost:8081
+pnpm --filter @peridotvault/pid-wallet dev:web   # http://localhost:3302
 ```
 
-Point the SDK at a local API (`apps/api` on `:3301`) and ensure
-`WEBAUTHN_ORIGINS` includes `http://localhost:8081` for passkey flows.
+Point the SDK at a local API (`apps/api` on `:3300`) and ensure
+`WEBAUTHN_ORIGINS` includes `http://localhost:3302` for passkey flows.
 
 ## Login in dev (first-party contract)
 
@@ -46,10 +46,10 @@ origin IS the trusted DOM — and must **never** use the popup/hosted flow
 
 Dev and prod run the identical auth code paths — only credentials differ:
 
-- **Passkey** works fully local against `http://localhost:3301` (open the wallet
-  at exactly `http://localhost:8081`; the RP ID is `localhost`).
+- **Passkey** works fully local against `http://localhost:3300` (open the wallet
+  at exactly `http://localhost:3302`; the RP ID is `localhost`).
 - **Google** needs a dev OAuth client: create one at
   https://console.cloud.google.com/apis/credentials with redirect URI
-  `http://localhost:3301/v1/auth/google/callback`, fill in
+  `http://localhost:3300/v1/auth/google/callback`, fill in
   `GOOGLE_CLIENT_ID_DEV`/`GOOGLE_CLIENT_SECRET_DEV` in `apps/api/.env`, and
   restart the API. The prod client (prod callback only) lives in the deploy env.

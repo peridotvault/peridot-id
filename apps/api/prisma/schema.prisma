@@ -563,7 +563,7 @@ model FiatWebhookEvent {
 // fee = clamp(round-half-up(amount * percentBps / 10_000), minIdr, maxIdr).
 // Flat 5% clamped to [Rp5.000, Rp25.000] by default; 0 = unbounded on either
 // side. This is the PeridotID fee ONLY — DOKU charges its own fee separately.
-// Checkout top-ups additionally enforce a Rp100.000 NET minimum in API code
+// Checkout top-ups additionally enforce a Rp50.000 NET minimum in API code
 // (no DOKU-side minimum). Internal transfers stay GROSS-in.
 // Settlement is DOKU-native per payment (static PERCENTAGE split rule).
 model FiatFeePolicy {

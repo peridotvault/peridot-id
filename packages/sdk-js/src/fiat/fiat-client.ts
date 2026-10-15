@@ -272,7 +272,7 @@ export class PeridotFiat {
 
   /**
    * Create a Checkout deposit intent: DOKU-hosted page. netAmountIdr is the
-   * NET credited to the user (minimum Rp100.000); PeridotID fee + app fee +
+   * NET credited to the user (minimum Rp50.000); PeridotID fee + app fee +
    * the selected method's gateway fee and total are quoted upfront.
    * `paymentMethod` (DOKU code) locks the channel at DOKU. Third-party mode
    * opens the PeridotID popup (`fiat-checkout`) which navigates to DOKU on

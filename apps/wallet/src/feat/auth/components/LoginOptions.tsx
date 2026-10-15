@@ -1,5 +1,5 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from "../../../shared/primitives";
-import { theme, styles as s } from "../../../shared/theme";
+import { Pressable, Text, TextInput, View } from "../../../shared/primitives";
+import { styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
 import { UIButton } from "../../../shared/components/UIButton";
 import { ArrowRight, Mail } from "../../../shared/icons";
@@ -30,9 +30,9 @@ function GoogleIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-function AppleIcon({ size = 18, color = "#fafafa" }: { size?: number; color?: string }) {
+function AppleIcon({ size = 18, className }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 384 512" fill={color} aria-hidden>
+    <svg width={size} height={size} viewBox="0 0 384 512" fill="currentColor" className={className} aria-hidden>
       <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
     </svg>
   );
@@ -63,25 +63,25 @@ export function LoginOptions({
   onPasskey: () => void;
 }) {
   return (
-    <View style={styles.screen}>
+    <View className="flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
       <View style={s.container}>
-      <View style={styles.middle}>
-        <View style={styles.masthead}>
-          <Text style={styles.title}>PeridotID</Text>
+      <View className="flex-1 w-full items-center justify-center gap-5">
+        <View className="items-center gap-2">
+          <Text className="font-serif text-[40px] tracking-[-0.4px] text-foreground">PeridotID</Text>
           {ssoOrigin ? (
-            <Text style={styles.subtitle}>Sign in to continue to {ssoOrigin}</Text>
+            <Text className="font-sans text-sm text-muted-foreground">Sign in to continue to {ssoOrigin}</Text>
           ) : ctxOrigin ? (
-            <Text style={styles.subtitle}>Sign in to continue to {ctxOrigin}</Text>
+            <Text className="font-sans text-sm text-muted-foreground">Sign in to continue to {ctxOrigin}</Text>
           ) : null}
         </View>
         {error && <Text style={s.error}>{error}</Text>}
-        <View style={styles.stack}>
-          <View style={styles.emailRow}>
-            <View style={[s.input, styles.emailBox]}>
-              <Mail size={16} color={theme.colors.mutedForeground} />
+        <View className="w-full max-w-[343px] gap-3">
+          <View style={{ flexDirection: "row" }} className="items-center gap-2">
+            <View className="flex-1 items-center gap-2.5 border border-border bg-background px-5 py-[15px]" style={{ flexDirection: "row" }}>
+              <Mail size={16} className="text-muted-foreground" />
               <TextInput
-                style={styles.emailField}
+                className="flex-1 p-0 font-sans text-sm text-foreground [--placeholder:var(--color-muted-foreground)] outline-none"
                 value={email}
                 onChangeText={onEmailChange}
                 autoCapitalize="none"
@@ -89,7 +89,6 @@ export function LoginOptions({
                 keyboardType="email-address"
                 returnKeyType="go"
                 placeholder="Continue with email"
-                placeholderTextColor={theme.colors.mutedForeground}
                 editable={!busy}
                 onSubmitEditing={onSubmitEmail}
               />
@@ -99,13 +98,12 @@ export function LoginOptions({
               disabled={busy}
               accessibilityRole="button"
               accessibilityLabel="Continue with email"
-              style={({ pressed }) => [
-                styles.submitBtn,
-                pressed && !busy && styles.submitPressed,
-                busy && styles.submitDisabled,
-              ]}
+              style={({ pressed }) => ({ opacity: pressed && !busy ? 0.7 : busy ? 0.55 : 1 })}
+              className="self-stretch"
             >
-              <ArrowRight size={18} color={theme.colors.background} />
+              <View className="flex h-full w-[50px] items-center justify-center border border-foreground bg-foreground">
+                <ArrowRight size={18} className="text-background" />
+              </View>
             </Pressable>
           </View>
           <UIButton
@@ -119,15 +117,15 @@ export function LoginOptions({
             title="Continue with Apple"
             disabled
             align="left"
-            icon={<AppleIcon size={18} color={theme.colors.mutedForeground} />}
+            icon={<AppleIcon size={18} className="text-muted-foreground" />}
           />
-          <View style={styles.orRow}>
-            <View style={styles.hairline} />
-            <Text style={styles.orText}>or</Text>
-            <View style={styles.hairline} />
+          <View style={{ flexDirection: "row" }} className="items-center gap-3">
+            <View className="h-px flex-1 bg-border" />
+            <Text className="font-sans text-xs text-muted-foreground">or</Text>
+            <View className="h-px flex-1 bg-border" />
           </View>
           {stepUp && (
-            <Text style={styles.stepUp}>Session expired — please confirm it's you with your passkey.</Text>
+            <Text className="text-center font-sans text-[13px] text-foreground">Session expired — please confirm it's you with your passkey.</Text>
           )}
           <UIButton
             title={busy ? "Waiting for passkey…" : "Select a passkey"}
@@ -135,73 +133,10 @@ export function LoginOptions({
             disabled={busy}
             variant="primary"
           />
-          <Text style={styles.legal}>By continuing, I agree to PeridotID Terms of Use and Privacy notice</Text>
+          <Text className="text-center font-sans text-[11px] text-muted-foreground">By continuing, I agree to PeridotID Terms of Use and Privacy notice</Text>
         </View>
       </View>
       </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  middle: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 20 },
-  masthead: { alignItems: "center", gap: 8 },
-  title: {
-    fontSize: 40,
-    fontWeight: "400",
-    color: theme.colors.foreground,
-    fontFamily: theme.fonts.serif,
-    letterSpacing: -0.4,
-  },
-  subtitle: { fontSize: 14, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  stack: { width: "100%", maxWidth: 343, gap: 12 },
-  emailRow: { flexDirection: "row", gap: 8, alignItems: "center" },
-  emailBox: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    backgroundColor: theme.colors.background,
-  },
-  emailField: {
-    flex: 1,
-    padding: 0,
-    fontSize: 14,
-    fontFamily: theme.fonts.sans,
-    color: theme.colors.foreground,
-    outlineWidth: 0,
-    outlineColor: "transparent",
-  },
-  submitBtn: {
-    width: 50,
-    alignSelf: "stretch",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: theme.colors.foreground,
-    borderWidth: 1,
-    borderColor: theme.colors.foreground,
-    // Web-only: same focus-ring kill as the email field.
-    outlineWidth: 0,
-    outlineColor: "transparent",
-  },
-  submitPressed: { opacity: 0.7 },
-  submitDisabled: { opacity: 0.55 },
-  orRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  hairline: { flex: 1, height: 1, backgroundColor: theme.colors.border },
-  orText: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  stepUp: {
-    fontSize: 13,
-    color: theme.colors.foreground,
-    textAlign: "center",
-    fontFamily: theme.fonts.sans,
-  },
-  legal: {
-    fontSize: 11,
-    color: theme.colors.mutedForeground,
-    textAlign: "center",
-    fontFamily: theme.fonts.sans,
-  },
-});

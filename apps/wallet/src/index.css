@@ -1,5 +1,23 @@
 /* Base document styles: dark shell + full-height root so flex:1 screens work. */
 
+@import "tailwindcss";
+
+/* Brand tokens (byte-identical to shared/theme.ts): sidebar and other
+   Tailwind-styled components consume these so the palette stays single-source. */
+@theme {
+  --color-background: #0a0a0a;
+  --color-surface: #141414;
+  --color-muted: #171717;
+  --color-border: #262626;
+  --color-foreground: #fafafa;
+  --color-muted-foreground: #a3a3a3;
+  --color-danger: #ff5f57;
+  --color-success: #28c840;
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Source Serif 4", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
 html,
 body,
 #root {
@@ -18,11 +36,6 @@ body {
 #root {
   display: flex;
   flex-direction: column;
-}
-
-/* Touch feedback for pressables without their own pressed style. */
-button:not(:disabled):active {
-  opacity: 0.7;
 }
 
 /* Per-input placeholder color via --placeholder (see TextInput shim). */

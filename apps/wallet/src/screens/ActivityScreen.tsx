@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text } from "../shared/primitives";
+import { ScrollView, Text } from "../shared/primitives";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
 import type { FiatItem, FiatLedgerItem } from "../shared/fiat";
 import { useActivityFeed } from "../feat/activity/hooks/useActivityFeed";
 import {
@@ -36,7 +36,7 @@ export function ActivityScreen({
   );
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
       <ActivityHeader tab={tab} onTabChange={setTab} onRefresh={feed.reload} busy={feed.busy} />
 
       {feed.error && <Text style={s.error}>{feed.error}</Text>}
@@ -61,8 +61,3 @@ export function ActivityScreen({
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.colors.background },
-  container: { padding: 24, gap: 12 },
-});

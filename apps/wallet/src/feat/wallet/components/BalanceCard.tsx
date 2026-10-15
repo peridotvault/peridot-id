@@ -1,5 +1,5 @@
-import { StyleSheet, Text, View } from "../../../shared/primitives";
-import { theme, styles as s } from "../../../shared/theme";
+import { Text, View } from "../../../shared/primitives";
+import { styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
 import { UIButton } from "../../../shared/components/UIButton";
 import { Plus } from "../../../shared/icons";
@@ -32,15 +32,15 @@ export function BalanceCard({
   onTopup: () => void;
 }) {
   return (
-    <View style={styles.balanceCard}>
+    <View className="relative aspect-[1.586] overflow-hidden border border-border bg-background">
       {/* ponytail: AsciiRidges renders a full-window grid clipped by
           overflow hidden — same cost as login screens, card shows a center
           crop. Add cols/rows props only if the crop ever looks wrong. */}
-      <View style={styles.balanceCardBg} pointerEvents="none">
+      <View pointerEvents="none" className="absolute inset-0 overflow-hidden">
         <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-        <View style={styles.balanceCardVeil} />
+        <View className="absolute inset-0 bg-black/10" />
       </View>
-      <View style={styles.balanceCardContent}>
+      <View className="flex-1 justify-between gap-1.5 p-5">
         {balanceError ? (
           <>
             <Text style={s.error}>{balanceError}</Text>
@@ -48,48 +48,19 @@ export function BalanceCard({
           </>
         ) : (
           <>
-            <View style={styles.breakdown}>
-              <Text style={styles.fiatLabel}>PeridotID</Text>
-              <Text style={styles.fiatAmount}>
+            <View className="gap-1.5">
+              <Text className="font-sans text-[13px] text-muted-foreground">PeridotID</Text>
+              <Text className="font-serif text-[38px] text-foreground">
                 {busy && balanceIdr === null ? "…" : formatTotal(totalValue, currency)}
               </Text>
-              <Text style={styles.fiatLeft}>
+              <Text className="text-left font-mono text-sm font-medium text-foreground">
                 {balanceIdr === null ? (busy ? "…" : "—") : formatIdrWhole(balanceIdr, "IDR", rates)}
               </Text>
             </View>
-            <UIButton title="Top Up" icon={<Plus size={16} color={theme.colors.foreground} />} onPress={onTopup} />
+            <UIButton title="Top Up" icon={<Plus size={16} className="text-foreground" />} onPress={onTopup} />
           </>
         )}
       </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  balanceCard: {
-    position: "relative",
-    overflow: "hidden",
-    aspectRatio: 1.586,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.background,
-  },
-  balanceCardBg: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: "hidden",
-  },
-  balanceCardVeil: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(10, 10, 10, 0.1)",
-  },
-  balanceCardContent: {
-    flex: 1,
-    justifyContent: "space-between",
-    padding: 20,
-    gap: 6,
-  },
-  fiatLabel: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  fiatAmount: { fontSize: 38, fontWeight: "400", color: theme.colors.foreground, fontFamily: theme.fonts.serif },
-  breakdown: { gap: 6 },
-  fiatLeft: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono, textAlign: "left" },
-});

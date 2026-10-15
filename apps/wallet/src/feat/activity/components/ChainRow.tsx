@@ -1,7 +1,7 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Text, TouchableOpacity, View } from "../../../shared/primitives";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { ChevronRight } from "../../../shared/icons";
-import { theme, styles as s } from "../../../shared/theme";
+import { styles as s } from "../../../shared/theme";
 import { fmtAmount, fmtDate, meta } from "../utils/feed";
 
 export function ChainRow({ tx: t, onSelect }: { tx: WalletTransaction; onSelect: (tx: WalletTransaction) => void }) {
@@ -9,26 +9,17 @@ export function ChainRow({ tx: t, onSelect }: { tx: WalletTransaction; onSelect:
   const Icon = m.icon;
   return (
     <TouchableOpacity key={t.id} style={s.card} onPress={() => onSelect(t)}>
-      <View style={styles.row}>
-        <View style={[styles.icon, { backgroundColor: m.color + "22" }]}>
+      <View style={{ flexDirection: "row" }} className="items-center gap-3">
+        <View style={{ backgroundColor: m.color + "22" }} className="flex h-9 w-9 items-center justify-center rounded-full">
           <Icon size={16} color={m.color} />
         </View>
-        <View style={styles.meta}>
-          <Text style={styles.label}>{m.label}</Text>
-          <Text style={styles.muted}>{fmtDate(t.createdAt)} · {t.status}</Text>
+        <View className="flex-1 gap-0.5">
+          <Text className="font-sans text-[15px] font-semibold text-foreground">{m.label}</Text>
+          <Text className="font-sans text-xs text-muted-foreground">{fmtDate(t.createdAt)} · {t.status}</Text>
         </View>
-        {t.amount != null && <Text style={styles.amount}>{fmtAmount(t)}</Text>}
-        <ChevronRight size={16} color={theme.colors.mutedForeground} />
+        {t.amount != null && <Text className="font-mono text-sm font-medium text-foreground">{fmtAmount(t)}</Text>}
+        <ChevronRight size={16} className="text-muted-foreground" />
       </View>
     </TouchableOpacity>
   );
 }
-
-const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  icon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  meta: { flex: 1, gap: 2 },
-  label: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  muted: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  amount: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
-});

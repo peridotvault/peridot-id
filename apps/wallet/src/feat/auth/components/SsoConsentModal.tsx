@@ -1,6 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from "../../../shared/primitives";
+import { Pressable, Text, View } from "../../../shared/primitives";
 import { X } from "../../../shared/icons";
-import { theme, styles as s } from "../../../shared/theme";
+import { styles as s } from "../../../shared/theme";
 import { UIButton } from "../../../shared/components/UIButton";
 
 // One-tap SSO consent as an overlay modal: dimmed scrim + centered card.
@@ -27,20 +27,22 @@ export function SsoConsentModal({
   verified?: boolean;
 }) {
   return (
-    <View style={styles.overlay}>
-      <View style={styles.scrim} />
-      <View style={styles.card}>
-        <Pressable onPress={onDeny} disabled={busy} style={styles.close} accessibilityLabel="Deny and close">
-          <X size={18} color={theme.colors.mutedForeground} />
+    <View className="absolute inset-0 z-10 items-center justify-center p-6">
+      <View className="absolute inset-0 bg-black/60" />
+      <View className="w-full max-w-[380px] gap-3 border border-border bg-surface p-5">
+        <Pressable onPress={onDeny} disabled={busy} accessibilityLabel="Deny and close" className="absolute right-2 top-2 z-[1]">
+          <View className="p-2">
+            <X size={18} className="text-muted-foreground" />
+          </View>
         </Pressable>
-        <Text style={styles.title}>PeridotID</Text>
-        <Text style={styles.subtitle}>Allow {origin} to sign in with your PeridotID?</Text>
-        {verified ? <Text style={styles.verified}>✓ Verified partner — 0% PeridotID fee</Text> : null}
-        <Text style={styles.hint}>
+        <Text className="text-center font-serif text-[28px] tracking-[-0.3px] text-foreground">PeridotID</Text>
+        <Text className="text-center font-sans text-sm font-medium text-foreground">Allow {origin} to sign in with your PeridotID?</Text>
+        {verified ? <Text className="text-center font-sans text-xs text-success">✓ Verified partner — 0% PeridotID fee</Text> : null}
+        <Text className="text-center font-sans text-xs text-muted-foreground">
           Signed in as {sessionLabel}. The app receives your ID, display name and email — never your passkeys.
         </Text>
         {error && <Text style={s.error}>{error}</Text>}
-        <View style={styles.actions}>
+        <View className="mt-1 gap-3">
           <UIButton title={busy ? "Authorizing…" : "Allow"} onPress={onAllow} disabled={busy} variant="primary" />
           <UIButton title="Use a different account" onPress={onDifferent} disabled={busy} />
           <UIButton title="Deny" onPress={onDeny} disabled={busy} variant="danger" />
@@ -49,52 +51,3 @@ export function SsoConsentModal({
     </View>
   );
 }
-
-const c = theme.colors;
-const f = theme.fonts;
-
-const styles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    // Above HomeScreen (mounted after us): without this the opaque home
-    // paints clean over the transparent overlay root. Elevation for Android.
-    zIndex: 10,
-    elevation: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  scrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.6)",
-  },
-  card: {
-    width: "100%",
-    maxWidth: 380,
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 0,
-    padding: 20,
-    gap: 12,
-  },
-  close: {
-    position: "absolute",
-    top: 8,
-    right: 8,
-    padding: 8,
-    zIndex: 1,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "400",
-    color: c.foreground,
-    fontFamily: f.serif,
-    letterSpacing: -0.3,
-    textAlign: "center",
-  },
-  subtitle: { fontSize: 14, color: c.foreground, fontFamily: f.sansMedium, fontWeight: "500", textAlign: "center" },
-  verified: { fontSize: 12, color: c.success ?? c.foreground, fontFamily: f.sans, textAlign: "center" },
-  hint: { fontSize: 12, color: c.mutedForeground, fontFamily: f.sans, textAlign: "center" },
-  actions: { gap: 12, marginTop: 4 },
-});

@@ -81,7 +81,7 @@ export class FiatController {
   /**
    * Create a Checkout deposit intent: DOKU-hosted page (all banks, QRIS,
    * e-money, cards). netAmountIdr is the NET credited to the user (minimum
-   * Rp100.000); PeridotID fee + app fee + the selected method's gateway fee
+   * Rp50.000); PeridotID fee + app fee + the selected method's gateway fee
    * and total payable are quoted upfront.
    */
   @Post("deposits/checkout")

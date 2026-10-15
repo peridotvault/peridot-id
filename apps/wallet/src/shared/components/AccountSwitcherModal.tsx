@@ -1,7 +1,7 @@
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "../primitives";
+import { Image, Pressable, ScrollView, Text, View } from "../primitives";
 import type { AccountView } from "@peridotvault/pid-types";
 import { Check, LogOut, Plus } from "../icons";
-import { theme, styles as s } from "../theme";
+import { styles as s } from "../theme";
 import { BottomSheet } from "./BottomSheet";
 import { UIButton } from "./UIButton";
 
@@ -38,45 +38,49 @@ export function AccountSwitcherModal({
     >
       {error && <Text style={s.error}>{error}</Text>}
 
-      <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-        {accounts.map((a) => (
-          <Pressable
-            key={a.pid}
-            style={styles.row}
-            onPress={() => onSelect(a.pid)}
-            disabled={busy || a.isActive}
-            accessibilityLabel={`Switch to ${a.pid}`}
-          >
-            {a.avatarUrl ? (
-              <Image source={{ uri: a.avatarUrl }} style={styles.thumb} />
-            ) : (
-              <View style={[styles.thumb, styles.thumbFallback]}>
-                <Text style={styles.thumbText}>{(a.displayName ?? a.pid).slice(0, 1).toUpperCase()}</Text>
+      <ScrollView className="grow-0">
+        <View className="gap-2 py-1">
+          {accounts.map((a) => (
+            <Pressable
+              key={a.pid}
+              onPress={() => onSelect(a.pid)}
+              disabled={busy || a.isActive}
+              accessibilityLabel={`Switch to ${a.pid}`}
+            >
+              <View style={{ flexDirection: "row" }} className="w-full items-center gap-3 border border-border p-3">
+                {a.avatarUrl ? (
+                  <Image source={{ uri: a.avatarUrl }} className="h-9 w-9 rounded-full border border-border" />
+                ) : (
+                  <View className="h-9 w-9 items-center justify-center rounded-full bg-muted">
+                    <Text className="font-serif text-[15px] text-foreground">{(a.displayName ?? a.pid).slice(0, 1).toUpperCase()}</Text>
+                  </View>
+                )}
+                <View className="flex-1 gap-0.5">
+                  <Text className="font-sans text-[15px] font-medium text-foreground" numberOfLines={1}>
+                    {a.displayName ?? a.pid}
+                  </Text>
+                  <Text className="font-sans text-xs text-muted-foreground" numberOfLines={1}>
+                    {a.pid}
+                  </Text>
+                </View>
+                {a.isActive ? (
+                  <Check size={18} className="text-foreground" />
+                ) : onSignOut ? (
+                  <Pressable
+                    onPress={() => onSignOut(a.pid)}
+                    disabled={busy}
+                    accessibilityLabel={`Sign out ${a.pid}`}
+                  >
+                    <View className="p-2">
+                      <LogOut size={16} className="text-muted-foreground" />
+                    </View>
+                  </Pressable>
+                ) : null}
               </View>
-            )}
-            <View style={styles.meta}>
-              <Text style={styles.name} numberOfLines={1}>
-                {a.displayName ?? a.pid}
-              </Text>
-              <Text style={styles.pid} numberOfLines={1}>
-                {a.pid}
-              </Text>
-            </View>
-            {a.isActive ? (
-              <Check size={18} color={theme.colors.foreground} />
-            ) : onSignOut ? (
-              <Pressable
-                onPress={() => onSignOut(a.pid)}
-                disabled={busy}
-                style={styles.rowAction}
-                accessibilityLabel={`Sign out ${a.pid}`}
-              >
-                <LogOut size={16} color={theme.colors.mutedForeground} />
-              </Pressable>
-            ) : null}
-          </Pressable>
-        ))}
-        {accounts.length === 0 && <Text style={s.hint}>No accounts signed in.</Text>}
+            </Pressable>
+          ))}
+          {accounts.length === 0 && <Text style={s.hint}>No accounts signed in.</Text>}
+        </View>
       </ScrollView>
 
       <UIButton
@@ -84,31 +88,8 @@ export function AccountSwitcherModal({
         onPress={onAdd}
         disabled={busy}
         variant="primary"
-        icon={<Plus size={16} color={theme.colors.foreground} />}
+        icon={<Plus size={16} className="text-foreground" />}
       />
     </BottomSheet>
   );
 }
-
-const c = theme.colors;
-const f = theme.fonts;
-
-const styles = StyleSheet.create({
-  list: { flexGrow: 0 },
-  listContent: { gap: 8, paddingVertical: 4 },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  thumb: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: c.border },
-  thumbFallback: { backgroundColor: c.muted, alignItems: "center", justifyContent: "center", borderWidth: 0 },
-  thumbText: { fontSize: 15, color: c.foreground, fontFamily: f.serif },
-  meta: { flex: 1, gap: 2 },
-  name: { fontSize: 15, fontWeight: "500", color: c.foreground, fontFamily: f.sansMedium },
-  pid: { fontSize: 12, color: c.mutedForeground, fontFamily: f.sans },
-  rowAction: { padding: 8 },
-});

@@ -15,8 +15,8 @@
 // Failure: HTTP 400 {error_messages[]}.
 
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { ProviderError } from "./provider";
-import { DOKU_PROD_URL, DOKU_SANDBOX_URL } from "./subaccount";
+import { ProviderError } from "./provider.js";
+import { DOKU_PROD_URL, DOKU_SANDBOX_URL } from "./subaccount.js";
 
 export const CHECKOUT_PAYMENT_PATH = "/checkout/v1/payment";
 

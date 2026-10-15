@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { StyleSheet, Text, TextInput, View } from "../shared/primitives";
+import { Text, TextInput, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
@@ -70,11 +70,11 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
     <View style={s.container}>
       <Text style={s.title}>Send</Text>
       <Text style={s.label}>Destination (Solana address)</Text>
-      <TextInput style={s.input} value={to} onChangeText={setTo} autoCapitalize="none" placeholder="Recipient address" placeholderTextColor={theme.colors.mutedForeground} />
+      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="Recipient address" />
       <Text style={s.label}>Amount ({asset === "SOL" ? "SOL" : "raw units"})</Text>
-      <TextInput style={s.input} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={asset === "SOL" ? "0.5" : "0"} placeholderTextColor={theme.colors.mutedForeground} />
+      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={asset === "SOL" ? "0.5" : "0"} />
       <Text style={s.label}>Asset (SOL or mint address)</Text>
-      <TextInput style={s.input} value={asset} onChangeText={setAsset} autoCapitalize="none" placeholderTextColor={theme.colors.mutedForeground} />
+      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={asset} onChangeText={setAsset} autoCapitalize="none" />
       <Text style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</Text>
       {error && <Text style={s.error}>{error}</Text>}
       {result && <Text selectable style={s.mono}>{result}</Text>}
@@ -83,5 +83,3 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({});

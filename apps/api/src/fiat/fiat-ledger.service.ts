@@ -18,7 +18,7 @@ import { CHECKOUT_CLIENT } from "./checkout-client.token";
 /** Minimum internal-credit issue, NET IDR. Mirrors the Checkout intent minimum
  *  (MIN_CHECKOUT_NET_IDR in fiat-subaccount.service) — kept as its own const
  *  so neither module imports the other at runtime (DI cycle). */
-export const MIN_FIAT_DEPOSIT_NET_IDR = 100_000n;
+export const MIN_FIAT_DEPOSIT_NET_IDR = 50_000n;
 
 /** Gateway payloads are JSON by contract — cast once, at the boundary. */
 const json = (v: unknown): Prisma.InputJsonValue => v as Prisma.InputJsonValue;

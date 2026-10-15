@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/icons";
 import { theme, styles as s } from "../../../shared/theme";
 import type { FiatLedgerItem } from "../../../shared/fiat";
@@ -11,31 +11,23 @@ export function LedgerRow({ item, onSelect }: { item: FiatLedgerItem; onSelect: 
   const posted = tx.status === "posted";
   const Icon = incoming ? ArrowDownLeft : ArrowUpRight;
   const color = posted ? (incoming ? theme.colors.success : theme.colors.foreground) : theme.colors.mutedForeground;
+  const tone = !posted ? "text-muted-foreground" : incoming ? "text-success" : "text-foreground";
   const amount = tx.amountIdr;
   // Only posted money gets a sign: pending/failed/cancelled moved nothing.
   const sign = posted ? (incoming ? "+" : "−") : "";
   return (
     <TouchableOpacity key={tx.id} style={s.card} onPress={() => onSelect(item)}>
-      <View style={styles.row}>
-        <View style={[styles.icon, { backgroundColor: color + "22" }]}>
-          <Icon size={16} color={color} />
+      <View style={{ flexDirection: "row" }} className="items-center gap-3">
+        <View style={{ backgroundColor: color + "22" }} className="flex h-9 w-9 items-center justify-center rounded-full">
+          <Icon size={16} className={tone} />
         </View>
-        <View style={styles.meta}>
-          <Text style={styles.label}>{ledgerLabel(item.kind, incoming)}</Text>
-          <Text style={styles.muted}>{fmtDate(item.createdAt)} · {ledgerStatusLabel(tx.status)}</Text>
+        <View className="flex-1 gap-0.5">
+          <Text className="font-sans text-[15px] font-semibold text-foreground">{ledgerLabel(item.kind, incoming)}</Text>
+          <Text className="font-sans text-xs text-muted-foreground">{fmtDate(item.createdAt)} · {ledgerStatusLabel(tx.status)}</Text>
         </View>
-        <Text style={styles.amount}>{sign}{fmtIdr(amount)}</Text>
-        <ChevronRight size={16} color={theme.colors.mutedForeground} />
+        <Text className="font-mono text-sm font-medium text-foreground">{sign}{fmtIdr(amount)}</Text>
+        <ChevronRight size={16} className="text-muted-foreground" />
       </View>
     </TouchableOpacity>
   );
 }
-
-const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  icon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  meta: { flex: 1, gap: 2 },
-  label: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  muted: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  amount: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
-});

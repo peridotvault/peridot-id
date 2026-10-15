@@ -2,7 +2,7 @@
 export const MAX_INPUT_DIGITS = 12;
 
 /** Minimum Checkout top-up, NET IDR (mirrors the API; the API rejects below). */
-export const MIN_NET_IDR = 100_000n;
+export const MIN_NET_IDR = 50_000n;
 
 /** Keep digits only (paste-safe), strip leading zeros, cap length. */
 export function digitsOnly(raw: string): string {

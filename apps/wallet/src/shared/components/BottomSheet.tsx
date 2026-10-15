@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "../primitives";
-import { theme } from "../theme";
 import { X } from "../icons";
 
 // Shared bottom drawer: slide-up sheet capped at the sm width and centered.
@@ -28,11 +27,13 @@ export function BottomSheet({
         onPress={closeDisabled ? undefined : onClose}
         accessibilityLabel={scrimLabel ?? `Close ${title}`}
       />
-      <View style={styles.sheet}>
-        <View style={styles.head}>
-          <Text style={styles.title}>{title}</Text>
-          <Pressable onPress={onClose} disabled={closeDisabled} style={styles.close} accessibilityLabel="Close">
-            <X size={18} color={theme.colors.mutedForeground} />
+      <View className="absolute bottom-0 left-0 right-0 mx-auto max-h-[75%] w-full max-w-[576px] gap-3 self-center border-t border-border bg-surface p-5 pb-7">
+        <View style={{ flexDirection: "row" }} className="items-center justify-between">
+          <Text className="font-serif text-[22px] tracking-[-0.3px] text-foreground">{title}</Text>
+          <Pressable onPress={onClose} disabled={closeDisabled} accessibilityLabel="Close">
+            <View className="p-1.5">
+              <X size={18} className="text-muted-foreground" />
+            </View>
           </Pressable>
         </View>
         {children}
@@ -41,29 +42,8 @@ export function BottomSheet({
   );
 }
 
-const c = theme.colors;
-const f = theme.fonts;
-
+// The scrim keeps a stylesheet: it is a Pressable whose dim background must
+// beat the shim's inline `background: none` — no class can do that.
 const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0, 0, 0, 0.6)" },
-  sheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: "100%",
-    maxWidth: theme.layout.maxWidth,
-    marginHorizontal: "auto",
-    alignSelf: "center",
-    maxHeight: "75%",
-    backgroundColor: c.surface,
-    borderTopWidth: 1,
-    borderColor: c.border,
-    padding: 20,
-    paddingBottom: 28,
-    gap: 12,
-  },
-  head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  title: { fontSize: 22, color: c.foreground, fontFamily: f.serif, letterSpacing: -0.3 },
-  close: { padding: 6 },
 });

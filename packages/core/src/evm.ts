@@ -7,8 +7,8 @@
 // Browser-safe: @noble/hashes only, no Buffer, no node:crypto.
 
 import { keccak_256 } from "@noble/hashes/sha3";
-import { concat, fromAscii, fromHex, pidToSeed32, toHex } from "./bytes";
-import type { Bytes } from "./bytes";
+import { concat, fromAscii, fromHex, pidToSeed32, toHex } from "./bytes.js";
+import type { Bytes } from "./bytes.js";
 
 // Re-exported byte vocabulary so EVM consumers never touch the web3.js index.
 export { concat, fromAscii, fromHex, toHex };

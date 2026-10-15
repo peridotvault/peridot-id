@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "../shared/primitives";
-import { ArrowLeft } from "../shared/icons";
+import { Linking, ScrollView, Text, TextInput, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
+import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
 import { fmtIdr } from "../shared/fiat";
 import { FiatQuoteBreakdown } from "../feat/fiat/components/FiatQuoteBreakdown";
@@ -44,7 +44,7 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
         return;
       }
       if (BigInt(digits) < MIN_NET_IDR) {
-        setError("Minimum top-up is Rp100.000.");
+        setError("Minimum top-up is Rp50.000.");
         return;
       }
       if (!q.method) {
@@ -67,17 +67,14 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
 
   return (
     <ScrollView contentContainerStyle={s.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone} accessibilityLabel="Back">
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
+      <BackButton onPress={onDone} />
       <Text style={s.title}>Top Up</Text>
       <Text style={s.subtitle}>Enter what you want credited — you pay that plus the fees shown below.</Text>
 
-      <View style={styles.card}>
+      <View className="mt-3 gap-1.5 border border-border bg-surface p-3">
         <Text style={s.label}>Amount credited to you (IDR)</Text>
-        <TextInput style={s.input} value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="100.000" placeholderTextColor={theme.colors.mutedForeground} />
-        {belowMin && <Text style={s.error}>Minimum top-up is Rp100.000.</Text>}
+        <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000" />
+        {belowMin && <Text style={s.error}>Minimum top-up is Rp50.000.</Text>}
 
         {q.quote && (
           <>
@@ -103,7 +100,7 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
           variant="primary"
         />
         {sync.pending && (
-          <View style={styles.pending}>
+          <View className="gap-1.5">
             <Text style={s.hint}>Complete your payment, then tap Check status — your Saldo updates once the payment is confirmed.</Text>
             <UIButton
               title={sync.syncing ? "Checking…" : "Check payment status"}
@@ -124,17 +121,3 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-  card: {
-    marginTop: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    gap: 6,
-  },
-  pending: { gap: 6 },
-});

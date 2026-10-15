@@ -52,8 +52,8 @@ cd smart-account
 PID_BACKEND=<backend-pubkey> cargo build-sbf # backend allowlist baked in (build.rs)
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot_smart_account-keypair.json
-pnpm --filter @peridotvault/pid-api dev        # API on :3301
-cd apps/wallet && pnpm dev:web         # Vite dev server on :8081
+pnpm --filter @peridotvault/pid-api dev        # API on :3300
+cd apps/wallet && pnpm dev:web         # Vite dev server on :3302
 ```
 
 After pulling (or whenever Prisma complains about a missing column, e.g.
@@ -64,8 +64,8 @@ but never touches the DB schema; deploy applies migrations automatically.)
 Env to set in `apps/api/.env`: `GOOGLE_CLIENT_ID`/`_SECRET` (dev Google
 client with localhost redirect; same key names in every env, values differ —
 prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
-`WEBAUTHN_ORIGINS` includes `http://localhost:8081`, `CLIENT_SUCCESS_URL=http://localhost:8081`,
-`CORS_ORIGINS=http://localhost:8081`. Restart the API after `.env` changes (`nest --watch` does not reload env).
+`WEBAUTHN_ORIGINS` includes `http://localhost:3302`, `CLIENT_SUCCESS_URL=http://localhost:3302`,
+`CORS_ORIGINS=http://localhost:3302`. Restart the API after `.env` changes (`nest --watch` does not reload env).
 
 Fiat (one namespace `fiat`, see docs/FIAT_LEDGER.md): **DOKU Checkout is
 money-in only** (no Sub-Account). Every user balance lives on the internal
@@ -82,7 +82,7 @@ explicit status checks, not pushes. TopupScreen auto-checks once per intent
 and offers “Check payment status” (`syncTransaction` → `POST /v1/fiat/deposits/:id/sync`
 — same corroborated path as the webhook, and it is what issues the ledger
 credit). For real-time webhook delivery in dev, expose the API via a tunnel
-(e.g. `ngrok http 3301`) and set `DOKU_WEBHOOK_URL` (+ `DOKU_CHECKOUT_NOTIFY_URL`)
+(e.g. `ngrok http 3300`) and set `DOKU_WEBHOOK_URL` (+ `DOKU_CHECKOUT_NOTIFY_URL`)
 to the tunnel URL — localhost values never reach DOKU.
 
 ## Login split (first-party wallet vs public flow)

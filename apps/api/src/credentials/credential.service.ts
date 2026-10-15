@@ -94,7 +94,7 @@ export class CredentialService {
   }
 
   private origins(): string[] {
-    const raw = this.config.get<string>("WEBAUTHN_ORIGINS") ?? "http://localhost:3301,http://localhost:5173";
+    const raw = this.config.get<string>("WEBAUTHN_ORIGINS") ?? "http://localhost:3300,http://localhost:5173";
     return raw.split(",").map((s) => s.trim()).filter(Boolean);
   }
 

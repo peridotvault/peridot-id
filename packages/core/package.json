@@ -1,7 +1,7 @@
 {
   "name": "@peridotvault/pid-core",
   "version": "0.1.0",
-  "description": "PeridotID core primitives — encoding, domain-separated hashes, WebAuthn ceremonies, and client key custody. No redirects, no hosts, no app flow.",
+  "description": "PeridotID core primitives \u2014 encoding, domain-separated hashes, WebAuthn ceremonies, and client key custody. No redirects, no hosts, no app flow.",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -18,11 +18,27 @@
     "@solana/web3.js": "^1.98.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepack": "tsc -p tsconfig.json"
+    "prepack": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\""
   },
   "devDependencies": {
     "@types/node": "^22.20.1"
+  },
+  "module": "./dist/esm/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./dist/*": {
+      "types": "./dist/esm/*.d.ts",
+      "import": "./dist/esm/*.js",
+      "require": "./dist/*.js",
+      "default": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
   }
 }

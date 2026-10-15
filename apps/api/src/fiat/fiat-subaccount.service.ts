@@ -32,7 +32,7 @@ const POINT_ACCOUNT = "DOKU_MERCHANT_POINT";
 const MAX_CHECKOUT_GROSS = 999_999_999_999n;
 /** Minimum Checkout top-up, NET IDR, enforced by the Peridot API only.
  *  No minimum-deposit rule is configured at DOKU. */
-export const MIN_CHECKOUT_NET_IDR = 100_000n;
+export const MIN_CHECKOUT_NET_IDR = 50_000n;
 
 /** Gateway payloads are JSON by contract — cast once, at the boundary. */
 const json = (v: unknown): Prisma.InputJsonValue => v as Prisma.InputJsonValue;
@@ -87,7 +87,7 @@ interface FeeParams {
  * records and fee snapshots only — never a balance.
  *
  * Deposit money model (Checkout, NET-in): the user enters the NET amount they
- * want credited (minimum Rp100.000, enforced here — no DOKU-side minimum).
+ * want credited (minimum Rp50.000, enforced here — no DOKU-side minimum).
  * fee = flat 5% of net (round-half-up, no floor, no cap), gross = net + fee.
  * The customer is charged gross at DOKU Checkout; fiat settles 100% to the
  * user's IDR account as POINTS backing (no fiat split — the fee moves as
@@ -391,7 +391,7 @@ export class FiatSubAccountService {
    */
   async quoteDeposit(netAmountIdr: string, appClientId?: string | null, paymentMethod?: string | null) {
     const net = this.parseGross(netAmountIdr);
-    if (net < MIN_CHECKOUT_NET_IDR) throw new BadRequestException("Minimum top-up is Rp100.000");
+    if (net < MIN_CHECKOUT_NET_IDR) throw new BadRequestException("Minimum top-up is Rp50.000");
     const { globalFee, peridotTaxIdr, appFee, policyVersion, isVerified } = await this.ledger.quoteFees(appClientId, "topup", net);
     const base = net + globalFee + peridotTaxIdr + appFee;
     const methods = (await this.paymentFee.methodsFor(net)).map((m) => ({
@@ -426,7 +426,7 @@ export class FiatSubAccountService {
 
   /**
    * Create a Checkout deposit intent (NET-in): the entered amount is the NET
-   * the user wants credited (minimum Rp100.000 — API-enforced, no DOKU
+   * the user wants credited (minimum Rp50.000 — API-enforced, no DOKU
    * minimum). Total charged = net + PeridotID fee + app fee + DOKU gateway fee;
    * the selected method is locked at DOKU (`payment_method_types`). Local row
    * first (total stored, all quotes snapshotted), then the DOKU-hosted payment
@@ -435,7 +435,7 @@ export class FiatSubAccountService {
    */
   async createCheckoutDeposit(pid: string, netAmountIdr: string, appClientId?: string | null, paymentMethod?: string | null) {
     const net = this.parseGross(netAmountIdr);
-    if (net < MIN_CHECKOUT_NET_IDR) throw new BadRequestException("Minimum top-up is Rp100.000");
+    if (net < MIN_CHECKOUT_NET_IDR) throw new BadRequestException("Minimum top-up is Rp50.000");
     // No DOKU Sub-Account required: Checkout money-in lands on the merchant
     // account; every user balance lives on the internal fiat ledger.
     // PeridotID fee (0 for verified apps) + the app's own stacked fee.
@@ -2809,7 +2809,7 @@ export class FiatSubAccountService {
    * sub-account's numbers (IDR + Pending + VA rail); amounts parse strictly.
    * Funds are always preserved (never rejected). Inbound VA credits are NOT
    * Checkout top-ups: when the derived net (received − fee) falls below the
-   * Rp100.000 Checkout minimum, the row is flagged
+   * Rp50.000 Checkout minimum, the row is flagged
    * (counterparty.belowMinimumNet) for separate exception handling instead
    * of being silently treated as a valid top-up.
    *

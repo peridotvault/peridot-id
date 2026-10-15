@@ -17,6 +17,8 @@ src/
     config.ts         # API_BASE_URL
     fiat-ensure.ts    # post-auth provisioning check (shell routing)
     fiat.ts           # FiatItem/FiatLedgerItem + status labels + sumIdr
+    shims.ts          # Buffer/global bootstrap — imported first by main.tsx,
+                      # runs before any Solana module (top-level Buffer use)
     components/       # UIButton, AsciiRidges(*), AccountSwitcherModal,
                       # LoadingScreen, TabBar
     hooks/  utils/    # future shared extractions land here
@@ -92,8 +94,25 @@ done
   useSignInMethods,useConsentActions,utils/parseOAuthError,
   components/PidClaimForm,LoginOptions}` (+`finishSso` lives in `sso.ts`).
 - Deliberately duplicated (not unified): Home vs Activity `TabButton`
-  variants, modal vs explainer activation copy, `BackButton` (2 uses —
-  extract on 3rd).
+  variants, modal vs explainer activation copy.
+
+## Done (Phase 4 — Tailwind styling)
+
+- Tokens in `src/index.css` `@theme` (byte-identical to `theme.ts`;
+  `theme.ts` stays the TS token source). Per-file `StyleSheet.create` is
+  gone except documented exceptions.
+- Rules: paint via `className`; `flexDirection` stays a style prop and
+  `Pressable` backgrounds/borders/padding go on an inner wrapper `View`
+  (the shim emits those inline, which beats any class). Never
+  `bg-[rgba()]` (scanner skips it — use `bg-black/60`-style modifiers);
+  icon color via `text-*`, never the `color` prop (dynamic tint values
+  stay inline props); placeholders via `[--placeholder:var(--color-…)]`.
+- `shared/components/BackButton.tsx` — single back affordance used by all
+  detail screens. `UIButton` keeps its stylesheet (variant backgrounds
+  live on the `Pressable` itself); `BottomSheet` keeps one scrim style
+  for the same reason. `ScrollView` inners keep plain objects (no class
+  path) — so `theme.ts` keeps the shared `styles` block (`container`,
+  `card`, `input`, …) while per-file blocks are gone.
 
 ## Done (Phase 3 — App.tsx is a pure composer)
 

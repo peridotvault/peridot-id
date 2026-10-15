@@ -5,8 +5,8 @@
 // Browser-safe: no Buffer, no node:crypto (WebCrypto for SHA-256).
 
 import { PublicKey } from "@solana/web3.js";
-import { concat, fromAscii, pidToSeed32, sha256 as hashSha256, u16le, u64le, i64le } from "./bytes";
-import type { Bytes } from "./bytes";
+import { concat, fromAscii, pidToSeed32, sha256 as hashSha256, u16le, u64le, i64le } from "./bytes.js";
+import type { Bytes } from "./bytes.js";
 
 export { pidToSeed32 };
 
@@ -62,7 +62,7 @@ export function sha256(data: Uint8Array): Promise<Uint8Array> {
 }
 
 export async function base64url(data: Uint8Array): Promise<string> {
-  const { b64url } = await import("./bytes");
+  const { b64url } = await import("./bytes.js");
   return b64url(data);
 }
 

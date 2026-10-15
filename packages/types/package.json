@@ -10,8 +10,24 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepack": "tsc -p tsconfig.json"
+    "prepack": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\""
+  },
+  "module": "./dist/esm/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./dist/*": {
+      "types": "./dist/esm/*.d.ts",
+      "import": "./dist/esm/*.js",
+      "require": "./dist/*.js",
+      "default": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
   }
 }

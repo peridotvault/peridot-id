@@ -1,7 +1,7 @@
 // Browser WebAuthn passkey integration (task 009). Provides the PasskeySigner the Solana
 // adapter needs, plus the registration ceremony client for the credentials API (task 003).
 
-import { b64url, b64urlToBytes, derToRawEcdsa } from "./bytes";
+import { b64url, b64urlToBytes, derToRawEcdsa } from "./bytes.js";
 import type {
   Authority,
   RegisterStart,

@@ -61,7 +61,7 @@ export {
   PID_PROGRAM_ID,
   SECP256R1_PRECOMPILE,
   sha256,
-} from "./hash";
+} from "./hash.js";
 export {
   pidToSeed32,
   sha256Sync,
@@ -78,17 +78,17 @@ export {
   toHex,
   u16le,
   u64le,
-} from "./bytes";
-export type { Bytes } from "./bytes";
-export type { ExecuteMeta, SessionMeta } from "./hash";
+} from "./bytes.js";
+export type { Bytes } from "./bytes.js";
+export type { ExecuteMeta, SessionMeta } from "./hash.js";
 export {
   assertCeremonyOrigin,
   authenticatePasskey,
   BrowserPasskeySigner,
   PasskeyHostedRequiredError,
   registerPasskey,
-} from "./webauthn";
-export type { PasskeyAssertion, PasskeySigner } from "./webauthn";
+} from "./webauthn.js";
+export type { PasskeyAssertion, PasskeySigner } from "./webauthn.js";
 export {
   pidToSalt32,
   addressToBytes,
@@ -107,14 +107,14 @@ export {
   OP_EVM,
   splitRawXy,
   toChecksumAddress,
-} from "./evm";
-export type { EvmChain } from "./evm";
+} from "./evm.js";
+export type { EvmChain } from "./evm.js";
 export {
   FeePayerManager,
   InMemorySecretStore,
   LocalStorageSecretStore,
   type SecretStore,
-} from "./custody";
-export { LocalHistoryStore, type HistoryStore } from "./cache";
+} from "./custody.js";
+export { LocalHistoryStore, type HistoryStore } from "./cache.js";
 export { Keypair, PublicKey } from "@solana/web3.js";
 export type { Keypair as SolanaKeypair } from "@solana/web3.js";

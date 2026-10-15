@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from "../shared/primitives";
+import { Text, TextInput, TouchableOpacity, View } from "../shared/primitives";
 import { ArrowDownUp } from "../shared/icons";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
 
 export function SwapScreen({ onDone }: { onDone: () => void }) {
@@ -20,40 +20,32 @@ export function SwapScreen({ onDone }: { onDone: () => void }) {
       <Text style={s.title}>Swap</Text>
       <Text style={s.subtitle}>Swap between assets on the smart account.</Text>
 
-      <View style={styles.swapCard}>
+      <View className="gap-2">
         <Text style={s.label}>You pay</Text>
-        <TextInput style={s.input} value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="0.0" placeholderTextColor={theme.colors.mutedForeground} />
+        <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="0.0" />
         <Text style={s.label}>From asset</Text>
         <TextInput style={s.input} value={from} onChangeText={setFrom} autoCapitalize="none" />
 
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <View style={styles.swapIcon}>
-            <ArrowDownUp size={16} color={theme.colors.foreground} />
+        <View style={{ flexDirection: "row" }} className="my-2 items-center gap-3">
+          <View className="h-px flex-1 bg-border" />
+          <View className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
+            <ArrowDownUp size={16} className="text-foreground" />
           </View>
-          <View style={styles.dividerLine} />
+          <View className="h-px flex-1 bg-border" />
         </View>
 
         <Text style={s.label}>You receive</Text>
-        <Text style={styles.estimate}>≈ {amount || "0.0"}</Text>
+        <Text className="font-mono text-[18px] font-semibold text-foreground">≈ {amount || "0.0"}</Text>
         <Text style={s.label}>To asset</Text>
         <TextInput style={s.input} value={to} onChangeText={setTo} autoCapitalize="none" />
       </View>
 
-      <TouchableOpacity style={styles.comingSoon} onPress={swap}>
-        <Text style={styles.comingSoonText}>Swap coming soon</Text>
+      <TouchableOpacity onPress={swap}>
+        <View className="w-full items-center border border-border bg-surface p-3.5">
+          <Text className="font-sans text-[13px] font-medium text-muted-foreground">Swap coming soon</Text>
+        </View>
       </TouchableOpacity>
       <UIButton title="Back" onPress={onDone} />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  swapCard: { gap: 8 },
-  divider: { flexDirection: "row", alignItems: "center", gap: 12, marginVertical: 8 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: theme.colors.border },
-  swapIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center", justifyContent: "center" },
-  estimate: { fontSize: 18, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
-  comingSoon: { alignItems: "center", padding: 14, borderRadius: 0, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface },
-  comingSoonText: { color: theme.colors.mutedForeground, fontSize: 13, fontWeight: "500", fontFamily: theme.fonts.sansMedium },
-});

@@ -1,4 +1,4 @@
-import { ProviderError } from "./provider";
+import { ProviderError } from "./provider.js";
 
 /**
  * Strict IDR parser — the single boundary normalizer for every provider

@@ -1,6 +1,5 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { ArrowDownLeft, ArrowUpRight, Banknote, Coins } from "../../../shared/icons";
-import { theme } from "../../../shared/theme";
 
 export function QuickActions({
   onSend,
@@ -14,7 +13,7 @@ export function QuickActions({
   onBuy: () => void;
 }) {
   return (
-    <View style={styles.actions}>
+    <View style={{ flexDirection: "row" }} className="gap-3">
       <ActionButton icon={ArrowUpRight} label="Send" onPress={onSend} />
       <ActionButton icon={ArrowDownLeft} label="Receive" onPress={onReceive} />
       <ActionButton icon={Coins} label="Swap" onPress={onSwap} />
@@ -26,40 +25,17 @@ export function QuickActions({
 function ActionButton({ icon: Icon, label, onPress, disabled }: { icon: typeof ArrowUpRight; label: string; onPress: () => void; disabled?: boolean }) {
   return (
     <TouchableOpacity
-      style={[styles.actionBtn, disabled && styles.actionBtnDisabled]}
       onPress={onPress}
       disabled={disabled}
       accessibilityState={{ disabled: !!disabled }}
+      className="flex-1"
     >
-      <View style={styles.actionIcon}>
-        <Icon size={20} color={disabled ? theme.colors.mutedForeground : theme.colors.foreground} />
+      <View className={`w-full items-center gap-2 border border-border bg-surface py-3 ${disabled ? "opacity-40" : ""}`}>
+        <View className="h-10 w-10 items-center justify-center rounded-full bg-muted">
+          <Icon size={20} className={disabled ? "text-muted-foreground" : "text-foreground"} />
+        </View>
+        <Text className={`font-sans text-[13px] font-medium text-foreground ${disabled ? "opacity-60" : ""}`}>{label}</Text>
       </View>
-      <Text style={[styles.actionLabel, disabled && styles.actionLabelDisabled]}>{label}</Text>
     </TouchableOpacity>
   );
 }
-
-const styles = StyleSheet.create({
-  actions: { flexDirection: "row", gap: 12 },
-  actionBtn: {
-    flex: 1,
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 0,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-  },
-  actionBtnDisabled: { opacity: 0.4 },
-  actionLabelDisabled: { opacity: 0.6 },
-  actionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.muted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionLabel: { fontSize: 13, color: theme.colors.foreground, fontWeight: "500", fontFamily: theme.fonts.sansMedium },
-});

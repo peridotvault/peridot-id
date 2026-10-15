@@ -1,6 +1,6 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { Copy } from "../../../shared/icons";
-import { theme, styles as s } from "../../../shared/theme";
+import { styles as s } from "../../../shared/theme";
 
 export function DepositAddressCard({
   address,
@@ -18,19 +18,21 @@ export function DepositAddressCard({
   return (
     <View style={s.card}>
       <Text style={[s.label, { marginBottom: 6 }]}>Your deposit address</Text>
-      <Text style={styles.desc}>
+      <Text className="font-sans text-[13px] leading-[19px] text-muted-foreground">
         Send SOL to this address to fund your wallet and cover activation. The cost
         currently requires about {requiredSol.toFixed(4)} SOL.
       </Text>
-      <TouchableOpacity style={styles.addressBox} onPress={onCopy}>
-        <Text selectable style={[s.mono, styles.addressText]}>
-          {address ? `${address.slice(0, 8)}…${address.slice(-8)}` : "—"}
-        </Text>
-        {copied ? (
-          <Text style={styles.copied}>Copied</Text>
-        ) : (
-          <Copy size={14} color={theme.colors.mutedForeground} />
-        )}
+      <TouchableOpacity onPress={onCopy}>
+        <View style={{ flexDirection: "row" }} className="mt-1 w-full items-center justify-between gap-2 border border-border bg-muted p-3">
+          <Text selectable style={s.mono} className="flex-1">
+            {address ? `${address.slice(0, 8)}…${address.slice(-8)}` : "—"}
+          </Text>
+          {copied ? (
+            <Text className="font-sans text-xs text-success">Copied</Text>
+          ) : (
+            <Copy size={14} className="text-muted-foreground" />
+          )}
+        </View>
       </TouchableOpacity>
       <Text style={s.hint}>
         Balance: {balanceSol.toFixed(4)} SOL{balanceSol < requiredSol ? ` — top up to at least ${requiredSol.toFixed(4)} SOL` : ""}.
@@ -38,21 +40,3 @@ export function DepositAddressCard({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  desc: { fontSize: 13, color: theme.colors.mutedForeground, lineHeight: 19, fontFamily: theme.fonts.sans },
-  addressBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.muted,
-    borderRadius: 0,
-    marginTop: 4,
-  },
-  addressText: { flex: 1 },
-  copied: { fontSize: 12, color: theme.colors.success, fontFamily: theme.fonts.sans },
-});

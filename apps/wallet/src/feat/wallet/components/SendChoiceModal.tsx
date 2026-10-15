@@ -1,5 +1,5 @@
 import { Text } from "../../../shared/primitives";
-import { styles as s, theme } from "../../../shared/theme";
+import { styles as s } from "../../../shared/theme";
 import { BottomSheet } from "../../../shared/components/BottomSheet";
 import { UIButton } from "../../../shared/components/UIButton";
 import { ArrowUpRight, Banknote } from "../../../shared/icons";
@@ -25,14 +25,14 @@ export function SendChoiceModal({
       <UIButton
         title="Send On-Chain"
         note={activated ? "To Solana address" : "Activate account first"}
-        icon={<ArrowUpRight size={16} color={activated ? theme.colors.foreground : theme.colors.mutedForeground} />}
+        icon={<ArrowUpRight size={16} className={activated ? "text-foreground" : "text-muted-foreground"} />}
         onPress={onPickOnChain}
         disabled={!activated}
       />
       <UIButton
         title="Send IDR"
         note="To xxx@pid"
-        icon={<Banknote size={16} color={theme.colors.foreground} />}
+        icon={<Banknote size={16} className="text-foreground" />}
         onPress={onPickIdr}
       />
       <UIButton title="Cancel" onPress={onClose} />

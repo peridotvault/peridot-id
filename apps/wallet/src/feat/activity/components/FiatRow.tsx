@@ -1,4 +1,4 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/icons";
 import { theme, styles as s } from "../../../shared/theme";
 import type { FiatItem } from "../../../shared/fiat";
@@ -10,6 +10,7 @@ export function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: F
   const { tx } = item;
   const Icon = incoming ? ArrowDownLeft : ArrowUpRight;
   const color = tx.providerStatus === "settled" || tx.providerStatus === "success" ? theme.colors.success : theme.colors.foreground;
+  const tinted = color === theme.colors.success;
   // Only live money gets a sign: failed/cancelled/expired moved nothing.
   const live = ["settled", "success", "processing", "created"].includes(tx.providerStatus);
   const sign = live ? (incoming ? "+" : "−") : "";
@@ -19,26 +20,17 @@ export function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: F
   const moved = item.kind === "fee" ? (tx.feeIdr ?? tx.grossIdr) : (tx.netIdr ?? tx.grossIdr);
   return (
     <TouchableOpacity key={tx.id} style={s.card} onPress={() => onSelect(item)}>
-      <View style={styles.row}>
-        <View style={[styles.icon, { backgroundColor: color + "22" }]}>
-          <Icon size={16} color={color} />
+      <View style={{ flexDirection: "row" }} className="items-center gap-3">
+        <View style={{ backgroundColor: color + "22" }} className="flex h-9 w-9 items-center justify-center rounded-full">
+          <Icon size={16} className={tinted ? "text-success" : "text-foreground"} />
         </View>
-        <View style={styles.meta}>
-          <Text style={styles.label}>{fiatLabel(item.kind)}</Text>
-          <Text style={styles.muted}>{fmtDate(item.createdAt)} · {fiatStatusLabel(item.kind, tx.providerStatus)}</Text>
+        <View className="flex-1 gap-0.5">
+          <Text className="font-sans text-[15px] font-semibold text-foreground">{fiatLabel(item.kind)}</Text>
+          <Text className="font-sans text-xs text-muted-foreground">{fmtDate(item.createdAt)} · {fiatStatusLabel(item.kind, tx.providerStatus)}</Text>
         </View>
-        <Text style={styles.amount}>{sign}{fmtIdr(moved)}</Text>
-        <ChevronRight size={16} color={theme.colors.mutedForeground} />
+        <Text className="font-mono text-sm font-medium text-foreground">{sign}{fmtIdr(moved)}</Text>
+        <ChevronRight size={16} className="text-muted-foreground" />
       </View>
     </TouchableOpacity>
   );
 }
-
-const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  icon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  meta: { flex: 1, gap: 2 },
-  label: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  muted: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  amount: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
-});

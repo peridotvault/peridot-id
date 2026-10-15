@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { StyleSheet, View } from "../../../shared/primitives";
+import { View } from "../../../shared/primitives";
 import type { Identity, Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../../../shared/AppContext";
 import { HomeHeader } from "./HomeHeader";
@@ -38,12 +38,8 @@ export function TopBar({ onConnections, refreshKey }: { onConnections: () => voi
   }, [peridot, refreshKey]);
 
   return (
-    <View style={styles.bar}>
+    <View className="px-6 pb-2 pt-5">
       <HomeHeader pid={pid} displayName={displayName} onConnections={onConnections} />
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  bar: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 8 },
-});

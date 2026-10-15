@@ -97,12 +97,12 @@ export {
   buildWithdrawTokenInstructionV2,
   buildWithdrawTokenInstructionV3,
   smartAccountAta,
-} from "./instructions";
-export { SolanaRpc } from "./rpc";
-export type { ChainRpc, NftItem, ParsedTx, TokenBalance } from "./rpc";
-export { getNftsOf, parseMetadataString, parseMetadataUri } from "./rpc";
-export { SolanaAdapter } from "./adapter";
-export type { TransactionStatus } from "./adapter";
+} from "./instructions.js";
+export { SolanaRpc } from "./rpc.js";
+export type { ChainRpc, NftItem, ParsedTx, TokenBalance } from "./rpc.js";
+export { getNftsOf, parseMetadataString, parseMetadataUri } from "./rpc.js";
+export { SolanaAdapter } from "./adapter.js";
+export type { TransactionStatus } from "./adapter.js";
 export type { PasskeyAssertion, PasskeySigner } from "@peridotvault/pid-core";
 export { Keypair, PublicKey } from "@solana/web3.js";
 export type { Keypair as SolanaKeypair } from "@solana/web3.js";

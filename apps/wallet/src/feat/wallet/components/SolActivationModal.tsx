@@ -1,4 +1,4 @@
-import { Modal, StyleSheet, Text, View } from "../../../shared/primitives";
+import { Modal, Text, View } from "../../../shared/primitives";
 import QRCode from "react-qr-code";
 import { theme, styles as s } from "../../../shared/theme";
 import { UIButton } from "../../../shared/components/UIButton";
@@ -24,17 +24,17 @@ export function SolActivationModal({
 }) {
   return (
     <Modal visible={target !== null} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalScrim}>
-        <View style={styles.modalCard}>
-          <Text style={styles.chainLabel}>{target?.label}</Text>
+      <View className="flex-1 items-center justify-center bg-black/70 p-6">
+        <View className="w-full max-w-[360px] gap-3 border border-border bg-surface p-5">
+          <Text className="font-sans text-[15px] font-semibold">{target?.label}</Text>
           {target && (
-            <View style={styles.qrWrap}>
+            <View className="mb-2 self-center bg-foreground p-3">
               <QRCode value={target.qrValue} size={220} bgColor={theme.colors.foreground} fgColor={theme.colors.background} />
             </View>
           )}
           <Text selectable style={s.mono}>{target?.address}</Text>
           {!gate.isActive && (
-            <Text style={gate.balanceSol < gate.requiredSol ? styles.balanceAlert : s.hint}>
+            <Text className={gate.balanceSol < gate.requiredSol ? "font-sans text-xs text-danger" : ""} style={gate.balanceSol < gate.requiredSol ? undefined : s.hint}>
               Balance: {gate.balanceSol.toFixed(4)} SOL{gate.balanceSol < gate.requiredSol ? ` — top up to at least ${gate.requiredSol.toFixed(4)} SOL` : ""}.
             </Text>
           )}
@@ -71,32 +71,3 @@ export function SolActivationModal({
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  chainLabel: { fontSize: 15, fontWeight: "600", fontFamily: theme.fonts.sans },
-  qrWrap: {
-    alignSelf: "center",
-    padding: 12,
-    backgroundColor: theme.colors.foreground,
-    borderRadius: 0,
-    marginBottom: 8,
-  },
-  balanceAlert: { fontSize: 12, color: theme.colors.danger, fontFamily: theme.fonts.sans },
-  modalScrim: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  modalCard: {
-    width: "100%",
-    maxWidth: 360,
-    gap: 12,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 0,
-  },
-});

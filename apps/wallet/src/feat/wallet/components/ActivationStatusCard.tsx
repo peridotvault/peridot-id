@@ -1,6 +1,6 @@
-import { StyleSheet, Text, View } from "../../../shared/primitives";
+import { Text, View } from "../../../shared/primitives";
 import { Info } from "../../../shared/icons";
-import { theme, styles as s } from "../../../shared/theme";
+import { styles as s } from "../../../shared/theme";
 
 export function ActivationStatusCard({
   status,
@@ -14,9 +14,9 @@ export function ActivationStatusCard({
   return (
     <View style={s.card}>
       <Text style={[s.label, { marginBottom: 6 }]}>Status</Text>
-      <View style={styles.statusRow}>
-        <Info size={16} color={theme.colors.mutedForeground} />
-        <Text style={styles.desc}>
+      <View style={{ flexDirection: "row" }} className="items-start gap-2">
+        <Info size={16} className="text-muted-foreground" />
+        <Text className="font-sans text-[13px] leading-[19px] text-muted-foreground">
           {status === "ready"
             ? `Ready to activate.`
             : status === "inactivated"
@@ -31,8 +31,3 @@ export function ActivationStatusCard({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  desc: { fontSize: 13, color: theme.colors.mutedForeground, lineHeight: 19, fontFamily: theme.fonts.sans },
-  statusRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
-});

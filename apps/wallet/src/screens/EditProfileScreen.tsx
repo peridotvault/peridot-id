@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Image, ScrollView, StyleSheet, Text, TextInput, View } from "../shared/primitives";
+import { Image, ScrollView, Text, TextInput, View } from "../shared/primitives";
 import type { Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
 
 export function EditProfileScreen({ onDone }: { onDone: () => void }) {
@@ -44,50 +44,26 @@ export function EditProfileScreen({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
       <Text style={s.title}>Edit Profile</Text>
 
       {profile?.avatarUrl ? (
-        <Image source={{ uri: profile.avatarUrl }} style={styles.photo} />
+        <Image source={{ uri: profile.avatarUrl }} className="h-16 w-16 self-center rounded-full border border-border" />
       ) : (
-        <View style={[styles.photo, styles.photoFallback]}>
-          <Text style={styles.avatarText}>{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
+        <View className="h-16 w-16 items-center justify-center self-center rounded-full border border-border bg-surface">
+          <Text className="font-serif text-[28px] text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
         </View>
       )}
 
-      {pid ? <Text style={styles.pid}>@{pid} · permanent, cannot be changed</Text> : null}
+      {pid ? <Text className="text-center font-sans text-[13px] text-muted-foreground">@{pid} · permanent, cannot be changed</Text> : null}
 
       <Text style={s.label}>Display Name</Text>
-      <TextInput style={s.input} value={displayName} onChangeText={setDisplayName} placeholder="Display name" placeholderTextColor={theme.colors.mutedForeground} />
+      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={displayName} onChangeText={setDisplayName} placeholder="Display name" />
 
       {error && <Text style={s.error}>{error}</Text>}
-      {saved && <Text style={styles.saved}>Saved</Text>}
+      {saved && <Text className="font-sans text-[13px] text-success">Saved</Text>}
       <UIButton title={busy ? "Saving…" : "Save"} onPress={save} disabled={busy} variant="primary" />
       <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }
-
-const c = theme.colors;
-const f = theme.fonts;
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.background },
-  container: { padding: 24, gap: 12 },
-  photo: {
-    alignSelf: "center",
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  photoFallback: {
-    backgroundColor: c.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarText: { fontSize: 28, fontWeight: "400", color: c.foreground, fontFamily: f.serif },
-  pid: { fontSize: 13, color: c.mutedForeground, fontFamily: f.sans, textAlign: "center" },
-  saved: { color: c.success, fontSize: 13, fontFamily: f.sans },
-});

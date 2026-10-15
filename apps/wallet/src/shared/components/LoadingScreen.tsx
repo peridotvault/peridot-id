@@ -1,5 +1,4 @@
-import { StyleSheet, Text, View } from "../primitives";
-import { theme } from "../theme";
+import { Text, View } from "../primitives";
 import { AsciiRidges } from "./AsciiRidges";
 
 // Branded loader — pixel-identical backdrop to the login screen (same
@@ -10,33 +9,11 @@ import { AsciiRidges } from "./AsciiRidges";
 // first paint never waits on font files).
 export function LoadingScreen({ fontsReady = true }: { fontsReady?: boolean }) {
   return (
-    <View style={styles.screen}>
+    <View className="flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <View style={styles.center}>
-        <Text style={[styles.logo, !fontsReady && styles.logoFallback]}>PeridotID</Text>
+      <View className="flex-1 items-center justify-center">
+        <Text className={fontsReady ? "font-serif text-[40px] tracking-[-0.4px] text-foreground" : "font-[serif] text-[40px] tracking-normal text-foreground"}>PeridotID</Text>
       </View>
     </View>
   );
 }
-
-const c = theme.colors;
-
-const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logo: {
-    fontSize: 40,
-    fontWeight: "400",
-    color: c.foreground,
-    fontFamily: theme.fonts.serif,
-    letterSpacing: -0.4,
-  },
-  logoFallback: {
-    fontFamily: "serif",
-    letterSpacing: 0,
-  },
-});

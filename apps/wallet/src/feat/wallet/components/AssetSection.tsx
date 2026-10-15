@@ -1,6 +1,6 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Text, TouchableOpacity, View } from "../../../shared/primitives";
 import type { NftItem } from "@peridotvault/pid-solana";
-import { theme, styles as s } from "../../../shared/theme";
+import { styles as s } from "../../../shared/theme";
 import type { Coin } from "../utils/assets";
 
 // Tokens/Items tabs + lists. TabButton stays here (not shared): Home's
@@ -20,7 +20,7 @@ export function AssetSection({
 }) {
   return (
     <>
-      <View style={styles.plainTabs}>
+      <View style={{ flexDirection: "row" }} className="gap-5 py-1.5">
         <TabButton label="Tokens" active={tab === "tokens"} onPress={() => onTabChange("tokens")} />
         <TabButton label="Items" active={tab === "items"} onPress={() => onTabChange("items")} />
       </View>
@@ -30,12 +30,12 @@ export function AssetSection({
             <Text style={s.hint}>No assets yet — receive SOL to your address to get started.</Text>
           )}
           {coins.map((coin) => (
-            <View key={coin.key} style={styles.coinRow}>
-              <View style={styles.coinMeta}>
-                <Text style={styles.coinSymbol}>{coin.symbol}</Text>
-                {coin.symbol !== "SOL" && <Text style={styles.coinMint}>{coin.key.slice(0, 4)}…{coin.key.slice(-4)}</Text>}
+            <View key={coin.key} style={{ flexDirection: "row" }} className="items-center gap-3 border-b border-border py-2.5">
+              <View className="flex-1">
+                <Text className="font-sans text-[15px] font-semibold text-foreground">{coin.symbol}</Text>
+                {coin.symbol !== "SOL" && <Text className="font-sans text-[11px] text-muted-foreground">{coin.key.slice(0, 4)}…{coin.key.slice(-4)}</Text>}
               </View>
-              <Text style={styles.coinAmount}>{coin.amount}</Text>
+              <Text className="font-mono text-[15px] font-medium text-foreground">{coin.amount}</Text>
             </View>
           ))}
         </>
@@ -45,10 +45,10 @@ export function AssetSection({
             <Text style={s.hint}>No items yet — SPL collectibles in this wallet appear here.</Text>
           )}
           {nfts.map((nft) => (
-            <View key={nft.mint} style={styles.coinRow}>
-              <View style={styles.coinMeta}>
-                <Text style={styles.coinSymbol}>{nft.name ?? "Unnamed item"}</Text>
-                <Text style={styles.coinMint}>{nft.mint.slice(0, 4)}…{nft.mint.slice(-4)}</Text>
+            <View key={nft.mint} style={{ flexDirection: "row" }} className="items-center gap-3 border-b border-border py-2.5">
+              <View className="flex-1">
+                <Text className="font-sans text-[15px] font-semibold text-foreground">{nft.name ?? "Unnamed item"}</Text>
+                <Text className="font-sans text-[11px] text-muted-foreground">{nft.mint.slice(0, 4)}…{nft.mint.slice(-4)}</Text>
               </View>
             </View>
           ))}
@@ -64,25 +64,7 @@ export function AssetSection({
 function TabButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
     <TouchableOpacity onPress={onPress} accessibilityState={{ selected: active }}>
-      <Text style={[styles.plainTabLabel, active && styles.plainTabLabelActive]}>{label}</Text>
+      <Text className={`pb-1 font-sans text-sm font-medium ${active ? "border-b border-foreground text-foreground" : "text-muted-foreground"}`}>{label}</Text>
     </TouchableOpacity>
   );
 }
-
-const styles = StyleSheet.create({
-  coinRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-  },
-  coinMeta: { flex: 1 },
-  coinSymbol: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  coinMint: { fontSize: 11, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  coinAmount: { fontSize: 15, fontWeight: "500", color: theme.colors.foreground, fontFamily: theme.fonts.mono },
-  plainTabs: { flexDirection: "row", gap: 20, paddingVertical: 6 },
-  plainTabLabel: { fontSize: 14, fontWeight: "500", color: theme.colors.mutedForeground, fontFamily: theme.fonts.sansMedium, paddingBottom: 4 },
-  plainTabLabelActive: { color: theme.colors.foreground, borderBottomWidth: 1, borderBottomColor: theme.colors.foreground },
-});

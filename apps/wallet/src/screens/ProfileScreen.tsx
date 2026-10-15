@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
+import { Image, ScrollView, Text, TouchableOpacity, View } from "../shared/primitives";
 import { ChevronRight, RefreshCw, Settings } from "../shared/icons";
 import type { AccountView, Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
 import { AccountSwitcherModal } from "../shared/components/AccountSwitcherModal";
 
@@ -85,35 +85,41 @@ export function ProfileScreen({
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
       <Text style={s.title}>Profile</Text>
 
-      <TouchableOpacity style={styles.row} onPress={goEditProfile}>
-        {profile?.avatarUrl ? (
-          <Image source={{ uri: profile.avatarUrl }} style={styles.thumb} />
-        ) : (
-          <View style={[styles.thumb, styles.thumbFallback]}>
-            <Text style={styles.thumbText}>{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
+      <TouchableOpacity onPress={goEditProfile}>
+        <View style={{ flexDirection: "row" }} className="w-full items-center gap-3 border border-border bg-surface p-3.5">
+          {profile?.avatarUrl ? (
+            <Image source={{ uri: profile.avatarUrl }} className="h-[34px] w-[34px] rounded-full border border-border" />
+          ) : (
+            <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
+              <Text className="font-serif text-[15px] text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
+            </View>
+          )}
+          <Text className="flex-1 font-sans text-[15px] font-medium text-foreground">Edit Profile</Text>
+          <ChevronRight size={16} className="text-muted-foreground" />
+        </View>
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={openAccounts}>
+        <View style={{ flexDirection: "row" }} className="w-full items-center gap-3 border border-border bg-surface p-3.5">
+          <View className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
+            <RefreshCw size={18} className="text-foreground" />
           </View>
-        )}
-        <Text style={styles.rowLabel}>Edit Profile</Text>
-        <ChevronRight size={16} color={theme.colors.mutedForeground} />
+          <Text className="flex-1 font-sans text-[15px] font-medium text-foreground">Switch Account</Text>
+          <ChevronRight size={16} className="text-muted-foreground" />
+        </View>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.row} onPress={openAccounts}>
-        <View style={styles.rowIcon}>
-          <RefreshCw size={18} color={theme.colors.foreground} />
+      <TouchableOpacity onPress={goSettings}>
+        <View style={{ flexDirection: "row" }} className="w-full items-center gap-3 border border-border bg-surface p-3.5">
+          <View className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
+            <Settings size={18} className="text-foreground" />
+          </View>
+          <Text className="flex-1 font-sans text-[15px] font-medium text-foreground">Settings</Text>
+          <ChevronRight size={16} className="text-muted-foreground" />
         </View>
-        <Text style={styles.rowLabel}>Switch Account</Text>
-        <ChevronRight size={16} color={theme.colors.mutedForeground} />
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.row} onPress={goSettings}>
-        <View style={styles.rowIcon}>
-          <Settings size={18} color={theme.colors.foreground} />
-        </View>
-        <Text style={styles.rowLabel}>Settings</Text>
-        <ChevronRight size={16} color={theme.colors.mutedForeground} />
       </TouchableOpacity>
 
       <UIButton title="Sign Out" onPress={onLogout} variant="danger" />
@@ -134,44 +140,3 @@ export function ProfileScreen({
     </ScrollView>
   );
 }
-
-const c = theme.colors;
-const f = theme.fonts;
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.background },
-  container: { padding: 24, gap: 12 },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 14,
-    borderRadius: 0,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surface,
-  },
-  thumb: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  thumbFallback: {
-    backgroundColor: c.muted,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 0,
-  },
-  thumbText: { fontSize: 15, fontWeight: "400", color: c.foreground, fontFamily: f.serif },
-  rowIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: c.muted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  rowLabel: { flex: 1, fontSize: 15, fontWeight: "500", color: c.foreground, fontFamily: f.sansMedium },
-});

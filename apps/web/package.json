@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "build": "next build || (echo 'retrying: next/font/google flake vercel/next.js#99114' >&2; rm -rf .next && next build)",
-    "dev": "next dev -p 3300",
-    "start": "next start -p 3300",
+    "dev": "next dev -p 3301 -H 0.0.0.0",
+    "start": "next start -p 3301",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

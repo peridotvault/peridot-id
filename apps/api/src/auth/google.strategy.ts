@@ -72,7 +72,7 @@ export function googleOAuthOptionsFactory(config: ConfigService): GoogleOAuthOpt
     clientSecret,
     callbackURL: config.get<string>(
       "GOOGLE_CALLBACK_URL",
-      "http://localhost:3301/v1/auth/google/callback",
+      "http://localhost:3300/v1/auth/google/callback",
     ),
   };
 }

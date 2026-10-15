@@ -1,6 +1,5 @@
-import { StyleSheet, Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Text, TouchableOpacity, View } from "../../../shared/primitives";
 import { Link2 } from "../../../shared/icons";
-import { theme } from "../../../shared/theme";
 
 export function HomeHeader({
   pid,
@@ -12,31 +11,16 @@ export function HomeHeader({
   onConnections: () => void;
 }) {
   return (
-    <View style={styles.topRow}>
-      <View style={styles.identity}>
-        <Text style={styles.pid}>{pid ?? "…"}</Text>
-        {displayName ? <Text style={styles.displayName}>{displayName}</Text> : null}
+    <View style={{ flexDirection: "row" }} className="items-center justify-between">
+      <View className="flex-1 gap-1">
+        <Text className="font-sans text-xl font-semibold text-foreground">{pid ?? "…"}</Text>
+        {displayName ? <Text className="font-sans text-[13px] text-muted-foreground">{displayName}</Text> : null}
       </View>
-      <TouchableOpacity style={styles.connBtn} onPress={onConnections} accessibilityLabel="App connections">
-        <Link2 size={18} color={theme.colors.foreground} />
+      <TouchableOpacity onPress={onConnections} accessibilityLabel="App connections">
+        <View className="h-10 w-10 items-center justify-center rounded-full border border-border bg-surface">
+          <Link2 size={18} className="text-foreground" />
+        </View>
       </TouchableOpacity>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  topRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  identity: { flex: 1, gap: 4 },
-  pid: { fontSize: 20, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  displayName: { fontSize: 13, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  connBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});

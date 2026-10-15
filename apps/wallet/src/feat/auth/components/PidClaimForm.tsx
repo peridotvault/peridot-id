@@ -1,5 +1,5 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from "../../../shared/primitives";
-import { theme, styles as s } from "../../../shared/theme";
+import { Pressable, Text, TextInput, View } from "../../../shared/primitives";
+import { styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
 import { UIButton } from "../../../shared/components/UIButton";
 import type { HandleStatus } from "../hooks/usePidClaim";
@@ -32,52 +32,53 @@ export function PidClaimForm({
   onSignOut: () => void;
 }) {
   return (
-    <View style={styles.screen}>
+    <View className="flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
       <View style={s.container}>
-      <View style={styles.claimHeader}>
+      <View style={{ flexDirection: "row" }} className="w-full items-center justify-end pt-2">
         <Pressable onPress={onSignOut} disabled={busy} accessibilityLabel="Sign out and cancel PID creation">
-          <Text style={styles.signOut}>Sign Out</Text>
+          <Text className="font-sans text-sm text-danger">Sign Out</Text>
         </Pressable>
       </View>
-      <View style={styles.middle}>
-        <View style={styles.masthead}>
-          <Text style={styles.title}>Create your PID</Text>
+      <View className="flex-1 w-full items-center justify-center gap-5">
+        <View className="items-center gap-2">
+          <Text className="font-serif text-[40px] tracking-[-0.4px] text-foreground">Create your PID</Text>
           {(email || displayName) && (
-            <Text style={styles.subtitle}>Continuing as {displayName ?? email}</Text>
+            <Text className="font-sans text-sm text-muted-foreground">Continuing as {displayName ?? email}</Text>
           )}
         </View>
         {error && <Text style={s.error}>{error}</Text>}
-        <View style={styles.stack}>
-          <View style={styles.handleWrap}>
+        <View className="w-full max-w-[343px] gap-3">
+          <View className="relative flex-1 justify-center">
             <TextInput
-              style={[s.input, styles.handleInput]}
+              style={[s.input, { paddingRight: 64 }]}
+              className="[--placeholder:var(--color-muted-foreground)] outline-none"
               value={handle}
               onChangeText={onHandle}
               autoCapitalize="none"
               autoCorrect={false}
               placeholder="username"
-              placeholderTextColor={theme.colors.mutedForeground}
               editable={!busy}
             />
-            <Text style={styles.suffixInside} pointerEvents="none">@pid</Text>
+            <Text pointerEvents="none" className="absolute right-3 font-sans text-[15px] text-muted-foreground">@pid</Text>
           </View>
-          {handleStatus === "free" && <Text style={styles.free}>✓ {handle.trim().toLowerCase()}@pid is available</Text>}
+          {handleStatus === "free" && <Text className="font-sans text-xs text-success">✓ {handle.trim().toLowerCase()}@pid is available</Text>}
           {handleStatus === "taken" && <Text style={s.error}>Taken — try another handle.</Text>}
           {handleStatus === "invalid" && handle.length > 0 && (
             <Text style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</Text>
           )}
           <Pressable
-            style={styles.ackRow}
+            style={{ flexDirection: "row" }}
+            className="items-center gap-2.5"
             onPress={onAck}
             disabled={busy}
             accessibilityRole="checkbox"
             accessibilityState={{ checked: ackPermanent }}
           >
-            <View style={[styles.ackBox, ackPermanent && styles.ackBoxChecked]}>
-              {ackPermanent && <Text style={styles.ackTick}>✓</Text>}
+            <View className={`h-[22px] w-[22px] items-center justify-center border ${ackPermanent ? "border-foreground" : "border-muted-foreground"}`}>
+              {ackPermanent && <Text className="font-sans text-sm text-foreground">✓</Text>}
             </View>
-            <Text style={styles.warn}>
+            <Text className="flex-1 font-sans text-xs text-muted-foreground">
               Your PID is permanent — it can never be changed, reused, or reassigned. Choose carefully.
             </Text>
           </Pressable>
@@ -93,42 +94,3 @@ export function PidClaimForm({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  middle: { flex: 1, width: "100%", alignItems: "center", justifyContent: "center", gap: 20 },
-  masthead: { alignItems: "center", gap: 8 },
-  title: {
-    fontSize: 40,
-    fontWeight: "400",
-    color: theme.colors.foreground,
-    fontFamily: theme.fonts.serif,
-    letterSpacing: -0.4,
-  },
-  subtitle: { fontSize: 14, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  stack: { width: "100%", maxWidth: 343, gap: 12 },
-  claimHeader: { width: "100%", flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: 8 },
-  signOut: { fontSize: 14, color: theme.colors.danger ?? theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  handleWrap: { position: "relative", flex: 1, justifyContent: "center" },
-  handleInput: { flex: 1, paddingRight: 64 },
-  suffixInside: {
-    position: "absolute",
-    right: 12,
-    fontSize: 15,
-    color: theme.colors.mutedForeground,
-    fontFamily: theme.fonts.sans,
-  },
-  free: { fontSize: 12, color: theme.colors.success ?? theme.colors.foreground, fontFamily: theme.fonts.sans },
-  warn: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans, flex: 1 },
-  ackRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  ackBox: {
-    width: 22,
-    height: 22,
-    borderWidth: 1,
-    borderColor: theme.colors.mutedForeground,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ackBoxChecked: { borderColor: theme.colors.foreground },
-  ackTick: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-});

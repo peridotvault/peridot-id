@@ -41,7 +41,7 @@ export {
   toHex,
 } from "@peridotvault/pid-core/dist/evm";
 export type { Bytes, EvmChain, PermissionScope } from "@peridotvault/pid-core/dist/evm";
-export { EvmRpc } from "./rpc";
-export type { EvmRpcLike } from "./rpc";
-export { EvmAdapter, buildViewCalldata } from "./adapter";
-export type { AbiValue, Exec7579Tuple, PermExecTuple } from "./adapter";
+export { EvmRpc } from "./rpc.js";
+export type { EvmRpcLike } from "./rpc.js";
+export { EvmAdapter, buildViewCalldata } from "./adapter.js";
+export type { AbiValue, Exec7579Tuple, PermExecTuple } from "./adapter.js";

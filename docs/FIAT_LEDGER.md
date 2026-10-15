@@ -15,7 +15,7 @@
 - Economics (locked): global PeridotID fee = **0.1% (10 bps), min Rp100, no cap**
   (`calcServiceFee`, active `FiatFeePolicy`), snapshotted per movement
   (`feePolicyVersion`). Applies to every fiat movement (user↔user, escrow,
-  topup, withdraw). Minimum top-up **Rp100.000 NET**.
+  topup, withdraw). Minimum top-up **Rp50.000 NET**.
 - **PPN (VAT), configurable, never hardcoded**: `FiatFeePolicy.taxBps` (PeridotID
   PPN on its fee, default 1100 = 11%) and the singleton `FiatTaxSetting.dokuTaxBps`
   (DOKU PPN on the gateway fee, default 1100). Tax is computed on the **fee**, not

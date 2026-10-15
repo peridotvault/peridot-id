@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { needsProvisioning } from "../fiat-ensure";
 
@@ -49,6 +49,9 @@ export function useSessionBootstrap(
   const [authed, setAuthed] = useState(false);
   // Bumped to re-run bootstrap after an account switch (same cookies, new identity).
   const [sessionEpoch, setSessionEpoch] = useState(0);
+  // StrictMode double-mounts in dev, firing me→refresh→me twice (doubled
+  // 401s in the console). Skip the remount replay; bumps still re-run.
+  const ranEpoch = useRef(-1);
 
   // After an account switch the cookies point at a new identity: re-bootstrap
   // so every screen re-fetches under it (and drop back to Home).
@@ -142,6 +145,8 @@ export function useSessionBootstrap(
 
   useEffect(() => {
     if (paused) return;
+    if (ranEpoch.current === sessionEpoch) return;
+    ranEpoch.current = sessionEpoch;
     bootstrap();
   }, [bootstrap, sessionEpoch, paused]);
 

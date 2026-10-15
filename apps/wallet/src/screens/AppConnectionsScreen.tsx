@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
-import { ArrowLeft, Link2 } from "../shared/icons";
+import { Alert, ScrollView, Text, TouchableOpacity, View } from "../shared/primitives";
+import { Link2 } from "../shared/icons";
 import type { SsoGrant } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
+import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
 
 function hostOf(origin: string): string {
@@ -62,38 +63,35 @@ export function AppConnectionsScreen({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone}>
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
+      <BackButton onPress={onDone} />
 
       <Text style={s.title}>App Connections</Text>
       <Text style={s.subtitle}>Sites you signed in to with PeridotID. Disconnecting stops future sign-ins there.</Text>
 
       {error && <Text style={s.error}>{error}</Text>}
-      {justRevoked && <Text style={styles.done}>Site disconnected.</Text>}
+      {justRevoked && <Text className="font-sans text-[13px] text-success">Site disconnected.</Text>}
 
       {grants.map((g) => {
         const host = hostOf(g.origin);
         const label = g.name ?? host;
         return (
           <View key={g.id} style={s.card}>
-            <View style={styles.row}>
-              <View style={styles.icon}>
-                <Link2 size={16} color={theme.colors.foreground} />
+            <View style={{ flexDirection: "row" }} className="items-center gap-3">
+              <View className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+                <Link2 size={16} className="text-foreground" />
               </View>
-              <View style={styles.meta}>
-                <Text style={styles.site}>
+              <View className="flex-1 gap-0.5">
+                <Text className="font-sans text-[15px] font-semibold text-foreground">
                   {label}
                   {g.isVerified ? " ✓" : ""}
                 </Text>
-                {g.name && <Text style={styles.muted}>{host}</Text>}
-                <Text style={styles.muted}>Connected {fmtDate(g.firstSeenAt)}</Text>
-                <Text style={styles.muted}>Last used {fmtDate(g.lastUsedAt)}</Text>
+                {g.name && <Text className="font-sans text-xs text-muted-foreground">{host}</Text>}
+                <Text className="font-sans text-xs text-muted-foreground">Connected {fmtDate(g.firstSeenAt)}</Text>
+                <Text className="font-sans text-xs text-muted-foreground">Last used {fmtDate(g.lastUsedAt)}</Text>
               </View>
               <TouchableOpacity onPress={() => disconnect(g.id, label)} disabled={busy}>
-                <Text style={styles.disconnect}>Disconnect</Text>
+                <Text className="font-sans text-[13px] text-danger">Disconnect</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -106,27 +104,3 @@ export function AppConnectionsScreen({ onDone }: { onDone: () => void }) {
     </ScrollView>
   );
 }
-
-const c = theme.colors;
-const f = theme.fonts;
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: c.background },
-  container: { padding: 24, gap: 14 },
-  back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: c.foreground, fontFamily: f.sans },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  icon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: c.muted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  meta: { flex: 1, gap: 2 },
-  site: { fontSize: 15, fontWeight: "600", color: c.foreground, fontFamily: f.sansSemiBold },
-  muted: { fontSize: 12, color: c.mutedForeground, fontFamily: f.sans },
-  disconnect: { fontSize: 13, color: c.danger, fontFamily: f.sans },
-  done: { color: c.success, fontSize: 13, fontFamily: f.sans },
-});

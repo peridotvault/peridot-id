@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "../shared/primitives";
-import { ArrowLeft } from "../shared/icons";
+import { ScrollView, Text, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
+import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
 import type { FiatLedgerItem } from "../shared/fiat";
 import { ledgerStatusLabel } from "../shared/fiat";
@@ -50,14 +50,11 @@ export function FiatLedgerDetailScreen({ item: initial, onDone }: { item: FiatLe
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={s.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone}>
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={s.container}>
+      <BackButton onPress={onDone} />
 
       <Text style={s.title}>{titleOf(item, incoming)}</Text>
-      <Text style={styles.bigAmount}>{sign}{fmtIdr(amount)}</Text>
+      <Text className="my-2 font-serif text-[32px] text-foreground">{sign}{fmtIdr(amount)}</Text>
 
       <Field label="Status" value={ledgerStatusLabel(tx.status)} />
       {tx.counterpartyPid && <Field label={incoming ? "From" : "To"} value={tx.counterpartyPid} />}
@@ -76,24 +73,9 @@ export function FiatLedgerDetailScreen({ item: initial, onDone }: { item: FiatLe
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <View style={styles.field}>
+    <View className="gap-1">
       <Text style={s.label}>{label}</Text>
-      <Text style={styles.value} selectable>{value}</Text>
+      <Text className="font-sans text-sm text-foreground" selectable>{value}</Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.colors.background },
-  back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-  bigAmount: {
-    fontSize: 32,
-    fontWeight: "400",
-    color: theme.colors.foreground,
-    fontFamily: theme.fonts.serif,
-    marginVertical: 8,
-  },
-  field: { gap: 4 },
-  value: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-});

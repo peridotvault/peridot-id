@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View, Alert } from "../shared/primitives";
-import { ArrowLeft, Link2 } from "../shared/icons";
+import { ScrollView, Text, TouchableOpacity, View, Alert } from "../shared/primitives";
+import { Link2 } from "../shared/icons";
 import type { IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
-import { theme, styles as s } from "../shared/theme";
+import { styles as s } from "../shared/theme";
+import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
 
 export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
@@ -50,36 +51,33 @@ export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <TouchableOpacity style={styles.back} onPress={onDone}>
-        <ArrowLeft size={18} color={theme.colors.foreground} />
-        <Text style={styles.backLabel}>Back</Text>
-      </TouchableOpacity>
+    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
+      <BackButton onPress={onDone} />
 
       <Text style={s.title}>Connected Accounts</Text>
       <Text style={s.subtitle}>Login methods linked to this Peridot ID. Google is the fallback/recovery path for your passkeys.</Text>
 
       {error && <Text style={s.error}>{error}</Text>}
-      {justUnlinked && <Text style={styles.done}>Account unlinked.</Text>}
+      {justUnlinked && <Text className="font-sans text-[13px] text-success">Account unlinked.</Text>}
 
       {credentials.map((c) => (
         <View key={c.id} style={s.card}>
-          <View style={styles.row}>
-            <View style={styles.icon}>
-              <Link2 size={16} color={theme.colors.foreground} />
+          <View style={{ flexDirection: "row" }} className="items-center gap-3">
+            <View className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+              <Link2 size={16} className="text-foreground" />
             </View>
-            <View style={styles.meta}>
-              <Text style={styles.provider}>{c.provider === "google" ? "Google" : c.provider}</Text>
-              <Text style={styles.muted}>{c.email ?? "No email"}</Text>
-              {c.lastLoginAt && <Text style={styles.muted}>Last login {new Date(c.lastLoginAt).toLocaleString()}</Text>}
+            <View className="flex-1 gap-0.5">
+              <Text className="font-sans text-[15px] font-semibold text-foreground">{c.provider === "google" ? "Google" : c.provider}</Text>
+              <Text className="font-sans text-xs text-muted-foreground">{c.email ?? "No email"}</Text>
+              {c.lastLoginAt && <Text className="font-sans text-xs text-muted-foreground">Last login {new Date(c.lastLoginAt).toLocaleString()}</Text>}
             </View>
             {credentials.length > 1 && (
               <TouchableOpacity onPress={() => unlink(c.id, c.provider)} disabled={busy}>
-                <Text style={styles.unlink}>Unlink</Text>
+                <Text className="font-sans text-[13px] text-danger">Unlink</Text>
               </TouchableOpacity>
             )}
           </View>
-          {credentials.length <= 1 && <Text style={styles.hint}>Keep at least one login method.</Text>}
+          {credentials.length <= 1 && <Text className="font-sans text-xs text-muted-foreground">Keep at least one login method.</Text>}
         </View>
       ))}
 
@@ -87,25 +85,3 @@ export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.colors.background },
-  container: { padding: 24, gap: 14 },
-  back: { flexDirection: "row", alignItems: "center", gap: 6 },
-  backLabel: { fontSize: 14, color: theme.colors.foreground, fontFamily: theme.fonts.sans },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
-  icon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: theme.colors.muted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  meta: { flex: 1, gap: 2 },
-  provider: { fontSize: 15, fontWeight: "600", color: theme.colors.foreground, fontFamily: theme.fonts.sansSemiBold },
-  muted: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  unlink: { fontSize: 13, color: theme.colors.danger, fontFamily: theme.fonts.sans },
-  hint: { fontSize: 12, color: theme.colors.mutedForeground, fontFamily: theme.fonts.sans },
-  done: { color: theme.colors.success, fontSize: 13, fontFamily: theme.fonts.sans },
-});

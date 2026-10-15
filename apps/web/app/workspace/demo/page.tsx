@@ -12,10 +12,11 @@ import { Peridot, openLoginPopup, type CheckoutDepositView, type FiatLedgerEntry
 import { Card, ERROR, MUTED } from "../_components/ui";
 import { PageHeader } from "../_components/page-header";
 import { CutButton } from "@/components/landing/cut-button";
+import { resolveBrowserUrl } from "@/lib/api-base";
 
-const API_BASE = process.env.NEXT_PUBLIC_PID_API_URL ?? "https://api.pid.peridotvault.com";
-// Wallet host that renders the approval popup (local Expo web or prod app).
-const POPUP_URL = process.env.NEXT_PUBLIC_PID_POPUP_URL ?? "http://localhost:8081";
+const API_BASE = resolveBrowserUrl(process.env.NEXT_PUBLIC_PID_API_URL ?? "https://api.pid.peridotvault.com");
+// Wallet host that renders the approval popup (local Vite web or prod app).
+const POPUP_URL = resolveBrowserUrl(process.env.NEXT_PUBLIC_PID_POPUP_URL ?? "http://localhost:3302");
 const CLIENT_ID = process.env.NEXT_PUBLIC_PID_CLIENT_ID; // optional; loopback needs none
 
 function errText(e: unknown): string {
@@ -121,7 +122,7 @@ export default function DemoPage() {
             value={net}
             onChange={(e) => setNet(e.target.value)}
             inputMode="numeric"
-            placeholder="Net IDR, min 100000"
+            placeholder="Net IDR, min 50000"
             aria-label="Net amount in IDR"
           />
           <CutButton type="button" onClick={topup} disabled={busy !== null || !pid}>

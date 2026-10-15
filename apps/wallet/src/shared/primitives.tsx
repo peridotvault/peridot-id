@@ -248,10 +248,14 @@ export function Image({ source, style, ...rest }: Omit<ImgHTMLAttributes<HTMLIma
   return <img {...rest} src={source?.uri} alt="" style={flatten(style)} />;
 }
 
-// Cached snapshot — a fresh object every call would loop useSyncExternalStore.
+// Cached snapshot — a fresh object every call would loop useSyncExternalStore
+// (it compares with Object.is). Only replace on an actual size change.
 let viewport = { width: 0, height: 0 };
+const serverViewport = { width: 0, height: 0 };
 function readViewport() {
-  viewport = { width: window.innerWidth, height: window.innerHeight };
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (viewport.width !== w || viewport.height !== h) viewport = { width: w, height: h };
   return viewport;
 }
 function subscribeViewport(cb: () => void) {
@@ -260,7 +264,7 @@ function subscribeViewport(cb: () => void) {
 }
 
 export function useWindowDimensions() {
-  return useSyncExternalStore(subscribeViewport, readViewport, () => ({ width: 0, height: 0 }));
+  return useSyncExternalStore(subscribeViewport, readViewport, () => serverViewport);
 }
 
 export const StyleSheet = {

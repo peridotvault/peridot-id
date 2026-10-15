@@ -15,7 +15,7 @@ import {
   toHex,
 } from "@peridotvault/pid-core/dist/evm";
 import type { Bytes } from "@peridotvault/pid-core/dist/evm";
-import type { EvmRpcLike } from "./rpc";
+import type { EvmRpcLike } from "./rpc.js";
 
 function selector(signature: string): Uint8Array {
   return keccak256(fromAscii(signature)).subarray(0, 4);

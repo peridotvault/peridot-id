@@ -49,7 +49,7 @@ live2dev@pid --send Rp100.000--> streamer1@pid   (app → user: payout, ×5 on d
 - **Charge your own fee** (stacked on the global 0.1%): set it at
   `PUT /v1/apps/:id/fees/{topup|transaction|withdraw}` and pass the app's
   `clientId` when initiating a movement — the fee credits your account.
-- Developer tops up via DOKU Checkout first (NET ≥ Rp100.000, fee 5% quoted
+- Developer tops up via DOKU Checkout first (NET ≥ Rp50.000, fee 5% quoted
   upfront); the credited NET is what they can send.
 - Live2Dev tracks which transfer belongs to which deal in its own database
   (PeridotID stores only `remark`/`entryGroup` references).
