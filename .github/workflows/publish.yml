@@ -34,6 +34,11 @@ jobs:
       - name: Build
         run: pnpm --filter @peridotvault/pid-types --filter @peridotvault/pid-core --filter @peridotvault/pid-payments --filter @peridotvault/pid-solana --filter @peridotvault/pid-evm --filter @peridotvault/pid-sdk-js --filter @peridotvault/pid-react-embed build
 
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish (leaves first)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
