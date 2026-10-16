@@ -20,6 +20,14 @@ networks:
   proxy:
     external: true
 
+# Cap json-file logs per container: without this stdout logging grows
+# unbounded and can fill a small VPS disk between deploys.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   api:
     build:
@@ -27,6 +35,7 @@ services:
       dockerfile: Dockerfile.api
     image: peridot-id-api${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
+    logging: *default-logging
     networks: [proxy]
     expose: ["3301"]
     environment:
@@ -105,6 +114,7 @@ services:
         NEXT_PUBLIC_PID_CLIENT_ID: ${NEXT_PUBLIC_PID_CLIENT_ID:-}
     image: peridot-id-web${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
+    logging: *default-logging
     networks: [proxy]
     expose: ["3300"]
     healthcheck:
@@ -129,6 +139,7 @@ services:
         VITE_API_URL: ${VITE_API_URL}
     image: peridot-id-app${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
+    logging: *default-logging
     networks: [proxy]
     expose: ["3000"]
     healthcheck:

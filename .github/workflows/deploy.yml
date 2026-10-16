@@ -46,6 +46,16 @@ jobs:
             git fetch "https://x-access-token:${{ secrets.GH_PAT }}@github.com/peridotvault/peridot-id.git" main
             git reset --hard FETCH_HEAD
             git checkout -B main FETCH_HEAD
+            # Disk guard: a full disk kills the image export mid-build (seen on
+            # sandbox). Running images are never pruned — only build cache and
+            # superseded tags go.
+            avail_kb=$(df --output=avail -k /var/lib/docker 2>/dev/null | tail -1 | tr -dc '0-9')
+            [ -z "$avail_kb" ] && avail_kb=$(df --output=avail -k / | tail -1 | tr -dc '0-9')
+            if [ "${avail_kb:-0}" -lt 8388608 ]; then
+              echo "low disk (${avail_kb}KB free) — pruning builder cache and unused images"
+              docker builder prune -af || true
+              docker image prune -af || true
+            fi
             ./deploy/up.sh main
 
   deploy-test:
@@ -70,4 +80,14 @@ jobs:
             git fetch "https://x-access-token:${{ secrets.GH_PAT }}@github.com/peridotvault/peridot-id.git" test
             git reset --hard FETCH_HEAD
             git checkout -B test FETCH_HEAD
+            # Disk guard: a full disk kills the image export mid-build (seen on
+            # sandbox). Running images are never pruned — only build cache and
+            # superseded tags go.
+            avail_kb=$(df --output=avail -k /var/lib/docker 2>/dev/null | tail -1 | tr -dc '0-9')
+            [ -z "$avail_kb" ] && avail_kb=$(df --output=avail -k / | tail -1 | tr -dc '0-9')
+            if [ "${avail_kb:-0}" -lt 8388608 ]; then
+              echo "low disk (${avail_kb}KB free) — pruning builder cache and unused images"
+              docker builder prune -af || true
+              docker image prune -af || true
+            fi
             ./deploy/up.sh test

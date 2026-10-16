@@ -48,6 +48,13 @@ RUN pnpm --filter @peridotvault/pid-sdk-js build
 RUN pnpm --filter @peridotvault/pid-api db:generate
 RUN pnpm --filter @peridotvault/pid-api build
 
+# Drop devDependencies (wallet/web toolchains, react-native, nest CLI) before
+# the runner stage copies node_modules: the API image only needs its prod
+# tree. Without this the image carries GBs of build junk and the export can
+# fill a small VPS disk mid-deploy. `prisma` stays: it is a runtime
+# dependency because the container boots with `prisma migrate deploy`.
+RUN pnpm prune --prod
+
 FROM node:22-slim AS runner
 
 ENV NODE_ENV=production
