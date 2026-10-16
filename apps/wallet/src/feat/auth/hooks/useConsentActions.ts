@@ -15,9 +15,11 @@ export function useConsentActions(
     setShowLogin: (b: boolean) => void;
     setBusy: (b: boolean) => void;
     setError: (e: string | null) => void;
+    /** Auth-in-a-new-tab flow resolved while this window stayed open. */
+    onCtxDone?: (denied: boolean) => void;
   },
 ) {
-  const { sso, ctx, flags, setSession, setShowLogin, setBusy, setError } = opts;
+  const { sso, ctx, flags, setSession, setShowLogin, setBusy, setError, onCtxDone } = opts;
   // Client-login account picker ("Use a different account"): null = closed.
   const [picker, setPicker] = useState<AccountView[] | null>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
@@ -41,6 +43,7 @@ export function useConsentActions(
     if (typeof window === "undefined") return;
     if (ctx) {
       rejectLogin(ctx);
+      onCtxDone?.(true);
       return;
     }
     if (!sso) return;
@@ -49,7 +52,7 @@ export function useConsentActions(
 
   /** Auth-in-a-new-tab consent: user approved the pre-existing session. */
   const allowCtx = async () => {
-    if (!ctx) return;
+    if (!ctx || flags.delivered) return;
     setBusy(true);
     setError(null);
     try {
@@ -58,6 +61,8 @@ export function useConsentActions(
       if (!ok) {
         flags.delivered = false;
         setError("Couldn't authorize — try again.");
+      } else {
+        onCtxDone?.(false);
       }
     } catch (e) {
       flags.delivered = false;

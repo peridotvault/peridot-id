@@ -12,9 +12,11 @@ export function useSignInMethods(
     onLoggedIn: () => void;
     setBusy: (b: boolean) => void;
     setError: (e: string | null) => void;
+    /** Auth-in-a-new-tab code delivered while this window stayed open. */
+    onCtxDone?: (denied: boolean) => void;
   },
 ) {
-  const { sso, ctx, flags, onLoggedIn, setBusy, setError } = opts;
+  const { sso, ctx, flags, onLoggedIn, setBusy, setError, onCtxDone } = opts;
 
   const signInWithPasskey = async () => {
     setBusy(true);
@@ -29,7 +31,7 @@ export function useSignInMethods(
       }
       if (ctx) {
         flags.delivered = true;
-        await deliverLoginCode(peridot, ctx);
+        if (await deliverLoginCode(peridot, ctx)) onCtxDone?.(false);
         return;
       }
       if (finishSso(sso, res.pidCode)) return;

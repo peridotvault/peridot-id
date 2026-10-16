@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePeridot } from "../shared/AppContext";
 import { readLoginContext, type LoginContext } from "../feat/auth/popup-login";
 import { readSsoParams, ssoOrigin } from "../feat/auth/sso";
@@ -15,6 +15,8 @@ import { PidClaimForm } from "../feat/auth/components/PidClaimForm";
 import { EmailOtpForm } from "../feat/auth/components/EmailOtpForm";
 import { LoginOptions } from "../feat/auth/components/LoginOptions";
 import { readOAuthError, stripOAuthError } from "../feat/auth/utils/parseOAuthError";
+import { Text, View } from "../shared/primitives";
+import { styles as s } from "../shared/theme";
 
 export function LoginScreen({
   onLoggedIn,
@@ -32,7 +34,7 @@ export function LoginScreen({
   // Auth-in-a-new-tab (`?popup=login&origin=…&client_id=…` opened by a dapp):
   // the tab authenticates (and creates a PID if the user has none), then mints a
   // pid_code and posts it to the opener instead of navigating.
-  const [ctx] = useState<LoginContext | null>(() => loginContext ?? readLoginContext());
+  const [ctx, setCtx] = useState<LoginContext | null>(() => loginContext ?? readLoginContext());
   const autoStarted = useRef(false);
   // Auth-in-a-new-tab consent: a session that already existed at tab open must
   // not auto-issue — the user picks Allow / different account in the consent
@@ -45,6 +47,15 @@ export function LoginScreen({
   const appClientId = sso?.clientId ?? ctx?.clientId;
   const appVerified = useAppVerified(peridot, appClientId);
 
+  // Terminal state for auth-in-a-new-tab: the code was delivered (or denied)
+  // but window.close() didn't take, so this window is still open. Without it
+  // the stale ctx renders the consent scrim again over a finished flow.
+  const [finished, setFinished] = useState<string | null>(null);
+  const finishCtx = useCallback((denied: boolean) => {
+    setCtx(null);
+    setFinished(denied ? "Request denied — you can close this window." : "Signed in — you can close this window.");
+  }, []);
+
   const claim = usePidClaim(peridot, { sso, ctx, flags, onLoggedIn, setBusy, setError });
   const emailSignIn = useEmailSignIn(peridot, {
     sso,
@@ -54,10 +65,11 @@ export function LoginScreen({
     refreshClaim: claim.refreshClaim,
     setBusy,
     setError,
+    onCtxDone: finishCtx,
   });
-  const { session, setSession, showLogin, setShowLogin } = useLoginSession(peridot, { sso, ctx, flags, claim: claim.claim });
-  const consent = useConsentActions(peridot, { sso, ctx, flags, setSession, setShowLogin, setBusy, setError });
-  const signIn = useSignInMethods(peridot, { sso, ctx, flags, onLoggedIn, setBusy, setError });
+  const { session, setSession, showLogin, setShowLogin } = useLoginSession(peridot, { sso, ctx, flags, claim: claim.claim, onCtxDone: finishCtx });
+  const consent = useConsentActions(peridot, { sso, ctx, flags, setSession, setShowLogin, setBusy, setError, onCtxDone: finishCtx });
+  const signIn = useSignInMethods(peridot, { sso, ctx, flags, onLoggedIn, setBusy, setError, onCtxDone: finishCtx });
 
   /** Retryable OAuth failure from the callback (?error=) — show inline, then strip. */
   useEffect(() => {
@@ -126,6 +138,16 @@ export function LoginScreen({
         onDeny={consent.denyApp}
         verified={appVerified}
       />
+    );
+  }
+
+  // Delivered/denied but still open: terminal screen, never the consent card.
+  if (finished) {
+    return (
+      <View style={[s.container, { justifyContent: "center", alignItems: "center" }]}>
+        <Text style={s.title}>PeridotID</Text>
+        <Text style={s.hint}>{finished}</Text>
+      </View>
     );
   }
 

@@ -20,9 +20,11 @@ export function useLoginSession(
     ctx: LoginContext | null;
     flags: LoginFlowFlags;
     claim: ClaimState;
+    /** Auth-in-a-new-tab code delivered while this window stayed open. */
+    onCtxDone?: (denied: boolean) => void;
   },
 ) {
-  const { sso, ctx, flags, claim } = opts;
+  const { sso, ctx, flags, claim, onCtxDone } = opts;
   const [session, setSession] = useState<{ label: string } | null | undefined>(sso || ctx ? undefined : null);
   const [showLogin, setShowLogin] = useState(false);
 
@@ -75,8 +77,10 @@ export function useLoginSession(
     // always be approved (never silently signed in).
     if (flags.hadSessionAtOpen === true && !showLogin) return;
     flags.delivered = true;
-    void deliverLoginCode(peridot, ctx);
-  }, [ctx, session, claim, showLogin, peridot, flags]);
+    void deliverLoginCode(peridot, ctx).then((ok) => {
+      if (ok) onCtxDone?.(false);
+    });
+  }, [ctx, session, claim, showLogin, peridot, flags, onCtxDone]);
 
   return { session, setSession, showLogin, setShowLogin };
 }

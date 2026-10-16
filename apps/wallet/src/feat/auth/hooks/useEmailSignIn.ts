@@ -20,9 +20,11 @@ export function useEmailSignIn(
     refreshClaim: () => Promise<void>;
     setBusy: (b: boolean) => void;
     setError: (e: string | null) => void;
+    /** Auth-in-a-new-tab code delivered while this window stayed open. */
+    onCtxDone?: (denied: boolean) => void;
   },
 ) {
-  const { sso, ctx, flags, onLoggedIn, refreshClaim, setBusy, setError } = opts;
+  const { sso, ctx, flags, onLoggedIn, refreshClaim, setBusy, setError, onCtxDone } = opts;
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -73,7 +75,7 @@ export function useEmailSignIn(
       }
       if (ctx) {
         flags.delivered = true;
-        await deliverLoginCode(peridot, ctx);
+        if (await deliverLoginCode(peridot, ctx)) onCtxDone?.(false);
         return;
       }
       if (finishSso(sso, res.pidCode)) return;
