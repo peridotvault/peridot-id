@@ -29,7 +29,8 @@ export function SsoConsentModal({
   return (
     <View className="absolute inset-0 z-10 items-center justify-center p-6">
       <View className="absolute inset-0 bg-black/60" />
-      <View className="w-full max-w-[380px] gap-3 border border-border bg-surface p-5">
+      {/* relative + z lifts the card above the absolute scrim. */}
+      <View className="relative z-10 w-full max-w-[380px] gap-3 border border-border bg-surface p-5">
         <Pressable onPress={onDeny} disabled={busy} accessibilityLabel="Deny and close" className="absolute right-2 top-2 z-[1]">
           <View className="p-2">
             <X size={18} className="text-muted-foreground" />

@@ -76,6 +76,7 @@ export const styles = StyleSheet.create({
     flex: 1,
     width: "100%",
     maxWidth: theme.layout.maxWidth,
+    position: "relative",
   },
   // Opaque cover over the content box only — TopBar/sidebar stay visible.
   // (Push roots use s.container with no bg of their own, so the wrapper
