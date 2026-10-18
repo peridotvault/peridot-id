@@ -35,6 +35,11 @@ import { SecurityEventService } from "../security/security-event.service";
 
 export type ActivationStatus = ChainAccountStatus;
 
+export interface ChainEcho {
+  namespace: "solana";
+  reference: string;
+}
+
 export interface ActivationView {
   pid: string;
   status: ActivationStatus;
@@ -53,6 +58,8 @@ export interface ActivationView {
   feePolicyVersion: number;
   /** base64url sha256 of the WebAuthn RP ID (bound into the V3 activation payload). */
   rpIdHash: string;
+  /** Additive CAIP-2 echo of the active Solana chain (omitted when registry has none). */
+  chain?: ChainEcho;
 }
 
 const POLL_ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
@@ -434,6 +441,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       ? "active"
       : this.classify(balance, required, chain.status);
 
+    const solChain = await this.chains.solanaChain().catch(() => undefined);
+
     return {
       pid: user.pid,
       status,
@@ -446,6 +455,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       treasury: this.treasury().toBase58(),
       feePolicyVersion: quoted.version,
       rpIdHash: Buffer.from(await this.rpIdHash()).toString("base64url"),
+      ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
 

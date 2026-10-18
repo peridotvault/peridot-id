@@ -32,6 +32,11 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
+export interface ChainEcho {
+  namespace: "solana";
+  reference: string;
+}
+
 export interface WithdrawQuote {
   /** Realtime network-cost estimate the backend will attest near (lamports). */
   networkFeeLamports: string;
@@ -44,6 +49,8 @@ export interface WithdrawQuote {
   chainTime: number;
   /** Canonical revenue vault receiving the protocol fee (informational — enforced on-chain). */
   treasury: string;
+  /** Additive CAIP-2 echo of the active Solana chain (omitted when registry has none). */
+  chain?: ChainEcho;
 }
 
 export interface SponsoredWithdrawResult {
@@ -124,6 +131,7 @@ export class SponsoredWithdrawService {
     const bps = protocolFeeBps(version);
     const protocolFee = protocolFeeOf(networkFee, bps);
     const chainTime = await adapter.chainTime();
+    const solChain = await this.chains.solanaChain().catch(() => undefined);
     return {
       networkFeeLamports: networkFee.toString(),
       protocolFeeBps: bps,
@@ -131,6 +139,7 @@ export class SponsoredWithdrawService {
       totalFeeLamports: (networkFee + protocolFee).toString(),
       chainTime,
       treasury: this.treasury().toBase58(),
+      ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
 
@@ -377,6 +386,7 @@ export class SponsoredWithdrawService {
     const bps = protocolFeeBps(version);
     const protocolFee = protocolFeeOf(networkFee, bps);
     const chainTime = await adapter.chainTime();
+    const solChain = await this.chains.solanaChain().catch(() => undefined);
     return {
       networkFeeLamports: networkFee.toString(),
       protocolFeeBps: bps,
@@ -384,6 +394,7 @@ export class SponsoredWithdrawService {
       totalFeeLamports: (networkFee + protocolFee).toString(),
       chainTime,
       treasury: this.treasury().toBase58(),
+      ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
 

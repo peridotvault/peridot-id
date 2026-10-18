@@ -296,4 +296,18 @@ describe("ActivationService", () => {
     expect(typeof view.rpIdHash).toBe("string");
     expect(view.rpIdHash.length).toBeGreaterThan(0);
   });
+
+  it("omits the chain echo when the registry has no Solana row", async () => {
+    const { service } = setup();
+    const view = await service.viewOf({ pid: IDENTITY_ID });
+    expect(view.chain).toBeUndefined();
+  });
+
+  it("echoes the active Solana chain when the registry has one", async () => {
+    const { service } = setup();
+    const chains = (service as unknown as { chains: { solanaChain: jest.Mock } }).chains;
+    chains.solanaChain.mockResolvedValue({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
+    const view = await service.viewOf({ pid: IDENTITY_ID });
+    expect(view.chain).toEqual({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
+  });
 });
