@@ -1,5 +1,7 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Post, Query, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
+import { ChainRegistryService } from "../chain/chain-registry.service";
+import { CHAIN_REFERENCE_HEADER, CHAIN_REFERENCE_QUERY } from "../common/chains";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { CreateWalletDto } from "./dto/create-wallet.dto";
@@ -17,7 +19,18 @@ export class WalletController {
     private readonly walletService: WalletService,
     private readonly sponsoredWithdrawService: SponsoredWithdrawService,
     private readonly rotateService: RotateService,
+    private readonly chains: ChainRegistryService,
   ) {}
+
+  /**
+   * Network selection for this request (ANT-15 spec §8): the
+   * `X-Chain-Reference` header wins, `?chainReference` is the GET-friendly
+   * fallback. Absent = server default (current behavior); unknown = 400
+   * UNKNOWN_CHAIN, fail-closed before any chain write.
+   */
+  private selection(chainRefHeader?: string, chainRefQuery?: string | string[]) {
+    return this.chains.selectionFromReferenceOrThrow(chainRefHeader ?? chainRefQuery);
+  }
 
   @Get("me")
   @UseGuards(JwtAuthGuard)
@@ -38,9 +51,14 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 60, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  quote(@CurrentUser() user: AuthenticatedUser, @Body() dto: WithdrawQuoteDto): Promise<WithdrawQuote> {
+  async quote(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: WithdrawQuoteDto,
+    @Headers(CHAIN_REFERENCE_HEADER) chainRefHeader?: string,
+    @Query(CHAIN_REFERENCE_QUERY) chainRefQuery?: string | string[],
+  ): Promise<WithdrawQuote> {
     void dto;
-    return this.sponsoredWithdrawService.quote(user.pid);
+    return this.sponsoredWithdrawService.quote(user.pid, await this.selection(chainRefHeader, chainRefQuery));
   }
 
   /** Relayer-sponsored withdraw (V3): the SDK signs intent + fee policy; Peridot's relayer pays the fee. */
@@ -48,17 +66,26 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  withdraw(@CurrentUser() user: AuthenticatedUser, @Body() dto: SponsoredWithdrawDto): Promise<SponsoredWithdrawResult> {
-    return this.sponsoredWithdrawService.withdraw(user.pid, {
-      asset: dto.asset,
-      to: dto.to,
-      amount: dto.amount,
-      nonce: dto.nonce,
-      expiry: dto.expiry,
-      feePolicyVersion: dto.feePolicyVersion,
-      quotedNetworkFeeLamports: dto.quotedNetworkFeeLamports,
-      assertion: dto.assertion as never,
-    });
+  async withdraw(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SponsoredWithdrawDto,
+    @Headers(CHAIN_REFERENCE_HEADER) chainRefHeader?: string,
+    @Query(CHAIN_REFERENCE_QUERY) chainRefQuery?: string | string[],
+  ): Promise<SponsoredWithdrawResult> {
+    return this.sponsoredWithdrawService.withdraw(
+      user.pid,
+      {
+        asset: dto.asset,
+        to: dto.to,
+        amount: dto.amount,
+        nonce: dto.nonce,
+        expiry: dto.expiry,
+        feePolicyVersion: dto.feePolicyVersion,
+        quotedNetworkFeeLamports: dto.quotedNetworkFeeLamports,
+        assertion: dto.assertion as never,
+      },
+      await this.selection(chainRefHeader, chainRefQuery),
+    );
   }
 
   /** Relayer-sponsored generic execute (V3): the SDK signs call_hash + fee policy; Peridot's relayer pays the fee. */
@@ -66,17 +93,26 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  execute(@CurrentUser() user: AuthenticatedUser, @Body() dto: SponsoredExecuteDto): Promise<SponsoredWithdrawResult> {
-    return this.sponsoredWithdrawService.execute(user.pid, {
-      target: dto.target,
-      metas: dto.metas,
-      data: dto.data,
-      nonce: dto.nonce,
-      expiry: dto.expiry,
-      feePolicyVersion: dto.feePolicyVersion,
-      quotedNetworkFeeLamports: dto.quotedNetworkFeeLamports,
-      assertion: dto.assertion as never,
-    });
+  async execute(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SponsoredExecuteDto,
+    @Headers(CHAIN_REFERENCE_HEADER) chainRefHeader?: string,
+    @Query(CHAIN_REFERENCE_QUERY) chainRefQuery?: string | string[],
+  ): Promise<SponsoredWithdrawResult> {
+    return this.sponsoredWithdrawService.execute(
+      user.pid,
+      {
+        target: dto.target,
+        metas: dto.metas,
+        data: dto.data,
+        nonce: dto.nonce,
+        expiry: dto.expiry,
+        feePolicyVersion: dto.feePolicyVersion,
+        quotedNetworkFeeLamports: dto.quotedNetworkFeeLamports,
+        assertion: dto.assertion as never,
+      },
+      await this.selection(chainRefHeader, chainRefQuery),
+    );
   }
 
   /** Attested fee + policy + chain time for the client to sign an execute authorization. */
@@ -84,12 +120,21 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 60, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  executeQuote(@CurrentUser() user: AuthenticatedUser, @Body() dto: ExecuteQuoteDto): Promise<WithdrawQuote> {
-    return this.sponsoredWithdrawService.quoteExecute(user.pid, {
-      target: dto.target,
-      metas: dto.metas,
-      data: dto.data,
-    });
+  async executeQuote(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ExecuteQuoteDto,
+    @Headers(CHAIN_REFERENCE_HEADER) chainRefHeader?: string,
+    @Query(CHAIN_REFERENCE_QUERY) chainRefQuery?: string | string[],
+  ): Promise<WithdrawQuote> {
+    return this.sponsoredWithdrawService.quoteExecute(
+      user.pid,
+      {
+        target: dto.target,
+        metas: dto.metas,
+        data: dto.data,
+      },
+      await this.selection(chainRefHeader, chainRefQuery),
+    );
   }
 
   /**
@@ -102,13 +147,22 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  rotate(@CurrentUser() user: AuthenticatedUser, @Body() dto: RotateAuthorityDto): Promise<RotateAuthorityResult> {
-    return this.rotateService.rotate(user.pid, {
-      oldCredentialId: dto.oldCredentialId,
-      newCredentialId: dto.newCredentialId,
-      nonce: dto.nonce,
-      expiry: dto.expiry,
-      assertion: dto.assertion as never,
-    });
+  async rotate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RotateAuthorityDto,
+    @Headers(CHAIN_REFERENCE_HEADER) chainRefHeader?: string,
+    @Query(CHAIN_REFERENCE_QUERY) chainRefQuery?: string | string[],
+  ): Promise<RotateAuthorityResult> {
+    return this.rotateService.rotate(
+      user.pid,
+      {
+        oldCredentialId: dto.oldCredentialId,
+        newCredentialId: dto.newCredentialId,
+        nonce: dto.nonce,
+        expiry: dto.expiry,
+        assertion: dto.assertion as never,
+      },
+      await this.selection(chainRefHeader, chainRefQuery),
+    );
   }
 }

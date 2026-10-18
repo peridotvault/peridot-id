@@ -44,3 +44,16 @@ export type SolanaSelection = "devnet" | "testnet";
 export function solanaReferenceFor(selection: SolanaSelection): string {
   return selection === "testnet" ? SOLANA_TESTNET_REFERENCE : SOLANA_DEVNET_REFERENCE;
 }
+
+/**
+ * Client selection transport (ANT-15 spec §8, OQ-5 session-scoped).
+ * The wallet sends its network-mode selection per request; the server
+ * resolves RPC/program from the registry and is the source of truth.
+ * No per-user preference is stored server-side in v1.
+ */
+export const CHAIN_REFERENCE_HEADER = "x-chain-reference";
+export const CHAIN_REFERENCE_QUERY = "chainReference";
+/** Fail-closed error code for unknown selections (ANT-15 AC-1.4). */
+export const UNKNOWN_CHAIN_CODE = "UNKNOWN_CHAIN";
+/** Boundary guard for client-supplied references (type + length checked at the edge). */
+export const MAX_CHAIN_REFERENCE_LENGTH = 128;

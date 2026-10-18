@@ -115,6 +115,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
             solanaChain: jest.fn(async () => undefined),
             solanaRpcUrl: jest.fn(async () => "https://api.devnet.solana.com"),
             solanaProgramId: jest.fn(async () => "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT"),
+            selectionFromReferenceOrThrow: jest.fn(async () => undefined),
           },
         },
         {

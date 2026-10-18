@@ -92,6 +92,7 @@ describe("Account authorization & abuse cases (routes)", () => {
             solanaChain: jest.fn(async () => undefined),
             solanaRpcUrl: jest.fn(async () => "https://api.devnet.solana.com"),
             solanaProgramId: jest.fn(async () => PROGRAM_ID),
+            selectionFromReferenceOrThrow: jest.fn(async () => undefined),
             invalidate: jest.fn(),
           },
         },

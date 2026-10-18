@@ -1,4 +1,4 @@
-import { NotFoundException } from "@nestjs/common";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { ChainRegistryService } from "./chain-registry.service";
 import {
   SOLANA_DEVNET_REFERENCE,
@@ -217,6 +217,80 @@ describe("ChainRegistryService", () => {
       });
       await expect(service.solanaChainIdOrThrow("testnet")).rejects.toThrow(NotFoundException);
       await expect(service.solanaChainIdOrThrow("testnet")).rejects.toThrow('"testnet"');
+    });
+  });
+
+  describe("HTTP selection surface (ANT-35: header/query → selection, fail-closed)", () => {
+    const DEVNET_ROW = {
+      id: "chain-sol-devnet",
+      namespace: "solana",
+      reference: SOLANA_DEVNET_REFERENCE,
+      name: "solana-devnet",
+      nativeSymbol: "SOL",
+      decimals: 9,
+      rpcUrls: ["https://api.devnet.solana.com"],
+      explorerUrl: "https://explorer.solana.com",
+      isTestnet: true,
+      contracts: [{ type: "program", address: "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT", versionLabel: "v1" }],
+    };
+    const TESTNET_ROW = {
+      ...DEVNET_ROW,
+      id: "chain-sol-testnet",
+      reference: SOLANA_TESTNET_REFERENCE,
+      name: "solana-testnet",
+      rpcUrls: ["https://api.testnet.solana.com"],
+    };
+
+    async function unknownChainBody(promise: Promise<unknown>) {
+      try {
+        await promise;
+      } catch (err) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect((err as BadRequestException).getStatus()).toBe(400);
+        return (err as BadRequestException).getResponse() as { code: string; message: string };
+      }
+      throw new Error("expected selectionFromReferenceOrThrow to reject");
+    }
+
+    it("omitted or blank selection preserves the server default (backward compatible)", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      await expect(service.selectionFromReferenceOrThrow(undefined)).resolves.toBeUndefined();
+      await expect(service.selectionFromReferenceOrThrow("")).resolves.toBeUndefined();
+      await expect(service.selectionFromReferenceOrThrow("   ")).resolves.toBeUndefined();
+    });
+
+    it("maps registered references to selections (whitespace-tolerant)", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      await expect(service.selectionFromReferenceOrThrow(SOLANA_DEVNET_REFERENCE)).resolves.toBe("devnet");
+      await expect(service.selectionFromReferenceOrThrow(SOLANA_TESTNET_REFERENCE)).resolves.toBe("testnet");
+      await expect(service.selectionFromReferenceOrThrow(`  ${SOLANA_TESTNET_REFERENCE} `)).resolves.toBe("testnet");
+    });
+
+    it("rejects unknown references with 400 UNKNOWN_CHAIN (fail-closed, AC-1.4)", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      const body = await unknownChainBody(service.selectionFromReferenceOrThrow("mainnet-beta"));
+      expect(body.code).toBe("UNKNOWN_CHAIN");
+      expect(body.message).toMatch("Unknown chain reference");
+    });
+
+    it("rejects known-but-inactive references (no silent fallback to another cluster)", async () => {
+      const service = setup([DEVNET_ROW]); // testnet row deactivated
+      const body = await unknownChainBody(service.selectionFromReferenceOrThrow(SOLANA_TESTNET_REFERENCE));
+      expect(body.code).toBe("UNKNOWN_CHAIN");
+    });
+
+    it("rejects over-long references at the boundary", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      const body = await unknownChainBody(service.selectionFromReferenceOrThrow("x".repeat(129)));
+      expect(body.code).toBe("UNKNOWN_CHAIN");
+    });
+
+    it("rejects ambiguous (repeated query) references fail-closed", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      const body = await unknownChainBody(
+        service.selectionFromReferenceOrThrow([SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE]),
+      );
+      expect(body.code).toBe("UNKNOWN_CHAIN");
     });
   });
 });
