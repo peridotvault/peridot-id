@@ -7,6 +7,7 @@ import {
   SOLANA_DEVNET_RPC,
   SOLANA_NAMESPACE,
   SOLANA_PROGRAM_ID,
+  SOLANA_TESTNET_PROGRAM_ID,
   SOLANA_TESTNET_REFERENCE,
   SOLANA_TESTNET_RPC,
 } from "../src/common/chains";
@@ -72,7 +73,7 @@ async function main(): Promise<void> {
     create: {
       chainId: solanaTestnet.id,
       type: "program",
-      address: process.env.SOLANA_TESTNET_PROGRAM_ID ?? SOLANA_PROGRAM_ID,
+      address: process.env.SOLANA_TESTNET_PROGRAM_ID ?? SOLANA_TESTNET_PROGRAM_ID,
       versionLabel: "v1",
     },
   });

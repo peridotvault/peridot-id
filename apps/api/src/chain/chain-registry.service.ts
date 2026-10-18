@@ -11,6 +11,7 @@ import {
   SOLANA_DEVNET_RPC,
   SOLANA_NAMESPACE,
   SOLANA_PROGRAM_ID,
+  SOLANA_TESTNET_PROGRAM_ID,
   SOLANA_TESTNET_REFERENCE,
   SolanaSelection,
   solanaReferenceFor,
@@ -133,10 +134,13 @@ export class ChainRegistryService {
     return chain?.rpcUrls[0] ?? SOLANA_DEVNET_RPC;
   }
 
-  /** Solana program id for a selection (`program` contract, else canonical constant). */
+  /** Solana program id for a selection (`program` contract, else per-cluster constant). */
   async solanaProgramId(selection?: SolanaSelection): Promise<string> {
     const chain = await this.solanaChain(selection);
-    return chain?.contracts.find((k) => k.type === "program")?.address ?? SOLANA_PROGRAM_ID;
+    return (
+      chain?.contracts.find((k) => k.type === "program")?.address ??
+      (selection === "testnet" ? SOLANA_TESTNET_PROGRAM_ID : SOLANA_PROGRAM_ID)
+    );
   }
 
   /**

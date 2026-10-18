@@ -26,6 +26,12 @@ export const ACCOUNT_TYPE_LINKED = "linked_address";
  *  The live value lives in the chain registry (`program` contract); admins
  *  change it in the workspace, not in env. */
 export const SOLANA_PROGRAM_ID = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
+/** Testnet smart-account program id — seed default for the solana-testnet row.
+ *  Fresh test-only keypair (NOT the devnet keypair): reported by Trevor
+ *  (ANT-26 chain ops, comment d4ba0f9a) as board-directed. On-chain deploy to
+ *  testnet is still pending (ANT-26); re-verify with getAccountInfo post-deploy.
+ *  The live value stays in the registry (`program` contract), not env. */
+export const SOLANA_TESTNET_PROGRAM_ID = "D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3";
 /** Public devnet RPC — seed default when the registry has no Solana chain. */
 export const SOLANA_DEVNET_RPC = "https://api.devnet.solana.com";
 /** Public testnet RPC — seed default for the solana-testnet registry row. */

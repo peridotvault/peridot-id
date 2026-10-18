@@ -3,6 +3,8 @@ import { ChainRegistryService } from "./chain-registry.service";
 import {
   SOLANA_DEVNET_REFERENCE,
   SOLANA_NAMESPACE,
+  SOLANA_PROGRAM_ID,
+  SOLANA_TESTNET_PROGRAM_ID,
   SOLANA_TESTNET_REFERENCE,
   solanaReferenceFor,
 } from "../common/chains";
@@ -98,10 +100,12 @@ describe("ChainRegistryService", () => {
     expect(await withRow.solanaRpcUrl()).toBe("https://solana.example");
     expect(await withRow.solanaProgramId()).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
 
-    // Empty registry → EVM code fallback has no Solana chain → constants.
+    // Empty registry → EVM code fallback has no Solana chain → per-cluster constants.
     const empty = setup([]);
     expect(await empty.solanaRpcUrl()).toBe("https://api.devnet.solana.com");
     expect(await empty.solanaProgramId()).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
+    expect(await empty.solanaProgramId("devnet")).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
+    expect(await empty.solanaProgramId("testnet")).toBe(SOLANA_TESTNET_PROGRAM_ID);
   });
 
   it("derives the same address on every deployable chain (determinism invariant)", async () => {
@@ -134,8 +138,9 @@ describe("ChainRegistryService", () => {
   });
 
   describe("Solana selection scope (ANT-24 dual-cluster registry)", () => {
-    const DEVNET_PROGRAM = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
-    const TESTNET_PROGRAM = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
+    const DEVNET_PROGRAM = SOLANA_PROGRAM_ID;
+    const TESTNET_PROGRAM = SOLANA_TESTNET_PROGRAM_ID;
+    expect(TESTNET_PROGRAM).not.toBe(DEVNET_PROGRAM); // distinct keypairs per cluster (Trevor, ANT-26)
 
     function solanaRows() {
       return [
