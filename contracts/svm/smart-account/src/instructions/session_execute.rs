@@ -234,9 +234,30 @@ pub fn process(
         programdata::LoaderClass::Unknown => return Err(PeridotError::WrongOwner.into()),
     };
 
-    // Pre-CPI snapshot of every protected account: lamports, owner, full data
-    // hash (covers balances AND delegate/close_authority moves uniformly),
-    // plus explicit authority-field snapshots for token-owned accounts.
+    // Effects first (checks-effects-interactions): consume the sequence number
+    // BEFORE the untrusted game CPI. A reentrant second call with the same seq
+    // then fails `BadSessionSeq`; a failed CPI or a post-CPI invariant violation
+    // reverts the advance atomically, so this is behavior-preserving. The
+    // upgrade-visibility snapshot travels with the same write (record-and-log).
+    {
+        let mut data_ref = session.try_borrow_mut()?;
+        let mut record = SessionAccountMut::try_from_bytes(&mut data_ref)?;
+        record.advance(now);
+        record.record_seen(seen_auth, seen_has_auth, seen_slot);
+    }
+
+    // Post-effects, pre-CPI snapshot of every protected account: lamports,
+    // owner, full data hash (covers balances AND delegate/close_authority moves
+    // uniformly), plus explicit authority-field snapshots for token-owned
+    // accounts. The snapshot MUST be taken after the `advance`/`record_seen`
+    // write above: both mutate the session record bytes (`seq`, `last_used`,
+    // `seen_*`), so a pre-advance snapshot of a protected session PDA (the
+    // rent-pinning case, `session_execute.rs:274`) would never match the
+    // post-CPI state and every such call would revert with
+    // `SessionScopeViolation` (0x15) even when the game behaved perfectly.
+    // Snapshot-after-effects keeps checks-effects-interactions (a snapshot is
+    // a read, not an interaction) while baselining the invariant on the exact
+    // bytes the game observes.
     struct Snapshot {
         lamports: u64,
         owner: [u8; 32],
@@ -245,18 +266,19 @@ pub fn process(
     }
     let mut snapshots: Vec<Snapshot> = Vec::with_capacity(protected.len());
     for p in protected.iter() {
-        let view = accounts
-            .iter()
-            .skip(4)
-            .find(|v| v.address().as_array() == p)
-            .ok_or(PeridotError::SessionScopeViolation)?;
         // The session PDA itself may be protected (rent-pinning): it maps to
-        // account 0, which the scan above skips — handle it explicitly.
+        // account 0, which the scan below skips — check it first, mirroring
+        // the post-CPI loop.
         let (lamports, owner, data_hash, token_auth) = if p == session.address().as_array() {
             let borrowed = session.try_borrow()?;
             let owner = programdata::owner_bytes(session);
             (session.lamports(), owner, auth::sha256(&borrowed), None)
         } else {
+            let view = accounts
+                .iter()
+                .skip(4)
+                .find(|v| v.address().as_array() == p)
+                .ok_or(PeridotError::SessionScopeViolation)?;
             let borrowed = view.try_borrow()?;
             let owner = programdata::owner_bytes(view);
             let token_auth = if programdata::is_token_program(&owner) {
@@ -323,6 +345,7 @@ pub fn process(
     // Post-CPI invariant check: any change to a protected account reverts.
     // Lamport/owner/data-hash equality catches balance moves, owner swaps
     // (`assign`-then-drain), and delegate/close_authority edits alike.
+    // (The seq was already consumed above; a violation here reverts it too.)
     for (p, before) in protected.iter().zip(snapshots.iter()) {
         let (lamports, owner, data_hash, token_auth) = if p == session.address().as_array() {
             let borrowed = session.try_borrow()?;
@@ -351,14 +374,6 @@ pub fn process(
         if token_auth != before.token_auth {
             return Err(PeridotError::SessionScopeViolation.into());
         }
-    }
-
-    // Effects: seq + inactivity clock + upgrade-visibility snapshot.
-    {
-        let mut data_ref = session.try_borrow_mut()?;
-        let mut record = SessionAccountMut::try_from_bytes(&mut data_ref)?;
-        record.advance(now);
-        record.record_seen(seen_auth, seen_has_auth, seen_slot);
     }
 
     pinocchio_log::log!("PeridotEvent::SessionExecuted");

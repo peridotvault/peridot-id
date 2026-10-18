@@ -98,16 +98,19 @@ pub fn process(
     auth::check_expiry(expiry)?;
     auth::verify_secp256r1_v2(instructions, &authority, &rp_id_hash, client_json, &payload)?;
 
-    let lamports = session.lamports();
-    let to = *destination;
-    to.set_lamports(to.lamports() + lamports);
-    let account = *session;
-    account.close()?;
+    // Effects first (checks-effects-interactions): burn the vault nonce BEFORE
+    // the rent moves + close. A failure below reverts atomically, so this is
+    // behavior-preserving (ANT-16 hardening, uniform across spend paths).
     {
         let mut data_ref = vault.try_borrow_mut()?;
         let mut state = crate::state::SmartAccountMut::try_from_bytes(&mut data_ref)?;
         state.increment_nonce();
     }
+    let lamports = session.lamports();
+    let to = *destination;
+    to.set_lamports(to.lamports() + lamports);
+    let account = *session;
+    account.close()?;
 
     pinocchio_log::log!("PeridotEvent::SessionClosed");
     Ok(())

@@ -80,3 +80,169 @@ pub fn process_instruction(
             Instruction::CloseSession => instructions::close_session::process(program_id, accounts, &instruction_data),
         }
 }
+
+#[cfg(test)]
+fn assert_effect_before_interaction(file: &str, src: &str, effect: &str, interaction: &str) {
+    let e = src
+        .find(effect)
+        .unwrap_or_else(|| panic!("{file}: expected `{effect}` not found"));
+    let i = src
+        .find(interaction)
+        .unwrap_or_else(|| panic!("{file}: expected `{interaction}` not found"));
+    assert!(
+        e < i,
+        "{file}: `{effect}` (byte {e}) must precede `{interaction}` (byte {i})"
+    );
+}
+
+/// ANT-16 (child of ANT-12) hardening regression: effects-before-interactions.
+/// Every spend path must burn its nonce / consume its sequence number BEFORE
+/// any untrusted CPI or value movement. A failed CPI reverts atomically, so
+/// the reorder is behavior-preserving; the value is audit cleanliness plus
+/// reentrancy defense-in-depth (a reentrant second call with the same
+/// signature/seq observes spent state and fails).
+#[cfg(test)]
+mod ant16_ordering_tests {
+    use super::assert_effect_before_interaction;
+
+    #[test]
+    fn execute_burns_nonce_before_cpi() {
+        assert_effect_before_interaction(
+            "execute.rs",
+            include_str!("instructions/execute.rs"),
+            "increment_nonce()",
+            "invoke_signed_with_slice",
+        );
+    }
+
+    #[test]
+    fn withdraw_token_burns_nonce_before_cpi() {
+        assert_effect_before_interaction(
+            "withdraw_token.rs",
+            include_str!("instructions/withdraw_token.rs"),
+            "increment_nonce()",
+            "invoke_signed",
+        );
+    }
+
+    #[test]
+    fn withdraw_sol_burns_nonce_before_value_moves() {
+        assert_effect_before_interaction(
+            "withdraw_sol.rs",
+            include_str!("instructions/withdraw_sol.rs"),
+            "increment_nonce()",
+            "set_lamports",
+        );
+    }
+
+    #[test]
+    fn session_execute_consumes_seq_before_cpi() {
+        assert_effect_before_interaction(
+            "session_execute.rs",
+            include_str!("instructions/session_execute.rs"),
+            ".advance(",
+            "invoke_signed_with_slice",
+        );
+    }
+
+    #[test]
+    fn register_session_burns_nonce_before_create_cpi() {
+        assert_effect_before_interaction(
+            "register_session.rs",
+            include_str!("instructions/register_session.rs"),
+            "increment_nonce()",
+            "invoke_signed",
+        );
+    }
+
+    #[test]
+    fn close_session_burns_nonce_before_value_moves() {
+        assert_effect_before_interaction(
+            "close_session.rs",
+            include_str!("instructions/close_session.rs"),
+            "increment_nonce()",
+            "set_lamports",
+        );
+    }
+
+    #[test]
+    fn session_execute_snapshots_after_seq_advance() {
+        // F1 (ANT-30): the protected-accounts snapshot must be taken AFTER
+        // the `advance`/`record_seen` write. Both mutate the session record
+        // bytes (see `advance_and_record_seen_mutate_record_bytes` in
+        // state.rs), so a pre-advance snapshot of a protected session PDA
+        // (rent-pinning) would never match post-CPI state and every such
+        // call would revert with `SessionScopeViolation` (0x15).
+        let src = include_str!("instructions/session_execute.rs");
+        assert_effect_before_interaction("session_execute.rs", src, ".advance(", "let mut snapshots");
+        assert_effect_before_interaction(
+            "session_execute.rs",
+            src,
+            "record_seen(",
+            "let mut snapshots",
+        );
+    }
+}
+
+/// ANT-16(e) (child of ANT-12) hardening regression: direct `initialize` is
+/// deprecated (ANT-22 Option A) — creation must route through `activate`, the
+/// sole fee-bearing sponsored-creation path. Testnet/devnet builds keep
+/// `initialize` functional plus a deprecation event; production builds reject
+/// via `check_initialize_allowed` before any other validation.
+#[cfg(test)]
+mod ant16e_deprecation_tests {
+    use super::assert_effect_before_interaction;
+
+    #[test]
+    fn initialize_gate_runs_before_creation_cpi() {
+        // t-e1 mechanism pin: the production gate must precede the PDA
+        // creation CPI, so no fee-free account can be minted where `activate`
+        // (and its 50% sponsored-creation fee) was due. The `true` arm itself
+        // is a two-line pure function (`check_initialize_allowed`); behavior
+        // on a production build is covered by the session.mjs/integration
+        // creation suites in CI (validator-gated, not host-runnable).
+        assert_effect_before_interaction(
+            "initialize.rs",
+            include_str!("instructions/initialize.rs"),
+            "check_initialize_allowed()",
+            "    create_account_with_minimum_balance_signed(",
+        );
+    }
+
+    #[test]
+    fn initialize_deprecated_error_is_additive() {
+        // t-e1 discriminant pin: additive-only error enum — existing
+        // discriminants are untouched so old SDK decoders keep working.
+        let src = include_str!("errors.rs");
+        assert!(
+            src.contains("InitializeDeprecated = 23"),
+            "errors.rs: expected `InitializeDeprecated = 23`"
+        );
+    }
+
+    #[test]
+    fn initialize_emits_deprecation_event() {
+        // t-e2 pin: testnet/devnet `initialize` succeeds exactly as before
+        // PLUS the deprecation event for drift alerting (ANT-16(c) sink).
+        let src = include_str!("instructions/initialize.rs");
+        assert!(
+            src.contains("PeridotEvent::AccountInitialized"),
+            "initialize.rs: success event missing"
+        );
+        assert!(
+            src.contains("PeridotEvent::AccountInitializeDeprecated"),
+            "initialize.rs: deprecation event missing"
+        );
+    }
+
+    #[test]
+    fn testnet_gate_is_open() {
+        // This build is the testnet/devnet build: `initialize` stays
+        // functional. Production flips the const (ANT-22 Q1, owner: CTO).
+        assert!(
+            !crate::instructions::initialize::DEPRECATE_DIRECT_INITIALIZE,
+            "testnet build must keep direct initialize functional"
+        );
+        assert!(crate::instructions::initialize::check_initialize_allowed().is_ok());
+    }
+}

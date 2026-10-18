@@ -236,6 +236,32 @@ contract PeridotAccountTest is Test {
         );
     }
 
+    function test_DeployAndInitBadSignatureLeavesNoState() public {
+        if (!VEC_READY) return;
+        // ANT-16 hardening regression (verify-before-write in `initialize`):
+        // a bad activation signature must revert with zero state written. The
+        // factory path is atomic (clone + init roll back together), so the
+        // predicted address holds no code afterwards — and the same salt still
+        // activates cleanly, proving no partial state (no squat, no locked salt).
+        address predicted = factory.predict(SALT);
+        vm.expectRevert(PeridotFactory.InitFailed.selector);
+        factory.deployAndInit(
+            SALT, GX, GY, rpIdHash, POLICY, DEADLINE, NETWORK_FEE,
+            _authData(), _clientData(_actPayload()), bytes32(uint256(1)), bytes32(uint256(2))
+        );
+        assertEq(predicted.code.length, 0);
+        vm.deal(predicted, NETWORK_FEE + _protocolFee(NETWORK_FEE));
+        address account = factory.deployAndInit(
+            SALT, GX, GY, rpIdHash, POLICY, DEADLINE, NETWORK_FEE,
+            _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
+        );
+        assertEq(account, predicted);
+        assertEq(PeridotAccount(payable(account)).authorityX(), GX);
+        assertEq(PeridotAccount(payable(account)).authorityY(), GY);
+        assertEq(PeridotAccount(payable(account)).rpIdHash(), rpIdHash);
+        assertTrue(PeridotAccount(payable(account)).initialized());
+    }
+
     function test_DeployAndInitRejectsGasAnomaly() public {
         if (!VEC_READY) return;
         // Wild over-attestation (100 ether of "network cost") fails the sanity
