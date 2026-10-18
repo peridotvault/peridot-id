@@ -1,4 +1,11 @@
+import { NotFoundException } from "@nestjs/common";
 import { ChainRegistryService } from "./chain-registry.service";
+import {
+  SOLANA_DEVNET_REFERENCE,
+  SOLANA_NAMESPACE,
+  SOLANA_TESTNET_REFERENCE,
+  solanaReferenceFor,
+} from "../common/chains";
 import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
 
 const FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
@@ -124,5 +131,92 @@ describe("ChainRegistryService", () => {
     expect(addrs[0]).not.toBe(addrs[1]);
     const same = deriveEvmSmartAccountAddress("ifal@pid", FACTORY, IMPL).address;
     expect(deriveEvmSmartAccountAddress("IFAL@PID ", FACTORY, IMPL).address).toBe(same); // normalization
+  });
+
+  describe("Solana selection scope (ANT-24 dual-cluster registry)", () => {
+    const DEVNET_PROGRAM = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
+    const TESTNET_PROGRAM = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
+
+    function solanaRows() {
+      return [
+        dbRow({
+          id: "chain-sol-devnet",
+          namespace: "solana",
+          reference: SOLANA_DEVNET_REFERENCE,
+          name: "solana-devnet",
+          nativeSymbol: "SOL",
+          decimals: 9,
+          rpcUrls: ["https://api.devnet.solana.com"],
+          explorerUrl: "https://explorer.solana.com",
+          isTestnet: true,
+          contracts: [{ type: "program", address: DEVNET_PROGRAM, versionLabel: "v1" }],
+        }),
+        dbRow({
+          id: "chain-sol-testnet",
+          namespace: "solana",
+          reference: SOLANA_TESTNET_REFERENCE,
+          name: "solana-testnet",
+          nativeSymbol: "SOL",
+          decimals: 9,
+          rpcUrls: ["https://api.testnet.solana.com"],
+          explorerUrl: "https://explorer.solana.com?cluster=testnet",
+          isTestnet: true,
+          contracts: [{ type: "program", address: TESTNET_PROGRAM, versionLabel: "v1" }],
+        }),
+      ];
+    }
+
+    it("maps selections to distinct registry references", () => {
+      expect(solanaReferenceFor("devnet")).toBe(SOLANA_DEVNET_REFERENCE);
+      expect(solanaReferenceFor("testnet")).toBe(SOLANA_TESTNET_REFERENCE);
+      expect(SOLANA_TESTNET_REFERENCE).not.toBe(SOLANA_DEVNET_REFERENCE);
+    });
+
+    it("resolves devnet vs testnet chains, RPCs, and programs per selection", async () => {
+      const service = setup(solanaRows());
+      expect((await service.solanaChain("devnet"))?.id).toBe("chain-sol-devnet");
+      expect((await service.solanaChain("testnet"))?.id).toBe("chain-sol-testnet");
+      expect(await service.solanaRpcUrl("devnet")).toBe("https://api.devnet.solana.com");
+      expect(await service.solanaRpcUrl("testnet")).toBe("https://api.testnet.solana.com");
+      expect(await service.solanaProgramId("devnet")).toBe(DEVNET_PROGRAM);
+      expect(await service.solanaProgramId("testnet")).toBe(TESTNET_PROGRAM);
+      expect(await service.solanaChains()).toHaveLength(2);
+    });
+
+    it("keeps no-selection behavior on the first Solana row (backward compatible)", async () => {
+      const service = setup(solanaRows());
+      expect((await service.solanaChain())?.id).toBe("chain-sol-devnet");
+      expect(await service.solanaRpcUrl()).toBe("https://api.devnet.solana.com");
+      expect(await service.solanaProgramId()).toBe(DEVNET_PROGRAM);
+    });
+
+    it("labels networks per row: mainnet-beta when not testnet, testnet by reference, devnet otherwise", async () => {
+      const service = setup(solanaRows());
+      expect(await service.networkLabel("devnet")).toBe("devnet");
+      expect(await service.networkLabel("testnet")).toBe("testnet");
+      expect(await service.networkLabel()).toBe("devnet");
+      expect(service.networkLabelFor(undefined)).toBe("devnet");
+      expect(service.networkLabelFor({ reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z", isTestnet: false })).toBe(
+        "mainnet-beta",
+      );
+    });
+
+    it("scopes solanaChainIdOrThrow per selection with fail-fast 404s", async () => {
+      const findUnique = jest.fn(async ({ where }: any) =>
+        where.namespace_reference.reference === SOLANA_DEVNET_REFERENCE ? { id: "chain-sol-devnet" } : null,
+      );
+      const prisma = { chain: { findMany: jest.fn(async () => solanaRows()), findUnique } };
+      const config = { get: jest.fn(), getOrThrow: jest.fn(() => { throw new Error("missing"); }) };
+      const service = new ChainRegistryService(prisma as never, config as never);
+
+      expect(await service.solanaChainIdOrThrow()).toBe("chain-sol-devnet");
+      expect(await service.solanaChainIdOrThrow("devnet")).toBe("chain-sol-devnet");
+      expect(findUnique).toHaveBeenCalledWith({
+        where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_DEVNET_REFERENCE } },
+        select: { id: true },
+      });
+      await expect(service.solanaChainIdOrThrow("testnet")).rejects.toThrow(NotFoundException);
+      await expect(service.solanaChainIdOrThrow("testnet")).rejects.toThrow('"testnet"');
+    });
   });
 });

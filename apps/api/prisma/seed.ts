@@ -3,10 +3,12 @@
 // no Solana chain/RPC/program env. Run: `pnpm --filter @peridotvault/pid-api db:seed`
 import { PrismaClient } from "@prisma/client";
 import {
+  SOLANA_DEVNET_REFERENCE,
   SOLANA_DEVNET_RPC,
-  SOLANA_MAINNET_REFERENCE,
   SOLANA_NAMESPACE,
   SOLANA_PROGRAM_ID,
+  SOLANA_TESTNET_REFERENCE,
+  SOLANA_TESTNET_RPC,
 } from "../src/common/chains";
 
 const prisma = new PrismaClient();
@@ -19,14 +21,16 @@ const EVM = [
 ];
 
 async function main(): Promise<void> {
-  // The account-creation path writes SOLANA_MAINNET_REFERENCE (common/chains.ts) —
+  // The account-creation path resolves SOLANA_DEVNET_REFERENCE (common/chains.ts) —
   // the chain_accounts FK requires this row to exist. Admin edits RPC/contracts later.
+  // No schema migration is needed for dual-cluster: adding a chain is a data row
+  // (expand), and chain_accounts FKs by id so existing rows are untouched.
   const solana = await prisma.chain.upsert({
-    where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_MAINNET_REFERENCE } },
+    where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_DEVNET_REFERENCE } },
     update: {},
     create: {
       namespace: SOLANA_NAMESPACE,
-      reference: SOLANA_MAINNET_REFERENCE,
+      reference: SOLANA_DEVNET_REFERENCE,
       name: "solana-devnet",
       nativeSymbol: "SOL",
       decimals: 9,
@@ -40,6 +44,37 @@ async function main(): Promise<void> {
     where: { chainId_type: { chainId: solana.id, type: "program" } },
     update: {},
     create: { chainId: solana.id, type: "program", address: SOLANA_PROGRAM_ID, versionLabel: "v1" },
+  });
+
+  // Second Solana chain (ANT-15 req 1: dual-cluster registry). Keyed by the live
+  // testnet genesis hash — distinct from the legacy devnet row key above. Each
+  // row carries its own `program` contract so testnet can run a different
+  // program id after its deploy; admins change it via the workspace admin API,
+  // and the seed-time env overrides below are bootstrap-only.
+  const solanaTestnet = await prisma.chain.upsert({
+    where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_TESTNET_REFERENCE } },
+    update: {},
+    create: {
+      namespace: SOLANA_NAMESPACE,
+      reference: SOLANA_TESTNET_REFERENCE,
+      name: "solana-testnet",
+      nativeSymbol: "SOL",
+      decimals: 9,
+      rpcUrls: [process.env.SOLANA_TESTNET_RPC ?? SOLANA_TESTNET_RPC],
+      explorerUrl: "https://explorer.solana.com?cluster=testnet",
+      isTestnet: true,
+      isActive: true,
+    },
+  });
+  await prisma.chainContract.upsert({
+    where: { chainId_type: { chainId: solanaTestnet.id, type: "program" } },
+    update: {},
+    create: {
+      chainId: solanaTestnet.id,
+      type: "program",
+      address: process.env.SOLANA_TESTNET_PROGRAM_ID ?? SOLANA_PROGRAM_ID,
+      versionLabel: "v1",
+    },
   });
 
   const factory = process.env.EVM_FACTORY_ADDRESS;
