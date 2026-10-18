@@ -266,18 +266,19 @@ pub fn process(
     }
     let mut snapshots: Vec<Snapshot> = Vec::with_capacity(protected.len());
     for p in protected.iter() {
-        let view = accounts
-            .iter()
-            .skip(4)
-            .find(|v| v.address().as_array() == p)
-            .ok_or(PeridotError::SessionScopeViolation)?;
         // The session PDA itself may be protected (rent-pinning): it maps to
-        // account 0, which the scan above skips — handle it explicitly.
+        // account 0, which the scan below skips — check it first, mirroring
+        // the post-CPI loop.
         let (lamports, owner, data_hash, token_auth) = if p == session.address().as_array() {
             let borrowed = session.try_borrow()?;
             let owner = programdata::owner_bytes(session);
             (session.lamports(), owner, auth::sha256(&borrowed), None)
         } else {
+            let view = accounts
+                .iter()
+                .skip(4)
+                .find(|v| v.address().as_array() == p)
+                .ok_or(PeridotError::SessionScopeViolation)?;
             let borrowed = view.try_borrow()?;
             let owner = programdata::owner_bytes(view);
             let token_auth = if programdata::is_token_program(&owner) {
