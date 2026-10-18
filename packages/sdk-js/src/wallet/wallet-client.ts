@@ -58,6 +58,66 @@ export type ActivationStatus =
   | "active"
   | "insufficient";
 
+/**
+ * Optional chain echo on Solana-scoped 2xx (ANT-39/ANT-41, additive).
+ * Mirrors the backend `chain?: { namespace: "solana"; reference: string }`.
+ * `reference` is the active registry Solana chain's reference verbatim
+ * (today's seed: mainnet genesis hash reused as the row key; the *label*
+ * comes from `isTestnet`, not the reference). Two public strings only —
+ * no secrets/PII.
+ */
+export interface ChainEcho {
+  namespace: "solana";
+  reference: string;
+}
+
+/**
+ * Thrown when a Solana-scoped 2xx carries a `chain` echo that does not match
+ * the wallet's selected cluster. The response is discarded and the caller
+ * MUST NOT sign/broadcast. Message names expected vs received references
+ * (both public registry strings) and nothing secret.
+ */
+export class ClusterMismatchError extends Error {
+  readonly expectedReference: string;
+  readonly receivedReference: string;
+  readonly receivedNamespace: string;
+
+  constructor(expectedReference: string, received: { namespace: string; reference: string }) {
+    super(
+      `cluster-mismatch: wallet cluster "${expectedReference}" does not match response chain "${received.reference}" (namespace "${received.namespace}") — response discarded, nothing was signed`,
+    );
+    this.name = "ClusterMismatchError";
+    this.expectedReference = expectedReference;
+    this.receivedReference = received.reference;
+    this.receivedNamespace = received.namespace;
+  }
+}
+
+/**
+ * Assert-on-2xx (ANT-41 §2 / AC9): compare an optional `chain` echo against
+ * the wallet's selected cluster reference.
+ * - Missing/null echo → legacy path, proceed (return silently).
+ * - Missing selected reference → legacy path, proceed (no cluster to assert
+ *   against; adapter resolution fails later with a clear error if needed).
+ * - Match (`namespace === "solana"` + equal reference) → proceed.
+ * - Anything else → throw ClusterMismatchError (discard, do not sign).
+ */
+export function assertChainEcho(
+  echo: { namespace: string; reference: string } | null | undefined,
+  selectedReference: string | null | undefined,
+): void {
+  if (!echo) return;
+  if (!selectedReference) return;
+  if (echo.namespace !== "solana" || echo.reference !== selectedReference) {
+    throw new ClusterMismatchError(selectedReference, echo);
+  }
+}
+
+/** Build the submit-time `chain` echo from a known selected reference. */
+export function buildChainEcho(reference: string): ChainEcho {
+  return { namespace: "solana", reference };
+}
+
 export interface ActivationView {
   status: ActivationStatus;
   smartAccountAddress: string;
@@ -70,6 +130,8 @@ export interface ActivationView {
   feePolicyVersion: number;
   /** base64url sha256 of the WebAuthn RP ID (bound into the activation payload). */
   rpIdHash: string;
+  /** Optional chain echo (ANT-39/ANT-41): present when the registry has a Solana row. */
+  chain?: ChainEcho;
 }
 
 export interface RotateInput {
@@ -77,6 +139,28 @@ export interface RotateInput {
   oldCredentialId?: string;
   /** Credential id of the already-registered replacement authority. */
   newCredentialId: string;
+}
+
+/** Solana-scoped fee quote with optional chain echo (withdraw + execute share the shape). */
+export interface FeeQuoteView {
+  networkFeeLamports: string;
+  protocolFeeBps: number;
+  feePolicyVersion: number;
+  totalFeeLamports: string;
+  chainTime: number;
+  treasury: string;
+  /** Optional chain echo (ANT-39/ANT-41): present when the registry has a Solana row. */
+  chain?: ChainEcho;
+}
+
+/** Input for POST /v1/wallet/transactions/submit (ANT-39/ANT-41, additive). */
+export interface SubmitTransactionInput {
+  intentId: string;
+  txHash: string;
+  /** Legacy label field — kept for compat. Ignored server-side when `chain` is present. */
+  network?: string;
+  /** Optional chain echo (same shape as the 2xx echo). Server derives `network` from it. */
+  chain?: ChainEcho;
 }
 
 function isApiError(v: unknown): v is ApiError {
@@ -124,9 +208,26 @@ export class PeridotWallet {
     return this.adapterPromise;
   }
 
+  /**
+   * Selected cluster reference from the API chain registry (the active
+   * `solana` row's `reference`). Null when the registry has no Solana row
+   * or is unreachable — callers treat that as the legacy path (proceed;
+   * adapter resolution fails later with a clear error if signing is needed).
+   * Best-effort, never throws.
+   */
+  private async selectedSolanaReference(): Promise<string | null> {
+    try {
+      const res = await this.api.get<Chain[]>("/v1/chains");
+      if (!res.ok || isApiError(res.data) || !Array.isArray(res.data)) return null;
+      const chain = (res.data as Chain[]).find((c) => c.namespace === "solana");
+      return chain?.reference ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Inline signer — throws a routable error when the caller runs popup-mode. */
-  private signer(): PasskeySigner {
-    if (!this.passkeySigner) {
+  private signer(): PasskeySigner {    if (!this.passkeySigner) {
       throw new Error(
         "No passkey signer configured — signing inline is first-party-origin only. " +
           "Pass popupBaseUrl to delegate to the PeridotID popup, or pass an explicit passkeySigner.",
@@ -242,12 +343,16 @@ export class PeridotWallet {
     const adapter = await this.solana();
 
     const getQuote = async () => {
-      const quoteRes = await this.api.post<{ networkFeeLamports: string; protocolFeeBps: number; feePolicyVersion: number; totalFeeLamports: string; chainTime: number; treasury: string }>(
+      const quoteRes = await this.api.post<FeeQuoteView>(
         "/v1/wallet/withdraw/quote",
         { asset: input.asset },
       );
       if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
-      return quoteRes.data as { networkFeeLamports: string; protocolFeeBps: number; feePolicyVersion: number; totalFeeLamports: string; chainTime: number; treasury: string };
+      const quote = quoteRes.data as FeeQuoteView;
+      // Assert-on-2xx (ANT-41 AC9): mismatch discards the quote — never sign/broadcast.
+      // Missing echo → legacy path (proceed). Throws ClusterMismatchError on mismatch.
+      assertChainEcho(quote.chain, await this.selectedSolanaReference());
+      return quote;
     };
 
     const attempt = async (
@@ -327,12 +432,15 @@ export class PeridotWallet {
     const data = b64urlToBytes(input.data);
 
     const getQuote = async () => {
-      const quoteRes = await this.api.post<{ networkFeeLamports: string; protocolFeeBps: number; feePolicyVersion: number; totalFeeLamports: string; chainTime: number; treasury: string }>(
+      const quoteRes = await this.api.post<FeeQuoteView>(
         "/v1/wallet/execute/quote",
         { target: input.target, metas: input.metas, data: input.data },
       );
       if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
-      return quoteRes.data as { networkFeeLamports: string; protocolFeeBps: number; feePolicyVersion: number; totalFeeLamports: string; chainTime: number; treasury: string };
+      const quote = quoteRes.data as FeeQuoteView;
+      // Assert-on-2xx (ANT-41 AC9): mismatch discards the quote — never sign/broadcast.
+      assertChainEcho(quote.chain, await this.selectedSolanaReference());
+      return quote;
     };
 
     const attempt = async (
@@ -419,6 +527,9 @@ export class PeridotWallet {
     const pid = await this.pid();
     const viewRes = await this.activation();
     if (isApiError(viewRes)) return viewRes;
+    // Assert-on-2xx (ANT-41 AC9): mismatch discards the view — MUST NOT sign/broadcast.
+    // Missing echo → legacy path (proceed). Throws ClusterMismatchError on mismatch.
+    assertChainEcho(viewRes.chain, await this.selectedSolanaReference());
     const authority = await this.authorityCompressed();
     const rpIdHash = b64urlToBytes(viewRes.rpIdHash);
     const expiry = Math.floor(viewRes.chainTime) + 300;
@@ -493,6 +604,29 @@ export class PeridotWallet {
   /** Current activation status of the smart account. */
   async activation(): Promise<ActivationView | ApiError> {
     const res = await this.api.get<ActivationView>(`/v1/account/activation`);
+    return res.data;
+  }
+
+  /**
+   * Record an executed transaction against a pending intent
+   * (POST /v1/wallet/transactions/submit, ANT-39/ANT-41 slice).
+   * Sends the optional `chain` echo (same shape as the 2xx echo) so the
+   * server can derive `network` server-side; keeps the legacy `network`
+   * field for compat (`chain` wins server-side). When the caller omits
+   * `chain`, the SDK best-effort resolves the selected cluster reference
+   * from the registry and includes it; when the registry is unreachable it
+   * omits `chain` (legacy path, unchanged behavior).
+   */
+  async submitTransaction(input: SubmitTransactionInput): Promise<WalletTransaction | ApiError> {
+    let chain = input.chain;
+    if (!chain) {
+      const ref = await this.selectedSolanaReference();
+      if (ref) chain = buildChainEcho(ref);
+    }
+    const body: Record<string, unknown> = { intentId: input.intentId, txHash: input.txHash };
+    if (input.network !== undefined) body.network = input.network;
+    if (chain) body.chain = chain;
+    const res = await this.api.post<WalletTransaction>("/v1/wallet/transactions/submit", body);
     return res.data;
   }
 
