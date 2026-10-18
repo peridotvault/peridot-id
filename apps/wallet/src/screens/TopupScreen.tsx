@@ -5,6 +5,8 @@ import { styles as s } from "../shared/theme";
 import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
 import { fmtIdr } from "../shared/fiat";
+import { isNetworkSwitching, isTestnetMode } from "../shared/network-mode";
+import { useNetworkMode } from "../shared/hooks/useNetworkMode";
 import { FiatQuoteBreakdown } from "../feat/fiat/components/FiatQuoteBreakdown";
 import { digitsOnly, groupDigits, MIN_NET_IDR } from "../feat/fiat/utils/topup-amount";
 import { useDepositQuote } from "../feat/fiat/hooks/useDepositQuote";
@@ -26,6 +28,11 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const q = useDepositQuote(peridot, net, setError);
   const sync = useCheckoutSync(peridot);
+  // DOKU checkout moves real money — mainnet-only, and paused mid-transition
+  // (ANT-15 req 4). Testnet users top up with devnet SOL, not rupiah.
+  const nm = useNetworkMode();
+  const gated = nm.testnet;
+  const frozen = nm.switching;
 
   const digits = net.replace(/\D/g, "");
   const belowMin = /^\d+$/.test(digits) && BigInt(digits) > 0n && BigInt(digits) < MIN_NET_IDR;
@@ -39,6 +46,14 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
     setError(null);
     sync.setPending(null);
     try {
+      if (isTestnetMode()) {
+        setError("Top-ups are disabled in Testnet Mode — real-money checkout is mainnet-only.");
+        return;
+      }
+      if (isNetworkSwitching()) {
+        setError("Network is switching — wait a moment, then try again.");
+        return;
+      }
       if (!/^\d+$/.test(digits) || BigInt(digits) <= 0n) {
         setError("Enter the net amount you want credited.");
         return;
@@ -70,6 +85,15 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
       <BackButton onPress={onDone} />
       <Text style={s.title}>Top Up</Text>
       <Text style={s.subtitle}>Enter what you want credited — you pay that plus the fees shown below.</Text>
+      {gated && (
+        <View className="border border-border bg-muted p-3">
+          <Text className="font-sans text-[13px] font-semibold text-foreground">Disabled in Testnet Mode</Text>
+          <Text className="font-sans text-[13px] leading-5 text-muted-foreground">
+            Real-money checkout is mainnet-only — switch back to Mainnet in Settings to top up.
+          </Text>
+        </View>
+      )}
+      {frozen && !gated && <Text style={s.hint}>Network is switching — top-ups pause until balances reload.</Text>}
 
       <View className="mt-3 gap-1.5 border border-border bg-surface p-3">
         <Text style={s.label}>Amount credited to you (IDR)</Text>
@@ -96,7 +120,7 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
         <UIButton
           title={busy ? "Creating…" : q.selected ? `Pay ${fmtIdr(q.selected.totalIdr)}` : "Pay"}
           onPress={createCheckout}
-          disabled={busy || !q.quote || belowMin || q.noMethods}
+          disabled={busy || gated || frozen || !q.quote || belowMin || q.noMethods}
           variant="primary"
         />
         {sync.pending && (

@@ -1,6 +1,7 @@
 import { Linking, ScrollView, Text, View } from "../shared/primitives";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { styles as s } from "../shared/theme";
+import { solanaExplorerTxUrl } from "../shared/network-mode";
 import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
 
@@ -51,9 +52,10 @@ export function ActivityDetailScreen({ tx, onDone }: { tx: WalletTransaction; on
       {tx.txHash && (
         <UIButton
           title="View on Explorer"
+          // Explorer cluster follows the selection (ANT-15 req 3): testnet
+          // links carry ?cluster=devnet via the shared helper.
           onPress={() => {
-            const cluster = tx.network === "devnet" ? "?cluster=devnet" : "";
-            Linking.openURL(`https://explorer.solana.com/tx/${tx.txHash}${cluster}`).catch(() => undefined);
+            Linking.openURL(solanaExplorerTxUrl(tx.txHash, tx.network)).catch(() => undefined);
           }}
           variant="primary"
         />
