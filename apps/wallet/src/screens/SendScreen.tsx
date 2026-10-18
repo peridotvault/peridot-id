@@ -3,11 +3,16 @@ import { Text, TextInput, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
+import { isNetworkSwitching } from "../shared/network-mode";
+import { useNetworkMode } from "../shared/hooks/useNetworkMode";
 
 const LAMPORTS_PER_SOL = 1e9;
 
 export function SendScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
+  // Block signing while a network switch propagates (ANT-15 req 3) — the
+  // request must never land on the wrong chain mid-transition.
+  const net = useNetworkMode();
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [asset, setAsset] = useState("SOL");
@@ -33,6 +38,10 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
     setError(null);
     setResult(null);
     try {
+      if (isNetworkSwitching()) {
+        setError("Network is switching — wait a moment, then try again.");
+        return;
+      }
       const lamports = toLamports(amount);
       if (lamports === null) {
         setError(asset === "SOL" ? "Enter an amount greater than 0." : "Token amounts must be whole raw units.");
@@ -78,7 +87,8 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
       <Text style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</Text>
       {error && <Text style={s.error}>{error}</Text>}
       {result && <Text selectable style={s.mono}>{result}</Text>}
-      <UIButton title={busy ? "Sending…" : "Send"} onPress={send} disabled={busy || !to || !amount} variant="primary" />
+      {net.switching && <Text style={s.hint}>Network is switching — sending is paused until balances reload.</Text>}
+      <UIButton title={busy ? "Sending…" : "Send"} onPress={send} disabled={busy || net.switching || !to || !amount} variant="primary" />
       <UIButton title="Back" onPress={onDone} />
     </View>
   );
