@@ -13,6 +13,7 @@ export {
   ChevronRight,
   Coins,
   Copy,
+  FlaskConical,
   House,
   Info,
   KeyRound,
