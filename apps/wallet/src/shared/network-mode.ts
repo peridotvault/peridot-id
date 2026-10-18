@@ -16,8 +16,10 @@ export type NetworkMode = "mainnet" | "testnet";
 
 export const NETWORK_MODE_KEY = "pid_network_mode";
 
-/** Failsafe: never leave signing blocked if a reload never settles. */
-const TRANSITION_FAILSAFE_MS = 5000;
+/** Failsafe: never leave signing blocked if a reload never settles.
+ * 30s — QA (ANT-34 re-run) observed HomeData.load() ~30s on devnet RPC;
+ * a 5s cap re-enabled signing while balances were still stale. */
+const TRANSITION_FAILSAFE_MS = 30000;
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
