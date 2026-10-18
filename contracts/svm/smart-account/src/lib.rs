@@ -80,3 +80,85 @@ pub fn process_instruction(
             Instruction::CloseSession => instructions::close_session::process(program_id, accounts, &instruction_data),
         }
 }
+
+/// ANT-16 (child of ANT-12) hardening regression: effects-before-interactions.
+/// Every spend path must burn its nonce / consume its sequence number BEFORE
+/// any untrusted CPI or value movement. A failed CPI reverts atomically, so
+/// the reorder is behavior-preserving; the value is audit cleanliness plus
+/// reentrancy defense-in-depth (a reentrant second call with the same
+/// signature/seq observes spent state and fails).
+#[cfg(test)]
+mod ant16_ordering_tests {
+    fn assert_effect_before_interaction(file: &str, src: &str, effect: &str, interaction: &str) {
+        let e = src
+            .find(effect)
+            .unwrap_or_else(|| panic!("{file}: expected `{effect}` not found"));
+        let i = src
+            .find(interaction)
+            .unwrap_or_else(|| panic!("{file}: expected `{interaction}` not found"));
+        assert!(
+            e < i,
+            "{file}: `{effect}` (byte {e}) must precede `{interaction}` (byte {i})"
+        );
+    }
+
+    #[test]
+    fn execute_burns_nonce_before_cpi() {
+        assert_effect_before_interaction(
+            "execute.rs",
+            include_str!("instructions/execute.rs"),
+            "increment_nonce()",
+            "invoke_signed_with_slice",
+        );
+    }
+
+    #[test]
+    fn withdraw_token_burns_nonce_before_cpi() {
+        assert_effect_before_interaction(
+            "withdraw_token.rs",
+            include_str!("instructions/withdraw_token.rs"),
+            "increment_nonce()",
+            "invoke_signed",
+        );
+    }
+
+    #[test]
+    fn withdraw_sol_burns_nonce_before_value_moves() {
+        assert_effect_before_interaction(
+            "withdraw_sol.rs",
+            include_str!("instructions/withdraw_sol.rs"),
+            "increment_nonce()",
+            "set_lamports",
+        );
+    }
+
+    #[test]
+    fn session_execute_consumes_seq_before_cpi() {
+        assert_effect_before_interaction(
+            "session_execute.rs",
+            include_str!("instructions/session_execute.rs"),
+            ".advance(",
+            "invoke_signed_with_slice",
+        );
+    }
+
+    #[test]
+    fn register_session_burns_nonce_before_create_cpi() {
+        assert_effect_before_interaction(
+            "register_session.rs",
+            include_str!("instructions/register_session.rs"),
+            "increment_nonce()",
+            "invoke_signed",
+        );
+    }
+
+    #[test]
+    fn close_session_burns_nonce_before_value_moves() {
+        assert_effect_before_interaction(
+            "close_session.rs",
+            include_str!("instructions/close_session.rs"),
+            "increment_nonce()",
+            "set_lamports",
+        );
+    }
+}

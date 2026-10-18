@@ -118,6 +118,15 @@ pub fn process(
         return Err(PeridotError::InsufficientFunds.into());
     }
 
+    // Effects first (checks-effects-interactions): burn the nonce BEFORE moving
+    // value. No CPI on this path (direct lamport moves), but the ordering keeps
+    // every spend path uniform for audit cleanliness; failure below reverts
+    // atomically, so this is behavior-preserving.
+    let mut data_ref = smart_account.try_borrow_mut()?;
+    let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
+    state.increment_nonce();
+    drop(data_ref);
+
     // Move lamports directly: amount to the destination, exact network cost back
     // to the relayer (fee payer), protocol fee to the canonical revenue vault.
     let from = *smart_account;
@@ -128,11 +137,6 @@ pub fn process(
     r.set_lamports(r.lamports() + relayer_fee);
     t.set_lamports(t.lamports() + protocol_fee);
     from.set_lamports(from.lamports() - amount - total);
-
-    let mut data_ref = smart_account.try_borrow_mut()?;
-    let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
-    state.increment_nonce();
-    drop(data_ref);
 
     pinocchio_log::log!("PeridotEvent::TransactionExecuted");
     Ok(())

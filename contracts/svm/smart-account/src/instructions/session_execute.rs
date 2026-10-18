@@ -272,6 +272,18 @@ pub fn process(
         snapshots.push(Snapshot { lamports, owner, data_hash, token_auth });
     }
 
+    // Effects first (checks-effects-interactions): consume the sequence number
+    // BEFORE the untrusted game CPI. A reentrant second call with the same seq
+    // then fails `BadSessionSeq`; a failed CPI or a post-CPI invariant violation
+    // reverts the advance atomically, so this is behavior-preserving. The
+    // upgrade-visibility snapshot travels with the same write (record-and-log).
+    {
+        let mut data_ref = session.try_borrow_mut()?;
+        let mut record = SessionAccountMut::try_from_bytes(&mut data_ref)?;
+        record.advance(now);
+        record.record_seen(seen_auth, seen_has_auth, seen_slot);
+    }
+
     // Build the CPI: session PDA signs via seeds; nothing else gains signer.
     let bump = verify_session_pda(session, program_id, account_id, session_key)?;
     let bump_seed = [bump];
@@ -323,6 +335,7 @@ pub fn process(
     // Post-CPI invariant check: any change to a protected account reverts.
     // Lamport/owner/data-hash equality catches balance moves, owner swaps
     // (`assign`-then-drain), and delegate/close_authority edits alike.
+    // (The seq was already consumed above; a violation here reverts it too.)
     for (p, before) in protected.iter().zip(snapshots.iter()) {
         let (lamports, owner, data_hash, token_auth) = if p == session.address().as_array() {
             let borrowed = session.try_borrow()?;
@@ -351,14 +364,6 @@ pub fn process(
         if token_auth != before.token_auth {
             return Err(PeridotError::SessionScopeViolation.into());
         }
-    }
-
-    // Effects: seq + inactivity clock + upgrade-visibility snapshot.
-    {
-        let mut data_ref = session.try_borrow_mut()?;
-        let mut record = SessionAccountMut::try_from_bytes(&mut data_ref)?;
-        record.advance(now);
-        record.record_seen(seen_auth, seen_has_auth, seen_slot);
     }
 
     pinocchio_log::log!("PeridotEvent::SessionExecuted");

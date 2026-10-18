@@ -178,6 +178,17 @@ pub fn process(
         return Err(PeridotError::InsufficientFunds.into());
     }
 
+    // Effects first (checks-effects-interactions): burn the nonce BEFORE the
+    // untrusted CPI. A reentrant second call with the same passkey signature
+    // then sees a spent nonce and fails; a failed CPI reverts the increment
+    // atomically, so this is behavior-preserving. Audit cleanliness, not a
+    // live exploit fix (reentry needs a second valid passkey sig + self-call
+    // is denied above).
+    let mut data_ref = smart_account.try_borrow_mut()?;
+    let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
+    state.increment_nonce();
+    drop(data_ref);
+
     // All state borrows are dropped above; build the CPI from the bound metas.
     let signer_seeds = [bump];
     let seeds = [
@@ -228,17 +239,13 @@ pub fn process(
     pinocchio::cpi::invoke_signed_with_slice(&cpi_ix, &cpi_views, &[signer])?;
 
     // Settle fees after the call (atomic revert on CPI failure regardless).
+    // The nonce was already burned above (effects-before-interactions).
     let from = *smart_account;
     let t = *treasury;
     let r = *relayer;
     r.set_lamports(r.lamports() + relayer_fee);
     t.set_lamports(t.lamports() + protocol_fee);
     from.set_lamports(from.lamports() - total);
-
-    let mut data_ref = smart_account.try_borrow_mut()?;
-    let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
-    state.increment_nonce();
-    drop(data_ref);
 
     pinocchio_log::log!("PeridotEvent::TransactionExecuted");
     Ok(())
