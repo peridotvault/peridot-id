@@ -22,7 +22,14 @@ import { concat, u16le, u64le, i64le, fromAscii, serializeExecuteCall, serialize
 import type { Bytes, ExecuteMeta, SessionMeta } from "@peridotvault/pid-core";
 import { IX, IX_SESSION, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
 
-/** Build the passkey-signed `initialize(account_id, authority, clientDataJSON)` instruction (disc 0). */
+/**
+ * Build the passkey-signed `initialize(account_id, authority, clientDataJSON)` instruction (disc 0).
+ *
+ * @deprecated ANT-16(e) (board fee decision d4ebecff): direct `initialize`
+ * bypasses the 50% sponsored-creation fee — `activate` (builders below) is
+ * the sole production creation path. Production builds reject this
+ * instruction with `InitializeDeprecated`. Kept for testnet/devnet only.
+ */
 export function buildInitializeInstruction(
   accountId32: Uint8Array,
   authorityCompressed: Uint8Array,
@@ -48,6 +55,11 @@ export function buildInitializeInstruction(
 /**
  * Build the V2 passkey-signed `initialize(account_id, authority, rp_id_hash, clientDataJSON)`
  * instruction (disc 0). Writes v2 state (112B with RP-ID hash).
+ *
+ * @deprecated ANT-16(e) (board fee decision d4ebecff): direct `initialize`
+ * bypasses the 50% sponsored-creation fee — `activate` (builders below) is
+ * the sole production creation path. Production builds reject this
+ * instruction with `InitializeDeprecated`. Kept for testnet/devnet only.
  */
 export function buildInitializeInstructionV2(
   accountId32: Uint8Array,
