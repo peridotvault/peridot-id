@@ -1,4 +1,5 @@
-import { IsEnum, IsNotEmpty, IsObject, IsOptional, IsString, Matches } from "class-validator";
+import { Type } from "class-transformer";
+import { IsEnum, IsNotEmpty, IsObject, IsOptional, IsString, Matches, ValidateNested } from "class-validator";
 
 const SOLANA_PUBKEY_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -27,6 +28,16 @@ export class CreateIntentDto {
   payload!: IntentPayloadDto;
 }
 
+export class ChainEchoDto {
+  @IsString()
+  @IsNotEmpty()
+  namespace!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  reference!: string;
+}
+
 export class RecordTransactionDto {
   @IsString()
   @IsNotEmpty()
@@ -39,6 +50,13 @@ export class RecordTransactionDto {
   @IsOptional()
   @IsString()
   network?: string;
+
+  /** Optional CAIP-2 chain: when present the server derives `network` from the registry and ignores `network`. */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ChainEchoDto)
+  chain?: ChainEchoDto;
 }
 
 export class RecordActivityDto {
