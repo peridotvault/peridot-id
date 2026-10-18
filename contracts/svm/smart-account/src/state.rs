@@ -421,6 +421,45 @@ mod session_time_tests {
         // Exactly 1800s idle still passes (`>` comparison, fail-open nowhere).
         assert!(check_session_time(10_000, 1000, 1000 + 1800).is_ok());
     }
+
+    #[test]
+    fn advance_and_record_seen_mutate_record_bytes() {
+        // F1 (ANT-30) load-bearing lemma: the effects write changes the
+        // session record bytes, so a snapshot taken BEFORE `advance` can
+        // never equal the post-CPI state when the session PDA itself is
+        // protected (rent-pinning) — the post-CPI invariant would always
+        // fail closed with `SessionScopeViolation` (0x15). The snapshot must
+        // therefore be taken after the write (pinned by
+        // `session_execute_snapshots_after_seq_advance` in lib.rs).
+        let mut bytes = [0u8; SESSION_STATE_LEN];
+        {
+            let mut record = SessionAccountMut::try_from_bytes(&mut bytes).unwrap();
+            record.initialize(
+                [1u8; 32],
+                [2u8; 32],
+                9_999_999_999,
+                1_700_000_000,
+                [3u8; 32],
+                [4u8; 32],
+                true,
+                7,
+                255,
+            );
+        }
+        let before = crate::auth::sha256(&bytes);
+        {
+            let mut record = SessionAccountMut::try_from_bytes(&mut bytes).unwrap();
+            record.advance(1_700_000_001);
+            record.record_seen([5u8; 32], false, 8);
+        }
+        let after = crate::auth::sha256(&bytes);
+        assert_ne!(
+            before, after,
+            "effects write must change the snapshotted bytes"
+        );
+        let record = SessionAccount::try_from_bytes(&bytes).unwrap();
+        assert_eq!(record.seq(), 1);
+    }
 }
 
 /// Verify the session PDA against seeds
