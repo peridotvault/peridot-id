@@ -29,12 +29,16 @@ PROJECT="peridot-id"
 [ "$ENV" = "test" ] && PROJECT="peridot-id-test"
 
 # Deploy meta (not secrets) — hardcoded per stack instead of living in Infisical.
+# NEW_API_HOST is the ANT-99 dual-serve API hostname (old *.peridotvault.com hosts
+# stay live via the same Traefik router — see compose.yaml).
 if [ "$ENV" = "test" ]; then
   export ENV_SUFFIX="${ENV_SUFFIX:-sandbox.}"
   export NAMESPACE="${NAMESPACE:--test}"
+  export NEW_API_HOST="${NEW_API_HOST:-sandbox.api.peridot.id}"
 else
   export ENV_SUFFIX="${ENV_SUFFIX:-}"
   export NAMESPACE="${NAMESPACE:-}"
+  export NEW_API_HOST="${NEW_API_HOST:-api.peridot.id}"
 fi
 
 INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID:-51f99bb1-16c8-4b74-be1f-52657e066a93}"

@@ -17,9 +17,17 @@ labels. No infra repo changes are ever required.
    - `sandbox.pid.peridotvault.com` (sandbox workspace)
    - `app.sandbox.pid.peridotvault.com` (sandbox wallet)
    - `api.sandbox.pid.peridotvault.com` (sandbox API)
-3. Google OAuth console: create OAuth 2.0 credentials with
-   `https://api.pid.peridotvault.com/v1/auth/google/callback` as the redirect URI
-   (redirect lands back on `app.pid.peridotvault.com` via CLIENT_SUCCESS_URL).
+   - `api.peridot.id` (ANT-99 dual-serve API — same stack, same router, old hosts stay live)
+   - `sandbox.api.peridot.id` (ANT-99 dual-serve sandbox API)
+   - (wallet `peridot.id` / `sandbox.peridot.id`, docs `docs.peridot.id`, dashboard
+     `dashboard.peridot.id` are frontend turf — ANT-117 — with DevOps TLS/DNS in ANT-118)
+3. Google OAuth console: register **both** redirect URIs on the OAuth 2.0 client
+   (old stays until every integration moves; cutover flips which one the stack advertises):
+   - `https://api.pid.peridotvault.com/v1/auth/google/callback` (current `GOOGLE_CALLBACK_URL`)
+   - `https://api.peridot.id/v1/auth/google/callback` (post-cutover `GOOGLE_CALLBACK_URL`)
+   - sandbox client: `https://api.sandbox.pid.peridotvault.com/v1/auth/google/callback`
+     + `https://sandbox.api.peridot.id/v1/auth/google/callback`
+   (redirect lands back on the wallet via CLIENT_SUCCESS_URL).
 4. Firewall: 80/tcp and 443/tcp open.
 
 ## First deploy (Infisical Cloud)
@@ -94,8 +102,38 @@ chmod 600 /etc/peridot-id/infisical.env
 ```
 
 Domains: `sandbox.pid.peridotvault.com`, `app.sandbox.pid.peridotvault.com`,
-`api.sandbox.pid.peridotvault.com` (same VPS, separate Traefik routers via
-`NAMESPACE=-test` / `ENV_SUFFIX=sandbox.`).
+`api.sandbox.pid.peridotvault.com` **plus** `sandbox.api.peridot.id` (dual-serve,
+same VPS, separate Traefik routers via `NAMESPACE=-test` / `ENV_SUFFIX=sandbox.` /
+`NEW_API_HOST`). Old hosts stay live — removal is a later board-ordered task.
+
+**Google OAuth:** the sandbox reuses the production Google client, so add
+`https://api.sandbox.pid.peridotvault.com/v1/auth/google/callback` to that
+client's authorized redirect URIs. Never add localhost URIs to the prod client.
+Dual-serve adds `https://sandbox.api.peridot.id/v1/auth/google/callback` (and
+`https://api.peridot.id/v1/auth/google/callback` for main) the same way.
+
+## Domain cutover checklist (ANT-99 — operator steps in Infisical, not code)
+
+Code is dual-serve-ready on this branch; going live on the new names is config:
+
+- [ ] DNS + TLS live for `api.peridot.id` / `sandbox.api.peridot.id` (Trevor, ANT-118)
+- [ ] Infisical `/apps/api` (main): append new origins to `CORS_ORIGINS`
+      (e.g. `https://peridot.id,https://dashboard.peridot.id,https://docs.peridot.id`;
+      keep every old origin until integrations move)
+- [ ] Infisical `/apps/api` (main): set `COOKIE_DOMAIN` empty (host-only — the compose
+      default). Do NOT keep `.peridotvault.com`: browsers drop `Domain=` cookies set
+      from `api.peridot.id`, breaking sessions there. Security review: Tobias, ANT-119.
+      Note: pre-cutover `Domain`-scoped cookies linger in browsers but hold revoked
+      server-side sessions after logout (fail closed); login issues fresh host-only cookies.
+- [ ] `GOOGLE_CALLBACK_URL` stays on the old callback until the new redirect URI is
+      registered + verified; flip after (same key names, values differ per env).
+- [ ] `CLIENT_SUCCESS_URL` stays on the old wallet until frontend flips (Thomas, ANT-117).
+- [ ] Intentionally UNCHANGED: `WEBAUTHN_RP_ID` (passkeys are bound to the RP ID —
+      changing it orphans existing credentials; needs its own migration plan, never a
+      silent flip), `EMAIL_FROM=no-reply@peridotvault.com` (Brevo verified sender),
+      `DOKU_WEBHOOK_URL` (re-register with DOKU only when API canonical host moves —
+      Troy, ANT-120), SDK `PRESETS` defaults (still old hosts; flip only after DNS live —
+      Thomas, ANT-117).
 
 **Google OAuth:** the sandbox reuses the production Google client, so add
 `https://api.sandbox.pid.peridotvault.com/v1/auth/google/callback` to that
@@ -125,7 +163,7 @@ docker logs -f peridot-id-api-1
 |-----------|-----|
 | Docs      | https://pid.peridotvault.com |
 | App       | https://app.pid.peridotvault.com |
-| API       | https://api.pid.peridotvault.com |
+| API       | https://api.pid.peridotvault.com (dual-serve: https://api.peridot.id) |
 | API docs  | https://api.pid.peridotvault.com/docs |
 
 ## Database
