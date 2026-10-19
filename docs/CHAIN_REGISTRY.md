@@ -7,8 +7,8 @@ Clients discover everything via `GET /v1/chains` — no chain/RPC/program env.
 
 | name | `(namespace, reference)` key | RPC | `program` contract |
 |---|---|---|---|
-| `solana-devnet` | `("solana", SOLANA_DEVNET_REFERENCE)` — legacy truncated-hash key, kept byte-stable | `https://api.devnet.solana.com` | `SOLANA_PROGRAM_ID` default |
-| `solana-testnet` | `("solana", SOLANA_TESTNET_REFERENCE)` — live testnet genesis hash (verified 2026-10-18) | `https://api.testnet.solana.com` (or `SOLANA_TESTNET_RPC` env at seed time) | `SOLANA_TESTNET_PROGRAM_ID` = `D6TpM7…ALVsg3` default (or `SOLANA_TESTNET_PROGRAM_ID` env at seed time; on-chain deploy pending ANT-26) |
+| `solana-devnet` | `("solana", SOLANA_DEVNET_REFERENCE)` — legacy truncated-hash key, kept byte-stable | `https://api.devnet.solana.com` | `SOLANA_PROGRAM_ID` = `9oMG7e…ECce` default (fresh devnet program, ANT-68 Option B; re-seed heals stale rows via `update: { address }`; old program `CiwLJ1h…Xf6NT` left untouched on-chain as the rollback path) |
+| `solana-testnet` | `("solana", SOLANA_TESTNET_REFERENCE)` — live testnet genesis hash (verified 2026-10-18) | `https://api.testnet.solana.com` (or `SOLANA_TESTNET_RPC` env at seed time) | `SOLANA_TESTNET_PROGRAM_ID` = `D6TpM7…ALVsg3` default (or `SOLANA_TESTNET_PROGRAM_ID` env at seed time; verified live on testnet 2026-10-18, slot 453908238 — unchanged by ANT-70) |
 
 `chain_accounts` FKs by chain **id**, so adding/renaming rows never orphans
 wallets. No schema migration is needed for a new chain — adding a chain is a

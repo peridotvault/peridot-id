@@ -94,17 +94,17 @@ describe("ChainRegistryService", () => {
       nativeSymbol: "SOL",
       decimals: 9,
       rpcUrls: ["https://solana.example"],
-      contracts: [{ type: "program", address: "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT", versionLabel: "v1" }],
+      contracts: [{ type: "program", address: "9oMG7eLaq8NxHJEr5nzPc9CgLc8gprzBGVn6sxunECce", versionLabel: "v1" }],
     });
     const withRow = setup([solanaRow]);
     expect(await withRow.solanaRpcUrl()).toBe("https://solana.example");
-    expect(await withRow.solanaProgramId()).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
+    expect(await withRow.solanaProgramId()).toBe("9oMG7eLaq8NxHJEr5nzPc9CgLc8gprzBGVn6sxunECce");
 
     // Empty registry → EVM code fallback has no Solana chain → per-cluster constants.
     const empty = setup([]);
     expect(await empty.solanaRpcUrl()).toBe("https://api.devnet.solana.com");
-    expect(await empty.solanaProgramId()).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
-    expect(await empty.solanaProgramId("devnet")).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
+    expect(await empty.solanaProgramId()).toBe("9oMG7eLaq8NxHJEr5nzPc9CgLc8gprzBGVn6sxunECce");
+    expect(await empty.solanaProgramId("devnet")).toBe("9oMG7eLaq8NxHJEr5nzPc9CgLc8gprzBGVn6sxunECce");
     expect(await empty.solanaProgramId("testnet")).toBe(SOLANA_TESTNET_PROGRAM_ID);
   });
 

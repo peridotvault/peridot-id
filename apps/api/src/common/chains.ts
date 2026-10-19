@@ -22,10 +22,13 @@ export const SOLANA_TESTNET_REFERENCE = "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk
 export const ACCOUNT_TYPE_SMART = "smart_account";
 export const ACCOUNT_TYPE_LINKED = "linked_address";
 
-/** Canonical smart-account program id — seed default / last-resort fallback.
- *  The live value lives in the chain registry (`program` contract); admins
- *  change it in the workspace, not in env. */
-export const SOLANA_PROGRAM_ID = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
+/** Devnet smart-account program id — seed default / last-resort fallback.
+ *  Fresh devnet program (ANT-68 Option B, board-authorized via ANT-69):
+ *  deployed 2026-10-19 from source commit 4782860, upgrade authority
+ *  9Et9ezFN41GaCdRx8xcwXawNGgPAySo9gc3aKQa2U3nD (Trevor-held deployer).
+ *  Deploy tx 3kXKE3...f1bsKqK3 (devnet). The live value stays in the chain
+ *  registry (`program` contract); admins change it in the workspace, not in env. */
+export const SOLANA_PROGRAM_ID = "9oMG7eLaq8NxHJEr5nzPc9CgLc8gprzBGVn6sxunECce";
 /** Testnet smart-account program id — seed default for the solana-testnet row.
  *  Fresh test-only keypair (NOT the devnet keypair): reported by Trevor
  *  (ANT-26 chain ops, comment d4ba0f9a) as board-directed. On-chain deploy to

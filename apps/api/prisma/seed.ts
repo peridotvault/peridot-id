@@ -43,7 +43,10 @@ async function main(): Promise<void> {
   });
   await prisma.chainContract.upsert({
     where: { chainId_type: { chainId: solana.id, type: "program" } },
-    update: {},
+    // ANT-70: heal stale devnet rows on re-seed (old program CiwLJ1h… replaced by
+    // fresh program 9oMG7e… via ANT-68 Option B; old program left untouched on-chain
+    // so this remains the rollback path — re-seed with the old constant to revert).
+    update: { address: SOLANA_PROGRAM_ID },
     create: { chainId: solana.id, type: "program", address: SOLANA_PROGRAM_ID, versionLabel: "v1" },
   });
 
