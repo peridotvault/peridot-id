@@ -6,8 +6,8 @@ set -euo pipefail
 #
 # Secrets come from Infisical Cloud (project peridot-id-uf-w9):
 #   /apps/api    — runtime secrets (DATABASE_URL, JWT_*, GOOGLE_*, DOKU_*, PID_*)
-#   /apps/web    — NEXT_PUBLIC_* (public build args)
 #   /apps/wallet — VITE_* (public build args)
+# Docs (apps/docs) needs no secrets — zero build args, zero env.
 # No /deploy folder — it only duplicated the above (delete it in the UI).
 # Env slugs match the script arg: main -> main, test -> test, local dev -> dev.
 #
@@ -18,7 +18,7 @@ set -euo pipefail
 # INFISICAL_TOKEN is honored as-is.
 # Fallback: INFISICAL_ENABLED=0 ./deploy/up.sh main reads deploy/.env.$ENV.
 #
-# Builds serially (api then web) so builds don't contend on a small VPS; BuildKit
+# Builds serially (api then docs) so builds don't contend on a small VPS; BuildKit
 # caches layers on the VPS so only changed apps rebuild. Requires the infra
 # bootstrap (Traefik + `proxy` network) already up.
 
@@ -59,7 +59,7 @@ compose() {
   if [ "${INFISICAL_ENABLED:-1}" = "1" ] && [ -n "${INFISICAL_TOKEN:-}" ] && command -v infisical >/dev/null 2>&1; then
     # First --path wins on collision; /apps/api owns shared names.
     infisical run --token "$INFISICAL_TOKEN" --projectId "$INFISICAL_PROJECT_ID" --env "$ENV" \
-      --path "/apps/api" --path "/apps/web" --path "/apps/wallet" -- \
+      --path "/apps/api" --path "/apps/wallet" -- \
       docker compose -f "$SCRIPT_DIR/compose.yaml" "$@"
   else
     echo "warn: Infisical not configured (no token) — falling back to deploy/.env.$ENV" >&2
@@ -70,7 +70,7 @@ compose() {
 }
 
 echo "Deploying PeridotID [$ENV]..."
-for s in api web app; do
+for s in api docs app; do
   echo "==> build $s"
   COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
 done

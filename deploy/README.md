@@ -1,6 +1,6 @@
 # PeridotID VPS deployment
 
-Deploys `api` (NestJS), `docs` (Next.js homepage/marketing), and `app` (Vite
+Deploys `api` (NestJS), `docs` (Next.js docs), and `app` (Vite
 static build) onto the Antigane infra
 VPS. Conforms to the infra platform contract (`infra/docs/application.md`): joins
 the external `proxy` network, exposes internal ports only, owns its Traefik
@@ -28,8 +28,9 @@ Secrets live in Infisical Cloud, project `peridot-id-uf-w9`
 (`51f99bb1-16c8-4b74-be1f-52657e066a93`), envs `dev` / `test` / `main`:
 
 - `/apps/api` — runtime secrets (`DATABASE_URL`, `JWT_*`, `GOOGLE_*`, `DOKU_*`, `PID_*`, …)
-- `/apps/web` — `NEXT_PUBLIC_*` (public build args)
 - `/apps/wallet` — `VITE_*` (public build args)
+
+Docs (`apps/docs`) needs no secrets — zero build args, zero env.
 
 There is no `/deploy` folder — it only duplicated the above. Delete it in the
 Infisical UI for every env if it still exists. Deploy meta (`ENV_SUFFIX`,
@@ -41,7 +42,7 @@ mkdir -p /opt/apps && cd /opt/apps
 git clone https://github.com/peridotvault/peridot-id.git peridot-id && cd peridot-id
 
 # One-time: persist the machine-identity creds for this host (0600 root).
-# The identity is project-scoped (read) on /apps/{api,web,wallet}; up.sh
+# The identity is project-scoped (read) on /apps/{api,wallet}; up.sh
 # exchanges these for a short-lived token on every run.
 mkdir -p /etc/peridot-id
 umask 077
@@ -55,7 +56,7 @@ chmod 600 /etc/peridot-id/infisical.env
 fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 
 ./deploy/db-init.sh main        # creates peridot_id db/role + runs migrations
-./deploy/up.sh main             # pulls secrets via `infisical run`, builds api + web + app
+./deploy/up.sh main             # pulls secrets via `infisical run`, builds api + docs + app
 ```
 
 No `deploy/.env.*` exists on the VPS — secrets are fetched from Infisical at
@@ -122,7 +123,7 @@ docker logs -f peridot-id-api-1
 
 | Service   | URL |
 |-----------|-----|
-| Docs/home | https://pid.peridotvault.com |
+| Docs      | https://pid.peridotvault.com |
 | App       | https://app.pid.peridotvault.com |
 | API       | https://api.pid.peridotvault.com |
 | API docs  | https://api.pid.peridotvault.com/docs |
