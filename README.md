@@ -16,6 +16,7 @@ every Peridot product.
 
 ```
 apps/api            NestJS API (auth, identity, profile, wallet, permissions)
+apps/dashboard      Developer dashboard (Vite + React, port :3303)
 apps/wallet         Expo wallet client (web + iOS + Android)
 apps/web            Public docs site (Fumadocs + Next.js)
 contracts/svm       Pinocchio smart-account program (Rust)
