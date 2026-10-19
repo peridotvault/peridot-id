@@ -16,7 +16,7 @@ import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({ clientId: 'pidapp_…' });
 // Register with just a name — allowed origins are managed after, in the dashboard
-// at pid.peridotvault.com/workspace (or PATCH /v1/apps).
+// (local dev: http://localhost:3303) (or PATCH /v1/apps).
 const res = await peridot.post('/v1/apps', { name: 'My Game' });
 // res.data.clientId → "pidapp_..." — pass it as client_id in step 2
 ```
@@ -137,7 +137,7 @@ Know the limits before promising anything to your users:
 
 ## Verified partners
 
-Admins can mark your app as a **verified partner** (in the workspace). Verified
+Admins can mark your app as a **verified partner** (in the dashboard). Verified
 apps show a ✓ badge on the login consent screen — and your users skip the
 PeridotID fiat fee on top-ups, sends, and withdrawals (0%). Your own app fee,
 DOKU provider fees, and on-chain fees still apply. Interested? Talk to us —

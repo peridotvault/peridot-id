@@ -8,9 +8,9 @@ public `client_id`, allowed origins, an optional backend secret, an optional fee
 schedule, and — because every app owner is a normal identity — its own
 **account/escrow balance**.
 
-## Manage in the workspace
+## Manage in the dashboard
 
-Open **[pid.peridotvault.com/workspace](/workspace)** and sign in. The **Apps**
+Open the **developer dashboard** (`http://localhost:3303` in local dev) and sign in. The **Apps**
 tab lists your apps (name only); click an app to open its **detail page**, which
 is where every setting lives:
 
@@ -23,7 +23,7 @@ is where every setting lives:
 
 Only the **owner** can view or change an app. The API is owner-scoped: a
 non-owner gets `404` from `GET /v1/apps/:id` and every mutation. This is enforced
-server-side (the workspace page is only a convenience).
+server-side (the dashboard page is only a convenience).
 
 ## Register an app
 
@@ -93,7 +93,7 @@ the operation charges nothing.
 
 An app owner identity (e.g. `live2dev@pid`) is a normal participant. Users send
 funds to it (escrow); the app releases them per its own logic. Read the app's
-balance with the machine token above, or `GET /v1/fiat/balance` in the workspace.
+balance with the machine token above, or `GET /v1/fiat/balance` in the dashboard.
 See [Fiat & payments → Escrow](/docs/fiat#escrow-pattern).
 
 ## Callbacks (deferred)

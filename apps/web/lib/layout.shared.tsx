@@ -34,7 +34,7 @@ export function baseOptions(): BaseLayoutProps {
       },
       { url: '/docs', text: 'Docs', active: 'nested-url' },
       { url: '/docs/api', text: 'API Reference', active: 'nested-url' },
-      { type: 'button', url: '/workspace', text: 'Login', secondary: true },
+      { type: 'button', url: process.env.NEXT_PUBLIC_PID_DASHBOARD_URL ?? 'http://localhost:3303', text: 'Login', secondary: true },
     ],
   };
 }
