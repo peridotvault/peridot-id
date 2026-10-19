@@ -31,6 +31,30 @@ const AUTHORITY_OFFSET: usize = 32;
 const RP_ID_OFFSET: usize = 65;
 const CLIENT_JSON_LEN_OFFSET: usize = 97;
 
+/// ANT-16(e) creation-leak fix, Option A (ANT-22 spec): direct `initialize`
+/// bypasses the 50% sponsored-creation fee that `activate` collects, so it is
+/// deprecated — `activate` is the sole production creation path.
+///
+/// Gate form (ANT-22 Q1, owner: CTO): a plain `const`, default `false`, so
+/// testnet/devnet builds keep `initialize` fully functional (plus a
+/// deprecation event for drift alerting). Production builds flip this to
+/// `true`; the check runs before any other validation so a production binary
+/// rejects every direct `initialize` uniformly. A `const` cannot be flipped
+/// at runtime by a caller — there is no new signer, money path, or trust
+/// root (see ANT-19 gate-flip analysis).
+pub const DEPRECATE_DIRECT_INITIALIZE: bool = false;
+
+/// Reject direct creation on production-gated builds. Pure (no account
+/// access), so it is host-testable: the `true` arm is pinned by the
+/// `initialize_deprecated_gate_is_first` source-ordering test plus the
+/// discriminant pin in `errors.rs`.
+pub fn check_initialize_allowed() -> ProgramResult {
+    if DEPRECATE_DIRECT_INITIALIZE {
+        return Err(PeridotError::InitializeDeprecated.into());
+    }
+    Ok(())
+}
+
 /// Accounts:
 ///   0. `[WRITE, SIGNER]` rent payer (funds the PDA creation)
 ///   1. `[WRITE]` smart account PDA (must be uninitialized)
@@ -44,6 +68,11 @@ pub fn process(
     if accounts.len() < 4 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
+
+    // ANT-16(e): production-gated builds reject direct creation outright, so
+    // the fee-free path can never mint an account where `activate` (and its
+    // 50% sponsored-creation fee) was due. Runs before any other validation.
+    check_initialize_allowed()?;
 
     let rent_payer = &accounts[0];
     let smart_account = &accounts[1];
@@ -103,5 +132,9 @@ pub fn process(
     drop(data_ref);
 
     pinocchio_log::log!("PeridotEvent::AccountInitialized");
+    // ANT-16(e): testnet/devnet drift signal — production builds never reach
+    // here (gated above), so every direct `initialize` still in use is counted
+    // for SDK-migration alerting (ANT-16(c) sink; threshold owner: DevOpsEngineer).
+    pinocchio_log::log!("PeridotEvent::AccountInitializeDeprecated");
     Ok(())
 }

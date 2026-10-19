@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Intent, IntentStatus, Transaction, TransactionStatus } from "@prisma/client";
-import { ACCOUNT_TYPE_SMART, SolanaSelection } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -167,7 +167,7 @@ export class IntentService {
    */
   async recordTransaction(
     pid: string,
-    input: { intentId: string; txHash: string; network?: string },
+    input: { intentId: string; txHash: string; network?: string; chain?: { namespace: string; reference: string } },
     selection?: SolanaSelection,
   ): Promise<TransactionView> {
     const { smart } = await this.resolveAccount(pid);
@@ -185,13 +185,34 @@ export class IntentService {
       throw new BadRequestException("Intent sudah kedaluwarsa");
     }
 
+    // Server-asserted network: when `chain` is present it wins over any
+    // client-sent `network`. Resolved pre-write — unknown/inactive reference
+    // or wrong namespace throws 4xx with no row created and intent untouched.
+    let network: string;
+    if (input.chain) {
+      if (input.chain.namespace !== SOLANA_NAMESPACE) {
+        throw new BadRequestException("Unsupported chain namespace");
+      }
+      if (!input.chain.reference || typeof input.chain.reference !== "string") {
+        throw new BadRequestException("Chain reference is invalid");
+      }
+      const chains = await this.chains.activeChains();
+      const row = chains.find(
+        (c) => c.namespace === SOLANA_NAMESPACE && c.reference === input.chain!.reference,
+      );
+      if (!row) throw new NotFoundException("Chain not found");
+      network = row.isTestnet ? "devnet" : "mainnet-beta";
+    } else {
+      network = input.network ?? (await this.network(selection));
+    }
+
     const tx = await this.prisma.transaction.create({
       data: {
         pid,
         chainAccountId: smart.id,
         intentId: intent.id,
         chain: "solana",
-        network: input.network ?? (await this.network(selection)),
+        network,
         txHash: input.txHash,
         status: "submitted" as TransactionStatus,
       },

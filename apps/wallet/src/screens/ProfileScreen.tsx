@@ -6,6 +6,7 @@ import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
 import { AccountSwitcherModal } from "../shared/components/AccountSwitcherModal";
+import { useNetworkMode } from "../shared/hooks/useNetworkMode";
 
 export function ProfileScreen({
   onLogout,
@@ -24,6 +25,9 @@ export function ProfileScreen({
 }) {
   const { peridot } = usePeridot();
   const [profile, setProfile] = useState<Profile | null>(null);
+
+  // Testnet Mode lives in Settings — Profile only surfaces the selection.
+  const net = useNetworkMode();
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [accounts, setAccounts] = useState<AccountView[]>([]);
   const [busy, setBusy] = useState(false);
@@ -118,6 +122,7 @@ export function ProfileScreen({
             <Settings size={18} className="text-foreground" />
           </View>
           <Text className="flex-1 font-sans text-[15px] font-medium text-foreground">Settings</Text>
+          <Text className="font-sans text-[13px] text-muted-foreground">{net.testnet ? "Testnet" : ""}</Text>
           <ChevronRight size={16} className="text-muted-foreground" />
         </View>
       </TouchableOpacity>

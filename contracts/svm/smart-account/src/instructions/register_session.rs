@@ -176,6 +176,14 @@ pub fn process(
     auth::check_expiry(expiry)?;
     auth::verify_secp256r1_v2(instructions, &authority, &rp_id_hash, client_json, &payload)?;
 
+    // Effects first (checks-effects-interactions): burn the vault nonce BEFORE
+    // the System create CPI. A failed CPI reverts the increment atomically, so
+    // this is behavior-preserving (ANT-16 hardening, uniform across spend paths).
+    {
+        let mut data_ref = vault.try_borrow_mut()?;
+        let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
+        state.increment_nonce();
+    }
     // Create the session PDA for exactly the rent-exempt minimum, signed with
     // the session seeds (a PDA cannot sign a client-side create).
     {
@@ -211,11 +219,6 @@ pub fn process(
             snapshot_slot,
             bump,
         );
-    }
-    {
-        let mut data_ref = vault.try_borrow_mut()?;
-        let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
-        state.increment_nonce();
     }
 
     pinocchio_log::log!("PeridotEvent::SessionRegistered");

@@ -3,10 +3,14 @@ import type { Authority, Identity, Profile } from "@peridotvault/pid-types";
 import type { TokenBalance, NftItem } from "@peridotvault/pid-solana";
 import type { ActivationView, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { getCurrency, getRates, type Currency, type Rates } from "../../../shared/currency";
+import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/network-mode";
 
 // Dashboard data: identity, chain assets, fiat ledger balance, activation.
 // Currency pref re-reads on every load (Settings writes localStorage; the
 // screen remounts when navigating back, so no subscription needed).
+// Network mode re-fetches via the store subscription (ANT-15 req 3): every
+// fetch is selection-scoped server-side, so a reload is all it takes to keep
+// balances separate (never merged client-side).
 export function useHomeData(peridot: PeridotClient) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [pid, setPid] = useState<string | null>(null);
@@ -103,6 +107,14 @@ export function useHomeData(peridot: PeridotClient) {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // Re-fetch balances/assets on network switch, then release the signing
+  // block. Idempotent — a no-op when no switch is in flight.
+  useEffect(() => {
+    return subscribeNetworkMode(() => {
+      load().then(endNetworkTransition, endNetworkTransition);
+    });
   }, [load]);
 
   const st = activation?.status;

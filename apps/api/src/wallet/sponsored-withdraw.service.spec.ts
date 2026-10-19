@@ -345,4 +345,42 @@ describe("SponsoredWithdrawService", () => {
       }),
     );
   });
+
+  it("quote omits the chain echo when the registry has no Solana row", async () => {
+    const { service } = setup();
+    const q = await service.quote(IDENTITY_ID);
+    expect(q.chain).toBeUndefined();
+  });
+
+  it("quote echoes the active Solana chain when the registry has one", async () => {
+    const { service } = setup();
+    const chains = (service as unknown as { chains: { solanaChain: jest.Mock } }).chains;
+    chains.solanaChain.mockResolvedValue({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
+    const q = await service.quote(IDENTITY_ID);
+    expect(q.chain).toEqual({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
+  });
+
+  it("quoteExecute echoes the active Solana chain when the registry has one", async () => {
+    const { service } = setup();
+    const chains = (service as unknown as { chains: { solanaChain: jest.Mock } }).chains;
+    chains.solanaChain.mockResolvedValue({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
+    adapterMock.estimateExecuteFee.mockResolvedValue(10000n);
+    const q = await service.quoteExecute(IDENTITY_ID, {
+      target: executeBase.target,
+      metas: executeBase.metas,
+      data: executeBase.data,
+    });
+    expect(q.chain).toEqual({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
+  });
+
+  it("quoteExecute omits the chain echo when the registry has no Solana row", async () => {
+    const { service } = setup();
+    adapterMock.estimateExecuteFee.mockResolvedValue(10000n);
+    const q = await service.quoteExecute(IDENTITY_ID, {
+      target: executeBase.target,
+      metas: executeBase.metas,
+      data: executeBase.data,
+    });
+    expect(q.chain).toBeUndefined();
+  });
 });

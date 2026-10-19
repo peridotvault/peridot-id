@@ -552,6 +552,40 @@ async function main() {
     await expectErrCode(replayTx(), [sessionKp], "0x14", "same-seq replay rejected (BadSessionSeq)");
   }
 
+  // ---- F1 (ANT-30): session PDA itself protected (rent-pinning) ----
+  // Pre-fix this always reverted 0x15: the pre-advance snapshot could never
+  // match post-CPI state because `advance`/`record_seen` mutate the session
+  // record bytes. Post-fix the snapshot is taken after the write, so a
+  // benign gameplay with the session PDA in `protected` succeeds and the
+  // post-CPI invariant still guards the pinned bytes.
+  {
+    const transferData = Buffer.concat([Buffer.from([3]), u64(7)]);
+    const gameData = forwarderCall(TOKEN_PROGRAM_ID, transferData, [
+      [sessionAta.address, false, true], [attackerAta.address, false, true], [sessionPda, true, false],
+    ]);
+    const metas = [
+      [sessionPda.toBuffer(), F(false, true)],
+      [sessionAta.address.toBuffer(), F(true, false)],
+      [attackerAta.address.toBuffer(), F(true, false)],
+      [TOKEN_PROGRAM_ID.toBuffer(), F(false, false)],
+      [SystemProgram.programId.toBuffer(), F(false, false)],
+    ];
+    const before = (await conn.getTokenAccountBalance(attackerAta.address)).value.amount;
+    const tx = execTx(sessionPda, sessionKp.publicKey, FORWARDER, fwdPdAddr, 2,
+      gameData, metas, [
+        { pubkey: sessionAta.address, isSigner: false, isWritable: true },
+        { pubkey: attackerAta.address, isSigner: false, isWritable: true },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ], [sessionPda]);
+    await expectOk(tx, [sessionKp], "rent-pinned session PDA protected: benign gameplay succeeds");
+    const gained = BigInt((await conn.getTokenAccountBalance(attackerAta.address)).value.amount) - BigInt(before);
+    assert.equal(gained, 7n, "gameplay moved exactly 7");
+    const d = (await conn.getAccountInfo(sessionPda)).data;
+    assert.equal(d.readBigUInt64LE(82), 3n, "seq advanced to 3");
+    results.push("PASS rent-pinned session PDA in protected set");
+  }
+
   // ---- revoke → exec dies (0x12); close reclaims rent ----
   {
     const nonce = await vaultNonce();
