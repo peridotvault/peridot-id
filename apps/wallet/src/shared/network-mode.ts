@@ -121,6 +121,21 @@ export function networkLabel(mode: NetworkMode = mem): string {
 }
 
 /**
+ * ANT-73 / ANT-74 v1 hard-code: Solana create/activate UI is available only
+ * in Testnet Mode. There is NO Solana mainnet-beta program deployed (both
+ * seeded registry rows are `isTestnet: true`), so mainnet mode must hide
+ * all Solana address/activate UI rather than promise a chain we cannot serve.
+ *
+ * RE-ENABLE CONDITION: when a mainnet Solana program goes live (registry
+ * gains a non-testnet Solana row), replace this with a registry-driven
+ * check (see ANT-75 backend signal) so the UI re-appears automatically
+ * with no second UI change. EVM rows are unaffected either way.
+ */
+export function isSolanaAvailable(): boolean {
+  return isTestnetMode();
+}
+
+/**
  * Explorer `?cluster=` suffix for the selection. An explicit tx network wins
  * (registry rows carry isTestnet); otherwise the current selection applies.
  */
