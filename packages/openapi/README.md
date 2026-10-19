@@ -1,7 +1,8 @@
 # `@peridotvault/pid-openapi`
 
 The **source of truth** OpenAPI 3.0 specification for the PeridotID API. Consumed to
-generate API reference docs (via `fumadocs-openapi` in `apps/docs`) and as a contract
+generate API reference docs (Mintlify endpoint pages from `apps/docs/openapi.yaml`,
+a synced copy of this spec) and as a contract
 for API consumers.
 
 ## Layout
@@ -12,7 +13,7 @@ src/openapi.yaml    OpenAPI 3.0 spec (single file)
 
 ## Preview locally
 
-The API serves the spec at `GET /v1/openapi.yaml` with a Swagger UI at `/docs`.
+The API serves the spec at `GET /v1/openapi.yaml` (API reference at `https://docs.peridot.id/api/overview`).
 Standalone validation:
 
 ```sh

@@ -1,8 +1,9 @@
 # PeridotID VPS deployment
 
-Deploys `api` (NestJS), `docs` (Next.js docs), and `app` (Vite
+Deploys `api` (NestJS) and `app` (Vite
 static build) onto the Antigane infra
-VPS. Conforms to the infra platform contract (`infra/docs/application.md`): joins
+VPS. (Docs left the VPS in ANT-124: `apps/docs` is the Mintlify source,
+board user deploys manually to `docs.peridot.id`.) Conforms to the infra platform contract (`infra/docs/application.md`): joins
 the external `proxy` network, exposes internal ports only, owns its Traefik
 labels. No infra repo changes are ever required.
 
@@ -38,7 +39,8 @@ Secrets live in Infisical Cloud, project `peridot-id-uf-w9`
 - `/apps/api` — runtime secrets (`DATABASE_URL`, `JWT_*`, `GOOGLE_*`, `DOKU_*`, `PID_*`, …)
 - `/apps/wallet` — `VITE_*` (public build args)
 
-Docs (`apps/docs`) needs no secrets — zero build args, zero env.
+Docs are Mintlify-hosted since ANT-124 (`apps/docs` is the Mintlify source, board user
+deploys manually) — no VPS docs service, no build args, no secrets, no env.
 
 There is no `/deploy` folder — it only duplicated the above. Delete it in the
 Infisical UI for every env if it still exists. Deploy meta (`ENV_SUFFIX`,
@@ -64,7 +66,7 @@ chmod 600 /etc/peridot-id/infisical.env
 fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 
 ./deploy/db-init.sh main        # creates peridot_id db/role + runs migrations
-./deploy/up.sh main             # pulls secrets via `infisical run`, builds api + docs + app
+./deploy/up.sh main             # pulls secrets via `infisical run`, builds api + app (+ dashboard)
 ```
 
 No `deploy/.env.*` exists on the VPS — secrets are fetched from Infisical at
@@ -228,8 +230,10 @@ done
 - `deploy/compose.yaml`: wallet router also answers `peridot.id` /
   `sandbox.peridot.id`; **new** `dashboard` service (nginx `:3001`,
   `Dockerfile.dashboard`) answers `dashboard.peridot.id` /
-  `sandbox.dashboard.peridot.id`. Docs router unchanged (Mintlify hosts
-  `docs.peridot.id`, board decision 2026-10-19). Old rules byte-identical.
+  `sandbox.dashboard.peridot.id`. Docs router REMOVED (ANT-124: `apps/docs` is now
+  the Mintlify source; Mintlify hosts `docs.peridot.id`, board decision 2026-10-19 —
+  sequencing warning in `compose.yaml`: do not run `up.sh` until Mintlify is live).
+  Remaining old rules byte-identical.
 - `deploy/up.sh`: per-env deploy-meta defaults (`NEW_WALLET_HOST`,
   `NEW_DASHBOARD_HOST`, `DASHBOARD_API_URL`,
   `DASHBOARD_POPUP_URL`, `DASHBOARD_PID_ENV`, `DASHBOARD_OTHER_WORKSPACE_URL`).
@@ -253,7 +257,7 @@ the `peridot_id` role + database, then runs `prisma migrate deploy`.
 
 ## Notes
 
-- Images build from source on the VPS (serially via `./deploy/up.sh`: api, docs, app); the
+- Images build from source on the VPS (serially via `./deploy/up.sh`: api, app, dashboard); the
   app's `VITE_API_URL` is baked in at build via a Docker build arg. Changing it
   requires a rebuild.
 - Solana is `devnet` for now (relayer funded on devnet). The Solana chain, its

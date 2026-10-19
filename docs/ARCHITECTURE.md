@@ -39,7 +39,7 @@ Non-custodial wallet model (WHITEPAPER.md §§1–2, 10–11):
 Repo:
 ```
 apps/api      NestJS (auth, identity, profile, account, credentials, intent, permissions, wallet)
-apps/docs      Fumadocs docs site
+apps/docs      Mintlify docs source (deployed manually to docs.peridot.id)
 apps/wallet   Expo wallet client (web + iOS + Android, PRD_v5 §9)
 contracts/svm/smart-account   Pinocchio smart-account program
 contracts/evm                 Counterfactual smart accounts + permission executor (Solidity/Foundry)

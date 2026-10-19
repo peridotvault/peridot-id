@@ -10,7 +10,7 @@ every Peridot product.
 |---|---|
 | API | `https://api.pid.peridotvault.com/v1` |
 | Docs | `https://pid.peridotvault.com` |
-| OpenAPI spec | `GET /v1/openapi.yaml` (Swagger UI at `/docs`) |
+| OpenAPI spec | `GET /v1/openapi.yaml` (API reference at `https://docs.peridot.id/api/overview`) |
 
 ## Repo layout
 
@@ -18,7 +18,7 @@ every Peridot product.
 apps/api            NestJS API (auth, identity, profile, wallet, permissions)
 apps/dashboard      Developer dashboard (Vite + React, port :3303)
 apps/wallet         Expo wallet client (web + iOS + Android)
-apps/docs            Public docs site (Fumadocs + Next.js)
+apps/docs            Public docs site (Mintlify source; board user deploys manually to docs.peridot.id)
 contracts/svm       Pinocchio smart-account program (Rust)
 contracts/evm       Counterfactual smart accounts + V4 permission layer (Solidity/Foundry, WHITEPAPER.md §10)
 packages/sdk-js     Browser SDK
@@ -41,7 +41,6 @@ cp apps/api/.env.example apps/api/.env   # add Google OAuth creds to test login
 docker compose up -d                     # Postgres (optional; only if not using Supabase)
 pnpm --filter @peridotvault/pid-api db:deploy
 pnpm --filter @peridotvault/pid-api dev  # API on :3301
-pnpm --filter @peridotvault/pid-docs dev  # docs on :3301
 pnpm --filter @peridotvault/pid-wallet dev:web  # wallet on :8081
 ```
 
@@ -74,14 +73,16 @@ const rows = await peridot.wallet.createAccount(); // wallet chain rows
 
 ## Documentation
 
-- [Docs site](https://pid.peridotvault.com) — getting started, authentication flow,
+- [Docs site](https://docs.peridot.id) — getting started, authentication flow,
   API reference (generated from the OpenAPI spec), SDK guide, self-hosting/deployment.
+  (Mintlify-hosted; source in `apps/docs`. Old `https://pid.peridotvault.com/docs*`
+  keeps serving until the cutover redirect lands.)
 - `docs/` — product spec (PRD_v5), architecture, database, security, roadmap, ADRs.
 - `AGENTS.md` — agent run book (naming, environment, login split, verification).
 
 ## Deploy
 
-See the [self-hosting guide](https://pid.peridotvault.com/docs/self-hosting). In short:
+See the [self-hosting guide](https://docs.peridot.id/self-hosting). In short:
 API + web/app on the VPS via `deploy/compose.yaml`; Postgres per the deploy guide.
 
 ## License
