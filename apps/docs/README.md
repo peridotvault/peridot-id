@@ -20,8 +20,10 @@ secrets — the dev console lives in `apps/dashboard` (backlog ANT-104).
 
 Docs live under `content/docs/`. The API reference is generated from
 `@peridotvault/pid-openapi` via `fumadocs-openapi`. All `/docs/*` routes render here;
-`/` redirects to `/docs`, and legacy `/workspace/*` URLs temporarily redirect to
-`/docs` (see `next.config.mts`).
+`/` redirects to `/docs`, and `/workspace/*` redirects (307) to the dashboard dev
+console preserving sub-path and query — `PID_DASHBOARD_URL` (or legacy
+`NEXT_PUBLIC_PID_DASHBOARD_URL`), dev default `http://localhost:3303`
+(see `next.config.mts`; dashboard host is baked in at build time).
 
 ## Local
 
