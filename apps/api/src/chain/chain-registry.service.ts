@@ -4,10 +4,21 @@
 // old unit-test doubles) falls back to the compiled-in chain list + env, so EVM
 // stays off until a factory is configured exactly like before.
 
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { EVM_CHAINS } from "@peridotvault/pid-core/dist/evm";
-import { SOLANA_DEVNET_RPC, SOLANA_MAINNET_REFERENCE, SOLANA_NAMESPACE, SOLANA_PROGRAM_ID } from "../common/chains";
+import {
+  MAX_CHAIN_REFERENCE_LENGTH,
+  SOLANA_DEVNET_REFERENCE,
+  SOLANA_DEVNET_RPC,
+  SOLANA_NAMESPACE,
+  SOLANA_PROGRAM_ID,
+  SOLANA_TESTNET_PROGRAM_ID,
+  SOLANA_TESTNET_REFERENCE,
+  SolanaSelection,
+  UNKNOWN_CHAIN_CODE,
+  solanaReferenceFor,
+} from "../common/chains";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface RegistryContract {
@@ -28,6 +39,21 @@ export interface RegistryChain {
   logoUrl: string | null;
   isTestnet: boolean;
   contracts: RegistryContract[];
+}
+
+/**
+ * Mainnet Solana presence signal (ANT-75). Single source of truth for
+ * "does a mainnet Solana program exist": true only when an ACTIVE
+ * non-testnet `solana` registry row carries a `program` contract address.
+ * The seeded registry has no such row (both Solana rows are testnet), so
+ * this reads `available: false` until a mainnet program ships as a data row
+ * (no code change, no migration — adding the row flips the signal).
+ */
+export interface SolanaMainnetAvailability {
+  available: boolean;
+  reference: string | null;
+  program: string | null;
+  rpcUrl: string | null;
 }
 
 const CACHE_TTL_MS = 30_000;
@@ -86,33 +112,115 @@ export class ChainRegistryService {
   /**
    * Solana chain id or clean 404 — chain_accounts has a hard FK to it, so
    * writers fail fast here (not P2003) when the registry row is missing.
-   * Fresh DBs must run db:seed first.
+   * Fresh DBs must run db:seed first. The optional selection scopes the
+   * lookup to the devnet/testnet row; omitted (default) preserves the
+   * historical behavior of resolving the default (devnet) row.
    */
-  async solanaChainIdOrThrow(): Promise<string> {
+  async solanaChainIdOrThrow(selection?: SolanaSelection): Promise<string> {
+    const reference = solanaReferenceFor(selection ?? "devnet");
     const row = await this.prisma.chain.findUnique({
-      where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_MAINNET_REFERENCE } },
+      where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference } },
       select: { id: true },
     });
-    if (!row) throw new NotFoundException("Solana chain is not registered — run db:seed");
+    if (!row) {
+      if (!selection) throw new NotFoundException("Solana chain is not registered — run db:seed");
+      throw new NotFoundException(`Solana chain is not registered for "${selection}" — run db:seed`);
+    }
     return row.id;
   }
 
-  /** The active Solana chain (undefined when the registry has none). */
-  async solanaChain(): Promise<RegistryChain | undefined> {
+  /** All active Solana chains (devnet + testnet in dual-cluster mode). */
+  async solanaChains(): Promise<RegistryChain[]> {
     const chains = await this.activeChains();
-    return chains.find((c) => c.namespace === SOLANA_NAMESPACE);
+    return chains.filter((c) => c.namespace === SOLANA_NAMESPACE);
   }
 
-  /** Solana RPC from the registry (public devnet as last resort). */
-  async solanaRpcUrl(): Promise<string> {
-    const chain = await this.solanaChain();
+  /**
+   * The active Solana chain for a selection (undefined when the registry has
+   * none). No selection = historical behavior: the first active Solana row
+   * (the devnet row on seeded DBs).
+   */
+  async solanaChain(selection?: SolanaSelection): Promise<RegistryChain | undefined> {
+    const chains = await this.solanaChains();
+    if (!selection) return chains[0];
+    return chains.find((c) => c.reference === solanaReferenceFor(selection));
+  }
+
+  /** Solana RPC for a selection (registry row, else public devnet as last resort). */
+  async solanaRpcUrl(selection?: SolanaSelection): Promise<string> {
+    const chain = await this.solanaChain(selection);
     return chain?.rpcUrls[0] ?? SOLANA_DEVNET_RPC;
   }
 
-  /** Solana program id from the `program` contract (canonical constant as last resort). */
-  async solanaProgramId(): Promise<string> {
-    const chain = await this.solanaChain();
-    return chain?.contracts.find((k) => k.type === "program")?.address ?? SOLANA_PROGRAM_ID;
+  /** Solana program id for a selection (`program` contract, else per-cluster constant). */
+  async solanaProgramId(selection?: SolanaSelection): Promise<string> {
+    const chain = await this.solanaChain(selection);
+    return (
+      chain?.contracts.find((k) => k.type === "program")?.address ??
+      (selection === "testnet" ? SOLANA_TESTNET_PROGRAM_ID : SOLANA_PROGRAM_ID)
+    );
+  }
+
+  /**
+   * Mainnet Solana presence signal (ANT-75, served at
+   * `GET /v1/chains/solana-availability`). Reads the cached `activeChains()`
+   * (30s TTL, no extra DB query, no N+1) so the wallet can hide Solana
+   * create/activate UI in mainnet mode until a mainnet program exists
+   * (ANT-73). Fail-absent: anything short of an active non-testnet solana
+   * row WITH a program contract reads as unavailable.
+   */
+  async solanaMainnetAvailability(): Promise<SolanaMainnetAvailability> {
+    const chains = await this.activeChains();
+    const row = chains.find((c) => c.namespace === SOLANA_NAMESPACE && !c.isTestnet);
+    const program = row?.contracts.find((k) => k.type === "program")?.address ?? null;
+    if (!row || !program) return { available: false, reference: null, program: null, rpcUrl: null };
+    return { available: true, reference: row.reference, program, rpcUrl: row.rpcUrls[0] ?? null };
+  }
+
+  /**
+   * Activity/explorer label for a registry chain (no SOLANA_NETWORK env).
+   * Centralizes the rule previously duplicated in activation + intent:
+   * non-testnet rows are mainnet-beta, the testnet row is testnet, and
+   * anything else (including an empty registry) reads as devnet.
+   */
+  networkLabelFor(chain: Pick<RegistryChain, "reference" | "isTestnet"> | undefined): string {
+    if (chain && !chain.isTestnet) return "mainnet-beta";
+    if (chain?.reference === SOLANA_TESTNET_REFERENCE) return "testnet";
+    return "devnet";
+  }
+
+  /** Activity label for the selected chain (default = current behavior). */
+  async networkLabel(selection?: SolanaSelection): Promise<string> {
+    return this.networkLabelFor(await this.solanaChain(selection));
+  }
+
+  /**
+   * HTTP-surface resolver (ANT-35, spec §8): map a client-supplied chain
+   * reference (`X-Chain-Reference` header, `?chainReference` query fallback)
+   * to a Solana selection. Omitted/blank preserves the server default
+   * (current behavior, AC-1.3). Unknown, over-long, or inactive references
+   * fail closed with 400 UNKNOWN_CHAIN and no chain write (AC-1.4).
+   * Header wins over query — controllers pass `header ?? query` in.
+   */
+  async selectionFromReferenceOrThrow(reference?: string | string[]): Promise<SolanaSelection | undefined> {
+    if (Array.isArray(reference)) {
+      throw new BadRequestException({ code: UNKNOWN_CHAIN_CODE, message: "Ambiguous chain reference" });
+    }
+    const ref = reference?.trim();
+    if (!ref) return undefined;
+    const failClosed = (message: string): never => {
+      throw new BadRequestException({ code: UNKNOWN_CHAIN_CODE, message });
+    };
+    if (ref.length > MAX_CHAIN_REFERENCE_LENGTH) failClosed(`Unknown chain reference "${ref.slice(0, 32)}…"`);
+    const chain = (await this.solanaChains()).find((c) => c.reference === ref);
+    if (!chain) {
+      throw new BadRequestException({ code: UNKNOWN_CHAIN_CODE, message: `Unknown chain reference "${ref}"` });
+    }
+    if (chain.reference === SOLANA_TESTNET_REFERENCE) return "testnet";
+    if (chain.reference === SOLANA_DEVNET_REFERENCE) return "devnet";
+    // Active Solana row with no served selection (e.g. a future third row):
+    // fail closed rather than silently serving another cluster (offline case, §11).
+    return failClosed(`Chain reference "${ref}" is not served by this API version`);
   }
 
   /** RPC URL for a reference (row URL, else shared env fallback). */

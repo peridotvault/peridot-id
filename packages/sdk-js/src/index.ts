@@ -28,8 +28,9 @@ import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
 import { openLoginPopup, openLoginTab, openPeridotPopup } from "./popup.js";
 import { PopupClosedError, PopupUnavailableError } from "./popup.js";
 
-export { PeridotWallet, type PeridotWalletOptions };
-export type { ExecuteInput, ExecuteMetaInput, RotateInput, TopupInput, WithdrawInput } from "./wallet/wallet-client.js";
+export { PeridotWallet, ClusterMismatchError, assertChainEcho, buildChainEcho } from "./wallet/wallet-client.js";
+export type { PeridotWalletOptions } from "./wallet/wallet-client.js";
+export type { ExecuteInput, ExecuteMetaInput, RotateInput, TopupInput, WithdrawInput, ChainEcho, FeeQuoteView, SubmitTransactionInput } from "./wallet/wallet-client.js";
 export {
   PeridotFiat,
   sumTransferFee,

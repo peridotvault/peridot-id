@@ -1,5 +1,5 @@
 // WebGL backdrop: raw-WebGL port of the R3F AsciiRidges ridge field
-// (apps/web/components/landing/ascii-ridges.tsx — same shaders, same
+// (apps/docs/components/landing/ascii-ridges.tsx — same shaders, same
 // uniforms, same motion). Zero dependencies: three/fiber only ever provided
 // scaffolding. Where shader compile fails (software GL drivers), a Canvas2D
 // port below renders the same field per cell.

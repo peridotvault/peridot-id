@@ -6,8 +6,8 @@ set -euo pipefail
 #
 # Secrets come from Infisical Cloud (project peridot-id-uf-w9):
 #   /apps/api    — runtime secrets (DATABASE_URL, JWT_*, GOOGLE_*, DOKU_*, PID_*)
-#   /apps/web    — NEXT_PUBLIC_* (public build args)
 #   /apps/wallet — VITE_* (public build args)
+# Docs (apps/docs) needs no secrets — zero build args, zero env.
 # No /deploy folder — it only duplicated the above (delete it in the UI).
 # Env slugs match the script arg: main -> main, test -> test, local dev -> dev.
 #
@@ -18,7 +18,7 @@ set -euo pipefail
 # INFISICAL_TOKEN is honored as-is.
 # Fallback: INFISICAL_ENABLED=0 ./deploy/up.sh main reads deploy/.env.$ENV.
 #
-# Builds serially (api then web) so builds don't contend on a small VPS; BuildKit
+# Builds serially (api then docs) so builds don't contend on a small VPS; BuildKit
 # caches layers on the VPS so only changed apps rebuild. Requires the infra
 # bootstrap (Traefik + `proxy` network) already up.
 
@@ -29,12 +29,43 @@ PROJECT="peridot-id"
 [ "$ENV" = "test" ] && PROJECT="peridot-id-test"
 
 # Deploy meta (not secrets) — hardcoded per stack instead of living in Infisical.
+# NEW_API_HOST is the ANT-99 dual-serve API hostname (old *.peridotvault.com hosts
+# stay live via the same Traefik router — see compose.yaml).
 if [ "$ENV" = "test" ]; then
   export ENV_SUFFIX="${ENV_SUFFIX:-sandbox.}"
   export NAMESPACE="${NAMESPACE:--test}"
+  export NEW_API_HOST="${NEW_API_HOST:-sandbox.api.peridot.id}"
 else
   export ENV_SUFFIX="${ENV_SUFFIX:-}"
   export NAMESPACE="${NAMESPACE:-}"
+  export NEW_API_HOST="${NEW_API_HOST:-api.peridot.id}"
+fi
+# Hardening (ANT-121 security review §3): NEW_API_HOST lands verbatim in a Traefik
+# Host() rule — reject anything that is not a plain hostname so a bad env value
+# fails fast here instead of producing a broken router (or rule injection).
+case "$NEW_API_HOST" in
+  *[!a-zA-Z0-9.-]* | "" | .* | *.) echo "error: NEW_API_HOST invalid: '$NEW_API_HOST'" >&2; exit 1 ;;
+esac
+
+# ANT-99 dual-serve new hosts (DevOps ANT-118): deploy meta, not secrets —
+# hardcoded per stack like ENV_SUFFIX above. Pre-set env vars win (override).
+# NEW_API_HOST is owned by ANT-116 (api.peridot.id / sandbox.api.peridot.id);
+# the dashboard API default below tracks the same canonical names so this stack
+# stays correct even if that var is unset.
+if [ "$ENV" = "test" ]; then
+  export NEW_WALLET_HOST="${NEW_WALLET_HOST:-sandbox.peridot.id}"
+  export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox.dashboard.peridot.id}"
+  export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox.api.peridot.id}"
+  export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
+  export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-sandbox}"
+  export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://dashboard.peridot.id}"
+else
+  export NEW_WALLET_HOST="${NEW_WALLET_HOST:-peridot.id}"
+  export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-dashboard.peridot.id}"
+  export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://api.peridot.id}"
+  export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://peridot.id}"
+  export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-production}"
+  export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://sandbox.dashboard.peridot.id}"
 fi
 
 INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID:-51f99bb1-16c8-4b74-be1f-52657e066a93}"
@@ -59,7 +90,7 @@ compose() {
   if [ "${INFISICAL_ENABLED:-1}" = "1" ] && [ -n "${INFISICAL_TOKEN:-}" ] && command -v infisical >/dev/null 2>&1; then
     # First --path wins on collision; /apps/api owns shared names.
     infisical run --token "$INFISICAL_TOKEN" --projectId "$INFISICAL_PROJECT_ID" --env "$ENV" \
-      --path "/apps/api" --path "/apps/web" --path "/apps/wallet" -- \
+      --path "/apps/api" --path "/apps/wallet" -- \
       docker compose -f "$SCRIPT_DIR/compose.yaml" "$@"
   else
     echo "warn: Infisical not configured (no token) — falling back to deploy/.env.$ENV" >&2
@@ -70,7 +101,9 @@ compose() {
 }
 
 echo "Deploying PeridotID [$ENV]..."
-for s in api web app; do
+# Serial builds (small VPS): api + docs + app are the proven set; dashboard
+# (ANT-118) joins the same loop — same pattern, independent image.
+for s in api docs app dashboard; do
   echo "==> build $s"
   COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
 done

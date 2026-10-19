@@ -18,7 +18,7 @@ import { ConfigService } from "@nestjs/config";
 import { ChainAccount } from "@prisma/client";
 import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
-import { ACCOUNT_TYPE_SMART } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SolanaSelection } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
   exceedsDriftBound,
@@ -32,6 +32,11 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
+export interface ChainEcho {
+  namespace: "solana";
+  reference: string;
+}
+
 export interface WithdrawQuote {
   /** Realtime network-cost estimate the backend will attest near (lamports). */
   networkFeeLamports: string;
@@ -44,6 +49,8 @@ export interface WithdrawQuote {
   chainTime: number;
   /** Canonical revenue vault receiving the protocol fee (informational — enforced on-chain). */
   treasury: string;
+  /** Additive CAIP-2 echo of the active Solana chain (omitted when registry has none). */
+  chain?: ChainEcho;
 }
 
 export interface SponsoredWithdrawResult {
@@ -85,8 +92,8 @@ export class SponsoredWithdrawService {
     return treasuryPubkey(this.pidSolana, this.config);
   }
 
-  private async adapter(): Promise<SolanaAdapter> {
-    const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(), this.chains.solanaProgramId()]);
+  private async adapter(selection?: SolanaSelection): Promise<SolanaAdapter> {
+    const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(selection), this.chains.solanaProgramId(selection)]);
     return solanaAdapter(this.pidSolana, rpcUrl, programId);
   }
 
@@ -115,8 +122,8 @@ export class SponsoredWithdrawService {
   }
 
   /** Compute the quote the client signs the policy (not amounts) against. */
-  async quote(pid: string): Promise<WithdrawQuote> {
-    const adapter = await this.adapter();
+  async quote(pid: string, selection?: SolanaSelection): Promise<WithdrawQuote> {
+    const adapter = await this.adapter(selection);
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
     const networkFee = await this.networkFeeLamports(adapter);
@@ -124,6 +131,7 @@ export class SponsoredWithdrawService {
     const bps = protocolFeeBps(version);
     const protocolFee = protocolFeeOf(networkFee, bps);
     const chainTime = await adapter.chainTime();
+    const solChain = await this.chains.solanaChain().catch(() => undefined);
     return {
       networkFeeLamports: networkFee.toString(),
       protocolFeeBps: bps,
@@ -131,6 +139,7 @@ export class SponsoredWithdrawService {
       totalFeeLamports: (networkFee + protocolFee).toString(),
       chainTime,
       treasury: this.treasury().toBase58(),
+      ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
 
@@ -147,8 +156,9 @@ export class SponsoredWithdrawService {
       quotedNetworkFeeLamports: string;
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
     },
+    selection?: SolanaSelection,
   ): Promise<SponsoredWithdrawResult> {
-    const adapter = await this.adapter();
+    const adapter = await this.adapter(selection);
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
 
@@ -337,9 +347,10 @@ export class SponsoredWithdrawService {
       metas: { address: string; writable: boolean; signer: boolean }[];
       data: string;
     },
+    selection?: SolanaSelection,
   ): Promise<{ target: PublicKey; metas: { address: PublicKey; writable: boolean; signer: boolean }[]; data: Uint8Array }> {
     const { PublicKey, b64urlToBytes } = this.pidSolana;
-    const programId = await this.chains.solanaProgramId();
+    const programId = await this.chains.solanaProgramId(selection);
     const target = new PublicKey(call.target);
     if (target.toBase58() === new PublicKey(programId).toBase58()) {
       throw new BadRequestException("Target cannot be the smart-account program");
@@ -367,16 +378,18 @@ export class SponsoredWithdrawService {
       metas: { address: string; writable: boolean; signer: boolean }[];
       data: string;
     },
+    selection?: SolanaSelection,
   ): Promise<WithdrawQuote> {
-    const adapter = await this.adapter();
+    const adapter = await this.adapter(selection);
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
-    const decoded = await this.decodeExecuteCall(chain.address, call);
+    const decoded = await this.decodeExecuteCall(chain.address, call, selection);
     const networkFee = await adapter.estimateExecuteFee(decoded.target, decoded.metas, decoded.data.length);
     const version = this.policyVersion();
     const bps = protocolFeeBps(version);
     const protocolFee = protocolFeeOf(networkFee, bps);
     const chainTime = await adapter.chainTime();
+    const solChain = await this.chains.solanaChain().catch(() => undefined);
     return {
       networkFeeLamports: networkFee.toString(),
       protocolFeeBps: bps,
@@ -384,6 +397,7 @@ export class SponsoredWithdrawService {
       totalFeeLamports: (networkFee + protocolFee).toString(),
       chainTime,
       treasury: this.treasury().toBase58(),
+      ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
 
@@ -400,11 +414,12 @@ export class SponsoredWithdrawService {
       quotedNetworkFeeLamports: string;
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
     },
+    selection?: SolanaSelection,
   ): Promise<SponsoredWithdrawResult> {
-    const adapter = await this.adapter();
+    const adapter = await this.adapter(selection);
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
-    const decoded = await this.decodeExecuteCall(chain.address, dto);
+    const decoded = await this.decodeExecuteCall(chain.address, dto, selection);
 
     // The asserting credential must be one of this wallet's active passkeys.
     const authority = await this.prisma.authority.findFirst({

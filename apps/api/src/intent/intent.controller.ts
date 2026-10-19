@@ -1,5 +1,7 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
+import { ChainRegistryService } from "../chain/chain-registry.service";
+import { CHAIN_REFERENCE_HEADER, CHAIN_REFERENCE_QUERY } from "../common/chains";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { CreateIntentDto, RecordActivityDto, RecordTransactionDto } from "./dto/intent.dto";
@@ -8,14 +10,36 @@ import { IntentService, IntentView, TransactionView } from "./intent.service";
 @Controller("v1/wallet")
 @UseGuards(ThrottlerGuard)
 export class IntentController {
-  constructor(private readonly intentService: IntentService) {}
+  constructor(
+    private readonly intentService: IntentService,
+    private readonly chains: ChainRegistryService,
+  ) {}
+
+  /**
+   * Network selection for this request (ANT-15 spec §8): the
+   * `X-Chain-Reference` header wins, `?chainReference` is the GET-friendly
+   * fallback. Absent = server default (current behavior); unknown = 400
+   * UNKNOWN_CHAIN, fail-closed before any chain write.
+   */
+  private selection(chainRefHeader?: string, chainRefQuery?: string | string[]) {
+    return this.chains.selectionFromReferenceOrThrow(chainRefHeader ?? chainRefQuery);
+  }
 
   @Post("intents")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  createIntent(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateIntentDto): Promise<IntentView> {
-    return this.intentService.createIntent(user.pid, { type: dto.type, payload: dto.payload as never });
+  async createIntent(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateIntentDto,
+    @Headers(CHAIN_REFERENCE_HEADER) chainRefHeader?: string,
+    @Query(CHAIN_REFERENCE_QUERY) chainRefQuery?: string | string[],
+  ): Promise<IntentView> {
+    return this.intentService.createIntent(
+      user.pid,
+      { type: dto.type, payload: dto.payload as never },
+      await this.selection(chainRefHeader, chainRefQuery),
+    );
   }
 
   @Get("intents/:id")
@@ -36,15 +60,24 @@ export class IntentController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  recordActivity(@CurrentUser() user: AuthenticatedUser, @Body() dto: RecordActivityDto): Promise<TransactionView> {
-    return this.intentService.recordActivity(user.pid, {
-      type: dto.type,
-      amount: dto.amount,
-      asset: dto.asset,
-      direction: dto.direction,
-      counterparty: dto.counterparty,
-      txHash: dto.txHash,
-    });
+  async recordActivity(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RecordActivityDto,
+    @Headers(CHAIN_REFERENCE_HEADER) chainRefHeader?: string,
+    @Query(CHAIN_REFERENCE_QUERY) chainRefQuery?: string | string[],
+  ): Promise<TransactionView> {
+    return this.intentService.recordActivity(
+      user.pid,
+      {
+        type: dto.type,
+        amount: dto.amount,
+        asset: dto.asset,
+        direction: dto.direction,
+        counterparty: dto.counterparty,
+        txHash: dto.txHash,
+      },
+      await this.selection(chainRefHeader, chainRefQuery),
+    );
   }
 
   @Get("transactions/:id")

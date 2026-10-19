@@ -19,7 +19,7 @@ import { ChainAccount, ChainAccountStatus, TransactionStatus } from "@prisma/cli
 import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
-import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SOLANA_DEVNET_REFERENCE, SOLANA_NAMESPACE, SOLANA_TESTNET_REFERENCE, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
   feePolicyVersion as configuredPolicyVersion,
@@ -34,6 +34,11 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
 export type ActivationStatus = ChainAccountStatus;
+
+export interface ChainEcho {
+  namespace: "solana";
+  reference: string;
+}
 
 export interface ActivationView {
   pid: string;
@@ -53,6 +58,8 @@ export interface ActivationView {
   feePolicyVersion: number;
   /** base64url sha256 of the WebAuthn RP ID (bound into the V3 activation payload). */
   rpIdHash: string;
+  /** Additive CAIP-2 echo of the active Solana chain (omitted when registry has none). */
+  chain?: ChainEcho;
 }
 
 const POLL_ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
@@ -88,10 +95,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return configuredPolicyVersion(this.config);
   }
 
-  /** Activity label derived from the registry chain (no SOLANA_NETWORK env). */
-  private async networkLabel(): Promise<string> {
-    const chain = await this.chains.solanaChain();
-    return chain && !chain.isTestnet ? "mainnet-beta" : "devnet";
+  /** Activity label for the selected chain (default = current behavior). */
+  private async networkLabel(selection?: SolanaSelection): Promise<string> {
+    return this.chains.networkLabel(selection);
   }
 
   /** sha256 of the WebAuthn RP ID — stored on-chain and verified per assertion. */
@@ -117,9 +123,18 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return treasuryPubkey(this.pidSolana, this.config);
   }
 
-  private async adapter(): Promise<SolanaAdapter> {
-    const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(), this.chains.solanaProgramId()]);
+  private async adapter(selection?: SolanaSelection): Promise<SolanaAdapter> {
+    const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(selection), this.chains.solanaProgramId(selection)]);
     return solanaAdapter(this.pidSolana, rpcUrl, programId);
+  }
+
+  /** Selection for a registry reference (undefined when unmapped — the poll
+   *  grouping skips-and-alerts on those rows fail-closed instead of quoting
+   *  them against the default cluster). */
+  private selectionForReference(reference: string): SolanaSelection | undefined {
+    if (reference === SOLANA_TESTNET_REFERENCE) return "testnet";
+    if (reference === SOLANA_DEVNET_REFERENCE) return "devnet";
+    return undefined;
   }
 
   /** Realtime activation network-cost estimate (rent + message fee, no margin)
@@ -141,8 +156,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Active lamports held by the Peridot relayer (the float that funds fee + rent). */
-  private async relayerBalanceLamports(): Promise<number> {
-    const adapter = await this.adapter();
+  private async relayerBalanceLamports(selection?: SolanaSelection): Promise<number> {
+    const adapter = await this.adapter(selection);
     return adapter.getBalanceOf(this.relayer().publicKey.toBase58());
   }
 
@@ -164,8 +179,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   private async confirmActivation(
     sig: string,
     address: string,
+    selection?: SolanaSelection,
   ): Promise<{ outcome: "confirmed" | "failed" | "pending"; reason?: string }> {
-    const adapter = await this.adapter();
+    const adapter = await this.adapter(selection);
     const attempts = this.confirmAttempts();
     const intervalMs = this.confirmIntervalMs();
     for (let i = 0; i < attempts; i++) {
@@ -194,46 +210,77 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         accountType: POLL_ACCOUNT_TYPE,
         status: { in: ["inactivated", "funded", "insufficient", "ready", "activating", "active"] },
       },
+      include: { chain: true },
     });
     if (pending.length === 0) return;
 
-    const adapter = await this.adapter();
-    const quoted = await this.quotedFees(adapter);
-
+    // Group by chain so every row is read and quoted against its own cluster
+    // + program (devnet/testnet). Single-chain DBs behave exactly as before.
+    const byChain = new Map<string, { reference: string; rows: typeof pending }>();
     for (const ca of pending) {
-      try {
-        const activated = await adapter.isActivated(ca.address);
-        if (activated && ca.status !== "active") {
-          // The PDA became program-owned outside this poll's bookkeeping (e.g. a confirm
-          // timed out but the tx landed). Heal the row to match on-chain truth.
-          await this.prisma.chainAccount.update({
-            where: { id: ca.id },
-            data: { status: "active" },
-          });
-          await this.security.log(ca.pid, "account.activation.promoted", { from: ca.status, to: "active" });
-          continue;
-        }
-        if (ca.status === "active") {
-          // stale active row on-chain not actually activated (e.g. earlier dropped tx)
-          if (activated) continue;
-          await this.prisma.chainAccount.update({
-            where: { id: ca.id },
-            data: { status: "inactivated", activationBalance: null, activationRequired: null },
-          });
-          await this.security.log(ca.pid, "account.activation.healed", { from: "active", to: "inactivated" });
-          continue;
-        }
+      const group = byChain.get(ca.chainId) ?? { reference: ca.chain.reference, rows: [] };
+      group.rows.push(ca);
+      byChain.set(ca.chainId, group);
+    }
 
-        const balance = await adapter.getBalanceOf(ca.address);
-        const required = Number(quoted.total);
-        const next = this.classify(balance, required, ca.status);
-        await this.prisma.chainAccount.update({
-          where: { id: ca.id },
-          data: { status: next, activationBalance: BigInt(balance), activationRequired: BigInt(required) },
-        });
-        await this.security.log(ca.pid, "account.activation.polled", { status: next, balance });
-      } catch (err) {
-        this.logger.warn(`activation poll failed for ${ca.address}: ${(err as Error).message}`);
+    for (const group of byChain.values()) {
+      const selection = this.selectionForReference(group.reference);
+      if (!selection) {
+        // Fail closed on unmapped rows (e.g. a future third Solana row): never
+        // quote them against the default cluster. Skip the group and alert so
+        // operators notice the unmapped row instead of silently misquoting it.
+        this.logger.warn(
+          `activation poll skipping ${group.rows.length} row(s) with unmapped solana reference "${group.reference}"`,
+        );
+        for (const ca of group.rows) {
+          try {
+            await this.security.log(ca.pid, "account.activation.unmapped_chain", {
+              reference: group.reference,
+            });
+          } catch (err) {
+            this.logger.warn(`activation poll alert failed for ${ca.address}: ${(err as Error).message}`);
+          }
+        }
+        continue;
+      }
+      const adapter = await this.adapter(selection);
+      const quoted = await this.quotedFees(adapter);
+
+      for (const ca of group.rows) {
+        try {
+          const activated = await adapter.isActivated(ca.address);
+          if (activated && ca.status !== "active") {
+            // The PDA became program-owned outside this poll's bookkeeping (e.g. a confirm
+            // timed out but the tx landed). Heal the row to match on-chain truth.
+            await this.prisma.chainAccount.update({
+              where: { id: ca.id },
+              data: { status: "active" },
+            });
+            await this.security.log(ca.pid, "account.activation.promoted", { from: ca.status, to: "active" });
+            continue;
+          }
+          if (ca.status === "active") {
+            // stale active row on-chain not actually activated (e.g. earlier dropped tx)
+            if (activated) continue;
+            await this.prisma.chainAccount.update({
+              where: { id: ca.id },
+              data: { status: "inactivated", activationBalance: null, activationRequired: null },
+            });
+            await this.security.log(ca.pid, "account.activation.healed", { from: "active", to: "inactivated" });
+            continue;
+          }
+
+          const balance = await adapter.getBalanceOf(ca.address);
+          const required = Number(quoted.total);
+          const next = this.classify(balance, required, ca.status);
+          await this.prisma.chainAccount.update({
+            where: { id: ca.id },
+            data: { status: next, activationBalance: BigInt(balance), activationRequired: BigInt(required) },
+          });
+          await this.security.log(ca.pid, "account.activation.polled", { status: next, balance });
+        } catch (err) {
+          this.logger.warn(`activation poll failed for ${ca.address}: ${(err as Error).message}`);
+        }
       }
     }
 
@@ -263,13 +310,14 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       quotedNetworkFeeLamports: string;
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
     },
+    selection?: SolanaSelection,
   ): Promise<ActivationView> {
-    const chain = await this.ownedSolanaRow(user.pid);
+    const chain = await this.ownedSolanaRow(user.pid, selection);
 
-    if (chain.status === "active") return this.viewOf(user);
+    if (chain.status === "active") return this.viewOf(user, selection);
 
     // Re-derive live state so a stale stored status can't block a genuinely READY account.
-    const adapter = await this.adapter();
+    const adapter = await this.adapter(selection);
     let balance = 0;
     let activated = false;
     try {
@@ -282,7 +330,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     const required = Number(quoted.total);
     const live = activated ? "active" : this.classify(balance, required, chain.status);
 
-    if (live === "active") return this.viewOf(user);
+    if (live === "active") return this.viewOf(user, selection);
 
     if (live !== "ready") {
       throw new ConflictException(`Wallet must be READY to activate (currently ${live})`);
@@ -302,7 +350,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       // be silently dropped (skipPreflight), so fail fast with a clear message instead.
       let relayerBalance = 0;
       try {
-        relayerBalance = await this.relayerBalanceLamports();
+        relayerBalance = await this.relayerBalanceLamports(selection);
       } catch (err) {
         this.logger.warn(`relayer balance check failed: ${(err as Error).message}`);
       }
@@ -346,7 +394,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         this.toAssertion(dto.assertion),
       );
 
-      const { outcome, reason } = await this.confirmActivation(signature, chain.address);
+      const { outcome, reason } = await this.confirmActivation(signature, chain.address, selection);
       if (outcome !== "confirmed") {
         // Revert — the transaction never landed (or errored); the user's deposit is untouched.
         await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
@@ -373,7 +421,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
             direction: "out",
             counterparty: this.treasury().toBase58(),
             chain: "solana",
-            network: await this.networkLabel(),
+            network: await this.networkLabel(selection),
             txHash: signature,
             status: "confirmed" as TransactionStatus,
             confirmedAt: new Date(),
@@ -394,7 +442,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       throw err;
     }
 
-    return this.viewOf(user);
+    return this.viewOf(user, selection);
   }
 
   /** Decode a client assertion DTO into chain bytes (mirrors SponsoredWithdrawService). */  private toAssertion(dto: {
@@ -413,9 +461,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Activation view derived live from on-chain state (ownership-checked). */
-  async viewOf(user: { pid: string }): Promise<ActivationView> {
-    const chain = await this.ownedSolanaRow(user.pid);
-    const adapter = await this.adapter();
+  async viewOf(user: { pid: string }, selection?: SolanaSelection): Promise<ActivationView> {
+    const chain = await this.ownedSolanaRow(user.pid, selection);
+    const adapter = await this.adapter(selection);
     let balance = 0;
     let activated = false;
     try {
@@ -434,6 +482,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       ? "active"
       : this.classify(balance, required, chain.status);
 
+    const solChain = await this.chains.solanaChain().catch(() => undefined);
+
     return {
       pid: user.pid,
       status,
@@ -446,6 +496,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       treasury: this.treasury().toBase58(),
       feePolicyVersion: quoted.version,
       rpIdHash: Buffer.from(await this.rpIdHash()).toString("base64url"),
+      ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
 
@@ -477,9 +528,16 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Solana smart row owned by the token identity — never a client-supplied one. */
-  private async ownedSolanaRow(pid: string) {
+  private async ownedSolanaRow(pid: string, selection?: SolanaSelection) {
     const chain = await this.prisma.chainAccount.findFirst({
-      where: { chain: { namespace: SOLANA_NAMESPACE }, accountType: POLL_ACCOUNT_TYPE, pid },
+      where: {
+        chain: {
+          namespace: SOLANA_NAMESPACE,
+          ...(selection ? { reference: solanaReferenceFor(selection) } : {}),
+        },
+        accountType: POLL_ACCOUNT_TYPE,
+        pid,
+      },
     });
     if (!chain) {
       throw new NotFoundException("Account not found");

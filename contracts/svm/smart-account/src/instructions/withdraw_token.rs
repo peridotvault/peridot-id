@@ -164,6 +164,15 @@ pub fn process(
     ];
     let signer = Signer::from(&seeds[..]);
 
+    // Effects first (checks-effects-interactions): burn the nonce BEFORE the
+    // Token-program CPI. A reentrant second call with the same passkey
+    // signature then sees a spent nonce and fails; a failed CPI reverts the
+    // increment atomically, so this is behavior-preserving.
+    let mut data_ref = smart_account.try_borrow_mut()?;
+    let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
+    state.increment_nonce();
+    drop(data_ref);
+
     // Transfer the token amount; reimburse exact network cost to the relayer
     // and the protocol fee to the canonical revenue vault.
     let transfer = TokenTransfer {
@@ -180,11 +189,6 @@ pub fn process(
     r.set_lamports(r.lamports() + relayer_fee);
     t.set_lamports(t.lamports() + protocol_fee);
     from.set_lamports(from.lamports() - total);
-
-    let mut data_ref = smart_account.try_borrow_mut()?;
-    let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
-    state.increment_nonce();
-    drop(data_ref);
 
     pinocchio_log::log!("PeridotEvent::TransactionExecuted");
     Ok(())

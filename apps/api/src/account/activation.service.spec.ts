@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { ActivationService } from "./activation.service";
+import { SOLANA_DEVNET_REFERENCE } from "../common/chains";
 import { mockSecurity, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
 
 
@@ -56,7 +57,7 @@ function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
     id: "chain-1",
     pid: IDENTITY_ID,
     chainId: "chain-sol",
-    chain: { namespace: "solana", reference: "ref" },
+    chain: { namespace: "solana", reference: SOLANA_DEVNET_REFERENCE },
     address: SMART_ADDR,
     accountType: "smart_account",
     status: "ready",
@@ -245,6 +246,27 @@ describe("ActivationService", () => {
     expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.promoted", expect.any(Object));
   });
 
+  it("skips poll rows with an unmapped solana reference instead of quoting the default cluster", async () => {
+    // Fail-closed for a future third Solana row (ANT-40): the group must never
+    // be read or quoted against the default cluster — it is skipped with an alert.
+    const { service, prisma, security } = setup();
+    prisma.chainAccount.findMany.mockResolvedValue([
+      chainRow({ status: "ready", chain: { namespace: "solana", reference: "future-third-row" } }),
+    ] as never);
+
+    await service.poll();
+
+    expect((service as unknown as { chains: { solanaRpcUrl: jest.Mock } }).chains.solanaRpcUrl).not.toHaveBeenCalled();
+    expect(adapterMock.estimateActivationCost).not.toHaveBeenCalled();
+    expect(adapterMock.getBalanceOf).not.toHaveBeenCalled();
+    expect(prisma.chainAccount.update).not.toHaveBeenCalled();
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "account.activation.unmapped_chain",
+      expect.objectContaining({ reference: "future-third-row" }),
+    );
+  });
+
   it("rejects drift beyond 120% of the quoted network fee without broadcasting", async () => {
     const { service } = setup();
     await expect(
@@ -295,5 +317,19 @@ describe("ActivationService", () => {
     expect(view.protocolFeeBps).toBe(5000);
     expect(typeof view.rpIdHash).toBe("string");
     expect(view.rpIdHash.length).toBeGreaterThan(0);
+  });
+
+  it("omits the chain echo when the registry has no Solana row", async () => {
+    const { service } = setup();
+    const view = await service.viewOf({ pid: IDENTITY_ID });
+    expect(view.chain).toBeUndefined();
+  });
+
+  it("echoes the active Solana chain when the registry has one", async () => {
+    const { service } = setup();
+    const chains = (service as unknown as { chains: { solanaChain: jest.Mock } }).chains;
+    chains.solanaChain.mockResolvedValue({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
+    const view = await service.viewOf({ pid: IDENTITY_ID });
+    expect(view.chain).toEqual({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
   });
 });

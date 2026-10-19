@@ -272,9 +272,11 @@ contract PeridotAccount {
         // Version gate before signature verification: unknown policies revert
         // identically for every caller and reveal nothing about the key.
         uint256 bps = _policyProtocolBps(feePolicyVersion);
-        authorityX = x;
-        authorityY = y;
-        rpIdHash = _rpIdHash;
+        // Verify-before-write (checks-effects discipline): the activation
+        // authorization is verified BEFORE any state is written. A failed
+        // verification reverts identically either way (atomic revert undoes
+        // writes), so this is behavior-preserving; it keeps a bad signature
+        // from ever touching storage, which is what auditors expect.
         bytes32 expected = keccak256(
             abi.encodePacked(
                 DOMAIN_V3,
@@ -289,7 +291,10 @@ contract PeridotAccount {
                 _factory
             )
         );
-        _verify(expected, authenticatorData, clientDataJSON, r, s);
+        _verifyWithKeyAndRpId(x, y, _rpIdHash, expected, authenticatorData, clientDataJSON, r, s);
+        authorityX = x;
+        authorityY = y;
+        rpIdHash = _rpIdHash;
         uint256 protocolFee = _protocolFee(networkFee, bps);
         factory = _factory;
         initialized = true;
@@ -448,13 +453,32 @@ contract PeridotAccount {
         bytes32 r,
         bytes32 s
     ) internal view {
+        _verifyWithKeyAndRpId(x, y, rpIdHash, expectedPayload, authenticatorData, clientDataJSON, r, s);
+    }
+
+    /// @dev Full WebAuthn/P-256 verification against an explicit key AND an
+    /// explicit RP-ID hash. Used by `initialize`, where the candidate authority
+    /// and RP ID arrive as calldata and NOTHING is stored yet: verifying first
+    /// (before any state write) requires checking against the candidates, not
+    /// against empty storage. Every other path delegates here with the stored
+    /// `rpIdHash` via `_verifyWithKey`.
+    function _verifyWithKeyAndRpId(
+        bytes32 x,
+        bytes32 y,
+        bytes32 _rpIdHash,
+        bytes32 expectedPayload,
+        bytes memory authenticatorData,
+        bytes memory clientDataJSON,
+        bytes32 r,
+        bytes32 s
+    ) internal view {
         // 1. RP-ID + user verification (first 32B of authenticatorData, flag bit 0x04).
         if (authenticatorData.length < 37) revert Unauthorized();
         bytes32 rpId;
         assembly ("memory-safe") {
             rpId := mload(add(authenticatorData, 32))
         }
-        if (rpId != rpIdHash) revert Unauthorized();
+        if (rpId != _rpIdHash) revert Unauthorized();
         if (uint8(authenticatorData[32]) & 0x04 == 0) revert Unauthorized();
         // 2. Signed message binds the exact attested bytes.
         bytes32 h = sha256(bytes.concat(authenticatorData, sha256(clientDataJSON)));

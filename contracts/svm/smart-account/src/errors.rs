@@ -52,6 +52,11 @@ pub enum PeridotError {
     SessionScopeViolation = 21,
     /// The session lifetime exceeds the 24h maximum.
     SessionTtlExceeded = 22,
+    /// ANT-16(e) (board fee decision d4ebecff): direct `initialize` is
+    /// deprecated — creation must route through `activate` (the sole
+    /// fee-bearing sponsored-creation path). Additive-only: existing
+    /// discriminants are untouched so old SDK decoders keep working.
+    InitializeDeprecated = 23,
 }
 
 impl From<PeridotError> for ProgramError {

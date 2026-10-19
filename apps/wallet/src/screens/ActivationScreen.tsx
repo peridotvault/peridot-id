@@ -4,6 +4,7 @@ import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
+import { useNetworkMode } from "../shared/hooks/useNetworkMode";
 import { useActivationGate } from "../feat/wallet/hooks/useActivationGate";
 import { useCopyAddress } from "../feat/wallet/hooks/useCopyAddress";
 import { DepositAddressCard } from "../feat/wallet/components/DepositAddressCard";
@@ -11,6 +12,7 @@ import { ActivationStatusCard } from "../feat/wallet/components/ActivationStatus
 
 export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {
   const { peridot } = usePeridot();
+  const { solanaAvailable } = useNetworkMode();
   const gate = useActivationGate(peridot);
   const { copy, isCopied } = useCopyAddress();
 
@@ -18,6 +20,30 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
     const addr = gate.activation?.smartAccountAddress;
     if (addr) void copy("address", addr);
   };
+
+  // ANT-74 + ANT-78: the activation flow is Solana-specific; it renders only
+  // when the data-driven gate passes (testnet always, mainnet only on a live
+  // program via the ANT-75 registry signal). Otherwise this notice shows.
+  if (!solanaAvailable) {
+    return (
+      <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
+        <BackButton onPress={onDone} />
+
+        <View style={{ flexDirection: "row" }} className="items-center gap-2.5">
+          <Rocket size={22} className="text-foreground" />
+          <Text style={s.title}>Activate Account</Text>
+        </View>
+
+        <View style={s.card}>
+          <Text className="font-sans text-[13px] leading-[19px] text-muted-foreground">
+            Solana activation is available in Testnet Mode. Switch testnet ON to activate your on-chain account.
+          </Text>
+        </View>
+
+        <UIButton title="Back" onPress={onDone} />
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>

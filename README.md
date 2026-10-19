@@ -16,8 +16,9 @@ every Peridot product.
 
 ```
 apps/api            NestJS API (auth, identity, profile, wallet, permissions)
+apps/dashboard      Developer dashboard (Vite + React, port :3303)
 apps/wallet         Expo wallet client (web + iOS + Android)
-apps/web            Public docs site (Fumadocs + Next.js)
+apps/docs            Public docs site (Fumadocs + Next.js)
 contracts/svm       Pinocchio smart-account program (Rust)
 contracts/evm       Counterfactual smart accounts + V4 permission layer (Solidity/Foundry, WHITEPAPER.md §10)
 packages/sdk-js     Browser SDK
@@ -40,7 +41,7 @@ cp apps/api/.env.example apps/api/.env   # add Google OAuth creds to test login
 docker compose up -d                     # Postgres (optional; only if not using Supabase)
 pnpm --filter @peridotvault/pid-api db:deploy
 pnpm --filter @peridotvault/pid-api dev  # API on :3301
-pnpm --filter @peridotvault/pid-web dev  # docs on :3300
+pnpm --filter @peridotvault/pid-docs dev  # docs on :3301
 pnpm --filter @peridotvault/pid-wallet dev:web  # wallet on :8081
 ```
 

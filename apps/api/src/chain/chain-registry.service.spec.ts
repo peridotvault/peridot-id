@@ -1,4 +1,13 @@
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { ChainRegistryService } from "./chain-registry.service";
+import {
+  SOLANA_DEVNET_REFERENCE,
+  SOLANA_NAMESPACE,
+  SOLANA_PROGRAM_ID,
+  SOLANA_TESTNET_PROGRAM_ID,
+  SOLANA_TESTNET_REFERENCE,
+  solanaReferenceFor,
+} from "../common/chains";
 import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
 
 const FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
@@ -85,16 +94,18 @@ describe("ChainRegistryService", () => {
       nativeSymbol: "SOL",
       decimals: 9,
       rpcUrls: ["https://solana.example"],
-      contracts: [{ type: "program", address: "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT", versionLabel: "v1" }],
+      contracts: [{ type: "program", address: "9oMG7eLaq8NxHJEr5nzPc9CgLc8gprzBGVn6sxunECce", versionLabel: "v1" }],
     });
     const withRow = setup([solanaRow]);
     expect(await withRow.solanaRpcUrl()).toBe("https://solana.example");
-    expect(await withRow.solanaProgramId()).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
+    expect(await withRow.solanaProgramId()).toBe("9oMG7eLaq8NxHJEr5nzPc9CgLc8gprzBGVn6sxunECce");
 
-    // Empty registry → EVM code fallback has no Solana chain → constants.
+    // Empty registry → EVM code fallback has no Solana chain → per-cluster constants.
     const empty = setup([]);
     expect(await empty.solanaRpcUrl()).toBe("https://api.devnet.solana.com");
-    expect(await empty.solanaProgramId()).toBe("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
+    expect(await empty.solanaProgramId()).toBe("9oMG7eLaq8NxHJEr5nzPc9CgLc8gprzBGVn6sxunECce");
+    expect(await empty.solanaProgramId("devnet")).toBe("9oMG7eLaq8NxHJEr5nzPc9CgLc8gprzBGVn6sxunECce");
+    expect(await empty.solanaProgramId("testnet")).toBe(SOLANA_TESTNET_PROGRAM_ID);
   });
 
   it("derives the same address on every deployable chain (determinism invariant)", async () => {
@@ -124,5 +135,264 @@ describe("ChainRegistryService", () => {
     expect(addrs[0]).not.toBe(addrs[1]);
     const same = deriveEvmSmartAccountAddress("ifal@pid", FACTORY, IMPL).address;
     expect(deriveEvmSmartAccountAddress("IFAL@PID ", FACTORY, IMPL).address).toBe(same); // normalization
+  });
+
+  describe("Solana selection scope (ANT-24 dual-cluster registry)", () => {
+    const DEVNET_PROGRAM = SOLANA_PROGRAM_ID;
+    const TESTNET_PROGRAM = SOLANA_TESTNET_PROGRAM_ID;
+    expect(TESTNET_PROGRAM).not.toBe(DEVNET_PROGRAM); // distinct keypairs per cluster (Trevor, ANT-26)
+
+    function solanaRows() {
+      return [
+        dbRow({
+          id: "chain-sol-devnet",
+          namespace: "solana",
+          reference: SOLANA_DEVNET_REFERENCE,
+          name: "solana-devnet",
+          nativeSymbol: "SOL",
+          decimals: 9,
+          rpcUrls: ["https://api.devnet.solana.com"],
+          explorerUrl: "https://explorer.solana.com",
+          isTestnet: true,
+          contracts: [{ type: "program", address: DEVNET_PROGRAM, versionLabel: "v1" }],
+        }),
+        dbRow({
+          id: "chain-sol-testnet",
+          namespace: "solana",
+          reference: SOLANA_TESTNET_REFERENCE,
+          name: "solana-testnet",
+          nativeSymbol: "SOL",
+          decimals: 9,
+          rpcUrls: ["https://api.testnet.solana.com"],
+          explorerUrl: "https://explorer.solana.com?cluster=testnet",
+          isTestnet: true,
+          contracts: [{ type: "program", address: TESTNET_PROGRAM, versionLabel: "v1" }],
+        }),
+      ];
+    }
+
+    it("maps selections to distinct registry references", () => {
+      expect(solanaReferenceFor("devnet")).toBe(SOLANA_DEVNET_REFERENCE);
+      expect(solanaReferenceFor("testnet")).toBe(SOLANA_TESTNET_REFERENCE);
+      expect(SOLANA_TESTNET_REFERENCE).not.toBe(SOLANA_DEVNET_REFERENCE);
+    });
+
+    it("resolves devnet vs testnet chains, RPCs, and programs per selection", async () => {
+      const service = setup(solanaRows());
+      expect((await service.solanaChain("devnet"))?.id).toBe("chain-sol-devnet");
+      expect((await service.solanaChain("testnet"))?.id).toBe("chain-sol-testnet");
+      expect(await service.solanaRpcUrl("devnet")).toBe("https://api.devnet.solana.com");
+      expect(await service.solanaRpcUrl("testnet")).toBe("https://api.testnet.solana.com");
+      expect(await service.solanaProgramId("devnet")).toBe(DEVNET_PROGRAM);
+      expect(await service.solanaProgramId("testnet")).toBe(TESTNET_PROGRAM);
+      expect(await service.solanaChains()).toHaveLength(2);
+    });
+
+    it("keeps no-selection behavior on the first Solana row (backward compatible)", async () => {
+      const service = setup(solanaRows());
+      expect((await service.solanaChain())?.id).toBe("chain-sol-devnet");
+      expect(await service.solanaRpcUrl()).toBe("https://api.devnet.solana.com");
+      expect(await service.solanaProgramId()).toBe(DEVNET_PROGRAM);
+    });
+
+    it("labels networks per row: mainnet-beta when not testnet, testnet by reference, devnet otherwise", async () => {
+      const service = setup(solanaRows());
+      expect(await service.networkLabel("devnet")).toBe("devnet");
+      expect(await service.networkLabel("testnet")).toBe("testnet");
+      expect(await service.networkLabel()).toBe("devnet");
+      expect(service.networkLabelFor(undefined)).toBe("devnet");
+      expect(service.networkLabelFor({ reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z", isTestnet: false })).toBe(
+        "mainnet-beta",
+      );
+    });
+
+    it("scopes solanaChainIdOrThrow per selection with fail-fast 404s", async () => {
+      const findUnique = jest.fn(async ({ where }: any) =>
+        where.namespace_reference.reference === SOLANA_DEVNET_REFERENCE ? { id: "chain-sol-devnet" } : null,
+      );
+      const prisma = { chain: { findMany: jest.fn(async () => solanaRows()), findUnique } };
+      const config = { get: jest.fn(), getOrThrow: jest.fn(() => { throw new Error("missing"); }) };
+      const service = new ChainRegistryService(prisma as never, config as never);
+
+      expect(await service.solanaChainIdOrThrow()).toBe("chain-sol-devnet");
+      expect(await service.solanaChainIdOrThrow("devnet")).toBe("chain-sol-devnet");
+      expect(findUnique).toHaveBeenCalledWith({
+        where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: SOLANA_DEVNET_REFERENCE } },
+        select: { id: true },
+      });
+      await expect(service.solanaChainIdOrThrow("testnet")).rejects.toThrow(NotFoundException);
+      await expect(service.solanaChainIdOrThrow("testnet")).rejects.toThrow('"testnet"');
+    });
+  });
+
+  describe("HTTP selection surface (ANT-35: header/query → selection, fail-closed)", () => {
+    const DEVNET_ROW = {
+      id: "chain-sol-devnet",
+      namespace: "solana",
+      reference: SOLANA_DEVNET_REFERENCE,
+      name: "solana-devnet",
+      nativeSymbol: "SOL",
+      decimals: 9,
+      rpcUrls: ["https://api.devnet.solana.com"],
+      explorerUrl: "https://explorer.solana.com",
+      isTestnet: true,
+      contracts: [{ type: "program", address: "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT", versionLabel: "v1" }],
+    };
+    const TESTNET_ROW = {
+      ...DEVNET_ROW,
+      id: "chain-sol-testnet",
+      reference: SOLANA_TESTNET_REFERENCE,
+      name: "solana-testnet",
+      rpcUrls: ["https://api.testnet.solana.com"],
+    };
+
+    async function unknownChainBody(promise: Promise<unknown>) {
+      try {
+        await promise;
+      } catch (err) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect((err as BadRequestException).getStatus()).toBe(400);
+        return (err as BadRequestException).getResponse() as { code: string; message: string };
+      }
+      throw new Error("expected selectionFromReferenceOrThrow to reject");
+    }
+
+    it("omitted or blank selection preserves the server default (backward compatible)", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      await expect(service.selectionFromReferenceOrThrow(undefined)).resolves.toBeUndefined();
+      await expect(service.selectionFromReferenceOrThrow("")).resolves.toBeUndefined();
+      await expect(service.selectionFromReferenceOrThrow("   ")).resolves.toBeUndefined();
+    });
+
+    it("maps registered references to selections (whitespace-tolerant)", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      await expect(service.selectionFromReferenceOrThrow(SOLANA_DEVNET_REFERENCE)).resolves.toBe("devnet");
+      await expect(service.selectionFromReferenceOrThrow(SOLANA_TESTNET_REFERENCE)).resolves.toBe("testnet");
+      await expect(service.selectionFromReferenceOrThrow(`  ${SOLANA_TESTNET_REFERENCE} `)).resolves.toBe("testnet");
+    });
+
+    it("rejects unknown references with 400 UNKNOWN_CHAIN (fail-closed, AC-1.4)", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      const body = await unknownChainBody(service.selectionFromReferenceOrThrow("mainnet-beta"));
+      expect(body.code).toBe("UNKNOWN_CHAIN");
+      expect(body.message).toMatch("Unknown chain reference");
+    });
+
+    it("rejects known-but-inactive references (no silent fallback to another cluster)", async () => {
+      const service = setup([DEVNET_ROW]); // testnet row deactivated
+      const body = await unknownChainBody(service.selectionFromReferenceOrThrow(SOLANA_TESTNET_REFERENCE));
+      expect(body.code).toBe("UNKNOWN_CHAIN");
+    });
+
+    it("rejects over-long references at the boundary", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      const body = await unknownChainBody(service.selectionFromReferenceOrThrow("x".repeat(129)));
+      expect(body.code).toBe("UNKNOWN_CHAIN");
+    });
+
+    it("rejects ambiguous (repeated query) references fail-closed", async () => {
+      const service = setup([DEVNET_ROW, TESTNET_ROW]);
+      const body = await unknownChainBody(
+        service.selectionFromReferenceOrThrow([SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE]),
+      );
+      expect(body.code).toBe("UNKNOWN_CHAIN");
+    });
+  });
+
+  describe("Solana mainnet availability (ANT-75 presence signal)", () => {
+    const MAINNET_ROW = {
+      id: "chain-sol-mainnet",
+      namespace: "solana",
+      reference: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+      name: "solana-mainnet",
+      nativeSymbol: "SOL",
+      decimals: 9,
+      rpcUrls: ["https://api.mainnet-beta.solana.com"],
+      explorerUrl: "https://explorer.solana.com",
+      isTestnet: false,
+      contracts: [{ type: "program", address: "Mainnet1111111111111111111111111111111111111", versionLabel: "v1" }],
+    };
+
+    function seededTestnetOnlyRows() {
+      return [
+        dbRow({
+          id: "chain-sol-devnet",
+          namespace: "solana",
+          reference: SOLANA_DEVNET_REFERENCE,
+          name: "solana-devnet",
+          nativeSymbol: "SOL",
+          decimals: 9,
+          rpcUrls: ["https://api.devnet.solana.com"],
+          explorerUrl: "https://explorer.solana.com",
+          isTestnet: true,
+          contracts: [{ type: "program", address: SOLANA_PROGRAM_ID, versionLabel: "v1" }],
+        }),
+        dbRow({
+          id: "chain-sol-testnet",
+          namespace: "solana",
+          reference: SOLANA_TESTNET_REFERENCE,
+          name: "solana-testnet",
+          nativeSymbol: "SOL",
+          decimals: 9,
+          rpcUrls: ["https://api.testnet.solana.com"],
+          explorerUrl: "https://explorer.solana.com?cluster=testnet",
+          isTestnet: true,
+          contracts: [{ type: "program", address: SOLANA_TESTNET_PROGRAM_ID, versionLabel: "v1" }],
+        }),
+      ];
+    }
+
+    it("reads unavailable on the seeded registry (both Solana rows testnet, no mainnet program)", async () => {
+      const service = setup(seededTestnetOnlyRows());
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: false,
+        reference: null,
+        program: null,
+        rpcUrl: null,
+      });
+    });
+
+    it("reads unavailable when a mainnet row exists but carries no program contract", async () => {
+      const service = setup([...seededTestnetOnlyRows(), { ...MAINNET_ROW, contracts: [] }]);
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: false,
+        reference: null,
+        program: null,
+        rpcUrl: null,
+      });
+    });
+
+    it("reads available with row details once a mainnet program ships (data row, no code change)", async () => {
+      const service = setup([...seededTestnetOnlyRows(), MAINNET_ROW]);
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: true,
+        reference: MAINNET_ROW.reference,
+        program: "Mainnet1111111111111111111111111111111111111",
+        rpcUrl: "https://api.mainnet-beta.solana.com",
+      });
+    });
+
+    it("reads unavailable on an empty registry (code fallback has no Solana rows)", async () => {
+      const service = setup([]);
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: false,
+        reference: null,
+        program: null,
+        rpcUrl: null,
+      });
+    });
+
+    it("reads unavailable when the mainnet program address is blank", async () => {
+      const service = setup([
+        ...seededTestnetOnlyRows(),
+        { ...MAINNET_ROW, contracts: [{ type: "program", address: "", versionLabel: "v1" }] },
+      ]);
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: false,
+        reference: null,
+        program: null,
+        rpcUrl: null,
+      });
+    });
   });
 });

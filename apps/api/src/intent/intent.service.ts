@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Intent, IntentStatus, Transaction, TransactionStatus } from "@prisma/client";
-import { ACCOUNT_TYPE_SMART } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -84,10 +84,9 @@ export class IntentService {
     private readonly chains: ChainRegistryService,
   ) {}
 
-  /** Activity label derived from the registry chain (no SOLANA_NETWORK env). */
-  private async network(): Promise<string> {
-    const chain = await this.chains.solanaChain();
-    return chain && !chain.isTestnet ? "mainnet-beta" : "devnet";
+  /** Activity label for the selected chain (default = current behavior). */
+  private async network(selection?: SolanaSelection): Promise<string> {
+    return this.chains.networkLabel(selection);
   }
 
   /** The identity's smart-account chain row (ownership from token). */
@@ -116,7 +115,7 @@ export class IntentService {
     }
   }
 
-  async createIntent(pid: string, input: IntentInput): Promise<IntentView> {
+  async createIntent(pid: string, input: IntentInput, selection?: SolanaSelection): Promise<IntentView> {
     const { smart } = await this.resolveAccount(pid);
     await this.assertAuthority(pid);
 
@@ -141,7 +140,7 @@ export class IntentService {
         payload: {
           ...input.payload,
           chain: "solana",
-          network: await this.network(),
+          network: await this.network(selection),
           pid,
           smartAccountAddress: smart.address,
         },
@@ -168,7 +167,8 @@ export class IntentService {
    */
   async recordTransaction(
     pid: string,
-    input: { intentId: string; txHash: string; network?: string },
+    input: { intentId: string; txHash: string; network?: string; chain?: { namespace: string; reference: string } },
+    selection?: SolanaSelection,
   ): Promise<TransactionView> {
     const { smart } = await this.resolveAccount(pid);
     const intent = await this.prisma.intent.findFirst({
@@ -185,13 +185,34 @@ export class IntentService {
       throw new BadRequestException("Intent sudah kedaluwarsa");
     }
 
+    // Server-asserted network: when `chain` is present it wins over any
+    // client-sent `network`. Resolved pre-write — unknown/inactive reference
+    // or wrong namespace throws 4xx with no row created and intent untouched.
+    let network: string;
+    if (input.chain) {
+      if (input.chain.namespace !== SOLANA_NAMESPACE) {
+        throw new BadRequestException("Unsupported chain namespace");
+      }
+      if (!input.chain.reference || typeof input.chain.reference !== "string") {
+        throw new BadRequestException("Chain reference is invalid");
+      }
+      const chains = await this.chains.activeChains();
+      const row = chains.find(
+        (c) => c.namespace === SOLANA_NAMESPACE && c.reference === input.chain!.reference,
+      );
+      if (!row) throw new NotFoundException("Chain not found");
+      network = row.isTestnet ? "devnet" : "mainnet-beta";
+    } else {
+      network = input.network ?? (await this.network(selection));
+    }
+
     const tx = await this.prisma.transaction.create({
       data: {
         pid,
         chainAccountId: smart.id,
         intentId: intent.id,
         chain: "solana",
-        network: input.network ?? (await this.network()),
+        network,
         txHash: input.txHash,
         status: "submitted" as TransactionStatus,
       },
@@ -224,7 +245,7 @@ export class IntentService {
    * Record a completed on-chain operation (deposit/withdrawal/activation) directly as a
    * Transaction row — the activity-history record. No intent lifecycle involved.
    */
-  async recordActivity(pid: string, input: ActivityInput): Promise<TransactionView> {
+  async recordActivity(pid: string, input: ActivityInput, selection?: SolanaSelection): Promise<TransactionView> {
     const { smart } = await this.resolveAccount(pid);
     const tx = await this.prisma.transaction.create({
       data: {
@@ -236,7 +257,7 @@ export class IntentService {
         direction: input.direction,
         counterparty: input.counterparty ?? null,
         chain: "solana",
-        network: await this.network(),
+        network: await this.network(selection),
         txHash: input.txHash ?? null,
         status: "submitted" as TransactionStatus,
       },

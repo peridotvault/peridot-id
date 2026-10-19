@@ -216,4 +216,90 @@ describe("IntentService", () => {
       }),
     );
   });
+
+  it("server-asserts mainnet network from chain, ignoring client network", async () => {
+    const { service, prisma } = setup();
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
+    prisma.intent.findFirst.mockResolvedValue(intentRow());
+    const chains = (service as unknown as { chains: { activeChains: jest.Mock } }).chains;
+    chains.activeChains.mockResolvedValue([
+      { namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z", isTestnet: false },
+    ]);
+
+    const view = await service.recordTransaction("pid_01HASH", {
+      intentId: "intent-1",
+      txHash: "sig1",
+      network: "devnet",
+      chain: { namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" },
+    });
+
+    expect(view.network).toBe("mainnet-beta");
+    expect(prisma.transaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ network: "mainnet-beta" }) }),
+    );
+  });
+
+  it("server-asserts devnet network for a testnet chain row", async () => {
+    const { service, prisma } = setup();
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
+    prisma.intent.findFirst.mockResolvedValue(intentRow());
+    const chains = (service as unknown as { chains: { activeChains: jest.Mock } }).chains;
+    chains.activeChains.mockResolvedValue([{ namespace: "solana", reference: "EtWTRABZaYq6iMfeYKouRu166VU2xqaHM", isTestnet: true }]);
+
+    const view = await service.recordTransaction("pid_01HASH", {
+      intentId: "intent-1",
+      txHash: "sig1",
+      chain: { namespace: "solana", reference: "EtWTRABZaYq6iMfeYKouRu166VU2xqaHM" },
+    });
+
+    expect(view.network).toBe("devnet");
+  });
+
+  it("rejects a non-solana namespace pre-write with no rows created", async () => {
+    const { service, prisma } = setup();
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
+    prisma.intent.findFirst.mockResolvedValue(intentRow());
+
+    await expect(
+      service.recordTransaction("pid_01HASH", {
+        intentId: "intent-1",
+        txHash: "sig1",
+        chain: { namespace: "eip155", reference: "1" },
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.transaction.create).not.toHaveBeenCalled();
+    expect(prisma.intent.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown chain reference pre-write with no rows created", async () => {
+    const { service, prisma } = setup();
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
+    prisma.intent.findFirst.mockResolvedValue(intentRow());
+    const chains = (service as unknown as { chains: { activeChains: jest.Mock } }).chains;
+    chains.activeChains.mockResolvedValue([]);
+
+    await expect(
+      service.recordTransaction("pid_01HASH", {
+        intentId: "intent-1",
+        txHash: "sig1",
+        chain: { namespace: "solana", reference: "nope" },
+      }),
+    ).rejects.toThrow(NotFoundException);
+    expect(prisma.transaction.create).not.toHaveBeenCalled();
+    expect(prisma.intent.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps legacy behavior when chain is absent (client network honored)", async () => {
+    const { service, prisma } = setup();
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
+    prisma.intent.findFirst.mockResolvedValue(intentRow());
+
+    const view = await service.recordTransaction("pid_01HASH", {
+      intentId: "intent-1",
+      txHash: "sig1",
+      network: "devnet",
+    });
+
+    expect(view.network).toBe("devnet");
+  });
 });

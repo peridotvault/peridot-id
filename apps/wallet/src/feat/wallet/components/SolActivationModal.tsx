@@ -1,9 +1,11 @@
+import { useSyncExternalStore } from "react";
 import { Modal, Text, View } from "../../../shared/primitives";
 import QRCode from "react-qr-code";
 import { theme, styles as s } from "../../../shared/theme";
 import { UIButton } from "../../../shared/components/UIButton";
 import type { useActivationGate } from "../hooks/useActivationGate";
 import type { DepositTarget } from "../utils/deposit-targets";
+import { isSolanaAvailable, subscribeNetworkMode } from "../../../shared/network-mode";
 
 type Gate = ReturnType<typeof useActivationGate>;
 
@@ -22,6 +24,18 @@ export function SolActivationModal({
   onCopy: (key: string, address: string) => void;
   onGoPasskey: () => void;
 }) {
+  // ANT-74 + ANT-78: never render the Solana activate entry unless the
+  // data-driven gate passes (testnet always; mainnet only when the registry
+  // signal reports available). Subscribes so a late-resolving fetch
+  // re-renders instead of sticking hidden. ReceiveScreen already skips
+  // mounting this modal when Solana is unavailable; this guard covers any
+  // other caller.
+  const solanaAvailable = useSyncExternalStore(
+    subscribeNetworkMode,
+    isSolanaAvailable,
+    isSolanaAvailable,
+  );
+  if (!solanaAvailable) return null;
   return (
     <Modal visible={target !== null} transparent animationType="fade" onRequestClose={onClose}>
       <View className="flex-1 items-center justify-center bg-black/70 p-6">

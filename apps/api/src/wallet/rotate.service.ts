@@ -18,7 +18,7 @@ import {
 import { ConfigService } from "@nestjs/config";
 import type { Keypair, PasskeyAssertion, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
-import { ACCOUNT_TYPE_SMART } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SolanaSelection } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { MAX_TTL_SECS, relayerKeypair, solanaAdapter } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
@@ -46,8 +46,8 @@ export class RotateService {
     return relayerKeypair(this.pidSolana, this.config);
   }
 
-  private async adapter(): Promise<SolanaAdapter> {
-    const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(), this.chains.solanaProgramId()]);
+  private async adapter(selection?: SolanaSelection): Promise<SolanaAdapter> {
+    const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(selection), this.chains.solanaProgramId(selection)]);
     return solanaAdapter(this.pidSolana, rpcUrl, programId);
   }
 
@@ -60,6 +60,7 @@ export class RotateService {
       expiry: number;
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
     },
+    selection?: SolanaSelection,
   ): Promise<RotateAuthorityResult> {
     if (dto.oldCredentialId === dto.newCredentialId) {
       throw new BadRequestException("Replacement credential must differ from the current one");
@@ -67,7 +68,7 @@ export class RotateService {
     if (dto.assertion.id !== dto.oldCredentialId) {
       throw new BadRequestException("Assertion must come from the current authority credential");
     }
-    const adapter = await this.adapter();
+    const adapter = await this.adapter(selection);
     const smart = await this.prisma.chainAccount.findFirst({
       where: { pid, accountType: ACCOUNT_TYPE_SMART },
     });

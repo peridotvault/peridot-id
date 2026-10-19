@@ -17,6 +17,7 @@ apps/api/test/.proof-out/
 *.rdb
 *.tsbuildinfo
 graphify-out/
+mutagen.yml.lock
 
 # Rust / Solana program builds
 contracts/**/target/

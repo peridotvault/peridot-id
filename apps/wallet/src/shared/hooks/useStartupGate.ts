@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 // Startup gate: brand fonts + failsafe timeout + splash handoff. Shell-wide
 // (not feature-scoped), so it lives in shared/hooks.
 export function useStartupGate() {
-  // Web type system (Geist + Source Serif 4, same as apps/web). Loaded via
+  // Web type system (Geist + Source Serif 4, same as apps/docs). Loaded via
   // the Google Fonts <link> in index.html; the gate resolves when
   // document.fonts reports ready (or errors and falls back to system fonts).
   const [fontsLoaded, setFontsLoaded] = useState(false);

@@ -5,6 +5,8 @@ import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { BackButton } from "../shared/components/BackButton";
 import { UIButton } from "../shared/components/UIButton";
+import { isNetworkSwitching, isTestnetMode } from "../shared/network-mode";
+import { useNetworkMode } from "../shared/hooks/useNetworkMode";
 
 function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;
@@ -27,6 +29,11 @@ function friendly(e: unknown): string {
  */
 export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
+  // Fiat-out is gated in Testnet Mode (ANT-15 req 4): the fiat ledger is
+  // real money, mainnet-only. Signing also stays blocked mid-transition.
+  const net = useNetworkMode();
+  const gated = net.testnet;
+  const frozen = net.switching;
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [remark, setRemark] = useState("");
@@ -39,6 +46,14 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
+      if (isTestnetMode()) {
+        setError("Transfers are disabled in Testnet Mode — switch back to Mainnet in Settings.");
+        return;
+      }
+      if (isNetworkSwitching()) {
+        setError("Network is switching — wait a moment, then try again.");
+        return;
+      }
       const trimmed = amount.replace(/\D/g, "");
       if (!/^\d+$/.test(trimmed) || BigInt(trimmed) <= 0n) {
         setError("Enter an amount greater than 0.");
@@ -75,6 +90,10 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setError(null);
     try {
+      if (isTestnetMode() || isNetworkSwitching()) {
+        setError("Transfers are unavailable right now — check the network banner in Settings.");
+        return;
+      }
       const res = await peridot.fiat.transferConfirm(inquiry.id);
       if (res.status === "posted") {
         setResult(`Sent ${fmtIdr(res.amountIdr)} to ${inquiry.beneficiaryPid}.`);
@@ -123,7 +142,7 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
           <Row label="Total debited" value={fmtIdr(inquiry.grossIdr)} />
         </View>
         {error && <Text style={s.error}>{error}</Text>}
-        <UIButton title={busy ? "Sending…" : "Confirm & send"} onPress={confirm} disabled={busy} variant="primary" />
+        <UIButton title={busy ? "Sending…" : "Confirm & send"} onPress={confirm} disabled={busy || gated || frozen} variant="primary" />
         <UIButton title="Back" onPress={cancel} disabled={busy} />
       </ScrollView>
     );
@@ -134,6 +153,15 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
       <BackButton onPress={onDone} />
       <Text style={s.title}>Transfer</Text>
       <Text style={s.subtitle}>Send from your balance to any PeridotID user. The fee is quoted from the amount you enter.</Text>
+      {gated && (
+        <View className="border border-border bg-muted p-3">
+          <Text className="font-sans text-[13px] font-semibold text-foreground">Disabled in Testnet Mode</Text>
+          <Text className="font-sans text-[13px] leading-5 text-muted-foreground">
+            Fiat transfers move real money — switch back to Mainnet in Settings to send.
+          </Text>
+        </View>
+      )}
+      {frozen && !gated && <Text style={s.hint}>Network is switching — transfers pause until balances reload.</Text>}
       <Text style={s.label}>Recipient PID</Text>
       <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid" />
       <Text style={s.label}>Amount (IDR)</Text>
@@ -142,7 +170,7 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
       <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for" />
       <Text style={s.hint}>Recipient must have a PeridotID account.</Text>
       {error && <Text style={s.error}>{error}</Text>}
-      <UIButton title={busy ? "Checking…" : "Continue"} onPress={prepare} disabled={busy || !to || !amount} variant="primary" />
+      <UIButton title={busy ? "Checking…" : "Continue"} onPress={prepare} disabled={busy || gated || frozen || !to || !amount} variant="primary" />
     </ScrollView>
   );
 }

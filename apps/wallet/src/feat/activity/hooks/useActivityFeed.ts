@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import type { FiatDepositView, FiatLedgerEntry, PeridotClient } from "@peridotvault/pid-sdk-js";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { pendingDeposit } from "../utils/feed";
+import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/network-mode";
 
 // Unified feed source: chain history + DOKU intents + fiat ledger rows.
 // Tab-agnostic — the screen filters via selectVisible.
+// Re-fetches on network switch (ANT-15 req 3) like useHomeData.
 export function useActivityFeed(peridot: PeridotClient) {
   const [items, setItems] = useState<WalletTransaction[]>([]);
   const [deposits, setDeposits] = useState<FiatDepositView[]>([]);
@@ -41,6 +43,13 @@ export function useActivityFeed(peridot: PeridotClient) {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // Re-fetch chain history on network switch, then release the signing block.
+  useEffect(() => {
+    return subscribeNetworkMode(() => {
+      load().then(endNetworkTransition, endNetworkTransition);
+    });
   }, [load]);
 
   return { items, deposits, entries, busy, error, reload: load };

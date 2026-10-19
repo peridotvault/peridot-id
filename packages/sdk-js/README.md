@@ -176,7 +176,8 @@ Read-only calls (`getBalance()`, `tokens()`, `history()`, `activity()`, `me()`,
 there is nothing to exploit there. `openPeridotPopup` / `openLoginPopup` are
 exported for custom flows.
 
-A minimal third-party sample lives at `apps/web/app/workspace/demo`
+A minimal third-party sample is tracked in the dashboard backlog (ANT-104):
+it lives in `apps/dashboard` once re-implemented
 (behaves like an external dapp: popup only, no session).
 
 ## Error contract
