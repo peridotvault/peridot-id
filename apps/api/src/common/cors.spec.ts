@@ -28,6 +28,22 @@ describe("CORS origin policy", () => {
     expect(parseEnvOrigins(undefined)).toEqual([]);
   });
 
+  it("dual-serves old + new first-party origins side by side (ANT-116)", () => {
+    const dual = parseEnvOrigins(
+      "https://app.pid.peridotvault.com,https://pid.peridotvault.com,https://peridot.id,https://dashboard.peridot.id,https://docs.peridot.id",
+    );
+    // Old hosts keep working (existing integrations unaffected).
+    expect(isOriginAllowed("https://app.pid.peridotvault.com", dual, apps)).toBe(true);
+    expect(isOriginAllowed("https://pid.peridotvault.com", dual, apps)).toBe(true);
+    // New peridot.id hosts work alongside — no redeploy, no code branch per host.
+    expect(isOriginAllowed("https://peridot.id", dual, apps)).toBe(true);
+    expect(isOriginAllowed("https://dashboard.peridot.id", dual, apps)).toBe(true);
+    expect(isOriginAllowed("https://docs.peridot.id", dual, apps)).toBe(true);
+    // Lookalikes on the new apex are still rejected (exact match, no suffix games).
+    expect(isOriginAllowed("https://peridot.id.evil.com", dual, apps)).toBe(false);
+    expect(isOriginAllowed("https://evilperidot.id", dual, apps)).toBe(false);
+  });
+
   it("refreshes app origins on a short TTL (no redeploy for new apps)", () => {
     expect(APP_ORIGINS_TTL_MS).toBeLessThanOrEqual(60_000);
   });

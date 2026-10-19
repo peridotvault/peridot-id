@@ -4,10 +4,14 @@
 # external `proxy` network, exposes internal ports only, owns its Traefik labels,
 # healthchecks, stdout logging. No infra repo changes required.
 #
-# Domains:
-#   pid.peridotvault.com       (docs: Next.js docs)              → next  :3300
-#   app.pid.peridotvault.com   (wallet app)                  → nginx :3000
-#   api.pid.peridotvault.com   (API)                         → nest  :3301
+# Domains (dual-serve since ANT-99/ANT-116 — old hosts stay live, never removed here):
+#   main stack (up.sh main):
+#     API    api.pid.peridotvault.com + api.peridot.id          → nest  :3301
+#     wallet app.pid.peridotvault.com (+ peridot.id, frontend)  → nginx :3000
+#     docs   pid.peridotvault.com (+ docs.peridot.id, frontend) → next  :3300
+#   test stack (up.sh test, ENV_SUFFIX=sandbox., NEW_API_HOST=sandbox.api.peridot.id):
+#     API    api.sandbox.pid.peridotvault.com + sandbox.api.peridot.id → nest :3301
+#     (wallet/docs new hosts are frontend turf — ANT-117; DevOps DNS/TLS — ANT-118)
 #
 # main: cp deploy/.env.main.example deploy/.env.main && ./deploy/up.sh main
 #
@@ -45,7 +49,14 @@ services:
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
       BREVO_API_KEY: ${BREVO_API_KEY}
       COOKIE_SECURE: "true"
-      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-.peridotvault.com}
+      # Dual-serve (ANT-116): host-only cookies (no Domain attribute) are scoped to
+      # the responding API host, so the SAME stack serves old (*.peridotvault.com)
+      # and new (*.peridot.id) origins without a Domain suffix that browsers would
+      # reject on the apex they don't belong to. A `Domain=.peridotvault.com` cookie
+      # set from api.peridot.id is silently dropped — sessions would break there.
+      # Pin per-env explicitly in Infisical /apps/api when cross-subdomain
+      # visibility is ever needed; keep empty for dual-serve.
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       CLIENT_SUCCESS_URL: ${CLIENT_SUCCESS_URL}
       CORS_ORIGINS: ${CORS_ORIGINS}
@@ -86,7 +97,9 @@ services:
       start_period: 20s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.pid-api${NAMESPACE}.rule=Host(`api.${ENV_SUFFIX}pid.peridotvault.com`)"
+      # Dual-serve (ANT-116): old host stays first (existing integrations unaffected);
+      # NEW_API_HOST (up.sh: api.peridot.id / sandbox.api.peridot.id) serves alongside.
+      - "traefik.http.routers.pid-api${NAMESPACE}.rule=Host(`api.${ENV_SUFFIX}pid.peridotvault.com`) || Host(`${NEW_API_HOST:-api.peridot.id}`)"
       - "traefik.http.routers.pid-api${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.pid-api${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
