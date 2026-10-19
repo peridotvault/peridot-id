@@ -12,6 +12,8 @@
 //
 // Safety: default OFF (mainnet). Only VITE_NETWORK_MODE=testnet opts in.
 
+import { API_BASE_URL } from "./config";
+
 export type NetworkMode = "mainnet" | "testnet";
 
 export const NETWORK_MODE_KEY = "pid_network_mode";
@@ -118,6 +120,107 @@ export function endNetworkTransition(): void {
 /** Display label for the current selection. */
 export function networkLabel(mode: NetworkMode = mem): string {
   return mode === "testnet" ? "Testnet" : "Mainnet";
+}
+
+/**
+ * Solana mainnet presence signal (ANT-78, consumes Tyler ANT-75
+ * `GET /v1/chains/solana-availability`). Data-driven re-enable of the
+ * ANT-74 hide: mainnet mode shows Solana UI only when the registry reports
+ * `available === true` (an active non-testnet Solana row carries a program
+ * contract). Testnet mode always shows Solana UI (no fetch needed).
+ *
+ * Fail-closed: any fetch failure, non-200, or malformed body keeps the
+ * cached value (default false) and clears the in-flight slot so the next
+ * screen load retries. The 30s client TTL mirrors the server
+ * `CACHE_TTL_MS` so we never fetch more often than the server recomputes;
+ * concurrent callers share one in-flight request (no per-render storms —
+ * call refresh from effects, never during render).
+ */
+export interface SolanaMainnetAvailability {
+  available: boolean;
+  reference: string | null;
+  program: string | null;
+  rpcUrl: string | null;
+}
+
+const SOLANA_AVAILABILITY_TTL_MS = 30_000;
+
+let solanaMainnetAvailable = false;
+let solanaAvailableAt = 0;
+let solanaInFlight: Promise<boolean> | null = null;
+
+function apiBaseUrl(): string {
+  try {
+    if (API_BASE_URL) return API_BASE_URL.replace(/\/$/, "");
+  } catch {
+    /* bundler-less unit runtime — fall through to window-derived fallback */
+  }
+  try {
+    if (typeof window !== "undefined") return `http://${window.location.hostname}:3300`;
+  } catch {
+    /* non-DOM runtime — fall through */
+  }
+  return "http://localhost:3300";
+}
+
+/** Raw cached mainnet flag (default false = fail closed). Testnet callers
+ * should use isSolanaAvailable() which short-circuits to true. */
+export function getSolanaMainnetAvailable(): boolean {
+  return solanaMainnetAvailable;
+}
+
+/** Test helper: drop the cache + in-flight slot. */
+export function resetSolanaAvailabilityForTests(): void {
+  solanaMainnetAvailable = false;
+  solanaAvailableAt = 0;
+  solanaInFlight = null;
+}
+
+/**
+ * Refresh the cached mainnet flag. Testnet mode short-circuits to true
+ * with no network call. Mainnet mode returns the cache when fresh (<30s),
+ * otherwise shares one in-flight GET and updates the cache on success.
+ */
+export function refreshSolanaAvailability(): Promise<boolean> {
+  if (isTestnetMode()) return Promise.resolve(true);
+  const now = Date.now();
+  if (solanaAvailableAt !== 0 && now - solanaAvailableAt < SOLANA_AVAILABILITY_TTL_MS) {
+    return Promise.resolve(solanaMainnetAvailable);
+  }
+  if (solanaInFlight) return solanaInFlight;
+  const run = (async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${apiBaseUrl()}/v1/chains/solana-availability`, {
+        headers: { accept: "application/json" },
+      });
+      if (!res.ok) return solanaMainnetAvailable;
+      const body = (await res.json()) as Partial<SolanaMainnetAvailability>;
+      const next = body.available === true;
+      if (next !== solanaMainnetAvailable) {
+        solanaMainnetAvailable = next;
+        emit();
+      }
+      solanaAvailableAt = Date.now();
+      return solanaMainnetAvailable;
+    } catch {
+      // Fail closed — keep the cached value so the next screen load retries.
+      return solanaMainnetAvailable;
+    } finally {
+      solanaInFlight = null;
+    }
+  })();
+  solanaInFlight = run;
+  return run;
+}
+
+/**
+ * ANT-73 / ANT-74 hide, now data-driven (ANT-78 AC3): Testnet Mode always
+ * shows Solana UI; mainnet mode shows it only when the registry signal
+ * reports available === true. EVM rows are unaffected either way.
+ */
+export function isSolanaAvailable(): boolean {
+  if (isTestnetMode()) return true;
+  return solanaMainnetAvailable;
 }
 
 /**
