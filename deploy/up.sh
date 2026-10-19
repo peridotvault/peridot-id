@@ -53,9 +53,13 @@ esac
 # NEW_API_HOST is owned by ANT-116 (api.peridot.id / sandbox.api.peridot.id);
 # the dashboard API default below tracks the same canonical names so this stack
 # stays correct even if that var is unset.
+# NEW_DOCS_HOST (ANT-137) is the Mintlify target for the old-docs cutover
+# redirect; it lands verbatim in a redirectregex replacement — same hostname
+# hardening as NEW_API_HOST so a bad value fails fast here, not as an open redirect.
 if [ "$ENV" = "test" ]; then
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-sandbox.peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox.dashboard.peridot.id}"
+  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-sandbox.docs.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox.api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
   export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-sandbox}"
@@ -63,11 +67,15 @@ if [ "$ENV" = "test" ]; then
 else
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-dashboard.peridot.id}"
+  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-docs.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://peridot.id}"
   export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-production}"
   export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://sandbox.dashboard.peridot.id}"
 fi
+case "$NEW_DOCS_HOST" in
+  *[!a-zA-Z0-9.-]* | "" | .* | *.) echo "error: NEW_DOCS_HOST invalid: '$NEW_DOCS_HOST'" >&2; exit 1 ;;
+esac
 
 INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID:-51f99bb1-16c8-4b74-be1f-52657e066a93}"
 
