@@ -118,15 +118,14 @@ services:
       - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.pid-api${NAMESPACE}.loadbalancer.server.port=3301"
 
-  # docs service REMOVED (ANT-124, board order 2026-10-19: apps/docs is now the
-  # Mintlify source, user deploys manually). There is no VPS docs image to build
-  # anymore, so no service can be declared here.
-  # SEQUENCING WARNING (Trevor / board): the next `up.sh` run with
-  # --remove-orphans DROPS the currently-running old docs container, ending
-  # old-host serving (pid.peridotvault.com/docs*). Do NOT run up.sh until
-  # Mintlify serves docs.peridot.id + sandbox.docs.peridot.id AND the cutover
-  # redirect (old-docs → Mintlify host) has a home (Trevor follow-up: Traefik
-  # redirectregex or a tiny redirect service).
+  # Cutover redirect (ANT-136/ANT-137, board order 2026-10-19): old docs URLs
+  # pid.peridotvault.com/docs* 301 → Mintlify host (NEW_DOCS_HOST).
+  # No VPS docs image to run — the redirect middleware answers before any
+  # backend is hit, so the router reuses the existing app service as its
+  # backend (zero new images, zero new ports). Next up.sh --remove-orphans
+  # drops the stale pre-migration docs container; this router is what keeps
+  # old links alive afterwards. Sequencing: run up.sh only after Mintlify
+  # serves docs.peridot.id + sandbox.docs.peridot.id.
 
   app:
     build:
@@ -155,6 +154,26 @@ services:
       - "traefik.http.routers.app${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.app${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.app${NAMESPACE}.loadbalancer.server.port=3000"
+      # Cutover redirect ANT-137: old docs path → Mintlify. Router matches only
+      # the old apex + /docs prefix; redirect middleware answers 301 before the
+      # app backend is ever hit (backend is a formality — Traefik requires one).
+      # Order matters: api-specific rule first, generic strip second.
+      # Blast radius: old apex /docs* only; wallet/API/dashboard routers untouched.
+      # Rollback: `git revert` this block + `./deploy/up.sh <env>` restores
+      # pre-cutover routing (old container gone → /docs 404s instead).
+      - "traefik.http.routers.pid-docs${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`) && PathPrefix(`/docs`)"
+      - "traefik.http.routers.pid-docs${NAMESPACE}.priority=100"
+      - "traefik.http.routers.pid-docs${NAMESPACE}.entrypoints=websecure"
+      - "traefik.http.routers.pid-docs${NAMESPACE}.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.pid-docs${NAMESPACE}.middlewares=security-headers@file,pid-docs-api-redirect${NAMESPACE}@docker,pid-docs-redirect${NAMESPACE}@docker"
+      # /docs/api* → /api/overview (Mintlify page moved; plain prefix-strip would 404).
+      - "traefik.http.middlewares.pid-docs-api-redirect${NAMESPACE}.redirectregex.regex=^https://[^/]+/docs/api(?:/(.*))?"
+      - "traefik.http.middlewares.pid-docs-api-redirect${NAMESPACE}.redirectregex.replacement=https://${NEW_DOCS_HOST:-docs.peridot.id}/api/overview"
+      - "traefik.http.middlewares.pid-docs-api-redirect${NAMESPACE}.redirectregex.permanent=true"
+      # /docs → / and /docs/<sub> → /<sub> (strip prefix, preserve sub-path).
+      - "traefik.http.middlewares.pid-docs-redirect${NAMESPACE}.redirectregex.regex=^https://[^/]+/docs(?:/(.*))?"
+      - "traefik.http.middlewares.pid-docs-redirect${NAMESPACE}.redirectregex.replacement=https://${NEW_DOCS_HOST:-docs.peridot.id}/$${1}"
+      - "traefik.http.middlewares.pid-docs-redirect${NAMESPACE}.redirectregex.permanent=true"
 
   dashboard:
     build:
