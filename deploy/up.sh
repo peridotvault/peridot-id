@@ -40,6 +40,12 @@ else
   export NAMESPACE="${NAMESPACE:-}"
   export NEW_API_HOST="${NEW_API_HOST:-api.peridot.id}"
 fi
+# Hardening (ANT-121 security review §3): NEW_API_HOST lands verbatim in a Traefik
+# Host() rule — reject anything that is not a plain hostname so a bad env value
+# fails fast here instead of producing a broken router (or rule injection).
+case "$NEW_API_HOST" in
+  *[!a-zA-Z0-9.-]* | "" | .* | *.) echo "error: NEW_API_HOST invalid: '$NEW_API_HOST'" >&2; exit 1 ;;
+esac
 
 INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID:-51f99bb1-16c8-4b74-be1f-52657e066a93}"
 
