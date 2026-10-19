@@ -128,7 +128,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return solanaAdapter(this.pidSolana, rpcUrl, programId);
   }
 
-  /** Selection for a registry reference (unknown rows fall back to default). */
+  /** Selection for a registry reference (undefined when unmapped — the poll
+   *  grouping skips-and-alerts on those rows fail-closed instead of quoting
+   *  them against the default cluster). */
   private selectionForReference(reference: string): SolanaSelection | undefined {
     if (reference === SOLANA_TESTNET_REFERENCE) return "testnet";
     if (reference === SOLANA_DEVNET_REFERENCE) return "devnet";
@@ -222,7 +224,26 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     }
 
     for (const group of byChain.values()) {
-      const adapter = await this.adapter(this.selectionForReference(group.reference));
+      const selection = this.selectionForReference(group.reference);
+      if (!selection) {
+        // Fail closed on unmapped rows (e.g. a future third Solana row): never
+        // quote them against the default cluster. Skip the group and alert so
+        // operators notice the unmapped row instead of silently misquoting it.
+        this.logger.warn(
+          `activation poll skipping ${group.rows.length} row(s) with unmapped solana reference "${group.reference}"`,
+        );
+        for (const ca of group.rows) {
+          try {
+            await this.security.log(ca.pid, "account.activation.unmapped_chain", {
+              reference: group.reference,
+            });
+          } catch (err) {
+            this.logger.warn(`activation poll alert failed for ${ca.address}: ${(err as Error).message}`);
+          }
+        }
+        continue;
+      }
+      const adapter = await this.adapter(selection);
       const quoted = await this.quotedFees(adapter);
 
       for (const ca of group.rows) {

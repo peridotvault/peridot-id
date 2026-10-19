@@ -4,16 +4,19 @@
 // old unit-test doubles) falls back to the compiled-in chain list + env, so EVM
 // stays off until a factory is configured exactly like before.
 
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { EVM_CHAINS } from "@peridotvault/pid-core/dist/evm";
 import {
+  MAX_CHAIN_REFERENCE_LENGTH,
+  SOLANA_DEVNET_REFERENCE,
   SOLANA_DEVNET_RPC,
   SOLANA_NAMESPACE,
   SOLANA_PROGRAM_ID,
   SOLANA_TESTNET_PROGRAM_ID,
   SOLANA_TESTNET_REFERENCE,
   SolanaSelection,
+  UNKNOWN_CHAIN_CODE,
   solanaReferenceFor,
 } from "../common/chains";
 import { PrismaService } from "../prisma/prisma.service";
@@ -158,6 +161,35 @@ export class ChainRegistryService {
   /** Activity label for the selected chain (default = current behavior). */
   async networkLabel(selection?: SolanaSelection): Promise<string> {
     return this.networkLabelFor(await this.solanaChain(selection));
+  }
+
+  /**
+   * HTTP-surface resolver (ANT-35, spec §8): map a client-supplied chain
+   * reference (`X-Chain-Reference` header, `?chainReference` query fallback)
+   * to a Solana selection. Omitted/blank preserves the server default
+   * (current behavior, AC-1.3). Unknown, over-long, or inactive references
+   * fail closed with 400 UNKNOWN_CHAIN and no chain write (AC-1.4).
+   * Header wins over query — controllers pass `header ?? query` in.
+   */
+  async selectionFromReferenceOrThrow(reference?: string | string[]): Promise<SolanaSelection | undefined> {
+    if (Array.isArray(reference)) {
+      throw new BadRequestException({ code: UNKNOWN_CHAIN_CODE, message: "Ambiguous chain reference" });
+    }
+    const ref = reference?.trim();
+    if (!ref) return undefined;
+    const failClosed = (message: string): never => {
+      throw new BadRequestException({ code: UNKNOWN_CHAIN_CODE, message });
+    };
+    if (ref.length > MAX_CHAIN_REFERENCE_LENGTH) failClosed(`Unknown chain reference "${ref.slice(0, 32)}…"`);
+    const chain = (await this.solanaChains()).find((c) => c.reference === ref);
+    if (!chain) {
+      throw new BadRequestException({ code: UNKNOWN_CHAIN_CODE, message: `Unknown chain reference "${ref}"` });
+    }
+    if (chain.reference === SOLANA_TESTNET_REFERENCE) return "testnet";
+    if (chain.reference === SOLANA_DEVNET_REFERENCE) return "devnet";
+    // Active Solana row with no served selection (e.g. a future third row):
+    // fail closed rather than silently serving another cluster (offline case, §11).
+    return failClosed(`Chain reference "${ref}" is not served by this API version`);
   }
 
   /** RPC URL for a reference (row URL, else shared env fallback). */
