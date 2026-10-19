@@ -44,7 +44,6 @@ fi
 # stays correct even if that var is unset.
 if [ "$ENV" = "test" ]; then
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-sandbox.peridot.id}"
-  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-sandbox.docs.peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox.dashboard.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox.api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
@@ -52,7 +51,6 @@ if [ "$ENV" = "test" ]; then
   export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://dashboard.peridot.id}"
 else
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-peridot.id}"
-  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-docs.peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-dashboard.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://peridot.id}"

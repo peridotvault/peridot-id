@@ -126,12 +126,13 @@ docker logs -f peridot-id-api-1
 | Wallet    | https://app.pid.peridotvault.com | https://peridot.id |
 | API       | https://api.pid.peridotvault.com | https://api.peridot.id |
 | API docs  | https://api.pid.peridotvault.com/docs | https://api.peridot.id/docs |
-| Docs      | https://pid.peridotvault.com | https://docs.peridot.id |
+| Docs      | https://pid.peridotvault.com/docs | Mintlify-hosted `docs.peridot.id` (board decision 2026-10-19; user deploys manually — NOT on this VPS) |
 | Dashboard | https://pid.peridotvault.com/workspace | https://dashboard.peridot.id |
 
 Sandbox mirrors with the `sandbox.*` prefix on the sandbox VPS (`107.173.130.7`):
-`sandbox.peridot.id`, `sandbox.api.peridot.id`, `sandbox.docs.peridot.id`,
-`sandbox.dashboard.peridot.id`. Old sandbox hosts
+`sandbox.peridot.id`, `sandbox.api.peridot.id`,
+`sandbox.dashboard.peridot.id`, plus Mintlify `sandbox.docs.peridot.id`.
+Old sandbox hosts
 (`app.sandbox.pid.peridotvault.com`, `api.sandbox.pid.peridotvault.com`,
 `sandbox.pid.peridotvault.com`) stay live.
 
@@ -144,20 +145,18 @@ byte-identical traffic — no redirects off old hosts. Rollback is a plain rever
 
 ### DNS checklist (registrar: Hostinger — human action, then verify)
 
-`peridot.id` apex is currently parked (Hostinger `hcdn`, parking cert for
-`peridot.id`/`www.peridot.id` only). None of the 8 service hosts resolve yet.
-Create these records (Apex = `A`, no CNAME at apex):
+6 A-records (board marked DONE 2026-10-19; `docs.*` intentionally have NO
+records — Mintlify hosts docs, user deploys manually, see table above).
+Apex = `A`, no CNAME at apex:
 
 | # | Host | Type | Value | Purpose |
 |---|------|------|-------|---------|
 | 1 | `peridot.id` | A | `76.13.16.183` (prod VPS) | wallet apex |
 | 2 | `api.peridot.id` | A | `76.13.16.183` | API (router: ANT-116) |
-| 3 | `docs.peridot.id` | A | `76.13.16.183` | docs |
-| 4 | `dashboard.peridot.id` | A | `76.13.16.183` | dashboard (new service) |
-| 5 | `sandbox.peridot.id` | A | `107.173.130.7` (sandbox VPS) | sandbox wallet |
-| 6 | `sandbox.api.peridot.id` | A | `107.173.130.7` | sandbox API |
-| 7 | `sandbox.docs.peridot.id` | A | `107.173.130.7` | sandbox docs |
-| 8 | `sandbox.dashboard.peridot.id` | A | `107.173.130.7` | sandbox dashboard |
+| 3 | `dashboard.peridot.id` | A | `76.13.16.183` | dashboard (new service) |
+| 4 | `sandbox.peridot.id` | A | `107.173.130.7` (sandbox VPS) | sandbox wallet |
+| 5 | `sandbox.api.peridot.id` | A | `107.173.130.7` | sandbox API |
+| 6 | `sandbox.dashboard.peridot.id` | A | `107.173.130.7` | sandbox dashboard |
 
 `www.peridot.id` already resolves to parking — leave it until brand decides
 (redirect vs site); out of scope here.
@@ -166,8 +165,8 @@ Verify after DNS propagates (Traefik issues certs automatically on first
 request via the existing `letsencrypt` resolver — allow ~2 min):
 
 ```sh
-for h in peridot.id api.peridot.id docs.peridot.id dashboard.peridot.id \
-         sandbox.peridot.id sandbox.api.peridot.id sandbox.docs.peridot.id \
+for h in peridot.id api.peridot.id dashboard.peridot.id \
+         sandbox.peridot.id sandbox.api.peridot.id \
          sandbox.dashboard.peridot.id; do
   echo "== $h"; dig +short $h A
   curl -sk -o /dev/null -w "%{http_code}\n" --max-time 10 https://$h/
@@ -189,23 +188,24 @@ done
 ### What this stack change does (and does not do)
 
 - `deploy/compose.yaml`: wallet router also answers `peridot.id` /
-  `sandbox.peridot.id`; docs router also answers `docs.peridot.id` /
-  `sandbox.docs.peridot.id`; **new** `dashboard` service (nginx `:3001`,
+  `sandbox.peridot.id`; **new** `dashboard` service (nginx `:3001`,
   `Dockerfile.dashboard`) answers `dashboard.peridot.id` /
-  `sandbox.dashboard.peridot.id`. Old rules byte-identical.
+  `sandbox.dashboard.peridot.id`. Docs router unchanged (Mintlify hosts
+  `docs.peridot.id`, board decision 2026-10-19). Old rules byte-identical.
 - `deploy/up.sh`: per-env deploy-meta defaults (`NEW_WALLET_HOST`,
-  `NEW_DOCS_HOST`, `NEW_DASHBOARD_HOST`, `DASHBOARD_API_URL`,
+  `NEW_DASHBOARD_HOST`, `DASHBOARD_API_URL`,
   `DASHBOARD_POPUP_URL`, `DASHBOARD_PID_ENV`, `DASHBOARD_OTHER_WORKSPACE_URL`).
   Pre-set env or Infisical values win; API dual-serve var `NEW_API_HOST` stays
   owned by ANT-116.
 - NOT in this change (sibling turf, tracked separately): API router dual-serve
   + `COOKIE_DOMAIN`/`CORS_ORIGINS`/`WEBAUTHN_*`/`GOOGLE_CALLBACK_URL` env flips
-  (ANT-116, needs Security review); wallet/docs build-arg cutover to new hosts
-  (ANT-117); Google OAuth redirect-URI registration; `@peridot.id` sender
+  (ANT-116, needs Security review); wallet/dashboard build-arg cutover to new hosts
+  (ANT-117); Mintlify docs migration (new child task → FrontendEngineer, user
+  deploys docs manually); Google OAuth redirect-URI registration; `@peridot.id` sender
   domain (stays as-is per spec).
 - Monitoring: per-`Host` request/error/latency split must exist in dashboards
-  from day 0 of the new rules; alert on TLS issuance failure for any of the 8
-  names (spec NFRs).
+  from day 0 of the new rules; alert on TLS issuance failure for any of the 6
+  VPS-hosted names (spec NFRs).
 
 ## Database
 

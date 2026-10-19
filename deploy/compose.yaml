@@ -108,11 +108,11 @@ services:
       start_period: 20s
     labels:
       - "traefik.enable=true"
-      # Dual-serve (ANT-118): old docs host stays first (bookmarks/integrations
-      # unaffected); NEW_DOCS_HOST (up.sh: docs.peridot.id / sandbox.docs.peridot.id)
-      # serves the same docs build alongside. API dual-serve lives in the api
-      # router (ANT-116, same pattern).
-      - "traefik.http.routers.pid-docs${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`) || Host(`${NEW_DOCS_HOST:-docs.peridot.id}`)"
+      # No new host on this router (board decision 2026-10-19, ANT-118): product
+      # docs move to Mintlify (user deploys manually), so docs.peridot.id must NOT
+      # point at this VPS. Old path /docs on pid.peridotvault.com keeps serving
+      # until the Mintlify cutover lands the redirect.
+      - "traefik.http.routers.pid-docs${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`)"
       - "traefik.http.routers.pid-docs${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.pid-docs${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.pid-docs${NAMESPACE}.middlewares=security-headers@file"
