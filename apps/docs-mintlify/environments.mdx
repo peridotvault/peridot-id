@@ -1,0 +1,55 @@
+---
+title: Environments (production & sandbox)
+description: Production and sandbox stacks — real money vs DOKU sandbox
+---
+
+PeridotID runs **two fully separate environments**. They share no database,
+credentials, or app registrations — only the same code and (for now) the same
+Google OAuth client.
+
+| | Production | Sandbox (test) |
+|---|---|---|
+| Docs (Mintlify) | `https://docs.peridot.id` (new canonical; old `https://pid.peridotvault.com/docs*` still serves until cutover) | `https://sandbox.docs.peridot.id` (new; old `https://sandbox.pid.peridotvault.com/docs*` still serves until cutover) |
+| Dashboard | `https://dashboard.peridot.id` (new canonical; old workspace `https://pid.peridotvault.com/workspace*` redirects there) | `https://sandbox.dashboard.peridot.id` |
+| Wallet app | `https://peridot.id` (new canonical; `https://app.pid.peridotvault.com` still serves — dual-serve) | `https://sandbox.peridot.id` (new canonical; `https://app.sandbox.pid.peridotvault.com` still serves) |
+| API | `https://api.peridot.id` (canonical; `https://api.pid.peridotvault.com` still serves — dual-serve) | `https://sandbox.api.peridot.id` (canonical; `https://api.sandbox.pid.peridotvault.com` still serves) |
+| Money | **real** (DOKU production) | **test** (DOKU sandbox) |
+| Database | `peridot_id` | `peridot_id_test` |
+| Deploy branch | `main` | `test` |
+
+## What differs (everything that can move money)
+
+- **DOKU mode**: production vs `sandbox`. Sandbox top-ups use DOKU's sandbox —
+  no real money ever moves.
+- **Database** (users, identities, apps, ledger) is separate.
+- **JWT secrets**, cookie domain (`.sandbox.pid.peridotvault.com`), and WebAuthn
+  RP id are separate — a session or passkey from one env never works in the other.
+- **App registrations**: `client_id`, allowed origins, backend secret, **fees**,
+  and webhook are per environment.
+
+Because environments are separate deployments, **register your app in each
+environment** you want to support (same name is fine; the `client_id` differs).
+There is no per-app environment switch.
+
+## Use the sandbox
+
+1. Open the sandbox workspace and register your app there (separate `client_id`).
+2. Your test build points at the sandbox **automatically**: the SDK selects the
+   environment from `NODE_ENV` — `production` → production, anything else
+   (unset, `development`, `staging`, `test`, …) → sandbox. A staging build that
+   runs with `NODE_ENV=production` just adds `env: 'sandbox'`:
+   ```ts
+   const peridot = Peridot({ clientId: 'pidapp_…', env: 'sandbox' });
+   // omit env on production; no URLs, no passkeySigner → popup/tab mode
+   ```
+3. Top up / send with test flows — DOKU runs in sandbox, so nothing is real.
+4. When it works, register the same app in **production** and build with
+   `NODE_ENV=production` — same code, production hosts.
+
+> Never point a sandbox build at the production API, or a production build at the
+> sandbox. The SDK derives the environment from `NODE_ENV`; if you override
+> `baseUrl`, **you** own staying on the right environment.
+
+Fees, the fiat ledger, and webhooks behave identically in both environments; only
+the DOKU mode and data differ. See [Fiat & payments](/fiat) and
+[Apps & workspace](/apps).

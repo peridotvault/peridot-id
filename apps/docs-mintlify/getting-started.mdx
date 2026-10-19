@@ -1,0 +1,51 @@
+---
+title: Getting started
+description: Base URLs, versioning, and your first request
+---
+
+## Base URLs
+
+All endpoints are prefixed with `/v1`.
+
+| Environment | Base URL |
+|---|---|
+| Production | `https://api.peridot.id/v1` (canonical; `https://api.pid.peridotvault.com/v1` still serves — dual-serve) |
+| Local development | `http://localhost:3301/v1` |
+
+## Versioning
+
+The API is versioned through the URL path (`/v1/...`). Breaking changes ship as a new
+major version; the previous version stays available until it is deprecated.
+
+## Your first request
+
+Almost every endpoint requires an authenticated session. The quickest way to verify the
+API is reachable is the login endpoint, which returns the Google sign-in URL:
+
+```bash
+curl -X POST https://api.pid.peridotvault.com/v1/auth/login
+```
+
+```json
+{ "url": "https://api.pid.peridotvault.com/v1/auth/google" }
+```
+
+Open `url` in a browser and sign in with Google. You are redirected back with the session
+cookies set. From then on, use a cookie jar for all requests:
+
+```bash
+# Save the session cookies (browser already set them; for non-browser clients use -c)
+curl -b cookies.txt https://api.pid.peridotvault.com/v1/identity/me
+```
+
+```json
+{
+  "id": "ifal@pid",
+  "status": "active",
+  "createdAt": "2026-08-03T13:30:00.000Z"
+}
+```
+
+## Read the reference
+
+Every endpoint, schema, and example is documented in the [API reference](/api/overview).

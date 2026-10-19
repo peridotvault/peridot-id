@@ -1,0 +1,81 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "PeridotID",
+  "theme": "mint",
+  "colors": {
+    "primary": "#349B65",
+    "light": "#87EE83",
+    "dark": "#349B65"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": ["index", "getting-started", "environments", "self-hosting"]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "authentication",
+              "sdk",
+              "fiat",
+              "apps",
+              "sign-in-with-peridot-id",
+              "embed-wallet",
+              "errors"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["api/overview"]
+          },
+          {
+            "group": "Endpoints",
+            "openapi": "openapi.yaml"
+          }
+        ]
+      }
+    ]
+  },
+  "api": {
+    "playground": {
+      "display": "interactive"
+    },
+    "examples": {
+      "languages": ["curl", "javascript", "python", "go"]
+    }
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "API Reference",
+        "href": "/api/overview"
+      },
+      {
+        "type": "github",
+        "href": "https://github.com/peridotvault/peridot-id"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Login",
+      "href": "https://dashboard.peridot.id"
+    }
+  },
+  "contextual": {
+    "options": ["copy", "view", "download-spec", "chatgpt", "claude"]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/peridotvault/peridot-id"
+    }
+  }
+}
