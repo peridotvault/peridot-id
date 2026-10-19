@@ -12,7 +12,7 @@ import { ActivationStatusCard } from "../feat/wallet/components/ActivationStatus
 
 export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {
   const { peridot } = usePeridot();
-  const { testnet } = useNetworkMode();
+  const { solanaAvailable } = useNetworkMode();
   const gate = useActivationGate(peridot);
   const { copy, isCopied } = useCopyAddress();
 
@@ -21,11 +21,10 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
     if (addr) void copy("address", addr);
   };
 
-  // ANT-74: the activation flow is Solana-specific and no mainnet program
-  // exists, so mainnet mode hides every Solana create/activate entry and
-  // shows this notice instead. RE-ENABLE: same condition as
-  // isSolanaAvailable() — a live mainnet program (ANT-75 registry signal).
-  if (!testnet) {
+  // ANT-74 + ANT-78: the activation flow is Solana-specific; it renders only
+  // when the data-driven gate passes (testnet always, mainnet only on a live
+  // program via the ANT-75 registry signal). Otherwise this notice shows.
+  if (!solanaAvailable) {
     return (
       <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
         <BackButton onPress={onDone} />

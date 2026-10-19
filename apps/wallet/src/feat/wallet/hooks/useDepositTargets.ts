@@ -2,14 +2,27 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { ChainAccount } from "@peridotvault/pid-types";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { buildDepositTargets, type DepositTarget } from "../utils/deposit-targets";
-import { getNetworkMode, isSolanaAvailable, subscribeNetworkMode } from "../../../shared/network-mode";
+import {
+  getNetworkMode,
+  isSolanaAvailable,
+  refreshSolanaAvailability,
+  subscribeNetworkMode,
+} from "../../../shared/network-mode";
 
-// ANT-74: Solana deposit targets render only when a Solana program exists
-// for the current selection. v1 hard-code (see isSolanaAvailable): mainnet
-// hides Solana rows, testnet shows them. EVM rows always pass through.
+// ANT-74 + ANT-78: Solana deposit targets render only when a Solana program
+// exists for the current selection. Testnet always shows them; mainnet shows
+// them only when GET /v1/chains/solana-availability reports available===true
+// (fail closed). EVM rows always pass through. Refresh runs on mount/mode
+// change (store dedupes in-flight + 30s TTL); the targets list re-filters
+// when the cached flag resolves via the store subscription.
 export function useDepositTargets(peridot: PeridotClient) {
   const [targets, setTargets] = useState<DepositTarget[]>([]);
   const mode = useSyncExternalStore(subscribeNetworkMode, getNetworkMode, getNetworkMode);
+  const solanaAvailable = useSyncExternalStore(
+    subscribeNetworkMode,
+    isSolanaAvailable,
+    isSolanaAvailable,
+  );
 
   const load = useCallback(async () => {
     let acc = await peridot.wallet.me();
@@ -20,8 +33,14 @@ export function useDepositTargets(peridot: PeridotClient) {
   }, [peridot]);
 
   useEffect(() => {
+    // Retry on every screen load: fail-closed refresh re-runs when the
+    // hook remounts; the store TTL + in-flight dedup prevent storms.
+    if (mode === "mainnet") void refreshSolanaAvailability();
+  }, [mode]);
+
+  useEffect(() => {
     load();
-  }, [load, mode]);
+  }, [load, solanaAvailable]);
 
   return { targets, reload: load };
 }

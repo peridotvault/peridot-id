@@ -4,7 +4,11 @@
 // Chains/RPC come from the API registry — no Solana env here.
 const devHost = typeof window !== "undefined" ? window.location.hostname : "localhost";
 
-const configured = import.meta.env.VITE_API_URL as string | undefined;
+const configured =
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_API_URL ??
+  (typeof process !== "undefined"
+    ? (process as unknown as { env?: Record<string, string | undefined> }).env?.VITE_API_URL
+    : undefined);
 
 // LAN dev: the page loads from 192.168.x.x but a configured loopback URL
 // would point at the *viewing* device, not the dev machine. Swap the host
