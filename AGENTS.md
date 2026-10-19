@@ -10,8 +10,8 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   `PID_*`). "Peridot ecosystem" refers to the wider Peridot products — a different thing.
 - **NPM packages:** `@peridotvault/pid-*` (npm org: `@peridotvault`; company: PT ANTIGANE LABS INDONESIA) — e.g.
   `@peridotvault/pid-api`, `@peridotvault/pid-types`, `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`,
-  `@peridotvault/pid-evm`, `@peridotvault/pid-openapi`, `@peridotvault/pid-docs`, `@peridotvault/pid-wallet`,
-  `@peridotvault/pid-react-embed`.
+  `@peridotvault/pid-evm`, `@peridotvault/pid-openapi`, `@peridotvault/pid-wallet`,
+  `@peridotvault/pid-react-embed`. (`apps/docs` is the Mintlify docs source, not an npm package.)
 - **On-chain:** PDA seed `["peridot_id", "account", sha256(pid)]`; signed-payload domain
   `PID|SOLANA|SMART_ACCOUNT|v1`; program id `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
 - **Identity:** PID = `<handle>@pid` (e.g. `ifal@pid`) — permanent Antigane-ecosystem

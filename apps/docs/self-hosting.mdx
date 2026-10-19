@@ -44,7 +44,7 @@ All configuration is loaded from `.env` in the API package. Copy
 ### Fiat (DOKU Checkout + internal ledger)
 
 Fiat is one namespace: **DOKU Checkout is money-in only** (no Sub-Account); every
-balance lives on the internal fiat ledger. See [Fiat & payments](/docs/fiat).
+balance lives on the internal fiat ledger. See [Fiat & payments](/fiat).
 
 | Variable | Required | Description |
 |---|---|---|
@@ -96,8 +96,13 @@ pnpm dev                      # API on http://localhost:3301, docs on http://loc
    `GOOGLE_CALLBACK_URL`, `COOKIE_SECURE=true`, `COOKIE_SAMESITE`, `CLIENT_SUCCESS_URL`,
    `CORS_ORIGINS`.
 
-  3. **Vercel — docs** (`apps/docs/vercel.json` is already configured). Add a project rooted at
-  `apps/docs`; no env vars needed.
+  3. **Mintlify — docs** (canonical; the board user deploys manually). The Mintlify
+  source lives in `apps/docs` (`docs.json` + pages + `openapi.yaml`).
+  In Mintlify: connect the `peridot-id` repo, set the docs path to
+  `apps/docs`, and attach custom domains `docs.peridot.id` (prod) +
+  `sandbox.docs.peridot.id` (sandbox) via CNAME at Hostinger. The legacy
+  Fumadocs site (`apps/docs`) keeps serving the old `pid.peridotvault.com/docs*`
+  paths until cutover; at cutover it lands a redirect old-docs → the Mintlify host.
 
 4. Attach your custom domains and point DNS at Vercel.
 

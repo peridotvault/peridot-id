@@ -1,7 +1,7 @@
 # SDK
 
 Browser SDK (`@peridotvault/pid-sdk-js`). Full usage guide: see the public docs at `apps/docs`
-(`content/docs/(general)/sdk.mdx`).
+(`sdk.mdx`).
 
 ```ts
 const peridot = Peridot({

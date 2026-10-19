@@ -8,10 +8,14 @@
 #   main stack (up.sh main):
 #     API    api.pid.peridotvault.com + api.peridot.id          → nest  :3301
 #     wallet app.pid.peridotvault.com (+ peridot.id, frontend)  → nginx :3000
-#     docs   pid.peridotvault.com (+ docs.peridot.id, frontend) → next  :3300
+#     docs   Mintlify-hosted (docs.peridot.id) — no VPS service since ANT-124:
+#            apps/docs is the Mintlify source (board user deploys manually).
+#            The old pid.peridotvault.com docs container keeps running until the
+#            next up.sh run removes it — sequence Mintlify-live BEFORE that.
 #   test stack (up.sh test, ENV_SUFFIX=sandbox., NEW_API_HOST=sandbox.api.peridot.id):
 #     API    api.sandbox.pid.peridotvault.com + sandbox.api.peridot.id → nest :3301
-#     (wallet/docs new hosts are frontend turf — ANT-117; DevOps DNS/TLS — ANT-118)
+#     (wallet new host is frontend turf — ANT-117; DevOps DNS/TLS — ANT-118;
+#      docs new host sandbox.docs.peridot.id is Mintlify-hosted, same sequencing)
 #
 # main: cp deploy/.env.main.example deploy/.env.main && ./deploy/up.sh main
 #
@@ -114,6 +118,7 @@ services:
       - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.pid-api${NAMESPACE}.loadbalancer.server.port=3301"
 
+<<<<<<< HEAD
   docs:
     build:
       context: ..
@@ -140,6 +145,17 @@ services:
       - "traefik.http.routers.pid-docs${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.pid-docs${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.pid-docs${NAMESPACE}.loadbalancer.server.port=3300"
+=======
+  # docs service REMOVED (ANT-124, board order 2026-10-19: apps/docs is now the
+  # Mintlify source, user deploys manually). There is no VPS docs image to build
+  # anymore, so no service can be declared here.
+  # SEQUENCING WARNING (Trevor / board): the next `up.sh` run with
+  # --remove-orphans DROPS the currently-running old docs container, ending
+  # old-host serving (pid.peridotvault.com/docs*). Do NOT run up.sh until
+  # Mintlify serves docs.peridot.id + sandbox.docs.peridot.id AND the cutover
+  # redirect (old-docs → Mintlify host) has a home (Trevor follow-up: Traefik
+  # redirectregex or a tiny redirect service).
+>>>>>>> dev
 
   app:
     build:

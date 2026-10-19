@@ -1,7 +1,8 @@
 # `@peridotvault/pid-dashboard`
 
 PeridotID developer dashboard — a **Vite + React** single-page app ported 1:1
-from `apps/docs/app/workspace` (spec ANT-83). Register apps, manage origins and
+from the former `apps/docs/app/workspace` (spec ANT-83; removed in ANT-124 when
+`apps/docs` became the Mintlify source). Register apps, manage origins and
 backend secrets, set per-app fees, and (admins) run the chain / contract /
 partner / fee consoles.
 
@@ -50,7 +51,7 @@ The env badge follows the *configured* URL, not the LAN-resolved one.
 
 ## Routes
 
-| Route | Source |
+| Route | Port source (historical — `apps/docs` is now the Mintlify source) |
 |---|---|
 | `/` (Apps + session gate) | `apps/docs/app/workspace/page.tsx` |
 | `/apps/:id` | `apps/docs/app/workspace/apps/[id]/page.tsx` |
