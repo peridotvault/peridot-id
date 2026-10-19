@@ -37,6 +37,29 @@ else
   export NAMESPACE="${NAMESPACE:-}"
 fi
 
+# ANT-99 dual-serve new hosts (DevOps ANT-118): deploy meta, not secrets —
+# hardcoded per stack like ENV_SUFFIX above. Pre-set env vars win (override).
+# NEW_API_HOST is owned by ANT-116 (api.peridot.id / sandbox.api.peridot.id);
+# the dashboard API default below tracks the same canonical names so this stack
+# stays correct even if that var is unset.
+if [ "$ENV" = "test" ]; then
+  export NEW_WALLET_HOST="${NEW_WALLET_HOST:-sandbox.peridot.id}"
+  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-sandbox.docs.peridot.id}"
+  export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox.dashboard.peridot.id}"
+  export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox.api.peridot.id}"
+  export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
+  export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-sandbox}"
+  export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://dashboard.peridot.id}"
+else
+  export NEW_WALLET_HOST="${NEW_WALLET_HOST:-peridot.id}"
+  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-docs.peridot.id}"
+  export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-dashboard.peridot.id}"
+  export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://api.peridot.id}"
+  export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://peridot.id}"
+  export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-production}"
+  export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://sandbox.dashboard.peridot.id}"
+fi
+
 INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID:-51f99bb1-16c8-4b74-be1f-52657e066a93}"
 
 # Persisted machine-identity creds (VPS). 0600 root, never in git.
@@ -70,7 +93,9 @@ compose() {
 }
 
 echo "Deploying PeridotID [$ENV]..."
-for s in api docs app; do
+# Serial builds (small VPS): api + docs + app are the proven set; dashboard
+# (ANT-118) joins the same loop — same pattern, independent image.
+for s in api docs app dashboard; do
   echo "==> build $s"
   COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
 done

@@ -1,0 +1,85 @@
+FROM node:22-slim AS base
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable && corepack prepare pnpm@10.27.0 --activate
+
+WORKDIR /app
+
+# Copy workspace manifests for the dashboard's build graph only (better layer
+# caching, same subset-install pattern as Dockerfile.app). The dashboard talks
+# to the API exclusively through @peridotvault/pid-sdk-js.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/dashboard/package.json ./apps/dashboard/
+COPY packages/types/package.json ./packages/types/
+COPY packages/solana/package.json ./packages/solana/
+COPY packages/sdk-js/package.json ./packages/sdk-js/
+COPY packages/core/package.json ./packages/core/
+
+# --ignore-scripts: root postinstall builds types/core/solana/sdk-js but their sources aren't
+# copied yet — we build them explicitly in the builder stage after COPY . .
+RUN pnpm install --frozen-lockfile --ignore-scripts
+
+FROM base AS builder
+
+ENV NODE_OPTIONS=--max-old-space-size=1536
+
+COPY . .
+
+# Vite inlines VITE_* at build time — bake in the hosts the browser calls.
+# Every value arrives from compose (deploy-meta defaults in up.sh, overridable
+# via Infisical/env); Dockerfile fallbacks below are last-resort only.
+ARG VITE_API_URL
+ARG VITE_POPUP_URL
+ARG VITE_PID_ENV
+ARG VITE_PID_CLIENT_ID
+ARG VITE_OTHER_WORKSPACE_URL
+ENV VITE_API_URL=${VITE_API_URL:-https://api.peridot.id} \
+    VITE_POPUP_URL=${VITE_POPUP_URL:-https://peridot.id} \
+    VITE_PID_ENV=${VITE_PID_ENV:-production} \
+    VITE_PID_CLIENT_ID=${VITE_PID_CLIENT_ID:-} \
+    VITE_OTHER_WORKSPACE_URL=${VITE_OTHER_WORKSPACE_URL:-}
+
+RUN pnpm --filter @peridotvault/pid-types build
+RUN pnpm --filter @peridotvault/pid-core build
+RUN pnpm --filter @peridotvault/pid-solana build
+RUN pnpm --filter @peridotvault/pid-sdk-js build
+RUN pnpm --filter @peridotvault/pid-dashboard build
+
+FROM nginx:1.27-alpine AS runner
+
+# SPA: any unknown path falls back to index.html.
+COPY --from=builder /app/apps/dashboard/dist /usr/share/nginx/html
+
+COPY <<'NGINX' /etc/nginx/conf.d/default.conf
+server {
+    listen 3001;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    gzip on;
+    gzip_types application/javascript text/css image/svg+xml application/json;
+    gzip_min_length 1024;
+
+    # Vite emits content-hashed filenames: immutable, cache for a year.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+NGINX
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD wget -q -O - http://127.0.0.1:3001/ >/dev/null 2>&1 || exit 1

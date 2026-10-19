@@ -108,7 +108,11 @@ services:
       start_period: 20s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.pid-docs${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`)"
+      # Dual-serve (ANT-118): old docs host stays first (bookmarks/integrations
+      # unaffected); NEW_DOCS_HOST (up.sh: docs.peridot.id / sandbox.docs.peridot.id)
+      # serves the same docs build alongside. API dual-serve lives in the api
+      # router (ANT-116, same pattern).
+      - "traefik.http.routers.pid-docs${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`) || Host(`${NEW_DOCS_HOST:-docs.peridot.id}`)"
       - "traefik.http.routers.pid-docs${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.pid-docs${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.pid-docs${NAMESPACE}.middlewares=security-headers@file"
@@ -132,8 +136,41 @@ services:
       start_period: 10s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.app${NAMESPACE}.rule=Host(`app.${ENV_SUFFIX}pid.peridotvault.com`)"
+      # Dual-serve (ANT-118): wallet keeps the old app.* host and additionally
+      # answers on the apex (NEW_WALLET_HOST: peridot.id / sandbox.peridot.id).
+      # Same nginx build serves both — no redirect chain, old links keep working.
+      - "traefik.http.routers.app${NAMESPACE}.rule=Host(`app.${ENV_SUFFIX}pid.peridotvault.com`) || Host(`${NEW_WALLET_HOST:-peridot.id}`)"
       - "traefik.http.routers.app${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.app${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.app${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.app${NAMESPACE}.loadbalancer.server.port=3000"
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: Dockerfile.dashboard
+      args:
+        VITE_API_URL: ${DASHBOARD_API_URL}
+        VITE_POPUP_URL: ${DASHBOARD_POPUP_URL}
+        VITE_PID_ENV: ${DASHBOARD_PID_ENV}
+        VITE_PID_CLIENT_ID: ${DASHBOARD_PID_CLIENT_ID:-}
+        VITE_OTHER_WORKSPACE_URL: ${DASHBOARD_OTHER_WORKSPACE_URL:-}
+    image: peridot-id-dashboard${NAMESPACE}:${TAG:-latest}
+    restart: unless-stopped
+    networks: [proxy]
+    expose: ["3001"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3001/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      # New host only (ANT-118): the dashboard never lived on an old host of its
+      # own (it was /workspace inside docs, still served there). No old rule to keep.
+      - "traefik.http.routers.pid-dashboard${NAMESPACE}.rule=Host(`${NEW_DASHBOARD_HOST:-dashboard.peridot.id}`)"
+      - "traefik.http.routers.pid-dashboard${NAMESPACE}.entrypoints=websecure"
+      - "traefik.http.routers.pid-dashboard${NAMESPACE}.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.pid-dashboard${NAMESPACE}.middlewares=security-headers@file"
+      - "traefik.http.services.pid-dashboard${NAMESPACE}.loadbalancer.server.port=3001"
