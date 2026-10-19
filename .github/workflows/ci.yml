@@ -34,6 +34,18 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: Dashboard build + typecheck (@peridotvault/pid-dashboard)
+        run: |
+          # ANT-83 NFR: build + typecheck cover the dashboard package from day one.
+          # Root `pnpm -r` recursion covers it automatically once added; this step makes
+          # the coverage explicit and fails loudly if the package ever drops its scripts.
+          if [ -d apps/dashboard ]; then
+            pnpm --filter @peridotvault/pid-dashboard typecheck
+            pnpm --filter @peridotvault/pid-dashboard build
+          else
+            echo "apps/dashboard not present yet — covered by pnpm -r recursion once added"
+          fi
+
       - name: Login split guard
         run: |
           # First-party wallet must never use the popup / hosted flow (third-party only).
