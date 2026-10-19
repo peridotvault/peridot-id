@@ -298,4 +298,101 @@ describe("ChainRegistryService", () => {
       expect(body.code).toBe("UNKNOWN_CHAIN");
     });
   });
+
+  describe("Solana mainnet availability (ANT-75 presence signal)", () => {
+    const MAINNET_ROW = {
+      id: "chain-sol-mainnet",
+      namespace: "solana",
+      reference: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+      name: "solana-mainnet",
+      nativeSymbol: "SOL",
+      decimals: 9,
+      rpcUrls: ["https://api.mainnet-beta.solana.com"],
+      explorerUrl: "https://explorer.solana.com",
+      isTestnet: false,
+      contracts: [{ type: "program", address: "Mainnet1111111111111111111111111111111111111", versionLabel: "v1" }],
+    };
+
+    function seededTestnetOnlyRows() {
+      return [
+        dbRow({
+          id: "chain-sol-devnet",
+          namespace: "solana",
+          reference: SOLANA_DEVNET_REFERENCE,
+          name: "solana-devnet",
+          nativeSymbol: "SOL",
+          decimals: 9,
+          rpcUrls: ["https://api.devnet.solana.com"],
+          explorerUrl: "https://explorer.solana.com",
+          isTestnet: true,
+          contracts: [{ type: "program", address: SOLANA_PROGRAM_ID, versionLabel: "v1" }],
+        }),
+        dbRow({
+          id: "chain-sol-testnet",
+          namespace: "solana",
+          reference: SOLANA_TESTNET_REFERENCE,
+          name: "solana-testnet",
+          nativeSymbol: "SOL",
+          decimals: 9,
+          rpcUrls: ["https://api.testnet.solana.com"],
+          explorerUrl: "https://explorer.solana.com?cluster=testnet",
+          isTestnet: true,
+          contracts: [{ type: "program", address: SOLANA_TESTNET_PROGRAM_ID, versionLabel: "v1" }],
+        }),
+      ];
+    }
+
+    it("reads unavailable on the seeded registry (both Solana rows testnet, no mainnet program)", async () => {
+      const service = setup(seededTestnetOnlyRows());
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: false,
+        reference: null,
+        program: null,
+        rpcUrl: null,
+      });
+    });
+
+    it("reads unavailable when a mainnet row exists but carries no program contract", async () => {
+      const service = setup([...seededTestnetOnlyRows(), { ...MAINNET_ROW, contracts: [] }]);
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: false,
+        reference: null,
+        program: null,
+        rpcUrl: null,
+      });
+    });
+
+    it("reads available with row details once a mainnet program ships (data row, no code change)", async () => {
+      const service = setup([...seededTestnetOnlyRows(), MAINNET_ROW]);
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: true,
+        reference: MAINNET_ROW.reference,
+        program: "Mainnet1111111111111111111111111111111111111",
+        rpcUrl: "https://api.mainnet-beta.solana.com",
+      });
+    });
+
+    it("reads unavailable on an empty registry (code fallback has no Solana rows)", async () => {
+      const service = setup([]);
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: false,
+        reference: null,
+        program: null,
+        rpcUrl: null,
+      });
+    });
+
+    it("reads unavailable when the mainnet program address is blank", async () => {
+      const service = setup([
+        ...seededTestnetOnlyRows(),
+        { ...MAINNET_ROW, contracts: [{ type: "program", address: "", versionLabel: "v1" }] },
+      ]);
+      await expect(service.solanaMainnetAvailability()).resolves.toEqual({
+        available: false,
+        reference: null,
+        program: null,
+        rpcUrl: null,
+      });
+    });
+  });
 });
