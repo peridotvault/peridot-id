@@ -7,7 +7,8 @@ set -euo pipefail
 # Secrets come from Infisical Cloud (project peridot-id-uf-w9):
 #   /apps/api    — runtime secrets (DATABASE_URL, JWT_*, GOOGLE_*, DOKU_*, PID_*)
 #   /apps/wallet — VITE_* (public build args)
-# Docs (apps/docs) needs no secrets — zero build args, zero env.
+# Docs are Mintlify-hosted since ANT-124 (apps/docs is the Mintlify source,
+# board user deploys manually) — no VPS docs build, no docs secrets.
 # No /deploy folder — it only duplicated the above (delete it in the UI).
 # Env slugs match the script arg: main -> main, test -> test, local dev -> dev.
 #
@@ -18,7 +19,7 @@ set -euo pipefail
 # INFISICAL_TOKEN is honored as-is.
 # Fallback: INFISICAL_ENABLED=0 ./deploy/up.sh main reads deploy/.env.$ENV.
 #
-# Builds serially (api then docs) so builds don't contend on a small VPS; BuildKit
+# Builds serially (api then app) so builds don't contend on a small VPS; BuildKit
 # caches layers on the VPS so only changed apps rebuild. Requires the infra
 # bootstrap (Traefik + `proxy` network) already up.
 
@@ -101,9 +102,10 @@ compose() {
 }
 
 echo "Deploying PeridotID [$ENV]..."
-# Serial builds (small VPS): api + docs + app are the proven set; dashboard
+# Serial builds (small VPS): api + app are the proven set; dashboard
 # (ANT-118) joins the same loop — same pattern, independent image.
-for s in api docs app dashboard; do
+# (docs left the loop in ANT-124: Mintlify-hosted, no VPS image to build.)
+for s in api app dashboard; do
   echo "==> build $s"
   COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
 done

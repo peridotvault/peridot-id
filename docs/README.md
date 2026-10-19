@@ -6,20 +6,22 @@ every Peridot product.
 
 ## Public docs
 
-The developer documentation site lives in `apps/docs` (Fumadocs + Next.js) and renders the
+The developer documentation site lives in `apps/docs` (Mintlify source — the board
+user deploys it manually to `docs.peridot.id`) and renders the
 canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 
-- Docs (Vercel): `https://pid.peridotvault.com`
-- API (Vercel): `https://api.pid.peridotvault.com/v1`
-- Run locally: `pnpm --filter @peridotvault/pid-docs dev` → `http://localhost:3301`
-- API also serves the raw spec at `GET /v1/openapi.yaml` (Swagger UI at `/docs`)
+- Docs (Mintlify): `https://docs.peridot.id` (old `https://pid.peridotvault.com/docs*`
+  keeps serving until the cutover redirect lands)
+- API (VPS): `https://api.pid.peridotvault.com/v1`
+- Preview locally: `cd apps/docs && mint dev` → `http://localhost:3000`
+- API also serves the raw spec at `GET /v1/openapi.yaml`
 
 ## Repository layout
 
 ```
 apps/api            NestJS API (auth, identity, profile, wallet) — VPS via deploy/compose.yaml
 apps/wallet         Expo wallet client (web + iOS + Android)
-apps/docs            Public docs site (Fumadocs)
+apps/docs            Public docs site (Mintlify source)
 contracts/svm       Pinocchio smart-account program (Rust)
 contracts/evm       Counterfactual smart accounts (Solidity/Foundry)
 packages/sdk-js     Browser SDK
@@ -52,7 +54,6 @@ docker compose up -d        # Postgres (refresh-token state lives in Postgres �
 pnpm install
 pnpm --filter @peridotvault/pid-api db:deploy  # apply Prisma migrations
 pnpm --filter @peridotvault/pid-api dev        # API on http://localhost:3300
-pnpm --filter @peridotvault/pid-docs dev        # docs on http://localhost:3301
 pnpm --filter @peridotvault/pid-wallet dev:web # wallet on http://localhost:3302
 ```
 
@@ -61,5 +62,6 @@ login flow. Local chain: run `solana-test-validator` from `contracts/svm` (see A
 
 ## Deploy
 
-See the public docs' [Self-hosting](https://pid.peridotvault.com/docs/self-hosting)
-guide. In short: the API on the VPS (`deploy/compose.yaml`), `apps/docs` per the deploy guide.
+See the public docs' [Self-hosting](https://docs.peridot.id/self-hosting)
+guide. In short: the API on the VPS (`deploy/compose.yaml`); docs deploy via
+Mintlify (board user, manual — see `apps/docs/README.md`).

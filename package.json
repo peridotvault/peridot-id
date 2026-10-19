@@ -24,7 +24,6 @@
   "scripts": {
     "dev": "pnpm -r --parallel dev",
     "dev:api": "pnpm --filter @peridotvault/pid-api dev",
-    "dev:docs": "pnpm --filter @peridotvault/pid-docs dev",
     "dev:wallet": "pnpm --filter @peridotvault/pid-wallet dev",
     "dev:dashboard": "pnpm --filter @peridotvault/pid-dashboard dev",
     "dev:api:cloud": "infisical run --env=dev --path=/apps/api -- pnpm --filter @peridotvault/pid-api dev",
