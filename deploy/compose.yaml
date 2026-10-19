@@ -5,7 +5,7 @@
 # healthchecks, stdout logging. No infra repo changes required.
 #
 # Domains:
-#   pid.peridotvault.com       (web: marketing + docs + workspace)   → next  :3300
+#   pid.peridotvault.com       (docs: Next.js docs)              → next  :3300
 #   app.pid.peridotvault.com   (wallet app)                  → nginx :3000
 #   api.pid.peridotvault.com   (API)                         → nest  :3301
 #
@@ -92,34 +92,27 @@ services:
       - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.pid-api${NAMESPACE}.loadbalancer.server.port=3301"
 
-  web:
+  docs:
     build:
       context: ..
-      dockerfile: Dockerfile.web
-      args:
-        # Public build-time config comes from Infisical /apps/web (see up.sh).
-        NEXT_PUBLIC_PID_API_URL: ${NEXT_PUBLIC_PID_API_URL}
-        NEXT_PUBLIC_PID_ENV: ${NEXT_PUBLIC_PID_ENV}
-        NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL: ${NEXT_PUBLIC_PID_OTHER_WORKSPACE_URL:-}
-        NEXT_PUBLIC_PID_POPUP_URL: ${NEXT_PUBLIC_PID_POPUP_URL}
-        NEXT_PUBLIC_PID_CLIENT_ID: ${NEXT_PUBLIC_PID_CLIENT_ID:-}
-    image: peridot-id-web${NAMESPACE}:${TAG:-latest}
+      dockerfile: Dockerfile.docs
+    image: peridot-id-docs${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
     networks: [proxy]
     expose: ["3300"]
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3300/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3300/docs').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.pid-web${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`)"
-      - "traefik.http.routers.pid-web${NAMESPACE}.entrypoints=websecure"
-      - "traefik.http.routers.pid-web${NAMESPACE}.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.pid-web${NAMESPACE}.middlewares=security-headers@file"
-      - "traefik.http.services.pid-web${NAMESPACE}.loadbalancer.server.port=3300"
+      - "traefik.http.routers.pid-docs${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`)"
+      - "traefik.http.routers.pid-docs${NAMESPACE}.entrypoints=websecure"
+      - "traefik.http.routers.pid-docs${NAMESPACE}.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.pid-docs${NAMESPACE}.middlewares=security-headers@file"
+      - "traefik.http.services.pid-docs${NAMESPACE}.loadbalancer.server.port=3300"
 
   app:
     build:
