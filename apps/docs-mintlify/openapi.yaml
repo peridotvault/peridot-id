@@ -1,0 +1,3694 @@
+openapi: 3.0.3
+info:
+  title: PeridotID API
+  version: 0.1.0
+  description: |
+    Gaming Identity Platform — Authentication, Identity, and Profile for the Peridot ecosystem.
+
+    ## Base URL
+    All endpoints are prefixed with `/v1`.
+
+    | Environment | Base URL |
+    |---|---|
+    | Production | `https://api.pid.peridotvault.com/v1` |
+    | Local dev | `http://localhost:3300/v1` |
+
+    ## Authentication
+    Authentication is **cookie-based**. After a successful Google sign-in the API sets two
+    `HttpOnly` cookies:
+
+    - `pid_access` — short-lived JWT access token (15 min), sent on every request.
+    - `pid_refresh` — long-lived rotating refresh token (30 days), only sent to `/v1/auth`.
+
+    Browsers handle these automatically; non-browser clients must send
+    `Cookie: pid_access=<token>` on each request and call `/v1/auth/refresh` before the
+    access token expires.
+  contact:
+    name: PeridotID
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.pid.peridotvault.com/v1
+    description: Production
+  - url: http://localhost:3300/v1
+    description: Local development
+
+tags:
+  - name: auth
+    description: Login, logout, token refresh, and machine (client-credentials) tokens
+  - name: identity
+    description: The user's identity across products
+  - name: profile
+    description: The user's public profile
+  - name: wallet
+    description: |
+      The user's wallet, associated with their PID. **Deprecated (V3 surface)** — preserved
+      for existing clients, backed by `linked_address` chain accounts. Use `/account` and
+      the smart account instead.
+  - name: account
+    description: PeridotID account — owns chain accounts (smart account PDA, legacy linked address)
+  - name: fiat
+    description: |
+      The internal IDR fiat ledger: balances, statements, sends, and money-in.
+      Top-ups enter through a hosted DOKU Checkout page (no Sub-Account) and
+      credit the internal ledger once the payment is corroborated. Any identity
+      can send to any identity (escrow/payouts). Fees: global 0.1% (min Rp100,
+      no cap) plus optional per-app fees that stack and credit the app. Bank
+      withdrawals (redemption) are disabled for now.
+  - name: apps
+    description: |
+      Third-party apps ("Sign in with PeridotID"): client_id, allowed origins,
+      optional backend secret, ledger callbacks (deferred), and a per-app fee
+      schedule. Owner-scoped — a non-owner gets 404. App backends authenticate
+      server-side with `POST /v1/auth/token` (client credentials).
+  - name: credentials
+    description: |
+      Signing authorities (secp256r1 passkeys). Google OAuth proves identity; a
+      passkey authorizes the wallet. The first credential registers freely; each additional
+      credential requires approval by an existing credential (existing-credential approval rule).
+  - name: permissions
+    description: |
+      EVM permission grants (scoped P-256 session keys, WHITEPAPER.md §10). Validation is pure
+      hygiene + canonical id/challenge computation; submission-time account binding
+      is enforced by the relay path.
+  - name: session-keys
+    description: |
+      SVM gameplay sessions (Ed25519 session keys in isolated PDAs, WHITEPAPER.md §11).
+      Validation is pure hygiene + canonical address/challenge computation;
+      submission-time vault binding is enforced by the relay path.
+  - name: openapi
+    description: Machine-readable API specification
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Start Google login
+      description: |
+        Returns the URL a client should navigate to in order to begin Google OAuth.
+        The URL points to `GET /auth/google`, which redirects the browser to Google's
+        consent screen. After the user consents, the browser is redirected back through
+        `/auth/google/callback` and session cookies are set.
+
+        For cross-origin SSO, pass `returnTo` (must be allowlisted, or registered to
+        your app via `clientId`) — the callback then redirects to
+        `returnTo?pid_code=...` with a one-time exchange code instead of the wallet.
+
+        First-time users always land on the PID picker after authenticating
+        (`POST /v1/auth/claim` creates the permanent `<handle>@pid` identity) —
+        handles are only ever chosen there, never up front. Returning logins
+        continue straight to a session.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                returnTo:
+                  type: string
+                  format: uri
+                  description: Cross-origin URL to return to with a pid_code
+                clientId:
+                  type: string
+                  description: Registered app id (binds the pid_code to your app)
+            examples:
+              sso:
+                summary: Third-party SSO login
+                value:
+                  returnTo: "https://mygame.dev/callback"
+                  clientId: "pidapp_0123456789abcdef0123456789abcdef"
+      responses:
+        "200":
+          description: Google authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+              example:
+                url: "http://localhost:3300/v1/auth/google"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/pid/available:
+    get:
+      tags: [auth]
+      summary: Check PID handle availability
+      description: |
+        Returns whether `handle` is free (`<handle>@pid`). Used by the onboarding
+        handle picker before starting Google sign-up. Handles are lowercase
+        `^[a-z0-9_]{3,20}$`; the full PID is `<handle>@pid` — permanent, never
+        changeable, reused, or reassigned.
+      parameters:
+        - name: handle
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z0-9_]{3,20}$"
+      responses:
+        "200":
+          description: Availability result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available:
+                    type: boolean
+                  pid:
+                    type: string
+                    nullable: true
+                    description: The full PID when available
+                    example: "ifal@pid"
+              example:
+                available: true
+                pid: "ifal@pid"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/google:
+    get:
+      tags: [auth]
+      summary: Redirect to Google OAuth consent screen
+      description: |
+        Redirects (HTTP 302) to Google's OAuth consent screen with `scope=profile email`.
+
+        **Browser-navigation only.** Open the URL in a browser tab (top-level navigation);
+        it cannot be called via `fetch()` or the Swagger "Send" button — the cross-origin
+        redirect to Google is blocked by CORS and appears as `Failed to fetch`, which is expected.
+
+        Not meant to be called directly by clients — use `POST /auth/login` to obtain the URL.
+      responses:
+        "302":
+          description: Redirect to Google consent screen
+        "503":
+          $ref: "#/components/responses/GoogleNotConfigured"
+
+  /auth/google/callback:
+    get:
+      tags: [auth]
+      summary: Google OAuth callback
+      description: |
+        Handles the redirect back from Google. On success it:
+
+        1. Returning credential (`provider, providerUserId` already linked) → issues
+           `pid_access` and `pid_refresh` cookies and redirects (with `pid_code`
+           when the login carried an allowlisted `returnTo`).
+        2. New credential → mints a single-use claim ticket, sets the
+           `pid_claim` cookie, and redirects to `CLIENT_SUCCESS_URL?claim=1` for
+           the PID picker. Nothing is created until `POST /auth/claim`.
+
+        Both cookies are `HttpOnly; SameSite=Lax`. In production the `Secure` flag is set.
+
+        Strategy/transport failures (stale code, exchange error) redirect to
+        `CLIENT_SUCCESS_URL?error=oauth_failed` instead of an error page — the
+        wallet shows an inline retry. Cause stays in server logs only.
+
+        **Browser-navigation only.** Google redirects the browser here; do not call it
+        directly via `fetch()`.
+      responses:
+        "302":
+          description: Redirect to CLIENT_SUCCESS_URL (or returnTo with pid_code) with session cookies set
+        "503":
+          $ref: "#/components/responses/GoogleNotConfigured"
+
+  /auth/email/start:
+    post:
+      tags: [auth]
+      summary: Send an email login code
+      description: |
+        Sends a 6-digit login code to the address via the Brevo sender
+        (10-minute TTL, 60-second resend cooldown, 5 requests/hour per address).
+        Always returns `{ ok: true }` — even for unknown addresses — so the
+        response never reveals whether an address has an account. New addresses
+        verify the same way, then land on the PID picker
+        (`POST /v1/auth/claim` creates the permanent `<handle>@pid` identity).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "ifal@example.com"
+      responses:
+        "200":
+          description: Code sent (or send skipped silently for abuse control)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+              example:
+                ok: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: Email sender not configured or Brevo rejected the send
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                statusCode: 503
+                message: "Couldn't send the code — please try again."
+
+  /auth/email/verify:
+    post:
+      tags: [auth]
+      summary: Verify an email login code
+      description: |
+        Consumes the 6-digit code (single-use, max 5 attempts, then locked).
+        Returning credentials get `pid_access`/`pid_refresh` cookies directly;
+        new addresses get `{ pendingClaim: true }` plus the `pid_claim` cookie
+        for the PID picker. With `returnTo` (allowlisted, or registered to your
+        app via `clientId`), returning logins also receive a one-time
+        `pidCode` for SSO exchange.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "ifal@example.com"
+                code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                  example: "428311"
+                returnTo:
+                  type: string
+                  format: uri
+                  description: Cross-origin URL to bind a pid_code to
+                clientId:
+                  type: string
+                  description: Registered app id (binds the pid_code to your app)
+      responses:
+        "200":
+          description: Verified — session cookies set, or claim pending
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                  pidCode:
+                    type: string
+                    description: One-time SSO code (returning logins with returnTo only)
+                  pendingClaim:
+                    type: boolean
+                    description: True for new addresses — continue via claimStatus + claim
+              example:
+                ok: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/claim/status:
+    get:
+      tags: [auth]
+      summary: Pending PID claim, if any
+      description: |
+        Returns the pending post-auth claim from the `pid_claim` cookie
+        (verified credential, no identity yet) for the claim picker UI.
+      responses:
+        "200":
+          description: Claim status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pending]
+                properties:
+                  pending:
+                    type: boolean
+                  email:
+                    type: string
+                    nullable: true
+                  displayName:
+                    type: string
+                    nullable: true
+                  avatarUrl:
+                    type: string
+                    nullable: true
+              example:
+                pending: true
+                email: "new@example.com"
+                displayName: "New User"
+                avatarUrl: null
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/claim:
+    post:
+      tags: [auth]
+      summary: Claim a pending credential under a fresh PID handle
+      description: |
+        One transaction creates the identity (`<handle>@pid`, permanent) + profile
+        + credential and consumes the single-use claim ticket. Issues the session
+        cookies. When the claim came from a relying-party login, the response also
+        carries the SSO `pidCode` plus the validated `redirectTo` — the hosted page
+        navigates there itself. Expired tickets answer `410` — sign in again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle]
+              properties:
+                handle:
+                  type: string
+                  pattern: "^[a-z0-9_]{3,20}$"
+                  description: Permanent handle for `<handle>@pid`
+            example:
+              handle: "ifal"
+      responses:
+        "200":
+          description: Claimed identity (+ SSO code and return target when applicable)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, pid]
+                properties:
+                  ok:
+                    type: boolean
+                  pid:
+                    type: string
+                    pattern: "^[a-z0-9_]{3,20}@pid$"
+                    example: "ifal@pid"
+                  pidCode:
+                    type: string
+                    description: One-time SSO code when the claim came from a relying-party login
+                  redirectTo:
+                    type: string
+                    format: uri
+                    description: Validated return target for the pidCode (navigate with ?pid_code=)
+              example:
+                ok: true
+                pid: "ifal@pid"
+        "400":
+          description: Bad handle, or no pending claim (stale page or already claimed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+              example:
+                statusCode: 400
+                message: "No pending claim — sign in again to get a fresh one."
+        "409":
+          description: Handle taken or credential/email already linked
+        "410":
+          description: Claim ticket expired — sign in again for a fresh one
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/exchange:
+    post:
+      tags: [auth]
+      summary: Exchange a one-time SSO code for the identity
+      description: |
+        Consumes a `pid_code` issued by a Google or passkey login with `returnTo`
+        (optionally bound to a `clientId`) and returns the PeridotID identity.
+        Codes are single-use and expire after ~5 minutes. Call server-to-server;
+        when the code is bound to an app, the same `clientId` must be presented.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  description: One-time pid_code from the redirect URL
+                clientId:
+                  type: string
+                  description: Must match the client_id the code was issued for
+                clientSecret:
+                  type: string
+                  description: Required only when the bound app has a secret set (backend-only, never ship in frontend code)
+            example:
+              code: "mF8xQ2vT9nR4kL7pZ3wX6yA1bD5eF0gH"
+              clientId: "pidapp_0123456789abcdef0123456789abcdef"
+      responses:
+        "200":
+          description: The PeridotID identity behind the code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExchangeResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /apps:
+    post:
+      tags: [apps]
+      summary: Register a third-party app
+      description: |
+        Registers an app for "Sign in with PeridotID" and returns its public
+        `client_id`. Pass just a name — allowed origins are managed after via
+        PATCH (the exact return URL is passed in code at login time).
+        Authenticated — the caller becomes the app owner.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 60
+                allowedOrigins:
+                  type: array
+                  maxItems: 20
+                  description: Bare http(s) origins (no paths). Optional — managed after registration too.
+                  items:
+                    type: string
+            example:
+              name: "My Game"
+      responses:
+        "201":
+          description: The registered app including its client_id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PidApp"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags: [apps]
+      summary: List my registered apps
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Apps owned by the caller
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PidApp"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /apps/{id}/secret:
+    post:
+      tags: [apps]
+      summary: Generate or rotate an app's backend secret
+      description: |
+        Returns a `pidsk_…` secret **once** — only its SHA-256 hash is stored, so an
+        existing secret can never be read back, only replaced. Afterwards, code
+        exchange for this app requires the secret. Backend-only: never ship it in
+        frontend code. Owners only.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The new secret (shown once) plus its identifying prefix
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, prefix]
+                properties:
+                  secret:
+                    type: string
+                    example: "pidsk_9f2c…"
+                  prefix:
+                    type: string
+                    example: "pidsk_9f2c41"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /apps/{id}/webhook:
+    post:
+      tags: [apps]
+      summary: Set the app's ledger-callback endpoint
+      description: |
+        PeridotID POSTs signed ledger events here (e.g. `fiat.transfer.posted`
+        when funds land on this app's escrow account). Returns a `pidwh_…` HMAC
+        signing secret **once**; every callback carries
+        `X-Pid-Signature: sha256=<hex>` over the raw body and `X-Pid-Event`.
+        https required (http allowed for localhost). Owners only.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  example: "https://live2dev.com/peridot/webhook"
+      responses:
+        "200":
+          description: The endpoint and its signing secret (shown once)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                  secret:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [apps]
+      summary: Remove the app's ledger-callback endpoint (and secret)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Cleared
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /apps/{id}/fees:
+    get:
+      tags: [apps]
+      summary: Per-app fee schedule (topup / transaction / withdraw)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Fee rows per operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /apps/{id}/fees/{operation}:
+    put:
+      tags: [apps]
+      summary: Set one operation's per-app fee (stacks on the global fee)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: operation
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [topup, transaction, withdraw]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [percentBps, minIdr, maxIdr, enabled]
+              properties:
+                percentBps:
+                  type: integer
+                minIdr:
+                  type: string
+                maxIdr:
+                  type: string
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: Saved fee
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /auth/token:
+    post:
+      tags: [auth]
+      summary: Client-credentials token for an app backend
+      description: |
+        Machine-to-machine token bound to the app owner's pid, carrying the
+        app's clientId. Use `Authorization: Bearer <token>`. `clientSecret` is
+        required when the app has one set.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId]
+              properties:
+                clientId:
+                  type: string
+                clientSecret:
+                  type: string
+      responses:
+        "200":
+          description: Access token + TTL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  expiresIn:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/authorize:
+    post:
+      tags: [auth]
+      summary: Mint a pid_code for the current session
+      description: |
+        Issues a one-time pid_code for the caller's existing session — no
+        re-authentication. Powers consent screens on PeridotID-hosted pages: the
+        user approves, the page redirects itself to returnTo with the code.
+        Cookie-authenticated (same-site pages only). returnTo follows the same
+        rules as login (loopback, registered app origins, global allowlist).
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [returnTo]
+              properties:
+                returnTo:
+                  type: string
+                  format: uri
+                clientId:
+                  type: string
+                  description: Binds the issued code to the app
+      responses:
+        "200":
+          description: The minted code
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pidCode]
+                properties:
+                  pidCode:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /apps/{id}:
+    patch:
+      tags: [apps]
+      summary: Update one of my apps
+      description: Rename, change allowed origins, or disable the app. Owners only.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 60
+                allowedOrigins:
+                  type: array
+                  maxItems: 20
+                  description: Bare http(s) origins (no paths) — replaces the whole list
+                  items:
+                    type: string
+                isActive:
+                  type: boolean
+      responses:
+        "200":
+          description: The updated app
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PidApp"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the refresh token
+      description: |
+        Rotates the refresh token and issues a fresh access token. The current `pid_refresh`
+        cookie is **invalidated** and replaced with a new one (rotation), so each refresh token
+        can be used exactly once.
+
+        - 401 if the refresh token is missing, expired, already rotated, or forged.
+        - Rate limited to 10 requests / minute.
+      responses:
+        "204":
+          description: New access + refresh cookies set; old refresh token revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Log out
+      description: |
+        Revokes the current refresh token and clears both session cookies. Idempotent — safe to
+        call when already logged out.
+      responses:
+        "200":
+          description: Session ended and cookies cleared
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /identity/me:
+    get:
+      tags: [identity]
+      summary: Get the current identity
+      description: |
+        Returns the identity of the authenticated user. The identity ID (`<handle>@pid`,
+        e.g. `ifal@pid`) is permanent — user-chosen once at onboarding, never changed,
+        reused, or reassigned, regardless of which credentials the user links,
+        unlinks, or how the profile is updated.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The current identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Identity"
+              example:
+                pid: "ifal@pid"
+                status: "active"
+                createdAt: "2026-08-03T13:30:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /identity/credentials:
+    get:
+      tags: [identity]
+      summary: List login credentials
+      description: |
+        Lists every login credential (provider, email, linked/last-login time) linked to
+        the current identity. Each row is one way to prove ownership of the PID.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The linked credentials
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IdentityCredential"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /identity/credentials/{id}:
+    delete:
+      tags: [identity]
+      summary: Unlink a login credential
+      description: |
+        Removes a credential from the current identity. Fails with `400` when it is the
+        identity's last credential — every identity must keep at least one way to log in.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The credential id
+      responses:
+        "204":
+          description: Credential unlinked
+        "400":
+          $ref: "#/components/responses/MinOneCredential"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /profile/me:
+    get:
+      tags: [profile]
+      summary: Get the current profile
+      description: Returns the profile of the authenticated user.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The current profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /profile:
+    patch:
+      tags: [profile]
+      summary: Update the current profile
+      description: |
+        Updates one or more mutable profile fields (display name, avatar, locale).
+        Only provided fields are changed. The PID (`<handle>@pid`) is immutable and
+        is never updated here — there is no endpoint that changes, reuses, or
+        reassigns it.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdate"
+            examples:
+              set-display-name:
+                summary: Set a display name and locale
+                value:
+                  displayName: "PeridotPlayer"
+                  locale: "en-US"
+              clear-avatar:
+                summary: Remove the avatar
+                value:
+                  avatarUrl: null
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /wallet/me:
+    get:
+      deprecated: true
+      tags: [wallet]
+      summary: Get the current wallet
+      description: |
+        Returns the wallet associated with the authenticated PID. The wallet belongs to the
+        PID, never to a specific login provider — unlinking Google does not affect it.
+
+        Only public association fields are exposed (chain, address, status). No key material
+        is ever stored or returned (PRD §9).
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The current wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wallet"
+              example:
+                id: "a3f2c9e0-4b7d-4c1a-8e5f-0d1a2b3c4d5e"
+                chain: "solana"
+                address: "2nBoE7F2vLkGtvXh7QnUhvW5mYPbRmY8GXJqPz9tKcQ"
+                status: "active"
+                createdAt: "2026-08-10T12:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /wallet:
+    post:
+      deprecated: true
+      tags: [wallet]
+      summary: Create the wallet
+      description: |
+        Creates the wallet for the authenticated PID with a user-supplied Solana address.
+        The chain is fixed to `solana` for V3 (single-chain MVP).
+
+        A PID has at most one wallet: creating again returns the existing wallet. Custody is
+        record-only — Peridot does not generate, hold, or return any key material.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletCreate"
+      responses:
+        "200":
+          description: The wallet (existing or newly created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Wallet"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/rotate:
+    post:
+      tags: [wallet]
+      summary: Rotate the on-chain authority to a registered replacement credential
+      description: |
+        Credential-lifecycle rotation: register the replacement credential first (approval
+        flow), then the current key authorizes on-chain `update_authority` here. The old
+        credential is revoked in DB only after the chain confirms the new authority.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateAuthority"
+      responses:
+        "200":
+          description: Rotation result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signature, status]
+                properties:
+                  signature:
+                    type: string
+                  status:
+                    type: string
+                    enum: [confirmed, pending]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/withdraw/quote:
+    post:
+      tags: [wallet]
+      summary: Quote the realtime network fee for a sponsored withdrawal
+      description: |
+        Returns the backend's realtime network-cost estimate plus the fixed protocol
+        percentage for the active fee policy. The client signs the intent + policy
+        (never amounts) and echoes the quoted network fee as the drift reference.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset]
+              properties:
+                asset:
+                  type: string
+      responses:
+        "200":
+          description: Fee quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WithdrawQuote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/withdraw:
+    post:
+      tags: [wallet]
+      summary: Sponsored SOL/SPL withdrawal (passkey-authorized, V3)
+      description: |
+        The relayer submits and floats the network fee; the smart account reimburses
+        the attested network cost in full plus the on-chain-recomputed protocol fee,
+        atomically. The backend rejects drift beyond 120% of the quoted network fee.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SponsoredWithdraw"
+      responses:
+        "200":
+          description: Withdrawal result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SponsoredWithdrawResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/execute/quote:
+    post:
+      tags: [wallet]
+      summary: Quote the realtime network fee for a generic execute
+      description: |
+        Returns the backend's realtime network-cost estimate for the exact call
+        shape (target, metas, data length) plus the fixed protocol percentage
+        for the active fee policy. The client signs call_hash + policy (never
+        amounts) and echoes the quoted network fee as the drift reference.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SponsoredExecuteQuote"
+      responses:
+        "200":
+          description: Fee quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WithdrawQuote"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/execute:
+    post:
+      tags: [wallet]
+      summary: Sponsored generic execute (passkey-authorized, V3)
+      description: |
+        One passkey-signed intent drives an arbitrary Solana call with the PDA as
+        signer (wallet parity with the EVM `execute`). The relayer submits and
+        floats the network fee; the smart account reimburses the attested network
+        cost in full plus the on-chain-recomputed protocol fee, atomically. The
+        backend rejects drift beyond 120% of the quoted network fee.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SponsoredExecute"
+      responses:
+        "200":
+          description: Execute result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SponsoredWithdrawResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /account:
+    post:
+      tags: [account]
+      summary: Ensure the identity's personal wallet
+      description: |
+        Idempotent wallet setup for the authenticated PID (1 identity = 1 personal wallet): ensures the Solana `smart_account` chain row whose
+        address is deterministically derived from the PID (PDA) and resolvable
+        before any on-chain initialization, plus EVM counterfactuals.
+        Smart-account initialization happens on the user's first on-chain top-up
+        (PRD_v5 §3), not here. Returns every chain row.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The wallet's chain rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChainAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Solana chain is not registered (fresh DB without seed)
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    get:
+      tags: [account]
+      summary: Get the authenticated PID's wallet chain rows
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The chain rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChainAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /account/chains:
+    get:
+      tags: [account]
+      summary: List the wallet's chain accounts
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The chain accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChainAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /account/activation:
+    get:
+      tags: [account]
+      summary: Live Solana activation view for the wallet
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Activation status derived live from on-chain state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivationView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /account/activate:
+    post:
+      tags: [account]
+      summary: Activate the wallet's Solana smart account (relayer-sponsored, passkey-signed claim)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Activate"
+      responses:
+        "200":
+          description: Activation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivationView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /account/evm/{chainRef}/activation:
+    get:
+      tags: [account]
+      summary: Live EVM activation view for one chain
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: chainRef
+          in: path
+          required: true
+          schema:
+            type: string
+          description: CAIP-2 reference (e.g. 97, 10143)
+      responses:
+        "200":
+          description: Activation status derived live from on-chain state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvmActivationView"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /account/evm/{chainRef}/activate:
+    post:
+      tags: [account]
+      summary: Deploy the EVM counterfactual for one chain (relayer-submitted, passkey-authorized)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: chainRef
+          in: path
+          required: true
+          schema:
+            type: string
+          description: CAIP-2 reference (e.g. 97, 10143)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvmActivate"
+      responses:
+        "200":
+          description: Activation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvmActivationView"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /fiat/deposits:
+    get:
+      tags: [fiat]
+      summary: Recent deposit intents for the caller (money-in history)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Deposit intents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/deposits/checkout:
+    post:
+      tags: [fiat]
+      summary: Create a Checkout deposit intent (DOKU-hosted page, all channels)
+      description: |
+        netAmountIdr is the NET credited to the user (minimum Rp50.000,
+        API-enforced — no DOKU minimum). Total payable = net + PeridotID fee
+        (0.1% min Rp100 no cap; Rp0 for verified apps) + the app's stacked fee
+        (when `clientId` is given) + the selected method's DOKU gateway fee.
+        All quotes are snapshotted on the row. `paymentMethod` is a category key
+        (VIRTUAL_ACCOUNT/EWALLET/CARD/QRIS) or a specific DOKU code; it locks
+        `payment_method_types` at DOKU. Omit it to let DOKU show all channels
+        (no gateway fee added). Quote first via POST /fiat/deposits/quote.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [netAmountIdr]
+              properties:
+                netAmountIdr:
+                  type: string
+                clientId:
+                  type: string
+                  description: Optional app context (per-app fee + verified waiver)
+                paymentMethod:
+                  type: string
+                  description: Category key or DOKU payment_method_types code
+      responses:
+        "200":
+          description: Checkout deposit intent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutDeposit"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/deposits/quote:
+    post:
+      tags: [fiat]
+      summary: Quote a top-up (moves no money) — the PeridotID checkout summary
+      description: |
+        Returns the transparent breakdown shown before DOKU: Amount, PeridotID
+        Fee (Rp0 for verified apps), App Fee, per-method Payment Gateway Fee and
+        Total Payment, plus `paymentMethods[]` (per-category fee + total) so the
+        summary updates on selection. Only **enabled** methods are listed; the
+        wallet blocks the top-up when the list is empty.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [netAmountIdr]
+              properties:
+                netAmountIdr:
+                  type: string
+                clientId:
+                  type: string
+                paymentMethod:
+                  type: string
+      responses:
+        "200":
+          description: Top-up quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepositQuote"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/admin/payment-fee-rates:
+    get:
+      tags: [fiat]
+      summary: List DOKU payment methods + gateway fees (admin)
+      description: |
+        The category catalog (Virtual Account / e-Wallet / Card / QRIS), one row
+        each with an `enabled` switch and fee fields, plus any stored extra keys
+        (specific codes / "*"). A method with no row shows as disabled at 0.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Method rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PaymentFeeRate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/admin/payment-fee-rates/{methodKey}:
+    put:
+      tags: [fiat]
+      summary: Upsert one payment method's gateway fee / enabled state (admin)
+      description: |
+        `methodKey` is a DOKU method code, a category
+        (VIRTUAL_ACCOUNT/EWALLET/CARD/QRIS/OTHER), or "*" (default). Resolution:
+        exact code → category → "*". A row with `enabled=false` is an explicit
+        off switch — the method is hidden in the wallet and no fee is charged
+        (it shadows the "*" fallback). 0 min/max = unbounded.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: methodKey
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentFeeRate"
+      responses:
+        "200":
+          description: Stored rate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentFeeRate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/fee-policy:
+    get:
+      tags: [fiat]
+      summary: Active platform service-fee policy
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Fee policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeePolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/deposits/{id}/sync:
+    post:
+      tags: [fiat]
+      summary: Reconcile a created/processing row via DOKU transactions-status
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubTx"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/webhook:
+    post:
+      tags: [fiat]
+      summary: Sub-Account notification inbox (persist-first, corroborated before apply)
+      description: |
+        No published V2 webhook signing contract — events persist on X-EXTERNAL-ID
+        and apply only after DOKU transactions-status corroboration. Public; always 200 after persist.
+      parameters:
+        - name: X-EXTERNAL-ID
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+
+  /fiat/admin/webhooks:
+    get:
+      tags: [fiat]
+      summary: Webhook inbox read-model (admin)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Inbox events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/admin/backfill:
+    post:
+      tags: [fiat]
+      summary: Backfill makeup points for settled deposits missing issuance (admin)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pid:
+                  type: string
+                take:
+                  type: integer
+      responses:
+        "200":
+          description: Backfill report
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/admin/fee-policy:
+    post:
+      tags: [fiat]
+      summary: Publish a new fee-policy version (admin, deactivates previous)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [percentBps, minIdr, maxIdr, taxBps]
+              properties:
+                percentBps:
+                  type: integer
+                minIdr:
+                  type: string
+                maxIdr:
+                  type: string
+                taxBps:
+                  type: integer
+                  description: PPN (VAT) on the PeridotID fee, basis points (1100 = 11%)
+      responses:
+        "200":
+          description: Fee policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeePolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/admin/doku-tax:
+    get:
+      tags: [fiat]
+      summary: Get the DOKU-wide PPN rate (admin)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: DOKU PPN
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [taxBps]
+                properties:
+                  taxBps:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      tags: [fiat]
+      summary: Set the DOKU-wide PPN rate (admin)
+      description: Applied to the payment-gateway fee of every method; shown to users folded into "Fee Transfer".
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taxBps]
+              properties:
+                taxBps:
+                  type: integer
+      responses:
+        "200":
+          description: Saved
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/balance:
+    get:
+      tags: [fiat]
+      summary: Internal-credit balance (temporary Rail B, replayed — source labelled)
+      description: |
+        Temporary Internal Credit Ledger balance, replayed from the immutable
+        journal (source: internal-credit — NOT the DOKU POINT Saldo).
+        See docs/INTERNAL_CREDIT.md.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Internal credit balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatBalance"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /fiat/ledger:
+    get:
+      tags: [fiat]
+      summary: Internal-credit journal export + replay verdict
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Journal rows and replay verdict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatLedger"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/transfers/inquiry:
+    post:
+      tags: [fiat]
+      summary: Internal-credit send inquiry (moves no money, phase-1 policy enforced)
+      description: |
+        GROSS-in quote pinned by feePolicyVersion. Phase-1 policy (escrow-only):
+        one side of every send must be an allowlisted app PID.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountIdr, beneficiaryPid]
+              properties:
+                amountIdr:
+                  type: string
+                beneficiaryPid:
+                  type: string
+                remark:
+                  type: string
+      responses:
+        "200":
+          description: Transfer inquiry with server quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatTransferInquiry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/transfers/{id}/confirm:
+    post:
+      tags: [fiat]
+      summary: Confirm an internal-credit send (atomic, idempotent)
+      description: |
+        Posts sender-out + recipient-in + treasury-fee legs in one DB
+        transaction. Re-confirming a posted intent returns the view.
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Posted transfer view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatLedgerEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/transfers/{id}/cancel:
+    post:
+      tags: [fiat]
+      summary: Cancel a created internal-credit intent
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transfer view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiatLedgerEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /fiat/admin/replay:
+    get:
+      tags: [fiat]
+      summary: Platform-wide internal-credit replay projection (admin)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Replay projection and rail switches
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/admin/chain:
+    get:
+      tags: [fiat]
+      summary: Verify the tamper-evident ledger hash chain (admin)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Chain verification verdict + head hash
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /fiat/admin/chain/head:
+    get:
+      tags: [fiat]
+      summary: Current chain head hash (publish externally to anchor) (admin)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Head hash + seq
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/admin/chain/backfill:
+    post:
+      tags: [fiat]
+      summary: Chain posted rows that predate the chain (admin)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Backfill result
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/admin/dispatch-events:
+    post:
+      tags: [fiat]
+      summary: Deliver due third-party callbacks (cron) (admin)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                take:
+                  type: integer
+      responses:
+        "200":
+          description: Dispatch result
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/admin/events:
+    get:
+      tags: [fiat]
+      summary: Inspect the callback outbox (admin)
+      security:
+        - cookieAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Outbox events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /fiat/admin/freeze:
+    post:
+      tags: [fiat]
+      summary: Engage/clear the internal-credit migration freeze (admin)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [frozen]
+              properties:
+                frozen:
+                  type: boolean
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Freeze state
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /permissions/grants/validate:
+    post:
+      tags: [permissions]
+      summary: Validate a permission grant and return its canonical id + owner challenge
+      description: |
+        Pure scope-hygiene check mirroring `grantPermission` (kind rules, denylist,
+        30d TTL, caps) plus the canonical `permissionId` and the owner challenge
+        (what the passkey signs). Authenticated; submission-time pid→account
+        binding is enforced by the relay path.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantPermission"
+      responses:
+        "200":
+          description: Canonical permission id + owner challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidatedGrant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /permissions/denied-selectors:
+    get:
+      tags: [permissions]
+      summary: Selectors a nonfinancial permission may never invoke
+      description: Mirror of the on-chain `_deniedSelector` list (second layer only —
+        exact target+selector scope is the first).
+      responses:
+        "200":
+          description: The denied-selector list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [selectors]
+                properties:
+                  selectors:
+                    type: array
+                    items:
+                      type: string
+
+  /session-keys/grants/validate:
+    post:
+      tags: [session-keys]
+      summary: Validate a session grant and return its canonical address + owner challenge
+      description: |
+        Pure scope-hygiene check mirroring `register_session` (24h TTL, game binding,
+        upgrade snapshot shape) plus the canonical session PDA and the owner
+        challenge (what the passkey signs). Authenticated; submission-time
+        pid→vault binding is enforced by the relay path.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterSession"
+      responses:
+        "200":
+          description: Canonical session address + owner challenge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidatedSessionGrant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /session-keys/constants:
+    get:
+      tags: [session-keys]
+      summary: Session bounds mirror of the on-chain constants
+      description: 24h max TTL, 30min inactivity timeout, 205-byte record.
+      responses:
+        "200":
+          description: The session bounds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [maxTtlSecs, inactivitySecs, stateLen]
+                properties:
+                  maxTtlSecs:
+                    type: integer
+                  inactivitySecs:
+                    type: integer
+                  stateLen:
+                    type: integer
+
+  /credentials:
+    get:
+      tags: [credentials]
+      summary: List signing authorities (passkeys)
+      description: |
+        Returns the authenticated PID's active passkey authorities for their account.
+        Public fields only — credential ID, last-used; never key material.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: The authorities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Authority"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /credentials/register/start:
+    post:
+      tags: [credentials]
+      summary: Begin passkey registration
+      description: |
+        Returns WebAuthn registration options. When the account already has a credential,
+        `isAdditional` is true and an `approval` challenge is included — the client must
+        assert with an existing credential to authorize adding the new one (existing-credential approval rule).
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Registration options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterStart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /credentials/register/finish:
+    post:
+      tags: [credentials]
+      summary: Complete passkey registration
+      description: |
+        Verifies the WebAuthn attestation against the single-use, expiring challenge and
+        stores the public key + credential ID (public material only). Rejects a second
+        credential without a valid existing-credential approval, a replayed challenge, or
+        a duplicated credential ID.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterFinish"
+      responses:
+        "200":
+          description: The registered authority
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Authority"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /credentials/authenticate/start:
+    post:
+      tags: [credentials]
+      summary: Begin credential authentication
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Authentication options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticateStart"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /credentials/authenticate/finish:
+    post:
+      tags: [credentials]
+      summary: Complete credential authentication
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthenticateFinish"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /credentials/{id}:
+    delete:
+      tags: [credentials]
+      summary: Revoke a signing authority
+      description: |
+        Revokes a passkey. The account must keep at least one active authority — revoking
+        the last one is rejected (last-credential guard).
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The revoked authority
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Authority"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /wallet/intents:
+    post:
+      tags: [wallet]
+      summary: Create a withdrawal intent
+      description: |
+        Validates and persists a desired withdrawal (WITHDRAW_SOL / WITHDRAW_TOKEN) for the
+        authenticated PID's smart account. Policy: account + registered passkey required,
+        amount > 0, valid destination, destination != the smart account. The intent is
+        single-use and expires (PRD_v4 §22) — reusing or exceeding it is rejected.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntentCreate"
+      responses:
+        "200":
+          description: The created intent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Intent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/intents/{id}:
+    get:
+      tags: [wallet]
+      summary: Get an intent (ownership-checked)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The intent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Intent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /wallet/transactions/submit:
+    post:
+      tags: [wallet]
+      summary: Record a submitted on-chain transaction
+      description: |
+        Records the on-chain submission against a pending, unexpired intent and marks it
+        executed (single-use replay protection). Submission itself happens through the
+        SDK/adapter.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransactionSubmit"
+      responses:
+        "200":
+          description: The recorded transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /wallet/transactions/{id}:
+    get:
+      tags: [wallet]
+      summary: Get a transaction (ownership-checked)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletTransaction"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /openapi.yaml:
+    get:
+      tags: [openapi]
+      summary: Get this specification
+      description: Returns the raw OpenAPI 3.0 document as `application/yaml`.
+      responses:
+        "200":
+          description: The OpenAPI specification
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: pid_access
+      description: "JWT access token set by /auth/google/callback or /auth/refresh"
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 400
+            message: ["handle must be 3-20 chars: lowercase letters, numbers, underscore"]
+    MinOneCredential:
+      description: Cannot unlink the identity's only login credential
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 400
+            message: "Kamu butuh minimal satu credential untuk login"
+    Unauthorized:
+      description: Missing, expired, or invalid access/refresh token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 401
+            message: "Unauthorized"
+    Forbidden:
+      description: Authenticated but lacking the required role (e.g. admin)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 403
+            message: "Admin access required"
+    NotFound:
+      description: The identity or profile does not exist
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 404
+            message: "No Identity found"
+    RateLimited:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 429
+            message: "ThrottlerException: Too Many Requests"
+    GoogleNotConfigured:
+      description: Google OAuth credentials are not set on the server
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 503
+            message: "Google OAuth is not configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET (and GOOGLE_CALLBACK_URL) in the env for this environment"
+
+  schemas:
+    LoginResponse:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Navigate here to start Google sign-in
+      example:
+        url: "http://localhost:3300/v1/auth/google"
+
+    ExchangeResult:
+      type: object
+      required: [pid, identityId, profile, credentials]
+      properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+          description: Permanent PID of the signed-in user (treat as opaque)
+          example: "ifal@pid"
+        identityId:
+          type: string
+          deprecated: true
+          description: Shim — identical to pid, removed next release
+          example: "ifal@pid"
+        profile:
+          type: object
+          properties:
+            displayName:
+              type: string
+              nullable: true
+            avatarUrl:
+              type: string
+              nullable: true
+        credentials:
+          type: array
+          items:
+            type: object
+            properties:
+              provider:
+                type: string
+              email:
+                type: string
+                nullable: true
+
+    PidApp:
+      type: object
+      required: [id, clientId, ownerId, name, allowedOrigins, isActive, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+          description: Public app id to pass as clientId in login/exchange calls
+          example: "pidapp_0123456789abcdef0123456789abcdef"
+        ownerId:
+          type: string
+        name:
+          type: string
+        allowedOrigins:
+          type: array
+          description: Managed list of bare origins — login redirects and CORS
+          items:
+            type: string
+        isActive:
+          type: boolean
+        clientSecretPrefix:
+          type: string
+          nullable: true
+          description: Identifying prefix of the current backend secret (the secret itself is never returned)
+        clientSecretCreatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Identity:
+      type: object
+      required: [pid, status, createdAt]
+      properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+          description: "Permanent PID (`<handle>@pid`) for this user across the Antigane ecosystem. User-chosen once, never changes, never reused or reassigned."
+          example: "ifal@pid"
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+          description: Identity lifecycle status
+        createdAt:
+          type: string
+          format: date-time
+
+    IdentityCredential:
+      type: object
+      required: [id, provider, linkedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          description: "e.g. google, discord, apple, password, passkey"
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: "Metadata only — the email is not the identity, the PID is."
+        linkedAt:
+          type: string
+          format: date-time
+        lastLoginAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    Profile:
+      type: object
+      required: [pid, createdAt, updatedAt]
+      properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+          description: "Shared PK with Identity — the PID itself (permanent, immutable)"
+        displayName:
+          type: string
+          nullable: true
+          maxLength: 64
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+        locale:
+          type: string
+          nullable: true
+          maxLength: 16
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProfileUpdate:
+      type: object
+      properties:
+        displayName:
+          type: string
+          nullable: true
+          maxLength: 64
+          description: "Set to null to clear"
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: "Set to null to clear"
+        locale:
+          type: string
+          nullable: true
+          maxLength: 16
+          description: "e.g. en-US. Set to null to clear"
+
+    Wallet:
+      type: object
+      required: [id, chain, address, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        chain:
+          type: string
+          description: "Blockchain the wallet is on — fixed to `solana` for V3"
+          example: "solana"
+        address:
+          type: string
+          maxLength: 64
+          description: "User-supplied wallet address. Public data only — no key material is stored or returned."
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+          description: Wallet lifecycle status (mirrors the identity status convention)
+        createdAt:
+          type: string
+          format: date-time
+
+    WalletCreate:
+      type: object
+      required: [address]
+      properties:
+        address:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: "The Solana address to associate with this PID"
+
+    ChainAccount:
+      type: object
+      required: [id, chainNamespace, chainReference, address, accountType, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        chainNamespace:
+          type: string
+          description: "CAIP-2 namespace — `solana` (V1) or `eip155` (EVM counterfactuals)"
+          example: "solana"
+        chainReference:
+          type: string
+          description: "CAIP-2 reference — genesis-hash prefix (Solana) or decimal chain id (EVM: 10143, 97, 421614)"
+          example: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z"
+        address:
+          type: string
+          description: "PDA (Solana smart_account), CREATE2 counterfactual (EVM smart_account), or user-supplied address (linked_address). Public data only."
+        accountType:
+          type: string
+          enum: [smart_account, linked_address]
+        status:
+          type: string
+          enum: [active, suspended, deleted]
+        createdAt:
+          type: string
+          format: date-time
+
+    ActivationView:
+      type: object
+      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports, networkFeeLamports, protocolFeeBps, chainTime, treasury, feePolicyVersion, rpIdHash]
+      properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+        status:
+          type: string
+        smartAccountAddress:
+          type: string
+        balanceLamports:
+          type: integer
+        requiredLamports:
+          type: integer
+          description: "Total lamports required (rent + networkFee + protocolFee)"
+        networkFeeLamports:
+          type: integer
+          description: "Realtime network-cost estimate the backend will attest near"
+        protocolFeeBps:
+          type: integer
+          description: "Fixed protocol percentage in bps for the quoted policy version"
+        chainTime:
+          type: integer
+          description: "Chain time (unix seconds) for the activation challenge expiry"
+        treasury:
+          type: string
+          description: "Canonical revenue vault (informational — enforced on-chain)"
+        feePolicyVersion:
+          type: integer
+          description: "Fee-policy version the quote was computed under (must be signed)"
+        rpIdHash:
+          type: string
+          description: "base64url sha256 of the WebAuthn RP ID (bound into the V3 activation payload)"
+
+    EvmActivationView:
+      type: object
+      required: [pid, chainReference, status, smartAccountAddress, deployed, balanceWei, requiredWei, networkFeeWei, protocolFeeBps]
+      properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+        chainReference:
+          type: string
+        status:
+          type: string
+        smartAccountAddress:
+          type: string
+        deployed:
+          type: boolean
+        balanceWei:
+          type: string
+        requiredWei:
+          type: string
+          description: "Total wei required (networkFee + protocolFee)"
+        networkFeeWei:
+          type: string
+          description: "Realtime network-cost estimate the backend will attest near"
+        protocolFeeBps:
+          type: integer
+          description: "Fixed protocol percentage in bps for the quoted policy version"
+
+    Authority:
+      type: object
+      required: [id, type, credentialId, publicKey, createdAt, lastUsedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [secp256r1]
+          description: "Passkey authority model (secp256r1 owner passkey)"
+        credentialId:
+          type: string
+          nullable: true
+          description: "WebAuthn credential ID — public data"
+        publicKey:
+          type: string
+          description: "33-byte compressed secp256r1 public key, base64url — the on-chain smart-account authority"
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    RegisterStart:
+      type: object
+      required: [registrationId, options, isAdditional, approval]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        options:
+          type: object
+          description: "PublicKeyCredentialCreationOptionsJSON for navigator.credentials.create"
+        isAdditional:
+          type: boolean
+        approval:
+          type: object
+          nullable: true
+          description: "PublicKeyCredentialRequestOptionsJSON for existing-credential approval (null for the first credential)"
+
+    RegisterFinish:
+      type: object
+      required: [registrationId, credential]
+      properties:
+        registrationId:
+          type: string
+          format: uuid
+        credential:
+          type: object
+          description: "WebAuthn RegistrationResponseJSON"
+        approval:
+          type: object
+          nullable: true
+          description: "Existing-credential AuthenticationResponseJSON — required when isAdditional"
+
+    AuthenticateStart:
+      type: object
+      required: [authenticationId, options]
+      properties:
+        authenticationId:
+          type: string
+          format: uuid
+        options:
+          type: object
+          description: "PublicKeyCredentialRequestOptionsJSON for navigator.credentials.get"
+
+    AuthenticateFinish:
+      type: object
+      required: [authenticationId, credential]
+      properties:
+        authenticationId:
+          type: string
+          format: uuid
+        credential:
+          type: object
+          description: "WebAuthn AuthenticationResponseJSON"
+
+    PasskeyAssertion:
+      type: object
+      required: [id, signature, authenticatorData, clientDataJSON]
+      properties:
+        id:
+          type: string
+          description: "Credential ID that produced the assertion"
+        signature:
+          type: string
+          description: "base64url 64-byte r‖s secp256r1 signature"
+        authenticatorData:
+          type: string
+          description: "base64url authenticatorData"
+        clientDataJSON:
+          type: string
+          description: "base64url clientDataJSON (challenge = domain payload)"
+
+    Activate:
+      type: object
+      required: [expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      properties:
+        expiry:
+          type: integer
+          description: "Chain-time expiry (unix seconds) the passkey signed against (TTL ≤ 600s)"
+        feePolicyVersion:
+          type: integer
+          description: "Signed fee-policy version selecting the fixed protocol percentage"
+        quotedNetworkFeeLamports:
+          type: string
+          description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        assertion:
+          $ref: "#/components/schemas/PasskeyAssertion"
+
+    EvmActivate:
+      type: object
+      required: [quotedNetworkFeeWei, feePolicyVersion, deadline, assertion]
+      properties:
+        quotedNetworkFeeWei:
+          type: string
+          description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        feePolicyVersion:
+          type: integer
+          description: "Signed fee-policy version selecting the fixed protocol percentage"
+        deadline:
+          type: integer
+          description: "Authorization deadline (unix seconds, TTL ≤ 600s)"
+        assertion:
+          type: object
+          required: [id, r, s, authenticatorData, clientDataJSON]
+          properties:
+            id:
+              type: string
+              description: "Credential ID that produced the assertion"
+            r:
+              type: string
+              description: "hex 32-byte r of the secp256r1 signature over the V3 activation payload"
+            s:
+              type: string
+              description: "hex 32-byte s of the secp256r1 signature (low-S enforced on-chain)"
+            authenticatorData:
+              type: string
+              description: "hex authenticatorData (first 32 bytes must equal the RP-ID hash)"
+            clientDataJSON:
+              type: string
+              description: "base64url clientDataJSON (challenge = V3 activation payload)"
+
+    GrantPermission:
+      type: object
+      required: [kind, target, selector, token, to, perTxCap, totalLimit, nftId, sessionX, sessionY, validAfter, validUntil, salt, deadline, chainId, account, nonce, factory]
+      properties:
+        kind:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: "1 = nonfinancial, 2 = ETH, 3 = ERC-20, 4 = ERC-721, 5 = ERC-1155"
+        target:
+          type: string
+          description: "Nonfinancial: exact allowed target (never the account/factory)"
+        selector:
+          type: string
+          description: "Nonfinancial: exact allowed selector (0x + 8 hex chars, never denylisted)"
+        token:
+          type: string
+          description: "Financial: token contract (zero address = native ETH)"
+        to:
+          type: string
+          description: "Financial: explicit recipient"
+        perTxCap:
+          type: string
+          description: "Financial: max per execution, raw units"
+        totalLimit:
+          type: string
+          description: "Financial: lifetime cap in the same units"
+        nftId:
+          type: string
+          description: "ERC-721/1155: token id"
+        sessionX:
+          type: string
+          description: "Session P-256 key x (0x + 64 hex chars)"
+        sessionY:
+          type: string
+          description: "Session P-256 key y (0x + 64 hex chars)"
+        validAfter:
+          type: integer
+          description: "Grant start (unix seconds)"
+        validUntil:
+          type: integer
+          description: "Grant expiry (unix seconds, ≤ 30d out)"
+        salt:
+          type: string
+          description: "Owner-chosen uniqueness salt (0x + 64 hex chars)"
+        deadline:
+          type: integer
+          description: "Owner-authorization deadline (unix seconds, TTL ≤ 600s)"
+        chainId:
+          type: integer
+        account:
+          type: string
+        nonce:
+          type: string
+          description: "Owner nonce the grant consumes"
+        factory:
+          type: string
+          description: "Deploying factory (blocked as a permission target)"
+
+    ValidatedGrant:
+      type: object
+      required: [permissionId, grantPayload]
+      properties:
+        permissionId:
+          type: string
+          description: "Canonical permission id (0x + 64 hex chars)"
+        grantPayload:
+          type: string
+          description: "Owner challenge — what the passkey signs (0x + 64 hex chars)"
+
+    RegisterSession:
+      type: object
+      required: [vault, accountId, sessionPubkey, allowedProgram, expiresAt, recordedHasAuthority, recordedSlot, deadline, nonce]
+      properties:
+        vault:
+          type: string
+          description: "Vault PDA the session attaches to (base58)"
+        accountId:
+          type: string
+          description: "sha256(pid) account id (0x + 64 hex chars)"
+        sessionPubkey:
+          type: string
+          description: "Ed25519 session keypair pubkey (base58)"
+        allowedProgram:
+          type: string
+          description: "The one allowlisted game program (base58)"
+        expiresAt:
+          type: integer
+          description: "Session hard expiry (unix seconds, ≤ 24h out)"
+        recordedHasAuthority:
+          type: boolean
+          description: "Whether the game program currently has an upgrade authority"
+        recordedAuthority:
+          type: string
+          description: "Upgrade authority at registration (base58, required when recordedHasAuthority)"
+        recordedSlot:
+          type: string
+          description: "ProgramData slot at registration"
+        deadline:
+          type: integer
+          description: "Owner-authorization deadline (unix seconds, TTL ≤ 600s)"
+        nonce:
+          type: string
+          description: "Owner nonce the registration consumes"
+
+    ValidatedSessionGrant:
+      type: object
+      required: [sessionAddress, registerPayload]
+      properties:
+        sessionAddress:
+          type: string
+          description: "Canonical session PDA (base58)"
+        registerPayload:
+          type: string
+          description: "Owner challenge — what the passkey signs (0x + 64 hex chars)"
+
+    WithdrawQuote:
+      type: object
+      required: [networkFeeLamports, protocolFeeBps, feePolicyVersion, totalFeeLamports, chainTime, treasury]
+      properties:
+        networkFeeLamports:
+          type: string
+          description: "Realtime network-cost estimate the backend will attest near"
+        protocolFeeBps:
+          type: integer
+          description: "Fixed protocol percentage in bps for the quoted policy version"
+        feePolicyVersion:
+          type: integer
+          description: "Fee-policy version the quote was computed under (must be signed)"
+        totalFeeLamports:
+          type: string
+          description: "networkFee + protocolFee at quote time (informational)"
+        chainTime:
+          type: integer
+        treasury:
+          type: string
+          description: "Canonical revenue vault (informational — enforced on-chain)"
+
+    SponsoredWithdraw:
+      type: object
+      required: [asset, to, amount, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      properties:
+        asset:
+          type: string
+          description: '"SOL" or an SPL mint address'
+        to:
+          type: string
+        amount:
+          type: string
+        nonce:
+          type: string
+        expiry:
+          type: integer
+          description: "Chain-time expiry (unix seconds, TTL ≤ 600s)"
+        feePolicyVersion:
+          type: integer
+          description: "Signed fee-policy version selecting the fixed protocol percentage"
+        quotedNetworkFeeLamports:
+          type: string
+          description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        assertion:
+          $ref: "#/components/schemas/PasskeyAssertion"
+
+    SubAccountCreate:
+      type: object
+      required: [name, email]
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        email:
+          type: string
+          maxLength: 25
+
+    SubAccount:
+      type: object
+      required: [status, currency]
+      properties:
+        status:
+          type: string
+          enum: [creating, active, suspended]
+        currency:
+          type: string
+          enum: [IDR]
+        profileId:
+          type: string
+          nullable: true
+          description: V2 profileId (1 PID → 1 Sub-Account)
+        accountNo:
+          type: string
+          nullable: true
+          description: IDR cash account (fiat backing, admin/debug)
+        pointAccountNo:
+          type: string
+          nullable: true
+          description: POINT account (spendable Saldo ledger)
+        vaNumber:
+          type: string
+          nullable: true
+          description: Static BRI VA for deposits
+        phoneNo:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        lastBalanceIdr:
+          type: string
+          nullable: true
+          description: Timestamped read cache only — DOKU is the ledger
+        lastBalanceAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    SubBalance:
+      type: object
+      required: [pointsAvailableIdr, pointsReservedIdr, availableIdr, reservedIdr, pendingIdr, currency, cachedAt]
+      properties:
+        pointsAvailableIdr:
+          type: string
+          description: Spendable Saldo — live DOKU Unified Ledger POINT balance (1:1 IDR peg)
+        pointsReservedIdr:
+          type: string
+        availableIdr:
+          type: string
+          description: Fiat IDR backing, available (admin/debug — not spendable)
+        reservedIdr:
+          type: string
+        pendingIdr:
+          type: string
+          description: Fiat pending settlement (backing in transit)
+        currency:
+          type: string
+          enum: [IDR]
+        cachedAt:
+          type: string
+          format: date-time
+
+    SubTx:
+      type: object
+      required: [id, kind, providerRef, providerStatus, grossIdr, currency, createdAt]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: deposit | payout_bank | payout_wallet | transfer_internal | debit | debit_cancel | fee | points_issue | points_fee | points_clawback
+        providerRef:
+          type: string
+          description: Idempotency key (partnerReferenceNo at DOKU)
+        providerStatus:
+          type: string
+          enum: [created, processing, settled, success, expired, failed, cancelled, refunded]
+          description: Payment state (never settlement). Checkout deposits use success/expired/failed; legacy rows may carry settled meaning paid.
+        grossIdr:
+          type: string
+          description: Gross movement (Checkout deposit = customer-paid net + fee; transfer = requested gross, beneficiary gets gross minus fee)
+        feeIdr:
+          type: string
+          nullable: true
+          description: Platform service fee quote, snapshotted at intent time (legacy fee rows remain for history)
+        netIdr:
+          type: string
+          nullable: true
+          description: Net user effect (gross minus fee)
+        paymentUrl:
+          type: string
+          nullable: true
+          description: DOKU-hosted payment page for unpaid Checkout deposits
+        feeStatus:
+          type: string
+          nullable: true
+          description: Legacy fee-leg status ({ref}-FEE row), read-only
+        currency:
+          type: string
+          enum: [IDR]
+        createdAt:
+          type: string
+          format: date-time
+
+    FiatBalance:
+      type: object
+      required: [balanceIdr, currency, source]
+      properties:
+        balanceIdr:
+          type: string
+          description: Replayed fiat-ledger balance, whole IDR
+        currency:
+          type: string
+          enum: [IDR]
+        source:
+          type: string
+          enum: [fiat-ledger]
+        replayErrors:
+          type: array
+          items:
+            type: string
+
+    FiatLedgerEntry:
+      type: object
+      required: [id, kind, entryGroup, grossIdr, status, createdAt]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: fiat_issue | fiat_fee | fiat_transfer_in | fiat_transfer_out | fiat_adjust
+        entryGroup:
+          type: string
+          description: Groups the legs of one logical movement
+        counterpartyPid:
+          type: string
+          nullable: true
+        grossIdr:
+          type: string
+        feeIdr:
+          type: string
+          nullable: true
+        netIdr:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [created, posted, failed, cancelled]
+        createdAt:
+          type: string
+          format: date-time
+
+    FiatTransferInquiry:
+      type: object
+      required: [id, entryGroup, grossIdr, feeIdr, netIdr, feePolicyVersion, beneficiaryPid]
+      properties:
+        id:
+          type: string
+        entryGroup:
+          type: string
+        grossIdr:
+          type: string
+        feeIdr:
+          type: string
+        netIdr:
+          type: string
+        feePolicyVersion:
+          type: integer
+        beneficiaryPid:
+          type: string
+
+    FiatLedger:
+      type: object
+      properties:
+        pid:
+          type: string
+        balanceIdr:
+          type: string
+        treasuryCreditedIdr:
+          type: string
+        inFlight:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: string
+        rows:
+          type: array
+          items:
+            type: object
+
+    SubTransferInquiry:
+      type: object
+      required: [id, providerRef, transferType, accountNumber, inquiryReferenceNo, grossIdr, feeIdr, netIdr, feePolicyVersion]
+      properties:
+        id:
+          type: string
+        providerRef:
+          type: string
+        transferType:
+          type: string
+          enum: [DOKU_SUB_ACCOUNT]
+        accountNumber:
+          type: string
+          description: Resolved recipient POINT account (server-side, never user-supplied)
+        beneficiaryPid:
+          type: string
+          description: Recipient identity, e.g. rani@pid
+        accountName:
+          type: string
+          nullable: true
+        inquiryReferenceNo:
+          type: string
+          description: DOKU referenceNo — must be reused by the confirm step
+        grossIdr:
+          type: string
+          description: Requested amount (gross)
+        feeIdr:
+          type: string
+          description: Quoted platform fee under the snapshotted policy
+        netIdr:
+          type: string
+          description: Amount the beneficiary will receive
+        feePolicyVersion:
+          type: integer
+
+    CheckoutDeposit:
+      type: object
+      required: [id, providerRef, paymentUrl, tokenId, grossIdr, feeIdr, netIdr, feePolicyVersion, providerStatus, createdAt]
+      properties:
+        id:
+          type: string
+        providerRef:
+          type: string
+          description: Invoice number at DOKU (idempotency key)
+        paymentUrl:
+          type: string
+          description: DOKU-hosted payment page (all banks, QRIS, e-money, cards)
+        tokenId:
+          type: string
+        expiredDate:
+          type: string
+          nullable: true
+        grossIdr:
+          type: string
+          description: Total payable at DOKU (net + PeridotID fee + app fee + gateway fee)
+        totalIdr:
+          type: string
+          description: Same as grossIdr (Total Payment)
+        feeIdr:
+          type: string
+          description: PeridotID fee (Rp0 for verified apps)
+        appFeeIdr:
+          type: string
+          description: The initiating app's own stacked fee (0 when no app context)
+        gatewayFeeIdr:
+          type: string
+          description: DOKU payment-gateway fee for the selected method
+        transferFeeIdr:
+          type: string
+          description: Combined display line — PeridotID fee+PPN + DOKU gateway fee+PPN
+        paymentMethod:
+          type: string
+          nullable: true
+          description: Selected category key or DOKU method code
+        netIdr:
+          type: string
+          description: Net credited to the user (the entered amount)
+        feePolicyVersion:
+          type: integer
+        providerStatus:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    DepositQuote:
+      type: object
+      required: [amountIdr, netIdr, peridotFeeIdr, peridotTaxIdr, appFeeIdr, appCategory, gatewayFeeEnabled, gatewayFeeIdr, gatewayTaxIdr, transferFeeIdr, totalIdr, feePolicyVersion, paymentMethods]
+      properties:
+        amountIdr:
+          type: string
+        netIdr:
+          type: string
+        peridotFeeIdr:
+          type: string
+          description: PeridotID platform fee — Rp0 for verified apps (excludes PPN)
+        peridotTaxIdr:
+          type: string
+          description: PPN on the PeridotID fee (wallet folds all fees into one "Transfer Fee" line)
+        appFeeIdr:
+          type: string
+        appCategory:
+          type: string
+          enum: [verified, public]
+        paymentMethod:
+          type: string
+          nullable: true
+        gatewayFeeEnabled:
+          type: boolean
+          description: Selected method's gateway fee is enabled (show the line only when true)
+        gatewayFeeIdr:
+          type: string
+        gatewayTaxIdr:
+          type: string
+          description: DOKU PPN on the gateway fee (wallet folds all fees into one "Transfer Fee" line)
+        transferFeeIdr:
+          type: string
+          description: Combined display line — PeridotID fee+PPN + DOKU gateway fee+PPN
+        totalIdr:
+          type: string
+        feePolicyVersion:
+          type: integer
+        paymentMethods:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentMethodOption"
+
+    PaymentMethodOption:
+      type: object
+      required: [key, label, category, enabled, gatewayFeeIdr, gatewayTaxIdr, rateKey, source, totalIdr]
+      properties:
+        key:
+          type: string
+          description: Category key (pass back as paymentMethod)
+        label:
+          type: string
+        category:
+          type: string
+        enabled:
+          type: boolean
+          description: false = not offered (hidden in the wallet)
+        gatewayFeeIdr:
+          type: string
+        gatewayTaxIdr:
+          type: string
+          description: DOKU PPN on this method's gateway fee
+        rateKey:
+          type: string
+          description: Which rate row applied (method code, category, or "*")
+        source:
+          type: string
+          enum: [doku, config]
+        totalIdr:
+          type: string
+
+    PaymentFeeRate:
+      type: object
+      required: [methodKey, percentBps, flatIdr, minIdr, maxIdr, enabled]
+      properties:
+        methodKey:
+          type: string
+          description: DOKU method code, category, or "*" (default)
+        label:
+          type: string
+          description: Display label (category name for catalog rows)
+        category:
+          type: string
+          nullable: true
+        isCategory:
+          type: boolean
+          description: True for the fixed category catalog rows
+        percentBps:
+          type: integer
+        flatIdr:
+          type: string
+        minIdr:
+          type: string
+          description: Floor, whole IDR (0 = unbounded)
+        maxIdr:
+          type: string
+          description: Cap, whole IDR (0 = unbounded)
+        enabled:
+          type: boolean
+          description: false = method hidden in the wallet and no fee charged
+        updatedAt:
+          type: string
+          format: date-time
+
+    FeePolicy:
+      type: object
+      required: [version, percentBps, minIdr, maxIdr, taxBps, active]
+      properties:
+        version:
+          type: integer
+        percentBps:
+          type: integer
+          description: Basis points, e.g. 10 = 0.1%
+        minIdr:
+          type: string
+          description: Fee floor in whole IDR (0 = no floor). Default Rp100
+        maxIdr:
+          type: string
+          description: Fee cap in whole IDR (0 = uncapped). Default 0 (no cap)
+        taxBps:
+          type: integer
+          description: PPN (VAT) on the PeridotID fee, basis points (1100 = 11%)
+        active:
+          type: boolean
+
+    SponsoredWithdrawResult:
+      type: object
+      required: [signature, networkFeeLamports, protocolFeeLamports, status]
+      properties:
+        signature:
+          type: string
+        networkFeeLamports:
+          type: string
+        protocolFeeLamports:
+          type: string
+        status:
+          type: string
+          enum: [confirmed, pending]
+
+    ExecuteMeta:
+      type: object
+      required: [address, writable, signer]
+      properties:
+        address:
+          type: string
+          description: "Bound CPI account (base58, in order)"
+        writable:
+          type: boolean
+        signer:
+          type: boolean
+          description: "Only the PDA or the relayer can carry the signer bit"
+
+    SponsoredExecuteQuote:
+      type: object
+      required: [target, metas, data]
+      properties:
+        target:
+          type: string
+          description: "Target program (never the smart-account program)"
+        metas:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/ExecuteMeta"
+        data:
+          type: string
+          description: "base64url inner instruction data (length shapes the estimate; content is opaque)"
+
+    SponsoredExecute:
+      type: object
+      required: [target, metas, data, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      properties:
+        target:
+          type: string
+          description: "Target program (never the smart-account program)"
+        metas:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/ExecuteMeta"
+        data:
+          type: string
+          description: "base64url inner instruction data (≤ 10_240 bytes)"
+        nonce:
+          type: string
+        expiry:
+          type: integer
+          description: "Chain-time expiry (unix seconds, TTL ≤ 600s)"
+        feePolicyVersion:
+          type: integer
+          description: "Signed fee-policy version selecting the fixed protocol percentage"
+        quotedNetworkFeeLamports:
+          type: string
+          description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        assertion:
+          $ref: "#/components/schemas/PasskeyAssertion"
+
+    RotateAuthority:
+      type: object
+      required: [oldCredentialId, newCredentialId, nonce, expiry, assertion]
+      properties:
+        oldCredentialId:
+          type: string
+          description: "Credential ID of the current (signing) authority"
+        newCredentialId:
+          type: string
+          description: "Credential ID of the already-registered replacement authority"
+        nonce:
+          type: string
+          description: "Chain nonce the current key signed against"
+        expiry:
+          type: integer
+          description: "Chain-time expiry (unix seconds, TTL ≤ 600s)"
+        assertion:
+          $ref: "#/components/schemas/PasskeyAssertion"
+
+    IntentCreate:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          enum: [WITHDRAW_SOL, WITHDRAW_TOKEN]
+        payload:
+          type: object
+          required: [amount]
+          properties:
+            amount:
+              type: string
+              description: "Amount as a decimal string (no JS float precision loss)"
+              example: "5000000"
+            destination:
+              type: string
+              description: "WITHDRAW_SOL — destination Solana address"
+            mint:
+              type: string
+              description: "WITHDRAW_TOKEN — token mint"
+            destinationAta:
+              type: string
+              description: "WITHDRAW_TOKEN — destination associated token account"
+
+    Intent:
+      type: object
+      required: [id, type, payload, status, expiresAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [WITHDRAW_SOL, WITHDRAW_TOKEN]
+        payload:
+          type: object
+          description: "Intent payload + resolved context (chain, network, smartAccountAddress)"
+        status:
+          type: string
+          enum: [pending, approved, executed, expired, rejected, cancelled]
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    TransactionSubmit:
+      type: object
+      required: [intentId, txHash]
+      properties:
+        intentId:
+          type: string
+          format: uuid
+        txHash:
+          type: string
+        network:
+          type: string
+
+    WalletTransaction:
+      type: object
+      required: [id, intentId, chain, network, txHash, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        intentId:
+          type: string
+          format: uuid
+          nullable: true
+        chain:
+          type: string
+        network:
+          type: string
+        txHash:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [prepared, submitted, confirmed, failed]
+        createdAt:
+          type: string
+          format: date-time
+
+    ApiError:
+      type: object
+      required: [statusCode, message]
+      properties:
+        statusCode:
+          type: integer
+        message:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
