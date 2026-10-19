@@ -118,34 +118,6 @@ services:
       - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.pid-api${NAMESPACE}.loadbalancer.server.port=3301"
 
-<<<<<<< HEAD
-  docs:
-    build:
-      context: ..
-      dockerfile: Dockerfile.docs
-    image: peridot-id-docs${NAMESPACE}:${TAG:-latest}
-    restart: unless-stopped
-    logging: *default-logging
-    networks: [proxy]
-    expose: ["3300"]
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3300/docs').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    labels:
-      - "traefik.enable=true"
-      # No new host on this router (board decision 2026-10-19, ANT-118): product
-      # docs move to Mintlify (user deploys manually), so docs.peridot.id must NOT
-      # point at this VPS. Old path /docs on pid.peridotvault.com keeps serving
-      # until the Mintlify cutover lands the redirect.
-      - "traefik.http.routers.pid-docs${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`)"
-      - "traefik.http.routers.pid-docs${NAMESPACE}.entrypoints=websecure"
-      - "traefik.http.routers.pid-docs${NAMESPACE}.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.pid-docs${NAMESPACE}.middlewares=security-headers@file"
-      - "traefik.http.services.pid-docs${NAMESPACE}.loadbalancer.server.port=3300"
-=======
   # docs service REMOVED (ANT-124, board order 2026-10-19: apps/docs is now the
   # Mintlify source, user deploys manually). There is no VPS docs image to build
   # anymore, so no service can be declared here.
@@ -155,7 +127,6 @@ services:
   # Mintlify serves docs.peridot.id + sandbox.docs.peridot.id AND the cutover
   # redirect (old-docs → Mintlify host) has a home (Trevor follow-up: Traefik
   # redirectregex or a tiny redirect service).
->>>>>>> dev
 
   app:
     build:
