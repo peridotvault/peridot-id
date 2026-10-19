@@ -41,6 +41,21 @@ export interface RegistryChain {
   contracts: RegistryContract[];
 }
 
+/**
+ * Mainnet Solana presence signal (ANT-75). Single source of truth for
+ * "does a mainnet Solana program exist": true only when an ACTIVE
+ * non-testnet `solana` registry row carries a `program` contract address.
+ * The seeded registry has no such row (both Solana rows are testnet), so
+ * this reads `available: false` until a mainnet program ships as a data row
+ * (no code change, no migration — adding the row flips the signal).
+ */
+export interface SolanaMainnetAvailability {
+  available: boolean;
+  reference: string | null;
+  program: string | null;
+  rpcUrl: string | null;
+}
+
 const CACHE_TTL_MS = 30_000;
 
 @Injectable()
@@ -144,6 +159,22 @@ export class ChainRegistryService {
       chain?.contracts.find((k) => k.type === "program")?.address ??
       (selection === "testnet" ? SOLANA_TESTNET_PROGRAM_ID : SOLANA_PROGRAM_ID)
     );
+  }
+
+  /**
+   * Mainnet Solana presence signal (ANT-75, served at
+   * `GET /v1/chains/solana-availability`). Reads the cached `activeChains()`
+   * (30s TTL, no extra DB query, no N+1) so the wallet can hide Solana
+   * create/activate UI in mainnet mode until a mainnet program exists
+   * (ANT-73). Fail-absent: anything short of an active non-testnet solana
+   * row WITH a program contract reads as unavailable.
+   */
+  async solanaMainnetAvailability(): Promise<SolanaMainnetAvailability> {
+    const chains = await this.activeChains();
+    const row = chains.find((c) => c.namespace === SOLANA_NAMESPACE && !c.isTestnet);
+    const program = row?.contracts.find((k) => k.type === "program")?.address ?? null;
+    if (!row || !program) return { available: false, reference: null, program: null, rpcUrl: null };
+    return { available: true, reference: row.reference, program, rpcUrl: row.rpcUrls[0] ?? null };
   }
 
   /**
