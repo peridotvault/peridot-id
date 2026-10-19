@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { ChainAccountStatus } from "@prisma/client";
 import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
 import { ChainRegistryService } from "../chain/chain-registry.service";
-import { ACCOUNT_TYPE_SMART } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { deriveSmartAccountAddress } from "../common/smart-account";
 import { isP2002 } from "../prisma/prisma-error";
 import { PrismaService } from "../prisma/prisma.service";
@@ -51,8 +51,8 @@ export class AccountService {
     private readonly chains: ChainRegistryService,
   ) {}
 
-  private async programId(): Promise<string> {
-    return this.chains.solanaProgramId();
+  private async programId(selection?: SolanaSelection): Promise<string> {
+    return this.chains.solanaProgramId(selection);
   }
 
   /**
@@ -94,20 +94,26 @@ export class AccountService {
   /**
    * Idempotent wallet setup for the token identity: ensures the Solana
    * smart-account row (derived PDA) plus EVM counterfactuals, then returns
-   * every chain row. 1 identity = 1 personal wallet.
+   * every chain row. 1 identity = 1 personal wallet. The optional selection
+   * scopes the Solana row to the devnet/testnet chain (one smart account per
+   * chain); omitted (default) preserves the historical single-row behavior.
    */
-  async ensureAccount(pid: string): Promise<ChainAccountView[]> {
+  async ensureAccount(pid: string, selection?: SolanaSelection): Promise<ChainAccountView[]> {
     // Resolve the program id (registry) before any DB write so it can't orphan rows.
-    const programId = await this.programId();
+    const programId = await this.programId(selection);
 
     // The smart-account address is deterministically resolvable before on-chain
     // initialization — seed the chain_accounts row with the derived PDA address.
     const derived = deriveSmartAccountAddress(pid, programId).address;
     const existingChain = await this.prisma.chainAccount.findFirst({
-      where: { pid, accountType: ACCOUNT_TYPE_SMART },
+      where: {
+        pid,
+        accountType: ACCOUNT_TYPE_SMART,
+        ...(selection ? { chain: { namespace: SOLANA_NAMESPACE, reference: solanaReferenceFor(selection) } } : {}),
+      },
     });
     if (!existingChain) {
-      const chainId = await this.chains.solanaChainIdOrThrow();
+      const chainId = await this.chains.solanaChainIdOrThrow(selection);
       try {
         await this.prisma.chainAccount.create({
           data: {

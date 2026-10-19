@@ -51,9 +51,12 @@ export function minimalChainsStub() {
     chainByReference: jest.fn(async () => undefined),
     rpcUrlForReference: jest.fn(async () => "http://localhost:8545"),
     solanaChainIdOrThrow: jest.fn(async () => "chain-sol"),
+    solanaChains: jest.fn(async () => []),
     solanaChain: jest.fn(async () => undefined),
     solanaRpcUrl: jest.fn(async () => "https://api.devnet.solana.com"),
     solanaProgramId: jest.fn(async () => "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT"),
+    networkLabel: jest.fn(async () => "devnet"),
+    networkLabelFor: jest.fn(() => "devnet"),
     invalidate: jest.fn(),
   };
 }
