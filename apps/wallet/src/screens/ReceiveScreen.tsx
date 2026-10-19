@@ -3,6 +3,7 @@ import { Text, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
+import { useNetworkMode } from "../shared/hooks/useNetworkMode";
 import { useActivationGate } from "../feat/wallet/hooks/useActivationGate";
 import { useCopyAddress } from "../feat/wallet/hooks/useCopyAddress";
 import { useDepositTargets } from "../feat/wallet/hooks/useDepositTargets";
@@ -13,11 +14,15 @@ import type { DepositTarget } from "../feat/wallet/utils/deposit-targets";
 export function ReceiveScreen({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {
   const { peridot } = usePeridot();
   const { targets } = useDepositTargets(peridot);
+  const { testnet } = useNetworkMode();
   const [selectedSol, setSelectedSol] = useState<DepositTarget | null>(null);
   const gate = useActivationGate(peridot);
   const { copiedKey, copy } = useCopyAddress();
 
   const openSol = (t: DepositTarget) => {
+    // ANT-74: Solana entry is hidden in mainnet mode — ignore taps even if
+    // a stale target lingers (e.g. mode switched with modal open).
+    if (!testnet) return;
     gate.clearError();
     setSelectedSol(t);
     void gate.refresh();
@@ -30,9 +35,13 @@ export function ReceiveScreen({ onDone, goPasskey }: { onDone: () => void; goPas
 
       {targets.length === 0 && <Text style={s.hint}>Account not initialized.</Text>}
 
+      {!testnet && (
+        <Text style={s.hint}>Solana deposits are available in Testnet Mode. EVM addresses below work as usual.</Text>
+      )}
+
       <DepositCardList
         targets={targets}
-        solAlert={!gate.isActive}
+        solAlert={testnet && !gate.isActive}
         copiedKey={copiedKey}
         onOpen={openSol}
         onCopy={copy}
@@ -40,14 +49,16 @@ export function ReceiveScreen({ onDone, goPasskey }: { onDone: () => void; goPas
 
       <UIButton title="Back" onPress={onDone} />
 
-      <SolActivationModal
-        target={selectedSol}
-        gate={gate}
-        copiedKey={copiedKey}
-        onClose={() => setSelectedSol(null)}
-        onCopy={copy}
-        onGoPasskey={goPasskey}
-      />
+      {testnet && (
+        <SolActivationModal
+          target={selectedSol}
+          gate={gate}
+          copiedKey={copiedKey}
+          onClose={() => setSelectedSol(null)}
+          onCopy={copy}
+          onGoPasskey={goPasskey}
+        />
+      )}
     </View>
   );
 }
