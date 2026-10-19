@@ -24,11 +24,10 @@
   "scripts": {
     "dev": "pnpm -r --parallel dev",
     "dev:api": "pnpm --filter @peridotvault/pid-api dev",
-    "dev:web": "pnpm --filter @peridotvault/pid-web dev",
+    "dev:docs": "pnpm --filter @peridotvault/pid-docs dev",
     "dev:wallet": "pnpm --filter @peridotvault/pid-wallet dev",
     "dev:dashboard": "pnpm --filter @peridotvault/pid-dashboard dev",
     "dev:api:cloud": "infisical run --env=dev --path=/apps/api -- pnpm --filter @peridotvault/pid-api dev",
-    "dev:web:cloud": "infisical run --env=dev --path=/apps/web -- pnpm --filter @peridotvault/pid-web dev",
     "dev:wallet:cloud": "infisical run --env=dev --path=/apps/wallet -- pnpm --filter @peridotvault/pid-wallet dev",
     "dev:dashboard:cloud": "infisical run --env=dev --path=/apps/dashboard -- pnpm --filter @peridotvault/pid-dashboard dev",
     "start": "pnpm -r --parallel start",

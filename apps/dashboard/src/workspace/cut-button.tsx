@@ -1,7 +1,7 @@
 import type { ComponentPropsWithoutRef, CSSProperties, ReactNode } from "react";
 
-// Ported verbatim from apps/web/components/landing/cut-button.tsx so the
-// dashboard keeps the landing button styling without depending on apps/web.
+// Ported verbatim from apps/docs/components/landing/cut-button.tsx so the
+// dashboard keeps the landing button styling without depending on apps/docs.
 
 const CUT =
   "[clip-path:polygon(var(--cut)_0,100%_0,100%_calc(100%-var(--cut)),calc(100%-var(--cut))_100%,0_100%,0_var(--cut))]";

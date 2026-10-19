@@ -12,7 +12,7 @@ import DemoPage from "./src/routes/demo";
 
 /**
  * Dashboard shell: session context + topbar around every route.
- * Route table mirrors apps/web/app/workspace (§1.1) with /workspace stripped:
+ * Route table mirrors apps/docs/app/workspace (§1.1) with /workspace stripped:
  * / → Apps+gate, /apps/:id, /chains, /chains/create, /chains/edit,
  * /contracts, /fees, /partners, /demo.
  */

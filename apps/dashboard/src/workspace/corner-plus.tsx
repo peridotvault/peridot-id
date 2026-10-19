@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-// Ported verbatim from apps/web/components/landing/corner-plus.tsx (PlusSvg +
+// Ported verbatim from apps/docs/components/landing/corner-plus.tsx (PlusSvg +
 // CornerPlus only — the Kicker export is landing-specific and not ported).
 
 function PlusSvg({ className }: { className: string }): ReactNode {

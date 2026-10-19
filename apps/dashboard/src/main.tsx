@@ -6,7 +6,7 @@ import App from "../App";
 
 function ThemeInit() {
   // Follow the OS theme so `dark:` variants keep working like they did under
-  // next-themes in apps/web. Runs once; no toggle UI (the workspace had none).
+  // next-themes in apps/docs. Runs once; no toggle UI (the workspace had none).
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => document.documentElement.classList.toggle("dark", mq.matches);

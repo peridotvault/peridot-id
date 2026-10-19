@@ -1,5 +1,5 @@
 // Dashboard environment resolution. Ported from
-// apps/web/app/workspace/_components/workspace-provider.tsx — same behavior,
+// apps/docs/app/workspace/_components/workspace-provider.tsx — same behavior,
 // Vite env names (VITE_* instead of NEXT_PUBLIC_PID_*).
 //
 // - Explicit VITE_PID_ENV wins; otherwise the badge follows the API URL

@@ -10,7 +10,7 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   `PID_*`). "Peridot ecosystem" refers to the wider Peridot products — a different thing.
 - **NPM packages:** `@peridotvault/pid-*` (npm org: `@peridotvault`; company: PT ANTIGANE LABS INDONESIA) — e.g.
   `@peridotvault/pid-api`, `@peridotvault/pid-types`, `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`,
-  `@peridotvault/pid-evm`, `@peridotvault/pid-openapi`, `@peridotvault/pid-web`, `@peridotvault/pid-wallet`,
+  `@peridotvault/pid-evm`, `@peridotvault/pid-openapi`, `@peridotvault/pid-docs`, `@peridotvault/pid-wallet`,
   `@peridotvault/pid-react-embed`.
 - **On-chain:** PDA seed `["peridot_id", "account", sha256(pid)]`; signed-payload domain
   `PID|SOLANA|SMART_ACCOUNT|v1`; program id `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
@@ -24,9 +24,10 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
 ## Environment
 
 - **Secrets (Infisical Cloud, project `peridot-id-uf-w9`):** envs `dev` / `test` /
-  `main`; folders `/apps/api` (runtime), `/apps/web` (`NEXT_PUBLIC_*`),
+  `main`; folders `/apps/api` (runtime),
   `/apps/wallet` (`VITE_*`). No `/deploy` folder — it duplicated these.
-  Local: `infisical login` once, then `pnpm dev:api:cloud` (or `dev:web:cloud` /
+  (Docs take zero secrets — there is no `/apps/docs` Infisical path.)
+  Local: `infisical login` once, then `pnpm dev:api:cloud` (or
   `dev:wallet:cloud`). Deploy: `./deploy/up.sh main|test` sources the VPS machine
   identity at `/etc/peridot-id/infisical.env` (0600 root) and pulls via
   `infisical run`; no `deploy/.env.*` on the VPS. Fallback:

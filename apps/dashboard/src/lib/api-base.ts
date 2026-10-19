@@ -1,7 +1,7 @@
 // LAN dev: a loopback URL baked at build time (localhost API/popup) points at
 // the *viewing* device, not the dev machine, when the page loads from a LAN
 // IP. Swap the host for the page host (keep scheme/port/path).
-// Ported verbatim from apps/web/lib/api-base.ts.
+// Ported verbatim from apps/docs/lib/api-base.ts.
 export function resolveBrowserUrl(configured: string): string {
   if (typeof window === "undefined") return configured;
   try {

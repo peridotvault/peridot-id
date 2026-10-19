@@ -1,4 +1,4 @@
-/* Dashboard base styles. Theme tokens mirror apps/web/app/global.css so the
+/* Dashboard base styles. Theme tokens mirror apps/docs/app/global.css so the
    ported workspace UI renders identically (light default, `.dark` opt-in). */
 
 @import "tailwindcss";

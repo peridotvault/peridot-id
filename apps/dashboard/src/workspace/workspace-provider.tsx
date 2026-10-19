@@ -14,7 +14,7 @@ import {
 } from "../lib/config";
 
 // LAN-safe resolution (loopback→page-host swap) applied at runtime, same as
-// apps/web. The badge in lib/config follows the configured URL, not this one.
+// apps/docs. The badge in lib/config follows the configured URL, not this one.
 const API_BASE = resolveBrowserUrl(CONFIGURED_API_BASE);
 const POPUP_URL = resolveBrowserUrl(CONFIGURED_POPUP_URL);
 

@@ -6,12 +6,12 @@ every Peridot product.
 
 ## Public docs
 
-The developer documentation site lives in `apps/web` (Fumadocs + Next.js) and renders the
+The developer documentation site lives in `apps/docs` (Fumadocs + Next.js) and renders the
 canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 
 - Docs (Vercel): `https://pid.peridotvault.com`
 - API (Vercel): `https://api.pid.peridotvault.com/v1`
-- Run locally: `pnpm --filter @peridotvault/pid-web dev` → `http://localhost:3300`
+- Run locally: `pnpm --filter @peridotvault/pid-docs dev` → `http://localhost:3301`
 - API also serves the raw spec at `GET /v1/openapi.yaml` (Swagger UI at `/docs`)
 
 ## Repository layout
@@ -19,7 +19,7 @@ canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 ```
 apps/api            NestJS API (auth, identity, profile, wallet) — VPS via deploy/compose.yaml
 apps/wallet         Expo wallet client (web + iOS + Android)
-apps/web            Public docs site (Fumadocs)
+apps/docs            Public docs site (Fumadocs)
 contracts/svm       Pinocchio smart-account program (Rust)
 contracts/evm       Counterfactual smart accounts (Solidity/Foundry)
 packages/sdk-js     Browser SDK
@@ -52,7 +52,7 @@ docker compose up -d        # Postgres (refresh-token state lives in Postgres �
 pnpm install
 pnpm --filter @peridotvault/pid-api db:deploy  # apply Prisma migrations
 pnpm --filter @peridotvault/pid-api dev        # API on http://localhost:3300
-pnpm --filter @peridotvault/pid-web dev        # docs on http://localhost:3300
+pnpm --filter @peridotvault/pid-docs dev        # docs on http://localhost:3301
 pnpm --filter @peridotvault/pid-wallet dev:web # wallet on http://localhost:3302
 ```
 
@@ -62,4 +62,4 @@ login flow. Local chain: run `solana-test-validator` from `contracts/svm` (see A
 ## Deploy
 
 See the public docs' [Self-hosting](https://pid.peridotvault.com/docs/self-hosting)
-guide. In short: the API on the VPS (`deploy/compose.yaml`), `apps/web` per the deploy guide.
+guide. In short: the API on the VPS (`deploy/compose.yaml`), `apps/docs` per the deploy guide.

@@ -1,7 +1,7 @@
 # `@peridotvault/pid-dashboard`
 
 PeridotID developer dashboard — a **Vite + React** single-page app ported 1:1
-from `apps/web/app/workspace` (spec ANT-83). Register apps, manage origins and
+from `apps/docs/app/workspace` (spec ANT-83). Register apps, manage origins and
 backend secrets, set per-app fees, and (admins) run the chain / contract /
 partner / fee consoles.
 
@@ -19,7 +19,7 @@ partner / fee consoles.
 ## Stack
 
 - Vite 8 / React 19 / React Router 7 (flat routes, no nested layouts)
-- Tailwind v4 via `@tailwindcss/vite` (theme tokens mirror `apps/web`)
+- Tailwind v4 via `@tailwindcss/vite` (theme tokens mirror `apps/docs`)
 - `@peridotvault/pid-sdk-js` (all API calls — zero new endpoints)
 
 ## Local
@@ -52,8 +52,8 @@ The env badge follows the *configured* URL, not the LAN-resolved one.
 
 | Route | Source |
 |---|---|
-| `/` (Apps + session gate) | `apps/web/app/workspace/page.tsx` |
-| `/apps/:id` | `apps/web/app/workspace/apps/[id]/page.tsx` |
+| `/` (Apps + session gate) | `apps/docs/app/workspace/page.tsx` |
+| `/apps/:id` | `apps/docs/app/workspace/apps/[id]/page.tsx` |
 | `/chains`, `/chains/create`, `/chains/edit` | `…/chains/**` |
 | `/contracts`, `/fees`, `/partners` | admin consoles |
 | `/demo` | third-party sample dapp (popup only, no session) |
