@@ -1,4 +1,4 @@
-import { APP_ORIGINS_TTL_MS, isOriginAllowed, parseEnvOrigins } from "./cors";
+import { APP_ORIGINS_TTL_MS, FIRST_PARTY_ORIGINS, isOriginAllowed, parseEnvOrigins } from "./cors";
 
 describe("CORS origin policy", () => {
   const env = ["https://app.pid.peridotvault.com", "http://localhost:3000"];
@@ -46,5 +46,32 @@ describe("CORS origin policy", () => {
 
   it("refreshes app origins on a short TTL (no redeploy for new apps)", () => {
     expect(APP_ORIGINS_TTL_MS).toBeLessThanOrEqual(60_000);
+  });
+
+  it("ships every first-party dual-serve origin built in (ANT-143: stale env cannot dark-out new domains)", () => {
+    const live = (origin: string): boolean => isOriginAllowed(origin, FIRST_PARTY_ORIGINS, []);
+    // New peridot.id hosts work even with an empty env/app list.
+    for (const o of [
+      "https://peridot.id",
+      "https://dashboard.peridot.id",
+      "https://docs.peridot.id",
+      "https://sandbox.peridot.id",
+      "https://sandbox.dashboard.peridot.id",
+      "https://sandbox.docs.peridot.id",
+    ]) {
+      expect(live(o)).toBe(true);
+    }
+    // Old hosts kept live (dual-serve, never removed).
+    for (const o of [
+      "https://app.pid.peridotvault.com",
+      "https://pid.peridotvault.com",
+      "https://app.sandbox.pid.peridotvault.com",
+      "https://sandbox.pid.peridotvault.com",
+    ]) {
+      expect(live(o)).toBe(true);
+    }
+    // Lookalikes still rejected (exact match, no suffix games).
+    expect(live("https://peridot.id.evil.com")).toBe(false);
+    expect(live("https://evilperidot.id")).toBe(false);
   });
 });

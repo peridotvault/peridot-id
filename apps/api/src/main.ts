@@ -5,7 +5,7 @@ import { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
 import { AppModule } from "./app.module";
-import { APP_ORIGINS_TTL_MS, isOriginAllowed, parseEnvOrigins } from "./common/cors";
+import { APP_ORIGINS_TTL_MS, FIRST_PARTY_ORIGINS, isOriginAllowed, parseEnvOrigins } from "./common/cors";
 import { PrismaService } from "./prisma/prisma.service";
 
 async function bootstrap(): Promise<void> {
@@ -22,7 +22,10 @@ async function bootstrap(): Promise<void> {
   app.set("trust proxy", 1);
 
   const successUrl = config.get<string>("CLIENT_SUCCESS_URL", "http://localhost:5173");
-  const staticOrigins = [successUrl, ...parseEnvOrigins(config.get<string>("CORS_ORIGINS", ""))];
+  // Static allow-list = CLIENT_SUCCESS_URL ∪ built-in first-party dual-serve
+  // set ∪ CORS_ORIGINS env. The built-in set (ANT-143) means a stale env can
+  // never dark-out the new domains again; env stays additive, never subtractive.
+  const staticOrigins = [...new Set([successUrl, ...FIRST_PARTY_ORIGINS, ...parseEnvOrigins(config.get<string>("CORS_ORIGINS", ""))])];
   // Registered third-party apps may call the API from their own origins. Refreshed on a
   // short TTL so newly registered apps work without a redeploy.
   let appOrigins: string[] = [];
