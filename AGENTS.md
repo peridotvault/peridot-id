@@ -65,7 +65,7 @@ but never touches the DB schema; deploy applies migrations automatically.)
 Env to set in `apps/api/.env`: `GOOGLE_CLIENT_ID`/`_SECRET` (dev Google
 client with localhost redirect; same key names in every env, values differ —
 prod values live in deploy env), `PID_PROGRAM_ID=G8tPC...`,
-`WEBAUTHN_ORIGINS` includes `http://localhost:3302`, `CLIENT_SUCCESS_URL=http://localhost:3302`,
+`CLIENT_SUCCESS_URL=http://localhost:3302`,
 `CORS_ORIGINS=http://localhost:3302`. Restart the API after `.env` changes (`nest --watch` does not reload env).
 
 Fiat (one namespace `fiat`, see docs/FIAT_LEDGER.md): **DOKU Checkout is

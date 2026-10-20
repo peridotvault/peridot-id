@@ -25,7 +25,8 @@ for Vercel.
 
 `DATABASE_URL` (Postgres **`peridot_id`**), `GOOGLE_CLIENT_ID_DEV`/`_SECRET_DEV`
 (or `_PROD` when `NODE_ENV=production`),
-`WEBAUTHN_ORIGINS`, `CLIENT_SUCCESS_URL`, `CORS_ORIGINS`. See `.env.example`.
+`CLIENT_SUCCESS_URL`, `CORS_ORIGINS`. See `.env.example`.
+(WebAuthn origins always derive from the service-URL set — no env to set.)
 Solana chains/RPC/program id come from the DB chain registry (`GET /v1/chains`,
 seeded by `db:seed`, edited in the workspace admin) — not env.
 

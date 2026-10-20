@@ -82,9 +82,10 @@ services:
       # Additive CORS escape hatch (one-off edges; never required per env).
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       CLIENT_REDIRECT_ALLOWLIST: ${CLIENT_REDIRECT_ALLOWLIST}
-      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-pid.peridotvault.com}
-      # Explicit WebAuthn-origins edge only — derived from the service set otherwise.
-      WEBAUTHN_ORIGINS: ${WEBAUTHN_ORIGINS:-}
+      # WebAuthn RP ID derives from the wallet host by default (generic —
+      # no per-env pin). Pin explicitly only for passkey continuity when
+      # rotating domains with existing credentials.
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
       PID_RELAYER_SECRET: ${PID_RELAYER_SECRET}
       PID_TREASURY_PUBKEY: ${PID_TREASURY_PUBKEY}
       DOKU_MODE: ${DOKU_MODE:-sandbox}

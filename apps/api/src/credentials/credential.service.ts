@@ -96,12 +96,9 @@ export class CredentialService {
   }
 
   private origins(): string[] {
-    // WEBAUTHN_ORIGINS wins when set (explicit edge); otherwise the ONE
-    // service-URL set ∪ the built-in first-party dual-serve set (ANT-193:
-    // nothing per-env to maintain), plus CORS_ORIGINS as a compat fallback
-    // (service defaults are localhost, so tests without any env still work).
-    const explicit = this.config.get<string>("WEBAUTHN_ORIGINS");
-    if (explicit) return parseEnvOrigins(explicit);
+    // Origins always derive from the ONE service-URL set ∪ the built-in
+    // first-party dual-serve set (ANT-193), plus CORS_ORIGINS as a compat
+    // fallback (service defaults are localhost, so tests without env work).
     const get = (key: string, def?: string): unknown => this.config.get(key, def);
     return [
       ...new Set([
