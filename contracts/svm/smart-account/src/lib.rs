@@ -46,7 +46,8 @@ use instructions::{Instruction, InstructionData};
 /// `CiwLJ…`, testnet builds set `D6TpM7…`). Same shape as `declare_id!`
 /// (`ID`, `id()`, `check_id`) so existing `crate::ID` users keep working.
 /// PDA derivation itself uses the runtime `program_id` (`state::verify_pda`),
-/// so existing accounts stay valid across an ID change.
+/// so gate and derivation agree within one binary; same-address rebuilds
+/// (e.g. testnet upgrades) preserve existing accounts.
 pub mod program_id {
     include!(concat!(env!("OUT_DIR"), "/program_id.rs"));
 }

@@ -6,9 +6,11 @@
 //! `declare_id!`). It defaults to the local/devnet address
 //! `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`; testnet builds set
 //! `D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3`. PDA derivation
-//! (`state::verify_pda`) uses the runtime `program_id`, so existing accounts
-//! stay valid across an ID change — only the build-time `ID` (entrypoint gate
-//! + CPI owner) moves.
+//! (`state::verify_pda`) uses the runtime `program_id`, so the gate ID and
+//! derivation cannot split-brain within one binary, and rebuilding for the
+//! same address preserves existing accounts. (A *new* address means new PDAs —
+//! PDAs are bound to (seeds, program id) — so always build with the
+//! `PID_PROGRAM_ID` of the cluster you deploy to.)
 //!
 //! `PID_BACKEND` (base58, the Peridot relayer pubkey for this environment)
 //! becomes `config::BACKEND`. Creation paths (`initialize`, `activate`) require
