@@ -5,7 +5,11 @@
 //! cluster) becomes `program_id::ID` (ANT-211: previously a hardcoded
 //! `declare_id!`). It defaults to the local/devnet address
 //! `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`; testnet builds set
-//! `D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3`. PDA derivation
+//! `D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3`. For named clusters the
+//! default is forbidden: `PID_PROGRAM_ID_REQUIRED=1` (or
+//! `SOLANA_CLUSTER=testnet*/mainnet*`) makes an unset `PID_PROGRAM_ID` a
+//! build-time hard error instead of a silent fallback (ANT-215, Tobias
+//! ANT-212 Finding 3). PDA derivation
 //! (`state::verify_pda`) uses the runtime `program_id`, so the gate ID and
 //! derivation cannot split-brain within one binary, and rebuilding for the
 //! same address preserves existing accounts. (A *new* address means new PDAs —
@@ -105,7 +109,28 @@ fn main() {
     // ANT-211: the program ID is build-configurable so a clean-source checkout
     // can target any cluster. `PID_PROGRAM_ID` unset keeps the local/devnet
     // default; testnet builds set the testnet address.
+    //
+    // ANT-215 (Tobias ANT-212 Finding 3): an unset `PID_PROGRAM_ID` silently
+    // falling back to the default is what bricks testnet builds at runtime.
+    // Deploy jobs for named clusters must fail closed here instead — signal
+    // with either `PID_PROGRAM_ID_REQUIRED=1` or `SOLANA_CLUSTER=testnet*` /
+    // `mainnet*`. Local/devnet builds (neither set) keep the default.
+    let require_explicit = std::env::var("PID_PROGRAM_ID_REQUIRED")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+        || matches!(
+            std::env::var("SOLANA_CLUSTER").unwrap_or_default().as_str(),
+            "testnet" | "testnet-beta" | "mainnet" | "mainnet-beta"
+        );
     let program_id_src = std::env::var("PID_PROGRAM_ID").unwrap_or_else(|_| {
+        if require_explicit {
+            panic!(
+                "PID_PROGRAM_ID must be set explicitly for this cluster \
+                 (PID_PROGRAM_ID_REQUIRED=1 / SOLANA_CLUSTER={:?}); refusing \
+                 the local/devnet default {DEFAULT_PROGRAM_ID}",
+                std::env::var("SOLANA_CLUSTER").unwrap_or_default()
+            );
+        }
         println!("cargo:warning=PID_PROGRAM_ID unset — using local/devnet default {DEFAULT_PROGRAM_ID}");
         DEFAULT_PROGRAM_ID.to_string()
     });
@@ -133,4 +158,6 @@ fn main() {
     .unwrap();
     println!("cargo:warning=PID_PROGRAM_ID baked: {}", program_id_src.trim());
     println!("cargo:rerun-if-env-changed=PID_PROGRAM_ID");
+    println!("cargo:rerun-if-env-changed=PID_PROGRAM_ID_REQUIRED");
+    println!("cargo:rerun-if-env-changed=SOLANA_CLUSTER");
 }

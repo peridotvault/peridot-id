@@ -100,6 +100,23 @@ solana program upgrade target/deploy/peridot_smart_account.so \
 node tests/integration.mjs D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3
 ```
 
+Deploy guard (ANT-215, Tobias ANT-212 Finding 3): before `cargo build-sbf`,
+assert the env equals the cluster keypair — a typo that still decodes to 32
+bytes builds green and bricks at runtime, and only this equality check catches
+it. Same `PID_PROGRAM_ID` value for guard and build:
+
+```sh
+PID_PROGRAM_ID=D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3 \
+  ../assert-program-id.sh --keypair <testnet-keypair.json> --require-explicit
+PID_PROGRAM_ID=D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3 cargo build-sbf
+```
+
+`--require-explicit` forbids the silent local/devnet default; `build.rs`
+enforces the same rule at compile time when `PID_PROGRAM_ID_REQUIRED=1` (or
+`SOLANA_CLUSTER=testnet*/mainnet*`) is set. 3am rule: if the guard fails with
+a mismatch, do NOT deploy — re-export the exact pubkey
+(`solana-keygen pubkey <testnet-keypair.json>`) and rebuild.
+
 Current devnet program id: `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
 
 ## One wallet on every cluster (same program id)
