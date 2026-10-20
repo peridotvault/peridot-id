@@ -117,7 +117,7 @@ async function main() {
   const direct = new Adapter(new Rpc(RPC));
   const authorityComp = Buffer.from(AUTHORITY_B64, "base64url");
   if (!(await direct.isInitialized(PID))) {
-    const initSig = await direct.initialize(PID, authorityComp, RP_ID_HASH, backend, signer);
+    const initSig = await direct.initialize(PID, authorityComp, backend, signer);
     await conn.confirmTransaction(initSig, "confirmed");
     console.log("initialize OK:", initSig);
   } else {
