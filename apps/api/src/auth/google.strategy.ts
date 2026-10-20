@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PassportStrategy } from "@nestjs/passport";
 import { Strategy, VerifyCallback } from "passport-google-oauth20";
+import { DEFAULT_API_DOMAIN, googleCallbackUrl } from "../common/app-config";
 import { AuthService, GoogleProfile } from "./auth.service";
 
 export interface GoogleOAuthOptions {
@@ -64,15 +65,14 @@ export const GOOGLE_OAUTH_OPTIONS = Symbol("GOOGLE_OAUTH_OPTIONS");
 export function googleOAuthOptionsFactory(config: ConfigService): GoogleOAuthOptions | null {
   // One identical key set in every environment (local/test/prod) — only the
   // values differ per env. No _DEV/_PROD suffix variants.
+  // Callback is derived from API_DOMAIN (ANT-184): <API_DOMAIN>/v1/auth/google/callback.
+  // An explicit GOOGLE_CALLBACK_URL still wins when set (dual-serve edge), but
+  // examples no longer carry it — set API_DOMAIN instead.
   const clientID = config.get<string>("GOOGLE_CLIENT_ID", "");
   const clientSecret = config.get<string>("GOOGLE_CLIENT_SECRET", "");
   if (!clientID || !clientSecret) return null;
-  return {
-    clientID,
-    clientSecret,
-    callbackURL: config.get<string>(
-      "GOOGLE_CALLBACK_URL",
-      "http://localhost:3300/v1/auth/google/callback",
-    ),
-  };
+  const apiDomain = config.get<string>("API_DOMAIN", DEFAULT_API_DOMAIN) ?? DEFAULT_API_DOMAIN;
+  const override = config.get<string>("GOOGLE_CALLBACK_URL", "");
+  const callbackURL = override ? override : googleCallbackUrl(apiDomain);
+  return { clientID, clientSecret, callbackURL };
 }

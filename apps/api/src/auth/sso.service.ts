@@ -10,6 +10,7 @@ import ms from "ms";
 import { randomBytes } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
+import { SSO_EXCHANGE_TOKEN_TTL } from "../common/app-config";
 import { PidAppsService } from "./apps.service";
 
 const CODE_TTL_MS = 5 * 60 * 1000;
@@ -23,7 +24,7 @@ export interface SsoIdentity {
   /**
    * App-scoped bearer token for the relying party's backend to call PeridotID
    * read APIs (e.g. GET /v1/fiat/balance) on the identity's behalf. Never sent
-   * to the browser by the RP. TTL via SSO_EXCHANGE_TOKEN_TTL.
+   * to the browser by the RP. TTL hardcoded via app-config SSO_EXCHANGE_TOKEN_TTL (ANT-184).
    */
   accessToken: string;
   /** accessToken lifetime in seconds (for RP-side caching). */
@@ -222,7 +223,7 @@ export class SsoService {
 
     // App-scoped bearer for RP backend reads (balance/ledger). The RP keeps it
     // server-side; the browser only ever sees the RP's own session.
-    const ttl = this.config.get<string>("SSO_EXCHANGE_TOKEN_TTL", "30d");
+    const ttl = SSO_EXCHANGE_TOKEN_TTL;
     const accessToken = await this.jwt.signAsync(
       // scope:"read" — the RP backend may only GET (balance/ledger), never write.
       { sub: row.pid, type: "access", scope: "read", ...(row.clientId ? { app: row.clientId } : {}) },

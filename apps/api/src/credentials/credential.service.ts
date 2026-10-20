@@ -15,6 +15,7 @@ import {
 import { Authority, AuthorityStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
+import { WEBAUTHN_RP_NAME } from "../common/app-config";
 import { coseToCompressedBase64url } from "./cose";
 
 const SECP256R1_ALG = -7; // ES256 = ECDSA P-256 (secp256r1) — owner passkey alg
@@ -94,12 +95,16 @@ export class CredentialService {
   }
 
   private origins(): string[] {
-    const raw = this.config.get<string>("WEBAUTHN_ORIGINS") ?? "http://localhost:3300,http://localhost:5173";
+    // WEBAUTHN_ORIGINS wins when set; otherwise reuse the CORS allow-list
+    // (ANT-184 dedupe: one origin list to maintain per env). Final fallback
+    // is the local-dev default for tests without any env.
+    const raw =
+      this.config.get<string>("WEBAUTHN_ORIGINS") ?? this.config.get<string>("CORS_ORIGINS") ?? "http://localhost:3300,http://localhost:5173";
     return raw.split(",").map((s) => s.trim()).filter(Boolean);
   }
 
   private rpName(): string {
-    return this.config.get<string>("WEBAUTHN_RP_NAME") ?? "PeridotID";
+    return WEBAUTHN_RP_NAME;
   }
 
   /**

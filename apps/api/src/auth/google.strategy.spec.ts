@@ -35,6 +35,33 @@ describe("googleOAuthOptionsFactory", () => {
     });
   });
 
+  it("derives the callback from API_DOMAIN (ANT-184)", () => {
+    const opts = googleOAuthOptionsFactory(
+      config({
+        GOOGLE_CLIENT_ID: "my-id",
+        GOOGLE_CLIENT_SECRET: "my-secret",
+        API_DOMAIN: "https://api.pid.peridotvault.com",
+      }),
+    );
+    expect(opts).toEqual({
+      clientID: "my-id",
+      clientSecret: "my-secret",
+      callbackURL: "https://api.pid.peridotvault.com/v1/auth/google/callback",
+    });
+  });
+
+  it("prefers an explicit GOOGLE_CALLBACK_URL override when set", () => {
+    const opts = googleOAuthOptionsFactory(
+      config({
+        GOOGLE_CLIENT_ID: "my-id",
+        GOOGLE_CLIENT_SECRET: "my-secret",
+        API_DOMAIN: "https://api.pid.peridotvault.com",
+        GOOGLE_CALLBACK_URL: "https://api.pid.peridotvault.com/v1/auth/google/callback",
+      }),
+    );
+    expect(opts?.callbackURL).toBe("https://api.pid.peridotvault.com/v1/auth/google/callback");
+  });
+
   it("returns null when id or secret is missing", () => {
     expect(googleOAuthOptionsFactory(config({}))).toBeNull();
     expect(googleOAuthOptionsFactory(config({ GOOGLE_CLIENT_ID: "only-id" }))).toBeNull();

@@ -70,8 +70,8 @@ function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
 
 function setup() {
   const config = solanaRelayerConfig({
+    // ANT-184: poll/confirm-interval are hardcoded constants; only attempts stays env-tunable.
     PID_ACTIVATION_CONFIRM_ATTEMPTS: "2",
-    PID_ACTIVATION_CONFIRM_INTERVAL_MS: "5",
   });
   const security = mockSecurity();
   const prisma = {
