@@ -131,10 +131,16 @@ const execP = permExecPayload({
   dataHash: keccak(callData), deadline, feePolicyVersion: 1,
 });
 const e = assertion(session, execP);
-// Same GasAnomaly calibration note as anvil-v3-e2e.mjs: attest a fixed
-// bound-compliant fee (the check admits ~2× verify-prefix gas; whole-tx
-// estimates exceed it on this anvil).
-const execFee = 30_000n * GAS_PRICE;
+// Post-ANT-206 the on-chain GasAnomaly bound measures the full execute
+// frame, so honest estimate x price attestation passes (same pattern as
+// anvil-v3-e2e.mjs). Draft with zero fee, estimate, rebuild — the PERM
+// payload binds policy only, so no re-signing is needed.
+const draftExec = executeWithPermissionData({
+  permissionId: pid, target: scope.target, value: 0n, data: callData, deadline, seq: 0,
+  feePolicyVersion: 1, networkFee: 0n,
+  authenticatorData: e.authData, clientDataJSON: e.clientDataJSON, r: e.r, s: e.s,
+});
+const execFee = BigInt(await rpc("eth_estimateGas", [{ from: RELAYER, to: account, data: draftExec }])) * GAS_PRICE;
 const execData = executeWithPermissionData({
   permissionId: pid, target: scope.target, value: 0n, data: callData, deadline, seq: 0,
   feePolicyVersion: 1, networkFee: execFee,
@@ -185,9 +191,14 @@ const exec2P = permExecPayload({
   dataHash: emptyHash, deadline, feePolicyVersion: 1,
 });
 const e2 = assertion(session, exec2P);
-// Bound-compliant fixed fee (see note above); the draft/estimate dance would
-// exceed the 2×verify-prefix bound on this anvil.
-const exec2Fee = 30_000n * GAS_PRICE;
+// Honest estimate-based attestation (post-ANT-206 full-frame bound); the
+// draft/estimate dance fits comfortably inside 2x the whole-tx cost.
+const exec2Draft = executeWithPermissionData({
+  permissionId: pid2, target: recipient, value: perTx, data: new Uint8Array(0), deadline, seq: 0,
+  feePolicyVersion: 1, networkFee: 0n,
+  authenticatorData: e2.authData, clientDataJSON: e2.clientDataJSON, r: e2.r, s: e2.s,
+});
+const exec2Fee = BigInt(await rpc("eth_estimateGas", [{ from: RELAYER, to: account, data: exec2Draft }])) * GAS_PRICE;
 const balBefore = BigInt(await rpc("eth_getBalance", [recipient, "latest"]));
 const exec2Rcpt = await sendTx({
   from: RELAYER, to: account,

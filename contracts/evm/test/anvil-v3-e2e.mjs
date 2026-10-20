@@ -107,16 +107,18 @@ const exePayload = exePayloadV3({
   dataHash: keccak(new Uint8Array(0)), deadline, feePolicyVersion: 1,
 });
 const exe = assertion(keyJson, exePayload);
-// NOTE (ANT-200 finding, flagged to Tobias): the on-chain GasAnomaly bound
-// admits at most 2× the verify-prefix gas, while backend-style
-// estimate×price attestation covers the whole tx (verify + call + payouts).
-// On this anvil (native P-256 precompile) the bound admits ~46-50k gas-worth
-// but the honest estimate is ~185k, so estimate-based attestation reverts.
-// This is a PRE-EXISTING calibration gap (not an ANT-197 regression — the
-// removal shaved ~2k gas off verify; the gap is ~130k). Attest a fixed
-// bound-compliant fee here; activation above keeps estimate-based attestation
-// (its check measures the full frame, so it admits honest estimates).
-const EXE_FEE = 30_000n * GAS_PRICE;
+// Post-ANT-206 the on-chain GasAnomaly bound measures the full execute
+// frame (2x verify + call + payouts), so honest backend-style
+// estimate x price attestation passes. Build with a zero placeholder,
+// estimate like the backend, rebuild with the attested fee (the V3 payload
+// binds policy only, so no re-signing is needed).
+const draftExe = executeData({
+  to: dest, value, data: new Uint8Array(0), deadline, feePolicyVersion: 1,
+  networkFee: 0n, authData: exe.authData, clientDataJSON: exe.clientDataJSON,
+  r: exe.r, s: exe.s,
+});
+const exeEst = BigInt(await rpc("eth_estimateGas", [{ from: RELAYER, to: account, data: draftExe }]));
+const EXE_FEE = exeEst * GAS_PRICE;
 const EXE_PROTO = PROTOCOL_FEE_OF(EXE_FEE);
 const exeData = executeData({
   to: dest, value, data: new Uint8Array(0), deadline, feePolicyVersion: 1,
