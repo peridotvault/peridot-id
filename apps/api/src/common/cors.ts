@@ -27,8 +27,8 @@ export const FIRST_PARTY_ORIGINS: string[] = [
   "https://sandbox.pid.peridotvault.com",
   // Sandbox new (ANT-99 cutover).
   "https://sandbox.peridot.id",
-  "https://sandbox.dashboard.peridot.id",
-  "https://sandbox.docs.peridot.id",
+  "https://sandbox-dashboard.peridot.id",
+  "https://sandbox-docs.peridot.id",
 ];
 
 /** Split a comma-separated env var into origins (trailing slashes stripped). */

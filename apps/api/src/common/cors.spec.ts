@@ -56,8 +56,8 @@ describe("CORS origin policy", () => {
       "https://dashboard.peridot.id",
       "https://docs.peridot.id",
       "https://sandbox.peridot.id",
-      "https://sandbox.dashboard.peridot.id",
-      "https://sandbox.docs.peridot.id",
+      "https://sandbox-dashboard.peridot.id",
+      "https://sandbox-docs.peridot.id",
     ]) {
       expect(live(o)).toBe(true);
     }

@@ -35,7 +35,7 @@ PROJECT="peridot-id"
 if [ "$ENV" = "test" ]; then
   export ENV_SUFFIX="${ENV_SUFFIX:-sandbox.}"
   export NAMESPACE="${NAMESPACE:--test}"
-  export NEW_API_HOST="${NEW_API_HOST:-sandbox.api.peridot.id}"
+  export NEW_API_HOST="${NEW_API_HOST:-sandbox-api.peridot.id}"
 else
   export ENV_SUFFIX="${ENV_SUFFIX:-}"
   export NAMESPACE="${NAMESPACE:-}"
@@ -50,7 +50,7 @@ esac
 
 # ANT-99 dual-serve new hosts (DevOps ANT-118): deploy meta, not secrets —
 # hardcoded per stack like ENV_SUFFIX above. Pre-set env vars win (override).
-# NEW_API_HOST is owned by ANT-116 (api.peridot.id / sandbox.api.peridot.id);
+# NEW_API_HOST is owned by ANT-116 (api.peridot.id / sandbox-api.peridot.id);
 # the dashboard API default below tracks the same canonical names so this stack
 # stays correct even if that var is unset.
 # NEW_DOCS_HOST (ANT-137) is the Mintlify target for the old-docs cutover
@@ -58,9 +58,9 @@ esac
 # hardening as NEW_API_HOST so a bad value fails fast here, not as an open redirect.
 if [ "$ENV" = "test" ]; then
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-sandbox.peridot.id}"
-  export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox.dashboard.peridot.id}"
-  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-sandbox.docs.peridot.id}"
-  export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox.api.peridot.id}"
+  export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox-dashboard.peridot.id}"
+  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-sandbox-docs.peridot.id}"
+  export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox-api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
   export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-sandbox}"
   export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://dashboard.peridot.id}"
@@ -71,7 +71,7 @@ else
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://peridot.id}"
   export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-production}"
-  export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://sandbox.dashboard.peridot.id}"
+  export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://sandbox-dashboard.peridot.id}"
 fi
 case "$NEW_DOCS_HOST" in
   *[!a-zA-Z0-9.-]* | "" | .* | *.) echo "error: NEW_DOCS_HOST invalid: '$NEW_DOCS_HOST'" >&2; exit 1 ;;

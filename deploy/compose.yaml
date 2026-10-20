@@ -12,10 +12,10 @@
 #            apps/docs is the Mintlify source (board user deploys manually).
 #            The old pid.peridotvault.com docs container keeps running until the
 #            next up.sh run removes it — sequence Mintlify-live BEFORE that.
-#   test stack (up.sh test, ENV_SUFFIX=sandbox., NEW_API_HOST=sandbox.api.peridot.id):
-#     API    api.sandbox.pid.peridotvault.com + sandbox.api.peridot.id → nest :3301
+#   test stack (up.sh test, ENV_SUFFIX=sandbox., NEW_API_HOST=sandbox-api.peridot.id):
+#     API    api.sandbox.pid.peridotvault.com + sandbox-api.peridot.id → nest :3301
 #     (wallet new host is frontend turf — ANT-117; DevOps DNS/TLS — ANT-118;
-#      docs new host sandbox.docs.peridot.id is Mintlify-hosted, same sequencing)
+#      docs new host sandbox-docs.peridot.id is Mintlify-hosted, same sequencing)
 #
 # main: cp deploy/.env.main.example deploy/.env.main && ./deploy/up.sh main
 #
@@ -111,7 +111,7 @@ services:
     labels:
       - "traefik.enable=true"
       # Dual-serve (ANT-116): old host stays first (existing integrations unaffected);
-      # NEW_API_HOST (up.sh: api.peridot.id / sandbox.api.peridot.id) serves alongside.
+      # NEW_API_HOST (up.sh: api.peridot.id / sandbox-api.peridot.id) serves alongside.
       - "traefik.http.routers.pid-api${NAMESPACE}.rule=Host(`api.${ENV_SUFFIX}pid.peridotvault.com`) || Host(`${NEW_API_HOST:-api.peridot.id}`)"
       - "traefik.http.routers.pid-api${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.pid-api${NAMESPACE}.tls.certresolver=letsencrypt"
@@ -125,7 +125,7 @@ services:
   # backend (zero new images, zero new ports). Next up.sh --remove-orphans
   # drops the stale pre-migration docs container; this router is what keeps
   # old links alive afterwards. Sequencing: run up.sh only after Mintlify
-  # serves docs.peridot.id + sandbox.docs.peridot.id.
+  # serves docs.peridot.id + sandbox-docs.peridot.id.
 
   app:
     build:

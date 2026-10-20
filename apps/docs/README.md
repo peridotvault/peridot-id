@@ -3,9 +3,9 @@
 Mintlify docs source. The board user deploys this to Mintlify manually
 (ANT-124 / board decision 2026-10-19): connect the `peridot-id` repo in
 Mintlify, set the docs path to `apps/docs`, and attach custom
-domains `docs.peridot.id` (prod) + `sandbox.docs.peridot.id` (sandbox)
+domains `docs.peridot.id` (prod) + `sandbox-docs.peridot.id` (sandbox)
 via CNAME at Hostinger. Do NOT point docs hosts at the VPS — PR #20
-deliberately does not route them; `docs.peridot.id` / `sandbox.docs.peridot.id`
+deliberately does not route them; `docs.peridot.id` / `sandbox-docs.peridot.id`
 are NXDOMAIN until the Mintlify CNAMEs land.
 
 ## Layout
@@ -48,7 +48,7 @@ old docs service mapping `/docs/*` → the Mintlify host (strip the prefix):
 | `pid.peridotvault.com/docs` | `docs.peridot.id/` |
 | `pid.peridotvault.com/docs/getting-started` | `docs.peridot.id/getting-started` |
 | `pid.peridotvault.com/docs/api` | `docs.peridot.id/api/overview` |
-| `sandbox.pid.peridotvault.com/docs*` | `sandbox.docs.peridot.id/*` (same mapping) |
+| `sandbox.pid.peridotvault.com/docs*` | `sandbox-docs.peridot.id/*` (same mapping) |
 
 Suggested implementation: `redirects()` in `apps/docs/next.config.mts` gated
 by `NEXT_PUBLIC_MINTLIFY_DOCS_URL` (e.g. `https://docs.peridot.id`), so the
@@ -78,4 +78,4 @@ AND new docs URLs serve the same content. Repro:
 3. `GET https://docs.peridot.id/api/overview` → 200; an endpoint page
    generated from `openapi.yaml` (e.g. `POST /v1/auth/login`) renders.
 4. Sandbox pair mirrors prod (`sandbox.pid.peridotvault.com/docs*` vs
-   `sandbox.docs.peridot.id/*`).
+   `sandbox-docs.peridot.id/*`).
