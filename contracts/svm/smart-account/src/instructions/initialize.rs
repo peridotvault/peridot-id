@@ -12,7 +12,6 @@ use crate::{
     config::BACKEND,
     errors::PeridotError,
     state::{verify_pda, SmartAccountMut, STATE_LEN_V2},
-    ID,
 };
 use pinocchio::{
     account::AccountView,
@@ -113,10 +112,13 @@ pub fn process(
     let signer = pinocchio::cpi::Signer::from(&seeds[..]);
 
     // Create the PDA (funded by rent_payer, owned by this program, PDA signs via seeds).
+    // Owner is the runtime `program_id` (ANT-211: equals the baked `ID` — the
+    // entrypoint rejects anything else — but the runtime value is the authority
+    // so the two can never diverge).
     create_account_with_minimum_balance_signed(
         smart_account,
         STATE_LEN_V2,
-        &ID,
+        program_id,
         rent_payer,
         None,
         &[signer],

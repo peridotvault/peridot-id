@@ -26,7 +26,6 @@ use crate::{
     errors::PeridotError,
     fee::{policy_protocol_bps, split_attested_fee, total_fee},
     state::{verify_pda, SmartAccountMut, STATE_LEN_V2},
-    ID,
 };
 use pinocchio::{
     account::AccountView,
@@ -120,10 +119,12 @@ pub fn process(
 
     // Claim the account: create (if empty) or top-up→assign→allocate (if pre-funded).
     // Payer = relayer. Rent is paid only up to the rent-exempt amount for the state.
+    // Owner is the runtime `program_id` (ANT-211: see initialize.rs — same value,
+    // no second source of truth).
     create_account_with_minimum_balance_signed(
         smart_account,
         STATE_LEN_V2,
-        &ID,
+        program_id,
         relayer,
         None,
         &[signer.clone()],
