@@ -337,7 +337,6 @@ contract PeridotAccount {
         uint256 bps = _policyProtocolBps(feePolicyVersion);
         bytes32 expected = _executePayload(to, value, data, deadline, feePolicyVersion);
         _verify(expected, authenticatorData, clientDataJSON, r, s);
-        _checkGasSanity(startGas, networkFee);
         uint256 protocolFee = _protocolFee(networkFee, bps);
         if (address(this).balance < value + networkFee + protocolFee) revert InsufficientFunds();
         nonce++;
@@ -351,6 +350,11 @@ contract PeridotAccount {
             (ok, ) = factory.call{value: protocolFee}("");
             if (!ok) revert CallFailed();
         }
+        // Full-frame sanity bound: measured AFTER the call + payouts so the
+        // bound covers the whole execution (ANT-206). A pre-call check only
+        // sees the verify prefix and rejects honest estimate-based
+        // attestation. Revert rolls the call + payouts back atomically.
+        _checkGasSanity(startGas, networkFee);
         emit Executed(to, value, networkFee, protocolFee, nonce - 1);
     }
 
@@ -417,11 +421,20 @@ contract PeridotAccount {
         return (networkFee * bps) / 10000;
     }
 
-    /// @dev Sanity-bound the attested networkFee against measured execution gas.
-    /// A bound, not pricing: covers verification/payout overhead inside the
-    /// measured region plus testnet L2 data fees with headroom. Prevents wild
-    /// over-attestation; exact attestation-vs-actual matching is verified by
-    /// receipt reconciliation (backend/indexer), which also carries L1-fee oracles.
+    /// @dev Sanity-bound the attested networkFee against the FULL execution
+    /// frame: `startGas` is captured on entry and the check runs AFTER the
+    /// target call + fee payouts, so `measured` covers verification, the
+    /// untrusted call, and both payouts. A bound, not pricing: covers
+    /// verification/payout overhead plus testnet L2 data fees with headroom.
+    /// Prevents wild over-attestation; exact attestation-vs-actual matching
+    /// is verified by receipt reconciliation (backend/indexer), which also
+    /// carries L1-fee oracles. A pre-call check only measures the verify
+    /// prefix and rejects honest estimate-based attestation (ANT-206).
+    /// @dev Revert is atomic: a bound violation rolls back the target call
+    /// and both payouts (same pattern as `PeridotFactory.deployAndInit`,
+    /// which checks after its sub-call). The check is view-only and runs
+    /// under the caller's `nonReentrant` lock; moving it post-call changes
+    /// no state ordering (effects still precede the untrusted call).
     function _checkGasSanity(uint256 startGas, uint256 networkFee) internal view {
         uint256 measured = (startGas - gasleft()) * tx.gasprice * GAS_SANITY_NUMERATOR;
         if (networkFee > measured) revert GasAnomaly();
@@ -757,7 +770,6 @@ contract PeridotAccount {
         _verifyWithKey(p.sessionX, p.sessionY, expected, a.authenticatorData, a.clientDataJSON, a.r, a.s);
         _enforceScope(p, a.target, a.value, a.data);
         p.seq = a.seq + 1;
-        _checkGasSanity(startGas, a.networkFee);
         uint256 protocolFee = _protocolFee(a.networkFee, bps);
         if (address(this).balance < a.value + a.networkFee + protocolFee) revert InsufficientFunds();
         (bool ok, bytes memory result) = a.target.call{value: a.value}(a.data);
@@ -770,6 +782,9 @@ contract PeridotAccount {
             (ok, ) = factory.call{value: protocolFee}("");
             if (!ok) revert CallFailed();
         }
+        // Full-frame sanity bound (ANT-206): see `execute` — pre-call checks
+        // reject honest estimate-based attestation on fast precompiles.
+        _checkGasSanity(startGas, a.networkFee);
         emit PermissionExecuted(a.permissionId, a.seq, a.target, a.value);
         _lastResult = result;
     }
@@ -1008,7 +1023,6 @@ contract PeridotAccount {
             )
         );
         _verify(expected, a.authenticatorData, a.clientDataJSON, a.r, a.s);
-        _checkGasSanity(startGas, a.networkFee);
         uint256 protocolFee = _protocolFee(a.networkFee, bps);
         if (address(this).balance < a.value + a.networkFee + protocolFee) revert InsufficientFunds();
         nonce++;
@@ -1022,6 +1036,9 @@ contract PeridotAccount {
             (ok, ) = factory.call{value: protocolFee}("");
             if (!ok) revert CallFailed();
         }
+        // Full-frame sanity bound (ANT-206): see `execute` — pre-call checks
+        // reject honest estimate-based attestation on fast precompiles.
+        _checkGasSanity(startGas, a.networkFee);
         emit Executed(a.target, a.value, a.networkFee, protocolFee, nonce - 1);
     }
 
