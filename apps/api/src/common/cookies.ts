@@ -2,7 +2,7 @@ import { Response } from "express";
 import { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
 import ms from "ms";
-import { ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL } from "./app-config";
+import { ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, apiServesHttps } from "./app-config";
 
 export const ACCESS_COOKIE = "pid_access";
 export const REFRESH_COOKIE = "pid_refresh";
@@ -25,12 +25,39 @@ export function accountRefreshCookieNames(cookies: Record<string, string> | unde
   return Object.keys(cookies ?? {}).filter((n) => n.startsWith(ACCOUNT_REFRESH_PREFIX));
 }
 
+/**
+ * Cookie attributes derived from the ONE service-URL set (ANT-193):
+ * - `secure` from the API origin protocol (https in every deployed env),
+ *   explicit COOKIE_SECURE wins when set (edge: http API behind https proxy).
+ * - `domain` defaults to host-only (dual-serve safe: a Domain suffix set from
+ *   one dual-serve host is silently dropped on the other — see compose.yaml);
+ *   explicit COOKIE_DOMAIN wins when set (edge: cross-subdomain visibility).
+ * - `sameSite` defaults to lax (same-site subdomains included); explicit
+ *   COOKIE_SAMESITE wins when set (edge: embedded cross-site flows).
+ */
+function cookieAttrs(config: ConfigService): { secure: boolean; domain: string; sameSite: "lax" | "strict" | "none" } {
+  const get = (key: string, def?: string): unknown => config.get(key, def);
+  const secureRaw = config.get<string>("COOKIE_SECURE", "");
+  const secure = secureRaw ? secureRaw === "true" : apiServesHttps(get);
+  return {
+    secure,
+    domain: config.get<string>("COOKIE_DOMAIN", ""),
+    sameSite: config.get<string>("COOKIE_SAMESITE", "lax") as "lax" | "strict" | "none",
+  };
+}
+
 function baseOpts(config: ConfigService): Record<string, unknown> {
-  const secure = config.get<string>("COOKIE_SECURE", "false") === "true";
-  const domain = config.get<string>("COOKIE_DOMAIN", "");
-  const sameSite = config.get<string>("COOKIE_SAMESITE", "lax") as "lax" | "strict" | "none";
+  const { secure, domain, sameSite } = cookieAttrs(config);
   const opts: Record<string, unknown> = { httpOnly: true, sameSite, secure };
   // Omitting `domain` for localhost avoids a known browser cookie-rejection gotcha.
+  if (domain && domain !== "localhost") opts.domain = domain;
+  return opts;
+}
+
+/** Domain attribute for cookie *clearing* (must match the `domain` used at set time). */
+function clearDomain(config: ConfigService): Record<string, unknown> {
+  const domain = config.get<string>("COOKIE_DOMAIN", "");
+  const opts: Record<string, unknown> = {};
   if (domain && domain !== "localhost") opts.domain = domain;
   return opts;
 }
@@ -60,9 +87,7 @@ export function setAccountRefreshCookie(res: Response, config: ConfigService, pi
 }
 
 export function clearAccountRefreshCookie(res: Response, config: ConfigService, pid: string): void {
-  const domain = config.get<string>("COOKIE_DOMAIN", "");
-  const opts: Record<string, unknown> = { path: REFRESH_PATH };
-  if (domain && domain !== "localhost") opts.domain = domain;
+  const opts: Record<string, unknown> = { path: REFRESH_PATH, ...clearDomain(config) };
   res.clearCookie(accountRefreshCookieName(pid), opts);
 }
 
@@ -96,34 +121,24 @@ export function setScopedAuthCookies(res: Response, config: ConfigService, scope
 }
 
 export function clearScopedAuthCookies(res: Response, config: ConfigService, scope: string): void {
-  const domain = config.get<string>("COOKIE_DOMAIN", "");
-  const opts: Record<string, unknown> = {};
-  if (domain && domain !== "localhost") opts.domain = domain;
+  const opts: Record<string, unknown> = { ...clearDomain(config) };
   res.clearCookie(scopeAccessCookie(scope), opts);
   res.clearCookie(scopeRefreshCookie(scope), { ...opts, path: REFRESH_PATH });
 }
 
 export function clearAuthCookies(res: Response, config: ConfigService): void {
-  const domain = config.get<string>("COOKIE_DOMAIN", "");
-  const opts: Record<string, unknown> = {};
-  if (domain && domain !== "localhost") opts.domain = domain;
+  const opts: Record<string, unknown> = { ...clearDomain(config) };
   res.clearCookie(ACCESS_COOKIE, opts);
   res.clearCookie(REFRESH_COOKIE, { ...opts, path: REFRESH_PATH });
 }
 
 /** Pending-claim ticket cookie (opaque ticket id, 10 min, auth paths only). */
 export function setClaimCookie(res: Response, config: ConfigService, ticketId: string): void {
-  const secure = config.get<string>("COOKIE_SECURE", "false") === "true";
-  const domain = config.get<string>("COOKIE_DOMAIN", "");
-  const sameSite = config.get<string>("COOKIE_SAMESITE", "lax") as "lax" | "strict" | "none";
-  const opts: Record<string, unknown> = { httpOnly: true, sameSite, secure, path: REFRESH_PATH, maxAge: CLAIM_TTL_MS };
-  if (domain && domain !== "localhost") opts.domain = domain;
+  const opts = { ...baseOpts(config), path: REFRESH_PATH, maxAge: CLAIM_TTL_MS };
   res.cookie(CLAIM_COOKIE, ticketId, opts);
 }
 
 export function clearClaimCookie(res: Response, config: ConfigService): void {
-  const domain = config.get<string>("COOKIE_DOMAIN", "");
-  const opts: Record<string, unknown> = { path: REFRESH_PATH };
-  if (domain && domain !== "localhost") opts.domain = domain;
+  const opts: Record<string, unknown> = { path: REFRESH_PATH, ...clearDomain(config) };
   res.clearCookie(CLAIM_COOKIE, opts);
 }

@@ -10,7 +10,7 @@ import ms from "ms";
 import { randomBytes } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
-import { SSO_EXCHANGE_TOKEN_TTL } from "../common/app-config";
+import { SSO_EXCHANGE_TOKEN_TTL, resolveServiceUrls, serviceOrigins } from "../common/app-config";
 import { PidAppsService } from "./apps.service";
 
 const CODE_TTL_MS = 5 * 60 * 1000;
@@ -109,12 +109,24 @@ export class SsoService {
     private readonly jwt: JwtService,
   ) {}
 
-  /** Allowed origins for cross-domain redirects (e.g. Live2Dev). */
+  /**
+   * Allowed origins for cross-domain redirects (e.g. Live2Dev). The ONE
+   * service-URL set is always included (first-party needs no maintenance);
+   * CLIENT_REDIRECT_ALLOWLIST stays additive for third-party relying parties
+   * (the real per-env edge — external hosts we don't own).
+   */
   allowlist(): string[] {
-    return (this.config.get<string>("CLIENT_REDIRECT_ALLOWLIST", "") ?? "")
-      .split(",")
-      .map((s) => s.trim().replace(/\/+$/, ""))
-      .filter(Boolean);
+    const get = (key: string, def?: string): unknown => this.config.get(key, def);
+    const firstParty = serviceOrigins(resolveServiceUrls(get));
+    return [
+      ...new Set([
+        ...firstParty,
+        ...(this.config.get<string>("CLIENT_REDIRECT_ALLOWLIST", "") ?? "")
+          .split(",")
+          .map((s) => s.trim().replace(/\/+$/, ""))
+          .filter(Boolean),
+      ]),
+    ];
   }
 
   /** True when `returnTo` is an allowed origin + any path. */

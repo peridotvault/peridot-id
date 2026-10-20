@@ -4,6 +4,7 @@ import { PassportStrategy } from "@nestjs/passport";
 import { Request } from "express";
 import { ExtractJwt, Strategy } from "passport-jwt";
 import { cookieExtractor } from "../common/jwt-auth.guard";
+import { resolveServiceUrls } from "../common/app-config";
 import { AuthenticatedUser } from "../common/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
 import { AccessTokenPayload } from "./auth.service";
@@ -11,10 +12,12 @@ import { AccessTokenPayload } from "./auth.service";
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
   constructor(config: ConfigService, private readonly prisma: PrismaService) {
-    const successUrl = config.get<string>("CLIENT_SUCCESS_URL");
+    // Wallet origin (WALLET_URL, deprecated CLIENT_SUCCESS_URL fallback)
+    // restricts the unscoped wallet session to the wallet's own origin.
+    const walletUrl = resolveServiceUrls((key, def) => config.get(key, def)).walletUrl;
     let walletOrigin: string | null = null;
     try {
-      walletOrigin = successUrl ? new URL(successUrl).origin : null;
+      walletOrigin = new URL(walletUrl).origin;
     } catch {
       walletOrigin = null;
     }

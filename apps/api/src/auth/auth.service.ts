@@ -16,7 +16,7 @@ import {
   setAuthCookies,
   setScopedAuthCookies,
 } from "../common/cookies";
-import { ACCESS_TOKEN_TTL, GOOGLE_FAMILY_MAX_AGE, PASSKEY_FAMILY_MAX_AGE, REFRESH_TOKEN_TTL } from "../common/app-config";
+import { ACCESS_TOKEN_TTL, APP_TOKEN_TTL, GOOGLE_FAMILY_MAX_AGE, PASSKEY_FAMILY_MAX_AGE, REFRESH_TOKEN_TTL } from "../common/app-config";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -76,7 +76,7 @@ export class AuthService {
    * no browser session. The token carries `app`, and AdminGuard rejects it.
    */
   async issueAppAccessToken(ownerPid: string, clientId: string): Promise<{ accessToken: string; expiresIn: string }> {
-    const ttl = this.config.get<string>("APP_TOKEN_TTL", "1h");
+    const ttl = APP_TOKEN_TTL;
     const accessToken = await this.jwt.signAsync(
       { sub: ownerPid, type: "access", app: clientId },
       { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: ttl },

@@ -109,6 +109,14 @@ describe("SsoService", () => {
     expect(service.isAllowedReturnTo(undefined)).toBe(false);
   });
 
+  it("always allows the first-party service URLs (ANT-193: no per-env maintenance)", () => {
+    const { service } = setup();
+    expect(service.allowlist()).toEqual(
+      expect.arrayContaining(["http://localhost:3300", "http://localhost:3302", "https://live2dev.com"]),
+    );
+    expect(service.isAllowedReturnTo("http://localhost:3302/welcome")).toBe(true);
+  });
+
   it("issues a single-use code and consumes it into an identity payload", async () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");

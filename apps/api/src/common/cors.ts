@@ -30,12 +30,32 @@ export const FIRST_PARTY_ORIGINS: string[] = [
   "https://sandbox-dashboard.peridot.id",
 ];
 
+import type { ConfigService } from "@nestjs/config";
+import { resolveServiceUrls, serviceOrigins } from "./app-config";
+
 /** Split a comma-separated env var into origins (trailing slashes stripped). */
 export function parseEnvOrigins(raw: string | undefined): string[] {
   return (raw ?? "")
     .split(",")
     .map((s) => s.trim().replace(/\/+$/, ""))
     .filter(Boolean);
+}
+
+/**
+ * Static CORS allow-list (ANT-193): the ONE service-URL set (API/WALLET/
+ * DASHBOARD/DOCS) ∪ the built-in first-party dual-serve set ∪ the CORS_ORIGINS
+ * additive escape hatch (one-off edges like localhost-against-sandbox; never
+ * required per env). Env stays additive, never subtractive.
+ */
+export function staticOriginsFor(config: ConfigService): string[] {
+  const urls = resolveServiceUrls((key, def) => config.get(key, def));
+  return [
+    ...new Set([
+      ...serviceOrigins(urls),
+      ...FIRST_PARTY_ORIGINS,
+      ...parseEnvOrigins(config.get<string>("CORS_ORIGINS", "")),
+    ]),
+  ];
 }
 
 /** Exact origin match. `undefined` origin = non-browser client (curl, mobile) — allowed. */

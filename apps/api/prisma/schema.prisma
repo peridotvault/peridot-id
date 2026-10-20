@@ -381,6 +381,7 @@ model Chain {
 
   contracts ChainContract[]
   accounts  ChainAccount[]
+  evmRelayerKey EvmRelayerKey?
 
   @@unique([namespace, reference])
   @@map("chains")
@@ -400,6 +401,22 @@ model ChainContract {
 
   @@unique([chainId, type])
   @@map("chain_contracts")
+}
+
+// EVM auto-deploy relayer key per chain (replaces EVM_RELAYER_SECRET env,
+// ANT-193). One row per EVM chain at most; the secret is a 0x-prefixed 32-byte
+// hex secp256k1 private key. Writes are admin-only (AdminGuard) and reads stay
+// server-side — the key is NEVER exposed via any API response (only a
+// hasSecret presence flag). Flagged for ANT-195 security review.
+model EvmRelayerKey {
+  id        String   @id @default(uuid())
+  chainId   String   @unique
+  chain     Chain    @relation(fields: [chainId], references: [id], onDelete: Cascade)
+  secret    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("evm_relayer_keys")
 }
 
 // DOKU Sub-Account V2 mapping (1 PID → 1 Sub-Account). DOKU is the

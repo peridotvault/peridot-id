@@ -13,16 +13,17 @@ import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
 const FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
 const IMPL = "0x0000000000000000000000000000000000000001";
 
-function setup(rows: unknown[], env: Record<string, string> = {}) {
-  const prisma = { chain: { findMany: jest.fn(async () => rows) } };
-  const config = {
-    get: jest.fn((key: string) => env[key]),
-    getOrThrow: jest.fn((key: string) => {
-      if (!(key in env)) throw new Error(`missing ${key}`);
-      return env[key];
-    }),
+function setup(rows: unknown[], relayerSecrets: Record<string, string> = {}) {
+  const prisma = {
+    chain: { findMany: jest.fn(async () => rows) },
+    evmRelayerKey: {
+      findUnique: jest.fn(async ({ where }: { where: { chainId: string } }) => {
+        const secret = relayerSecrets[where.chainId];
+        return secret ? { chainId: where.chainId, secret } : null;
+      }),
+    },
   };
-  return new ChainRegistryService(prisma as never, config as never);
+  return new ChainRegistryService(prisma as never);
 }
 
 function dbRow(overrides: Record<string, unknown> = {}) {
@@ -51,19 +52,22 @@ describe("ChainRegistryService", () => {
     expect(await service.rpcUrlForReference("97")).toBe("https://bsc-testnet.example");
   });
 
-  it("falls back to code + env when the registry is empty", async () => {
-    const service = setup([], { EVM_FACTORY_ADDRESS: FACTORY, EVM_IMPLEMENTATION_ADDRESS: IMPL });
+  it("falls back to the compiled chain list with no contracts (EVM off until admin rows exist)", async () => {
+    // ANT-193: no EVM_* env — an empty registry yields every compiled chain
+    // with zero contracts, so nothing is deployable until an admin registers
+    // factory/implementation rows.
+    const service = setup([]);
     const chains = await service.activeChains();
     expect(chains.map((c) => c.reference).sort()).toEqual(["10143", "421614", "84532", "97"]);
-    expect(await service.deploymentFor("97")).toEqual({ factory: FACTORY, implementation: IMPL });
+    expect(chains.every((c) => c.contracts.length === 0)).toBe(true);
+    expect(await service.deployableEvmChains()).toEqual([]);
+    expect(await service.deploymentFor("97")).toBeNull();
   });
 
-  it("enables no EVM chain when the factory is missing or invalid", async () => {
-    const missing = setup([]);
-    expect(await missing.deployableEvmChains()).toEqual([]);
-    const garbage = setup([], { EVM_FACTORY_ADDRESS: "not-an-address", EVM_IMPLEMENTATION_ADDRESS: IMPL });
-    expect(await garbage.deployableEvmChains()).toEqual([]);
-    expect(await garbage.deploymentFor("97")).toBeNull();
+  it("enables no EVM chain without registry factory/implementation rows", async () => {
+    const service = setup([]);
+    expect(await service.deployableEvmChains()).toEqual([]);
+    expect(await service.deploymentFor("97")).toBeNull();
   });
 
   it("requires both factory and implementation per chain", async () => {
@@ -71,12 +75,36 @@ describe("ChainRegistryService", () => {
     expect(await service.deployableEvmChains()).toEqual([]);
   });
 
+  it("falls back to the local-dev RPC default with no env involved", async () => {
+    const service = setup([]);
+    expect(await service.rpcUrlForReference("97")).toBe("http://localhost:8545");
+    expect(service.rpcUrlFor({ rpcUrls: [], reference: "97" })).toBe("http://localhost:8545");
+  });
+
+  it("reads the EVM relayer key from the dashboard-managed table (null when unset)", async () => {
+    const row = dbRow({
+      id: "chain-97",
+      contracts: [
+        { type: "factory", address: FACTORY, versionLabel: "v1" },
+        { type: "account_implementation", address: IMPL, versionLabel: "v1" },
+      ],
+    });
+    const withKey = setup([row], { "chain-97": "0x" + "11".repeat(32) });
+    expect(await withKey.relayerSecretFor("97")).toBe("0x" + "11".repeat(32));
+    const withoutKey = setup([row]);
+    expect(await withoutKey.relayerSecretFor("97")).toBeNull();
+    expect(await withoutKey.relayerSecretFor("unknown")).toBeNull();
+  });
+
+  it("reads relayerSecretFor as null when the table is missing (fail-absent, never throws)", async () => {
+    const prisma = { chain: { findMany: jest.fn(async () => []) } };
+    const service = new ChainRegistryService(prisma as never);
+    expect(await service.relayerSecretFor("97")).toBeNull();
+  });
+
   it("caches reads and drops the cache on invalidate", async () => {
     const findMany = jest.fn(async () => [dbRow()]);
-    const service = new ChainRegistryService(
-      { chain: { findMany } } as never,
-      { get: jest.fn(), getOrThrow: jest.fn(() => { throw new Error("missing"); }) } as never,
-    );
+    const service = new ChainRegistryService({ chain: { findMany } } as never);
     await service.activeChains();
     await service.activeChains();
     expect(findMany).toHaveBeenCalledTimes(1);
@@ -211,8 +239,7 @@ describe("ChainRegistryService", () => {
         where.namespace_reference.reference === SOLANA_DEVNET_REFERENCE ? { id: "chain-sol-devnet" } : null,
       );
       const prisma = { chain: { findMany: jest.fn(async () => solanaRows()), findUnique } };
-      const config = { get: jest.fn(), getOrThrow: jest.fn(() => { throw new Error("missing"); }) };
-      const service = new ChainRegistryService(prisma as never, config as never);
+      const service = new ChainRegistryService(prisma as never);
 
       expect(await service.solanaChainIdOrThrow()).toBe("chain-sol-devnet");
       expect(await service.solanaChainIdOrThrow("devnet")).toBe("chain-sol-devnet");

@@ -75,7 +75,7 @@ export class SponsoredWithdrawService {
   ) {}
 
   private policyVersion(): number {
-    return configuredPolicyVersion(this.config);
+    return configuredPolicyVersion();
   }
 
   /** Lazy pid-solana module (keeps @solana/web3.js out of Jest's transform graph). */

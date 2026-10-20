@@ -29,6 +29,7 @@ import {
   MAX_TTL_SECS,
 } from "../common/solana-relay";
 import { coseToRawXy } from "../credentials/cose";
+import { PID_EVM_POLL_MS, webauthnRpId } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -66,7 +67,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    const intervalMs = Number(this.config.get<string>("PID_EVM_POLL_MS", "30000"));
+    const intervalMs = PID_EVM_POLL_MS;
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
     this.timer = setInterval(() => {
       void this.poll().catch((err) => this.logger.error(`evm poll error: ${(err as Error).message}`));
@@ -95,7 +96,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private policyVersion(): number {
-    return configuredPolicyVersion(this.config);
+    return configuredPolicyVersion();
   }
 
   /** Realtime network-cost estimate for the deploy (no margin — the protocol fee is separate). */
@@ -190,6 +191,11 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
    * authority and RP ID **and** canonically associated with our factory.
    * Fail-closed: any error (no credential, bad RPC) is false.
    */
+  /** sha256 of the WebAuthn RP ID (derived from the service-URL set — see app-config). */
+  private async rpIdHash(): Promise<Uint8Array> {
+    return this.sha256Hex(webauthnRpId((key, def) => this.config.get(key, def)));
+  }
+
   private async deploymentMatches(
     rpc: EvmRpc,
     address: string,
@@ -198,7 +204,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   ): Promise<boolean> {
     const authority = await requireActiveAuthority(this.prisma, pid);
     const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
-    const rpIdHash = await this.sha256Hex(this.config.get<string>("WEBAUTHN_RP_ID", "localhost"));
+    const rpIdHash = await this.rpIdHash();
     const deployment = await this.chains.deploymentFor(chainReference);
     const v = buildViewCalldata();
     const [init, ax, ay, rp, factory] = await Promise.all([
@@ -280,10 +286,11 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
 
     const authority = await requireActiveAuthority(this.prisma, user.pid);
 
-    const secret = this.config.get<string>("EVM_RELAYER_SECRET");
+    // EVM relayer key is dashboard-managed (evm_relayer_keys table, admin-only) —
+    // never env. Unset = operator deploys via forge script, then this endpoint
+    // confirms ACTIVE. Never silently skip deployment.
+    const secret = await this.chains.relayerSecretFor(chainReference);
     if (!secret || !/^0x[0-9a-fA-F]{64}$/.test(secret)) {
-      // No relayer key: the operator deploys with the forge script, then this
-      // endpoint confirms ACTIVE. Never silently skip deployment.
       throw new ServiceUnavailableException(
         "EVM auto-deploy is not configured — deploy with contracts/evm (script/Deploy.s.sol) then retry.",
       );
@@ -316,7 +323,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "activating" } });
     try {
       const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
-      const rpIdHash = await this.sha256Hex(this.config.get<string>("WEBAUTHN_RP_ID", "localhost"));
+      const rpIdHash = await this.rpIdHash();
       const data = adapter.buildDeployAndInitDataV3({
         salt: adapter.getSalt(user.pid),
         x: new Uint8Array(x),

@@ -85,6 +85,32 @@ export class AdminService {
   }
 
   /**
+   * Set the EVM auto-deploy relayer key for a chain (write-only — the secret
+   * is never returned; see the presence flag). EVM chains only.
+   */
+  async setEvmRelayer(pid: string, chainId: string, secret: string) {
+    const chain = await this.prisma.chain.findUnique({ where: { id: chainId } });
+    if (!chain) throw new NotFoundException("Chain not found");
+    if (chain.namespace !== "eip155") throw new ConflictException("EVM relayer keys apply to eip155 chains only");
+    const row = await this.prisma.evmRelayerKey.upsert({
+      where: { chainId },
+      update: { secret },
+      create: { chainId, secret },
+    });
+    await this.security.log(pid, "admin.evm_relayer.set", { chainId });
+    return { chainId, hasSecret: true, updatedAt: row.updatedAt };
+  }
+
+  /** Remove the EVM auto-deploy relayer key (auto-deploy falls back to the operator flow). */
+  async deleteEvmRelayer(pid: string, chainId: string) {
+    const chain = await this.prisma.chain.findUnique({ where: { id: chainId } });
+    if (!chain) throw new NotFoundException("Chain not found");
+    await this.prisma.evmRelayerKey.deleteMany({ where: { chainId } });
+    await this.security.log(pid, "admin.evm_relayer.deleted", { chainId });
+    return { ok: true as const };
+  }
+
+  /**
    * Verify (or unverify) a partner app: verified apps skip the global
    * PeridotID fiat fee. Admin-only — app owners can never set this themselves.
    */

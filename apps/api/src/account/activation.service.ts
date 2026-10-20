@@ -30,7 +30,7 @@ import {
   solanaAdapter,
   treasuryPubkey,
 } from "../common/solana-relay";
-import { PID_ACTIVATION_CONFIRM_INTERVAL_MS, PID_ACTIVATION_POLL_MS } from "../common/app-config";
+import { PID_ACTIVATION_CONFIRM_INTERVAL_MS, PID_ACTIVATION_CONFIRM_ATTEMPTS, PID_ACTIVATION_POLL_MS, webauthnRpId } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -93,7 +93,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private policyVersion(): number {
-    return configuredPolicyVersion(this.config);
+    return configuredPolicyVersion();
   }
 
   /** Activity label for the selected chain (default = current behavior). */
@@ -103,10 +103,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
 
   /** sha256 of the WebAuthn RP ID — stored on-chain and verified per assertion. */
   private async rpIdHash(): Promise<Uint8Array> {
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(this.config.get<string>("WEBAUTHN_RP_ID", "localhost")),
-    );
+    const get = (key: string, def?: string): unknown => this.config.get(key, def);
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(webauthnRpId(get)));
     return new Uint8Array(digest);
   }
 
@@ -163,8 +161,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private confirmAttempts(): number {
-    const n = Number(this.config.get<string>("PID_ACTIVATION_CONFIRM_ATTEMPTS", "15"));
-    return Number.isFinite(n) && n > 0 ? n : 15;
+    return PID_ACTIVATION_CONFIRM_ATTEMPTS;
   }
 
   private confirmIntervalMs(): number {

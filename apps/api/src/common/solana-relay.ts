@@ -4,20 +4,13 @@
 // transform graph) and pass the module in. Type-only imports are erased.
 import type { ConfigService } from "@nestjs/config";
 import type { Keypair, PublicKey, SolanaAdapter } from "@peridotvault/pid-solana";
+import { PID_FEE_POLICY_VERSION } from "./app-config";
 
 type PidSolanaModule = typeof import("@peridotvault/pid-solana");
 
-/** Shared activation/withdraw margin (retired in V3 — kept for config compat only).
- *  V3 quotes the raw network estimate; the protocol fee is a separate percentage. */
-export function activationMarginRate(config: ConfigService): number {
-  const n = Number(config.get<string>("PID_ACTIVATION_MARGIN_RATE", "0"));
-  return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
-/** Signed fee-policy version (selects the protocol percentage; chain contracts enforce it). */
-export function feePolicyVersion(config: ConfigService): number {
-  const n = Number(config.get<string>("PID_FEE_POLICY_VERSION", "1"));
-  return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : 1;
+/** Signed fee-policy version (hardcoded: the on-chain program enforces the same table). */
+export function feePolicyVersion(): number {
+  return PID_FEE_POLICY_VERSION;
 }
 
 /** Canonical protocol-fee table (mirrors the on-chain policy; V3 spec §1). */

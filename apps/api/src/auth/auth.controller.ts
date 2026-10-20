@@ -18,6 +18,7 @@ import { isPendingGoogleClaim } from "./google.strategy";
 import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto, GrantScopeDto } from "./dto/auth.dto";
 import { PidAppsService } from "./apps.service";
 import { decodeState, encodeState, SsoService } from "./sso.service";
+import { resolveServiceUrls } from "../common/app-config";
 
 /** Redirect target with a pid_code appended (keeps any existing query string). */
 function withPidCode(returnTo: string, pidCode: string): string {
@@ -298,7 +299,9 @@ export class AuthController {
   @Get("google/callback")
   @UseGuards(GoogleGuard)
   async googleCallback(@Req() req: Request, @Res() res: Response): Promise<void> {
-    const successUrl = this.config.get<string>("CLIENT_SUCCESS_URL", "/");
+    // Wallet landing URL derived from the ONE service-URL set (WALLET_URL;
+    // CLIENT_SUCCESS_URL still reads as a deprecated cutover fallback).
+    const successUrl = resolveServiceUrls((key, def) => this.config.get(key, def)).walletUrl;
     // Strategy/transport failure arrives as a marker (see GoogleGuard) — send the
     // user back to retry UI, never a raw 500 JSON dead end.
     if (isGoogleAuthError(req.user)) {
