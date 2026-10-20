@@ -271,3 +271,19 @@ the `peridot_id` role + database, then runs `prisma migrate deploy`.
   mainnet chain + contracts there and fund the relayer on it.
 - The GitHub Actions `deploy.yml` mirrors live2dev: on push to `main` it runs
   typecheck, then SSHes to the VPS and runs `./deploy/up.sh main`.
+
+## Env ownership (ANT-157)
+
+- Canonical local-dev key registry: repo-root `.env.example` (OWNER: root).
+  Per-app `*.env.example` files are read-allowlists only and point back here.
+- Deploy overlays `deploy/.env.{main,test}.example` (OWNER: deploy) must stay
+  complete for `compose.yaml` interpolation. Guard: `pnpm check:env`
+  (`scripts/check-env-ownership.mjs`, node stdlib only, ~35ms, runs in CI).
+- Verify: `env -i PATH="$PATH" HOME="$HOME" docker compose --env-file
+  deploy/.env.main.example -f deploy/compose.yaml config` (same for `.test`);
+  exit 0, warnings allowed only for the explicitly-optional retired DOKU
+  legacy keys. Never run `compose config` with ambient env — local exports
+  mask missing vars (and can echo real secrets into logs).
+- Rollback: `git revert` the `*.example`/script commit; runtime `.env.main` /
+  `.env.test` copies are untouched by example edits (new keys only take effect
+  on fresh `cp *.example` copies, with values identical to `up.sh` defaults).

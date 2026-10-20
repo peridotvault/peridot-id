@@ -38,12 +38,13 @@
     "db:migrate": "pnpm --filter @peridotvault/pid-api db:migrate",
     "db:deploy": "pnpm --filter @peridotvault/pid-api db:deploy",
     "db:generate": "pnpm --filter @peridotvault/pid-api db:generate",
-    "db:studio": "pnpm --filter @peridotvault/pid-api db:studio"
+    "db:studio": "pnpm --filter @peridotvault/pid-api db:studio",
+    "check:env": "node scripts/check-env-ownership.mjs"
   },
   "devDependencies": {
     "typescript": "~5.9.0"
   },
-  "description": "Gaming Identity Platform — Authentication, Identity, and Profile for the Peridot ecosystem. One Google sign-in, one stable identity, one profile across every Peridot product.",
+  "description": "Gaming Identity Platform \u2014 Authentication, Identity, and Profile for the Peridot ecosystem. One Google sign-in, one stable identity, one profile across every Peridot product.",
   "main": "index.js",
   "directories": {
     "doc": "docs"

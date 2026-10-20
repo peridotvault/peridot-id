@@ -31,6 +31,9 @@ jobs:
       - name: Prisma generate
         run: pnpm --filter @peridotvault/pid-api db:generate
 
+      - name: Env ownership check
+        run: pnpm check:env
+
       - name: Typecheck
         run: pnpm typecheck
 
