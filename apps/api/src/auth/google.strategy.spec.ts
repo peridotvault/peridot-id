@@ -35,7 +35,19 @@ describe("googleOAuthOptionsFactory", () => {
     });
   });
 
-  it("derives the callback from API_DOMAIN (ANT-184)", () => {
+  it("derives the callback from API_URL, preferring it over API_DOMAIN (ANT-193)", () => {
+    const opts = googleOAuthOptionsFactory(
+      config({
+        GOOGLE_CLIENT_ID: "my-id",
+        GOOGLE_CLIENT_SECRET: "my-secret",
+        API_URL: "https://api.peridot.id",
+        API_DOMAIN: "https://api.pid.peridotvault.com",
+      }),
+    );
+    expect(opts?.callbackURL).toBe("https://api.peridot.id/v1/auth/google/callback");
+  });
+
+  it("derives the callback from API_DOMAIN (ANT-184 cutover fallback)", () => {
     const opts = googleOAuthOptionsFactory(
       config({
         GOOGLE_CLIENT_ID: "my-id",

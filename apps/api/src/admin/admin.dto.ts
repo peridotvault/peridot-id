@@ -1,5 +1,7 @@
-// Admin chain-registry DTOs. Secrets never appear here — relayer keys and RPC
-// API keys stay in env by design.
+// Admin chain-registry DTOs. Secrets never appear in RESPONSES — the EVM
+// relayer key (EvmRelayerKey, dashboard-managed since ANT-193) is write-only
+// via the admin API and read server-side only. Other relayer keys and RPC API
+// keys stay in env by design.
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from "class-validator";
 
 export class CreateChainDto {
@@ -88,6 +90,13 @@ export class UpdateChainDto {
 export class VerifyAppDto {
   @IsBoolean()
   verified!: boolean;
+}
+
+/** Write-only EVM auto-deploy relayer key (0x-prefixed 32-byte hex). Never returned by any endpoint. */
+export class SetEvmRelayerDto {
+  @IsString()
+  @Matches(/^0x[0-9a-fA-F]{64}$/, { message: "relayer secret must be 0x-prefixed 32-byte hex" })
+  secret!: string;
 }
 
 export class UpsertContractDto {

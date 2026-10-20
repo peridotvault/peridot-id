@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CreateChainDto, UpdateChainDto, UpsertContractDto, VerifyAppDto } from "./admin.dto";
+import { CreateChainDto, SetEvmRelayerDto, UpdateChainDto, UpsertContractDto, VerifyAppDto } from "./admin.dto";
 import { AdminService } from "./admin.service";
 
 @UseGuards(ThrottlerGuard)
@@ -44,6 +44,24 @@ export class AdminController {
     @Body() dto: UpsertContractDto,
   ) {
     return this.adminService.upsertContract(user.pid, id, dto);
+  }
+
+  @Put("chains/:id/evm-relayer")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  setEvmRelayer(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: SetEvmRelayerDto,
+  ) {
+    return this.adminService.setEvmRelayer(user.pid, id, dto.secret);
+  }
+
+  @Delete("chains/:id/evm-relayer")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  deleteEvmRelayer(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string) {
+    return this.adminService.deleteEvmRelayer(user.pid, id);
   }
 
   @Patch("apps/:id/verify")

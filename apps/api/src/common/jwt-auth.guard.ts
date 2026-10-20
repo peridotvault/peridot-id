@@ -8,7 +8,7 @@ import { ACCESS_COOKIE, normalizeScope, scopeAccessCookie } from "./cookies";
  * own scoped session; with no scope header (the wallet) we read the unscoped
  * session. Scope format is validated so it can never name another cookie.
  *
- * `walletOrigin` (CLIENT_SUCCESS_URL) additionally restricts the unscoped wallet
+ * `walletOrigin` (WALLET_URL) additionally restricts the unscoped wallet
  * session to the wallet's own origin, so a sibling first-party app can't reach it
  * by simply dropping the scope header. Requests with no Origin (non-browser) are
  * unaffected — those authenticate with a Bearer token anyway.

@@ -67,14 +67,11 @@ function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 function setup(relayerSecret?: string) {
+  // ANT-193: no EVM_* env — factory/impl/RPC come from the chains mock (DB
+  // rows in prod), the relayer key from relayerSecretFor (evm_relayer_keys).
   const values: Record<string, string> = {
-    EVM_FACTORY_ADDRESS: FACTORY,
-    EVM_IMPLEMENTATION_ADDRESS: IMPL,
-    EVM_RPC_URL: "http://localhost:8545",
     WEBAUTHN_RP_ID: "localhost",
-    PID_ACTIVATION_MARGIN_RATE: "0.5",
   };
-  if (relayerSecret) values.EVM_RELAYER_SECRET = relayerSecret;
   const config = {
     get: jest.fn((key: string, def?: unknown) => values[key] ?? def),
     getOrThrow: jest.fn((key: string) => {
@@ -136,6 +133,7 @@ function setup(relayerSecret?: string) {
     ),
     rpcUrlForReference: jest.fn(async () => "http://localhost:8545"),
     rpcUrlFor: jest.fn(() => "http://localhost:8545"),
+    relayerSecretFor: jest.fn(async () => relayerSecret ?? null),
     invalidate: jest.fn(),
   };
   const service = new EvmActivationService(prisma as never, config as never, security as never, chains as never);

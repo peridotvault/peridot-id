@@ -9,7 +9,7 @@ export function isEvmAddress(v: string | undefined): v is string {
   return typeof v === "string" && ADDRESS_RE.test(v);
 }
 
-/** Chains to provision, optionally narrowed by `EVM_CHAIN_REFERENCES` csv. */
+/** Compiled EVM chains, optionally narrowed by an explicit csv allowlist. */
 export function evmChains(allowlist?: string): EvmChain[] {
   if (!allowlist) return EVM_CHAINS;
   const refs = new Set(allowlist.split(",").map((s) => s.trim()).filter(Boolean));

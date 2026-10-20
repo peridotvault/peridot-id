@@ -69,10 +69,9 @@ function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 function setup() {
-  const config = solanaRelayerConfig({
-    // ANT-184: poll/confirm-interval are hardcoded constants; only attempts stays env-tunable.
-    PID_ACTIVATION_CONFIRM_ATTEMPTS: "2",
-  });
+  // ANT-193: confirm attempts are a hardcoded constant (15); the never-confirms
+  // test below budgets for the full window.
+  const config = solanaRelayerConfig({});
   const security = mockSecurity();
   const prisma = {
     chainAccount: {
@@ -166,7 +165,7 @@ describe("ActivationService", () => {
       );
       expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activation.unconfirmed", expect.any(Object));
     },
-    20000,
+    30000,
   );
 
   it("reverts and does not mark active when the tx confirms with an error", async () => {
@@ -219,7 +218,7 @@ describe("ActivationService", () => {
     let isActivatedCalls = 0;
     adapterMock.isActivated.mockImplementation(async () => {
       isActivatedCalls++;
-      return isActivatedCalls >= 3; // loop(2) + final check
+      return isActivatedCalls >= 3; // early loop iterations + final check
     });
 
     const view = await service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(NETWORK), feePolicyVersion: 1, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } });
