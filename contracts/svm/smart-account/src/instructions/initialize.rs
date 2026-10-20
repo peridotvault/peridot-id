@@ -2,10 +2,10 @@
 //! passkey itself).
 //!
 //! Creation is passkey-signed: the V3 payload binds `op-tag ‖ account_id ‖
-//! authority ‖ rp_id_hash`, so only the owner of the new authority can claim the
+//! authority`, so only the owner of the new authority can claim the
 //! PDA — squatting is impossible without the victim's private key. No expiry/nonce:
 //! replaying a creation authorization only fails `AlreadyInitialized` (or recreates
-//! the same state). State is written in the V2 layout (112 bytes, RP-ID hash included).
+//! the same state). State is written in the domain-free 80-byte layout.
 
 use crate::{
     auth,
@@ -25,11 +25,10 @@ use pinocchio_system::create_account_with_minimum_balance_signed;
 use super::InstructionData;
 
 /// Instruction data layout:
-/// `account_id [u8; 32] | authority [u8; 33] | rp_id_hash [u8; 32] | client_json_len u16 | clientDataJSON`.
+/// `account_id [u8; 32] | authority [u8; 33] | client_json_len u16 | clientDataJSON`.
 const ACCOUNT_ID_OFFSET: usize = 0;
 const AUTHORITY_OFFSET: usize = 32;
-const RP_ID_OFFSET: usize = 65;
-const CLIENT_JSON_LEN_OFFSET: usize = 97;
+const CLIENT_JSON_LEN_OFFSET: usize = 65;
 
 /// ANT-16(e) creation-leak fix, Option A (ANT-22 spec): direct `initialize`
 /// bypasses the 50% sponsored-creation fee that `activate` collects, so it is
@@ -92,7 +91,6 @@ pub fn process(
 
     let account_id = data.read_array::<32>(ACCOUNT_ID_OFFSET)?;
     let authority = data.read_array::<33>(AUTHORITY_OFFSET)?;
-    let rp_id_hash = data.read_array::<32>(RP_ID_OFFSET)?;
     let client_json_len = u16::from_le_bytes(data.read_array::<2>(CLIENT_JSON_LEN_OFFSET)?) as usize;
     let client_json = data.read_bytes(CLIENT_JSON_LEN_OFFSET + 2, client_json_len)?;
     let bump = verify_pda(smart_account, program_id, account_id)?;
@@ -102,9 +100,8 @@ pub fn process(
         &[auth::OP_INITIALIZE],
         &account_id,
         &authority,
-        &rp_id_hash,
     ]);
-    auth::verify_secp256r1_v2(instructions, &authority, &rp_id_hash, client_json, &payload)?;
+    auth::verify_secp256r1_v2(instructions, &authority, client_json, &payload)?;
 
     let signer_seeds = [bump];
     let seeds = [
@@ -125,10 +122,10 @@ pub fn process(
         &[signer],
     )?;
 
-    // Write the initial state (V2 with RP-ID hash).
+    // Write the initial state (domain-free 80 bytes).
     let mut data_ref = smart_account.try_borrow_mut()?;
     let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
-    state.initialize(account_id, authority, rp_id_hash);
+    state.initialize(account_id, authority);
     drop(data_ref);
 
     pinocchio_log::log!("PeridotEvent::AccountInitialized");

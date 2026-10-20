@@ -4,7 +4,7 @@
 //! controlling authority is a secp256r1 (P-256) WebAuthn passkey (owner authority):
 //! the SDK places a Secp256r1 precompile instruction immediately after this
 //! program's instruction and the program verifies it via the Instructions sysvar
-//! (`auth.rs::verify_secp256r1_v2`), enforcing stored-authority match, RP-ID hash,
+//! (`auth.rs::verify_secp256r1_v2`), enforcing stored-authority match,
 //! user-verification flag, exact `authenticatorData ‖ sha256(clientDataJSON)`
 //! message binding, and equality of the WebAuthn challenge with the V2
 //! domain-separated authorization payload recomputed from instruction args.
@@ -13,8 +13,8 @@
 //! payload starts with `DOMAIN_V2 ‖ op-tag ‖ account_id`, the user authorizes an
 //! absolute `max_fee` (never an exact fee), and reimbursement splits base →
 //! relayer (fee payer) and markup → canonical treasury per the signed
-//! fee-policy version. State is versioned (v1 80B legacy-readable, v2 112B with
-//! RP-ID hash); rotation never moves the PDA.
+//! fee-policy version. State is a single 80-byte layout (ANT-197 domain-free:
+//! no `rp_id_hash` stored or verified on any path); rotation never moves the PDA.
 
 #![no_std]
 #![allow(unexpected_cfgs)]
