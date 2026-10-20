@@ -59,7 +59,8 @@ esac
 if [ "$ENV" = "test" ]; then
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-sandbox.peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox-dashboard.peridot.id}"
-  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-sandbox-docs.peridot.id}"
+  # Single docs for all envs (board decision 2026-10-20): no sandbox docs host.
+  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-docs.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox-api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
   export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-sandbox}"

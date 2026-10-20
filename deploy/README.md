@@ -171,7 +171,7 @@ docker logs -f peridot-id-api-1
 
 Sandbox mirrors with the `sandbox.*` prefix on the sandbox VPS (`107.173.130.7`):
 `sandbox.peridot.id`, `sandbox-api.peridot.id`,
-`sandbox-dashboard.peridot.id`, plus Mintlify `sandbox-docs.peridot.id`.
+`sandbox-dashboard.peridot.id`, plus single Mintlify docs `docs.peridot.id` (no sandbox docs host).
 Old sandbox hosts
 (`app.sandbox.pid.peridotvault.com`, `api.sandbox.pid.peridotvault.com`,
 `sandbox.pid.peridotvault.com`) stay live.

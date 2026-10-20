@@ -15,7 +15,7 @@
 #   test stack (up.sh test, ENV_SUFFIX=sandbox., NEW_API_HOST=sandbox-api.peridot.id):
 #     API    api.sandbox.pid.peridotvault.com + sandbox-api.peridot.id → nest :3301
 #     (wallet new host is frontend turf — ANT-117; DevOps DNS/TLS — ANT-118;
-#      docs new host sandbox-docs.peridot.id is Mintlify-hosted, same sequencing)
+#      docs stay on the single Mintlify host docs.peridot.id (no sandbox docs host)
 #
 # main: cp deploy/.env.main.example deploy/.env.main && ./deploy/up.sh main
 #
@@ -125,7 +125,7 @@ services:
   # backend (zero new images, zero new ports). Next up.sh --remove-orphans
   # drops the stale pre-migration docs container; this router is what keeps
   # old links alive afterwards. Sequencing: run up.sh only after Mintlify
-  # serves docs.peridot.id + sandbox-docs.peridot.id.
+  # serves docs.peridot.id (single docs host for both stacks).
 
   app:
     build:
