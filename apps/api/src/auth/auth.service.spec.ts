@@ -347,7 +347,8 @@ describe("AuthService", () => {
     await service.rotateSession(reqWithToken(first.refreshToken), res as never);
   });
 
-  it("honors a GOOGLE_FAMILY_MAX_AGE override", async () => {
+  it("uses the hardcoded 90d google family cap (ANT-184: no env override)", async () => {
+    // 8 days < 90d cap → rotation succeeds even when a stale env override is present.
     const { service, prisma, res } = setup({ GOOGLE_FAMILY_MAX_AGE: "7d" });
     const first = await service.issueSession(res as never, "identity-1", "test-agent", undefined, "google");
     const oldJti = jwtPayload(first.refreshToken).jti;
@@ -356,21 +357,21 @@ describe("AuthService", () => {
     };
     stored.device.createdAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
 
-    const err = await service.rotateSession(reqWithToken(first.refreshToken), res as never).catch((e) => e);
-    expect(err).toBeInstanceOf(UnauthorizedException);
-    expect(err.getResponse()).toMatchObject({ code: "step_up_required" });
+    await service.rotateSession(reqWithToken(first.refreshToken), res as never);
   });
 
-  it("falls back to the default cap on unparseable env", async () => {
-    const { service, prisma, res } = setup({ GOOGLE_FAMILY_MAX_AGE: "bogus" });
+  it("step-ups past the hardcoded 90d cap", async () => {
+    const { service, prisma, res } = setup();
     const first = await service.issueSession(res as never, "identity-1", "test-agent", undefined, "google");
     const oldJti = jwtPayload(first.refreshToken).jti;
     const stored = (await prisma.session.findUnique({ where: { id: oldJti } })) as unknown as {
       device: { createdAt: Date };
     };
-    stored.device.createdAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    stored.device.createdAt = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000);
 
-    await service.rotateSession(reqWithToken(first.refreshToken), res as never);
+    const err = await service.rotateSession(reqWithToken(first.refreshToken), res as never).catch((e) => e);
+    expect(err).toBeInstanceOf(UnauthorizedException);
+    expect(err.getResponse()).toMatchObject({ code: "step_up_required" });
   });
 
   it("treats pre-existing (method-less) devices as google families", async () => {

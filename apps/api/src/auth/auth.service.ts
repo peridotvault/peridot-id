@@ -16,6 +16,7 @@ import {
   setAuthCookies,
   setScopedAuthCookies,
 } from "../common/cookies";
+import { ACCESS_TOKEN_TTL, GOOGLE_FAMILY_MAX_AGE, PASSKEY_FAMILY_MAX_AGE, REFRESH_TOKEN_TTL } from "../common/app-config";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -43,15 +44,14 @@ export interface GoogleProfile {
 
 /**
  * Absolute session-family caps by login method (rotation preserves the
- * device, so family age = device.createdAt). Overridable via
- * GOOGLE_FAMILY_MAX_AGE / PASSKEY_FAMILY_MAX_AGE (ms-parseable, e.g. "90d").
+ * device, so family age = device.createdAt). Hardcoded via
+ * app-config GOOGLE_FAMILY_MAX_AGE / PASSKEY_FAMILY_MAX_AGE (ANT-184).
  * Email-OTP shares the Google cap. Defaults are YouTube-like: months-long rotating cookies, with step-up only
  * past the cap. Pre-existing rows (authMethod null) count as google.
  * Money safety never rests on this: withdrawals/executes/rotation/authorize
  * all need fresh per-action passkey signatures or explicit consent.
  */
-const DEFAULT_GOOGLE_FAMILY_MAX_AGE = "90d";
-const DEFAULT_PASSKEY_FAMILY_MAX_AGE = "365d";
+// Family caps are hardcoded constants (ANT-184) — see common/app-config.ts.
 
 /**
  * Grace window for the multi-tab rotation race: two tabs refreshing with the
@@ -141,8 +141,8 @@ export class AuthService {
     authMethod?: "google" | "email" | "passkey",
     scope?: string | null,
   ): Promise<{ accessToken: string; refreshToken: string }> {
-    const accessTtl = this.config.get<string>("ACCESS_TOKEN_TTL", "15m");
-    const refreshTtl = this.config.get<string>("REFRESH_TOKEN_TTL", "30d");
+    const accessTtl = ACCESS_TOKEN_TTL;
+    const refreshTtl = REFRESH_TOKEN_TTL;
 
     const accessToken = await this.jwt.signAsync(
       { sub: pid, type: "access" },
@@ -235,10 +235,8 @@ export class AuthService {
     // never silently disable the cap.
     const cap =
       method === "passkey"
-        ? ms(this.config.get<string>("PASSKEY_FAMILY_MAX_AGE", DEFAULT_PASSKEY_FAMILY_MAX_AGE)) ||
-          ms(DEFAULT_PASSKEY_FAMILY_MAX_AGE)
-        : ms(this.config.get<string>("GOOGLE_FAMILY_MAX_AGE", DEFAULT_GOOGLE_FAMILY_MAX_AGE)) ||
-          ms(DEFAULT_GOOGLE_FAMILY_MAX_AGE);
+        ? ms(PASSKEY_FAMILY_MAX_AGE)
+        : ms(GOOGLE_FAMILY_MAX_AGE);
     if (Date.now() - session.device.createdAt.getTime() > cap) {
       throw new UnauthorizedException({
         code: "step_up_required",
@@ -331,7 +329,7 @@ export class AuthService {
     }
     const accessToken = await this.jwt.signAsync(
       { sub: pid, type: "access" },
-      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: this.config.get<string>("ACCESS_TOKEN_TTL", "15m") },
+      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: ACCESS_TOKEN_TTL },
     );
     setActiveAuthCookies(res, this.config, accessToken, token);
   }

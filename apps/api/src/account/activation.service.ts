@@ -30,6 +30,7 @@ import {
   solanaAdapter,
   treasuryPubkey,
 } from "../common/solana-relay";
+import { PID_ACTIVATION_CONFIRM_INTERVAL_MS, PID_ACTIVATION_POLL_MS } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -80,7 +81,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    const intervalMs = Number(this.config.get<string>("PID_ACTIVATION_POLL_MS", "10000"));
+    const intervalMs = PID_ACTIVATION_POLL_MS;
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
     this.timer = setInterval(() => {
       void this.poll().catch((err) => this.logger.error(`poll error: ${(err as Error).message}`));
@@ -167,8 +168,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private confirmIntervalMs(): number {
-    const n = Number(this.config.get<string>("PID_ACTIVATION_CONFIRM_INTERVAL_MS", "1000"));
-    return Number.isFinite(n) && n > 0 ? n : 1000;
+    const n = PID_ACTIVATION_CONFIRM_INTERVAL_MS;
+    return Number.isFinite(n) && n > 0 ? n : PID_ACTIVATION_CONFIRM_INTERVAL_MS;
   }
 
   /**
