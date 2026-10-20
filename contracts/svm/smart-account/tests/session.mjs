@@ -37,7 +37,10 @@ const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 const INSTRUCTIONS = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 const LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const DOMAIN_SESSION = Buffer.from("PID|SOLANA|SESSION|v1");
-const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
+// Authenticator-data prefix for fixtures. The program never compares these
+// bytes (ANT-197 domain-free); any 32-byte prefix verifies if key/message/
+// challenge/UV pass. Neutral value — never a real RP hash.
+const AUTH_PREFIX = crypto.createHash("sha256").update("test-rp").digest();
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 const SESSION_DISC = { register: 7, execute: 8, revoke: 9, close: 10 };
 const SESSION_STATE_LEN = 205;
@@ -69,14 +72,14 @@ function compressedPub(pub) {
   const X = raw.subarray(1, 33);
   return Buffer.concat([Buffer.from([(raw[64] & 1) ? 0x03 : 0x02]), X]);
 }
-function authData(rpId = RP_ID_HASH, flags = 0x05) {
-  return Buffer.concat([rpId, Buffer.from([flags]), Buffer.from([0, 0, 0, 1])]);
+function authData(prefix = AUTH_PREFIX, flags = 0x05) {
+  return Buffer.concat([prefix, Buffer.from([flags]), Buffer.from([0, 0, 0, 1])]);
 }
-function makeAssertion(payloadHash, { rpId, flags } = {}) {
+function makeAssertion(payloadHash, { prefix, flags } = {}) {
   const clientDataJSON = Buffer.from(JSON.stringify({
-    type: "webauthn.get", challenge: b64url(payloadHash), origin: "https://peridot-id.example",
+    type: "webauthn.get", challenge: b64url(payloadHash), origin: "test.invalid",
   }));
-  const ad = authData(rpId, flags);
+  const ad = authData(prefix, flags);
   return { clientDataJSON, messageData: Buffer.concat([ad, sha256(clientDataJSON)]) };
 }
 function signPayload(keypair, payloadHash, assertionOpts) {
@@ -213,7 +216,7 @@ async function main() {
 
   // ---- vault setup (initialize + fund + SPL position) ----
   {
-    const s = signPayload(owner, sha256(Buffer.concat([Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3"), Buffer.from([0]), accountId32, authorityComp, RP_ID_HASH])));
+    const s = signPayload(owner, sha256(Buffer.concat([Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3"), Buffer.from([0]), accountId32, authorityComp])));
     const tx = new Transaction().add(new TransactionInstruction({
       keys: [
         { pubkey: backend.publicKey, isSigner: true, isWritable: true },
@@ -222,7 +225,7 @@ async function main() {
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
-      data: Buffer.concat([Buffer.from([0]), accountId32, authorityComp, RP_ID_HASH, u16(s.clientDataJSON.length), s.clientDataJSON]),
+      data: Buffer.concat([Buffer.from([0]), accountId32, authorityComp, u16(s.clientDataJSON.length), s.clientDataJSON]),
     }), buildSecpIx(s.comp, s.sig, s.messageData));
     await expectOk(tx, [backend], "vault initialize");
   }

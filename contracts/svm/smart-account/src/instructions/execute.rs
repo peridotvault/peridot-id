@@ -151,11 +151,11 @@ pub fn process(
     let client_json_len = u16::from_le_bytes(data.read_array::<2>(cursor)?) as usize;
     let client_json = data.read_bytes(cursor + 2, client_json_len)?;
 
-    let (authority, account_id, rp_id_hash) = {
+    let (authority, account_id) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id(), state.rp_id_hash()?)
+        (state.authority(), state.account_id())
     };
     let bump = verify_pda(smart_account, program_id, account_id)?;
 
@@ -169,7 +169,7 @@ pub fn process(
         &call_hash,
     ]);
     auth::check_expiry(expiry)?;
-    auth::verify_secp256r1_v2(instructions, &authority, &rp_id_hash, client_json, &payload)?;
+    auth::verify_secp256r1_v2(instructions, &authority, client_json, &payload)?;
 
     let bps = policy_protocol_bps(policy_version)?;
     let (relayer_fee, protocol_fee) = split_attested_fee(network_fee, bps);

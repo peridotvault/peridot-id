@@ -55,11 +55,11 @@ pub fn process(
         return Err(PeridotError::Unauthorized.into());
     }
 
-    let (current_authority, account_id, rp_id_hash) = {
+    let (current_authority, account_id) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id(), state.rp_id_hash()?)
+        (state.authority(), state.account_id())
     };
     verify_pda(smart_account, program_id, account_id)?;
 
@@ -71,7 +71,7 @@ pub fn process(
         &expiry.to_le_bytes(),
     ]);
     auth::check_expiry(expiry)?;
-    auth::verify_secp256r1_v2(instructions, &current_authority, &rp_id_hash, client_json, &payload)?;
+    auth::verify_secp256r1_v2(instructions, &current_authority, client_json, &payload)?;
 
     debug_assert_eq!(new_authority.len(), AUTHORITY_LEN);
     let mut data_ref = smart_account.try_borrow_mut()?;

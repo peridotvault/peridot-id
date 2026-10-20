@@ -127,11 +127,11 @@ pub fn process(
         }
     }
 
-    let (authority, account_id, rp_id_hash) = {
+    let (authority, account_id) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id(), state.rp_id_hash()?)
+        (state.authority(), state.account_id())
     };
     let bump = verify_pda(smart_account, program_id, account_id)?;
 
@@ -147,7 +147,7 @@ pub fn process(
         &source_ata.address().as_array()[..],
     ]);
     auth::check_expiry(expiry)?;
-    auth::verify_secp256r1_v2(instructions, &authority, &rp_id_hash, client_json, &payload)?;
+    auth::verify_secp256r1_v2(instructions, &authority, client_json, &payload)?;
 
     let (relayer_fee, protocol_fee) = split_attested_fee(network_fee, bps);
     let total = total_fee(relayer_fee, protocol_fee);
