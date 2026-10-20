@@ -82,14 +82,22 @@ PID_SOLANA_RPC_URL=http://127.0.0.1:8899
 
 ## Testnet (devnet)
 
-Same flow against devnet with a funded deployer keypair:
+Same flow against devnet with a funded deployer keypair. The program id is
+build-configurable (ANT-211): `PID_PROGRAM_ID` baked by `build.rs` defaults to
+the local/devnet address `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`; the
+testnet program lives at `D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3`, so a
+testnet build MUST set the env before compiling — a default-ID binary bricks
+on testnet (`IncorrectProgramId`; QA proved at ANT-202). PDA derivation uses
+the runtime program id, so existing testnet accounts stay valid under upgrades
+built with the matching `PID_PROGRAM_ID`.
 
 ```sh
 cd contracts/svm/smart-account
-solana config set --url https://api.devnet.solana.com
-solana program deploy target/deploy/peridot_smart_account.so \
-  --program-id target/deploy/peridot-smart-account-keypair.json
-node tests/integration.mjs <program-id>
+PID_PROGRAM_ID=D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3 cargo build-sbf
+solana config set --url https://api.testnet.solana.com
+solana program upgrade target/deploy/peridot_smart_account.so \
+  --program-id <testnet-keypair.json>   # upgrade authority held by DevOps
+node tests/integration.mjs D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3
 ```
 
 Current devnet program id: `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT`.
@@ -107,6 +115,12 @@ testnet and mainnet with `--program-id` pointing at that same file. Never
 a secret until the upgrade authority is on the multisig.
 Point the API at it (`PID_PROGRAM_ID`, `PID_SOLANA_RPC_URL=https://api.devnet.solana.com`)
 and exercise `packages/sdk-js/test/devnet.e2e.mjs`.
+
+Caveat (ANT-211): testnet currently runs under a distinct address
+(`D6TpM7…`, not the canonical `CiwLJ…`), so testnet PDAs differ from
+local/devnet PDAs for the same pid. That is exactly why the program id is now
+build-configurable — always build with the `PID_PROGRAM_ID` of the cluster
+you deploy to.
 
 ## Mainnet
 
