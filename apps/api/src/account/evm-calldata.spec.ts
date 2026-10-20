@@ -27,38 +27,36 @@ describe("V3 EVM deployAndInit calldata", () => {
     const salt = "0x" + "07".padStart(64, "0");
     const x = new Uint8Array(32).fill(1);
     const y = new Uint8Array(32).fill(2);
-    const rpId = new Uint8Array(32).fill(3);
     const authData = new Uint8Array(37).fill(4);
     const clientData = new Uint8Array(64).fill(5);
     const r = new Uint8Array(32).fill(6);
     const s = new Uint8Array(32).fill(7);
     const data = a.buildDeployAndInitDataV3({
-      salt, x, y, rpIdHash: rpId, feePolicyVersion: 1,
+      salt, x, y, feePolicyVersion: 1,
       deadline: 1_000_300, networkFee: 500_000n, authenticatorData: authData,
       clientDataJSON: clientData, r, s,
     });
 
     const expectedSel = "0x" + toHex(
-      keccak256(fromAscii("deployAndInit(bytes32,bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)")).subarray(0, 4),
+      keccak256(fromAscii("deployAndInit(bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)")).subarray(0, 4),
     );
     expect(data.slice(0, 10)).toBe(expectedSel);
     const body = data.slice(10);
     expect(word(0, "0x" + body)).toBe(salt.toLowerCase());
     expect(u256(word(1, "0x" + body))).toBe(BigInt("0x" + "01".repeat(32))); // x = 0x01…01
     expect(u256(word(2, "0x" + body))).toBe(BigInt("0x" + "02".repeat(32))); // y = 0x02…02
-    expect(u256(word(3, "0x" + body))).toBe(BigInt("0x" + "03".repeat(32))); // rpIdHash
-    expect(u256(word(4, "0x" + body))).toBe(1n); // policy
-    expect(u256(word(5, "0x" + body))).toBe(1_000_300n); // deadline
-    expect(u256(word(6, "0x" + body))).toBe(500_000n); // networkFee (attested, not signed)
+    expect(u256(word(3, "0x" + body))).toBe(1n); // policy
+    expect(u256(word(4, "0x" + body))).toBe(1_000_300n); // deadline
+    expect(u256(word(5, "0x" + body))).toBe(500_000n); // networkFee (attested, not signed)
     // Static tail follows the Solidity parameter order: dynamic offsets FIRST,
     // then r/s. (A builder placing r/s before the offsets produces calldata the
     // ABI decoder rejects with an empty revert — regression-anchored here.)
-    const off0 = Number(u256(word(7, "0x" + body)));
-    const off1 = Number(u256(word(8, "0x" + body)));
-    expect(u256(word(9, "0x" + body))).toBe(BigInt("0x" + Buffer.from(r).toString("hex")));
-    expect(u256(word(10, "0x" + body))).toBe(BigInt("0x" + Buffer.from(s).toString("hex")));
-    // Dynamic offsets point past the 11 static slots.
-    expect(off0).toBe(11 * 32);
+    const off0 = Number(u256(word(6, "0x" + body)));
+    const off1 = Number(u256(word(7, "0x" + body)));
+    expect(u256(word(8, "0x" + body))).toBe(BigInt("0x" + Buffer.from(r).toString("hex")));
+    expect(u256(word(9, "0x" + body))).toBe(BigInt("0x" + Buffer.from(s).toString("hex")));
+    // Dynamic offsets point past the 10 static slots.
+    expect(off0).toBe(10 * 32);
     expect(off1).toBeGreaterThan(off0);
     const readBytes = (off: number) => {
       const len = Number(u256("0x" + body.slice(off * 2, off * 2 + 64)));
@@ -136,9 +134,8 @@ describe("V3 EVM deployAndInit calldata", () => {
     const salt = "0x" + "07".padStart(64, "0");
     const x = new Uint8Array(32).fill(1);
     const y = new Uint8Array(32).fill(2);
-    const rpId = new Uint8Array(32).fill(3);
     const v3 = Buffer.from(a.buildActivatePayloadV3({
-      salt, x, y, rpIdHash: rpId, feePolicyVersion: 1,
+      salt, x, y, feePolicyVersion: 1,
       deadline: 1_000_300, chainId: 97, factory: FACTORY,
     })).toString("hex");
     // Older domains must never appear in a V3 payload.
@@ -146,7 +143,7 @@ describe("V3 EVM deployAndInit calldata", () => {
     expect(Buffer.from(v3, "hex").toString("ascii")).not.toContain("SMART_ACCOUNT|v1");
     // Factory address is bound (last 20 bytes of the preimage hash input differ per factory).
     const other = Buffer.from(a.buildActivatePayloadV3({
-      salt, x, y, rpIdHash: rpId, feePolicyVersion: 1,
+      salt, x, y, feePolicyVersion: 1,
       deadline: 1_000_300, chainId: 97, factory: "0x1111111111111111111111111111111111111111",
     })).toString("hex");
     expect(other).not.toBe(v3);
