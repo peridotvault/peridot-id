@@ -68,7 +68,7 @@ export function AppConnectionsScreen({ onDone }: { onDone: () => void }) {
       <Text style={s.title}>App Connections</Text>
       <Text style={s.subtitle}>Sites you signed in to with PeridotID. Disconnecting stops future sign-ins there.</Text>
 
-      {error && <Text style={s.error}>{error}</Text>}
+      {error && <Text role="alert" style={s.error}>{error}</Text>}
       {justRevoked && <Text className="font-sans text-[13px] text-success">Site disconnected.</Text>}
 
       {grants.map((g) => {

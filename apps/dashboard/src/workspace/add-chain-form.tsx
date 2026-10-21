@@ -47,7 +47,7 @@ export function AddChainForm({
     <Card>
       <h3 className="font-semibold tracking-tight">Register a new EVM chain</h3>
       <p className={`mt-1 text-sm ${MUTED}`}>Metadata and RPCs are editable after — set its factory contract next.</p>
-      {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
+      {error && <p role="alert" className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
         <label className="text-sm">
           Name

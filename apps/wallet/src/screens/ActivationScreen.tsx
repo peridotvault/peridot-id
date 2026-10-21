@@ -80,7 +80,7 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
         />
       )}
 
-      {gate.error && <Text style={s.error}>{gate.error}</Text>}
+      {gate.error && <Text role="alert" style={s.error}>{gate.error}</Text>}
 
       {gate.activation && !gate.isActive && (
         <ActivationStatusCard status={gate.st} requiredSol={gate.requiredSol} balanceSol={gate.balanceSol} />

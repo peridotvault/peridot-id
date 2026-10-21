@@ -12,7 +12,7 @@ const CONTRACT_TYPES = ["factory", "account_implementation", "verifier", "paymas
 
 /** Admin smart-contract registry: typed contracts per chain (factory, implementation, …). */
 export function ContractsManager({ client }: { client: PeridotClient }) {
-  const { contractChainId } = useWorkspace();
+  const { contractChainId, clearContractChainId } = useWorkspace();
   const [chains, setChains] = useState<Chain[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,13 +38,16 @@ export function ContractsManager({ client }: { client: PeridotClient }) {
   }, [load]);
 
   useEffect(() => {
+    // ANT-341 FR7: single-use handoff — clear after consume so later visits
+    // never re-select a stale chain.
     if (contractChainId) {
       setSelectedId(contractChainId);
+      clearContractChainId();
     } else if (!selectedId && chains.length > 0) {
       const first = chains[0];
       if (first) setSelectedId(first.id);
     }
-  }, [contractChainId, chains, selectedId]);
+  }, [contractChainId, chains, selectedId, clearContractChainId]);
 
   const chain = chains.find((c) => c.id === selectedId) ?? null;
 
@@ -57,7 +60,7 @@ export function ContractsManager({ client }: { client: PeridotClient }) {
       />
       {error && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <p className={`text-sm ${ERROR}`}>{error}</p>
+          <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
           <MiniButton size="sm" onClick={retry}>
             Retry
           </MiniButton>

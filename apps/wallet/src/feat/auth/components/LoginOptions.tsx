@@ -75,12 +75,14 @@ export function LoginOptions({
             <Text className="font-sans text-sm text-muted-foreground">Sign in to continue to {ctxOrigin}</Text>
           ) : null}
         </View>
-        {error && <Text style={s.error}>{error}</Text>}
+        {error && <Text role="alert" style={s.error}>{error}</Text>}
         <View className="w-full max-w-[343px] gap-3">
           <View style={{ flexDirection: "row" }} className="items-center gap-2">
             <View className="flex-1 items-center gap-2.5 border border-border bg-background px-5 py-[15px]" style={{ flexDirection: "row" }}>
               <Mail size={16} className="text-muted-foreground" />
               <TextInput
+                id="login-email-inline"
+                aria-label="Email address"
                 className="flex-1 p-0 font-sans text-sm text-foreground [--placeholder:var(--color-muted-foreground)] outline-none"
                 value={email}
                 onChangeText={onEmailChange}

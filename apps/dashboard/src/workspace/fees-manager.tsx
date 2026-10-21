@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import type { FeePolicyView, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
 import type { PaymentFeeRate } from "./app-types";
@@ -54,9 +55,31 @@ export function FeesManager({ client }: { client: PeridotClient }) {
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
+  // ANT-341 FR7: flash timeout cleaned up on unmount (no setState-after-unmount).
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+
   const flash = (m: string) => {
     setMsg(m);
-    setTimeout(() => setMsg(null), 2500);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setMsg(null), 2500);
+  };
+
+  // ANT-341 FR6: roving-tabindex tab refs for arrow-key nav.
+  const tabOrder: Tab[] = ["peridot", "doku"];
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ peridot: null, doku: null });
+  const onTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, current: Tab) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const i = tabOrder.indexOf(current);
+    const next = tabOrder[(i + (e.key === "ArrowRight" ? 1 : tabOrder.length - 1)) % tabOrder.length]!;
+    setTab(next);
+    tabRefs.current[next]?.focus();
   };
 
   const load = useCallback(async () => {
@@ -179,22 +202,33 @@ export function FeesManager({ client }: { client: PeridotClient }) {
       />
       {error && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <p className={`text-sm ${ERROR}`}>{error}</p>
+          <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
           <MiniButton size="sm" onClick={() => void load()}>
             Retry
           </MiniButton>
         </div>
       )}
-      {msg && <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{msg}</p>}
+      {msg && (
+        <p role="status" className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">
+          {msg}
+        </p>
+      )}
 
       <div className="mt-6 flex w-fit gap-1 rounded-md border border-border bg-muted p-1" role="tablist" aria-label="Fee settings">
-        {(["peridot", "doku"] as const).map((k) => (
+        {tabOrder.map((k) => (
           <button
             key={k}
             type="button"
             role="tab"
+            id={`fees-tab-${k}`}
             aria-selected={tab === k}
+            aria-controls={`fees-panel-${k}`}
+            tabIndex={tab === k ? 0 : -1}
+            ref={(el) => {
+              tabRefs.current[k] = el;
+            }}
             onClick={() => setTab(k)}
+            onKeyDown={(e) => onTabKeyDown(e, k)}
             className={`rounded-[3px] px-3 py-1 text-sm font-medium transition-colors focus-ring ${
               tab === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
             }`}
@@ -204,7 +238,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
         ))}
       </div>
 
-      <div className="mt-4 grid gap-4">
+      <div role="tabpanel" id={`fees-panel-${tab}`} aria-labelledby={`fees-tab-${tab}`} className="mt-4 grid gap-4">
         {tab === "peridot" ? (
           <Card>
             <div className="flex items-center justify-between gap-3">
@@ -295,6 +329,13 @@ export function FeesManager({ client }: { client: PeridotClient }) {
             </div>
 
             <div className="mt-4 grid gap-3">
+              {/* ANT-341 FR7: explicit empty state when no gateway rates exist. */}
+              {rates.length === 0 && (
+                <p className={`text-sm ${MUTED}`}>
+                  No gateway rates configured yet — rates appear here once the backend registers DOKU payment
+                  methods.
+                </p>
+              )}
               {rates.map((r) => {
                 const d = drafts[r.methodKey] ?? toDraft(r);
                 return (

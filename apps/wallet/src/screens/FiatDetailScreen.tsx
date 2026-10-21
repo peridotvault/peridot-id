@@ -64,7 +64,7 @@ export function FiatDetailScreen({ item: initial, onDone }: { item: FiatItem; on
       {tx.feeIdr && <Field label="Service fee" value={fmtIdr(tx.feeIdr)} />}
       <Field label="Created" value={fmtDate(item.createdAt)} />
 
-      {error && <Text style={s.error}>{error}</Text>}
+      {error && <Text role="alert" style={s.error}>{error}</Text>}
 
       {(awaitingPayment || tx.providerStatus === "processing") && (
         <UIButton title={checking ? "Checking…" : "Check status"} onPress={sync} disabled={checking} />

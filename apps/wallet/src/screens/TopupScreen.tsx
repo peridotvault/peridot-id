@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Linking, ScrollView, Text, TextInput, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
@@ -26,6 +26,11 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
   const [net, setNet] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ANT-341 FR1: move focus to the error on failed submit (SR + keyboard).
+  useEffect(() => {
+    if (error) document.getElementById("topup-error")?.focus?.();
+  }, [error]);
   const q = useDepositQuote(peridot, net, setError);
   const sync = useCheckoutSync(peridot);
   // DOKU checkout moves real money — mainnet-only, and paused mid-transition
@@ -95,15 +100,20 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
       )}
       {frozen && !gated && <Text style={s.hint}>Network is switching — top-ups pause until balances reload.</Text>}
 
+      {/* ANT-341 FR7: submit errors render above the fold (no scroll to find them). */}
+      {error && <Text role="alert" tabIndex={-1} id="topup-error" style={s.error}>{error}</Text>}
+
       <View className="mt-3 gap-1.5 border border-border bg-surface p-3">
-        <Text style={s.label}>Amount credited to you (IDR)</Text>
-        <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000" />
-        {belowMin && <Text style={s.error}>Minimum top-up is Rp50.000.</Text>}
+        <label htmlFor="topup-amount">
+          <Text style={s.label}>Amount credited to you (IDR)</Text>
+        </label>
+        <TextInput id="topup-amount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000" />
+        {belowMin && <Text role="alert" style={s.error}>Minimum top-up is Rp50.000.</Text>}
 
         {q.quote && (
           <>
             {q.noMethods ? (
-              <Text style={s.error}>No payment methods available right now. Try again later.</Text>
+              <Text role="alert" style={s.error}>No payment methods available right now. Try again later.</Text>
             ) : (
               <FiatQuoteBreakdown
                 quote={q.quote}
@@ -134,14 +144,12 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
             <UIButton title="Open payment page" onPress={() => openUrl(sync.pending!.paymentUrl)} />
           </View>
         )}
-        {sync.syncMsg && <Text style={s.hint}>{sync.syncMsg}</Text>}
+        {sync.syncMsg && <Text role="status" style={s.hint}>{sync.syncMsg}</Text>}
       </View>
 
       <Text style={s.hint}>
         Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Verified apps pay a Rp0 PeridotID fee. Tap Check payment status after paying — your Saldo updates once confirmed.
       </Text>
-
-      {error && <Text style={s.error}>{error}</Text>}
     </ScrollView>
   );
 }

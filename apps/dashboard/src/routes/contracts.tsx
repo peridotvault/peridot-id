@@ -2,16 +2,43 @@
 import { Link } from "react-router";
 import { ContractsManager } from "../workspace/contracts-manager";
 import { useWorkspace } from "../workspace/workspace-provider";
-import { MUTED } from "../workspace/ui";
+import { Card, ERROR, MUTED } from "../workspace/ui";
+import { PageHeader } from "../workspace/page-header";
+import { CutButton } from "../workspace/cut-button";
 
 /** Admin smart-contract registry. */
 export default function WorkspaceContractsPage() {
-  const { client, status, isAdmin } = useWorkspace();
+  const { client, status, isAdmin, busy, error, signIn } = useWorkspace();
 
   if (status === "checking") {
     return (
       <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <p role="status" className={`mt-8 text-sm ${MUTED}`}>Checking session…</p>
+      </main>
+    );
+  }
+
+  // ANT-341 FR5: anonymous visitors get a sign-in CTA (no dead-ends);
+  // signed-in non-admins get Admin only.
+  if (status === "anonymous") {
+    return (
+      <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+        <PageHeader eyebrow="Smart contracts" title="Contracts" />
+        <Card className="mt-8">
+          <h2 className="text-lg font-semibold tracking-tight">Sign in to manage contracts</h2>
+          <p className={`mt-1 text-sm ${MUTED}`}>The contract registry is admin-only.</p>
+          {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
+          <div className="mt-4">
+            <CutButton
+              type="button"
+              onClick={signIn}
+              disabled={busy}
+              className={busy ? "pointer-events-none opacity-60" : ""}
+            >
+              {busy ? "Waiting for wallet…" : "Sign in with PeridotID"}
+            </CutButton>
+          </div>
+        </Card>
       </main>
     );
   }

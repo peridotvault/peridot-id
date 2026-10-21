@@ -18,7 +18,7 @@ export function ActivityHeader({
     <>
       <View style={{ flexDirection: "row" }} className="items-center justify-between">
         <Text style={s.title}>Activity</Text>
-        <TouchableOpacity onPress={onRefresh} disabled={busy}>
+        <TouchableOpacity onPress={onRefresh} disabled={busy} accessibilityLabel="Refresh activity">
           <View className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <RefreshCw size={16} className="text-foreground" />
           </View>

@@ -62,7 +62,7 @@ export function PasskeyScreen({ onDone }: { onDone: () => void }) {
         Passkeys authorize your on-chain wallet (secp256r1). Register one on this device to
         sign in and authorize withdrawals. Your last passkey cannot be removed.
       </Text>
-      {error && <Text style={s.error}>{error}</Text>}
+      {error && <Text role="alert" style={s.error}>{error}</Text>}
 
       <TouchableOpacity onPress={register} disabled={busy}>
         <View style={{ flexDirection: "row" }} className="w-full items-center justify-center gap-2 border border-border bg-surface py-3">

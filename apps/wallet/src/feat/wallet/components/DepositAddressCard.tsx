@@ -22,7 +22,7 @@ export function DepositAddressCard({
         Send SOL to this address to fund your wallet and cover activation. The cost
         currently requires about {requiredSol.toFixed(4)} SOL.
       </Text>
-      <TouchableOpacity onPress={onCopy}>
+      <TouchableOpacity onPress={onCopy} accessibilityLabel="Copy deposit address">
         <View style={{ flexDirection: "row" }} className="mt-1 w-full items-center justify-between gap-2 border border-border bg-muted p-3">
           <Text selectable style={s.mono} className="flex-1">
             {address ? `${address.slice(0, 8)}…${address.slice(-8)}` : "—"}

@@ -73,7 +73,7 @@ export function EditChainView() {
           <p role="status" className={`text-sm ${MUTED}`}>Loading…</p>
         ) : error ? (
           <div className="flex flex-wrap items-center gap-2">
-            <p className={`text-sm ${ERROR}`}>{error}</p>
+            <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
             <MiniButton size="sm" onClick={retry}>
               Retry
             </MiniButton>

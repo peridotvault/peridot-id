@@ -112,7 +112,7 @@ export function ProvisioningScreen({ onContinue }: { onContinue: () => void }) {
                 </TouchableOpacity>
               )}
             </View>
-            {st.error && <Text style={s.error}>{st.error}</Text>}
+            {st.error && <Text role="alert" style={s.error}>{st.error}</Text>}
           </View>
         );
       })}

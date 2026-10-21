@@ -64,7 +64,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
       />
       {error && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <p className={`text-sm ${ERROR}`}>{error}</p>
+          <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
           <MiniButton size="sm" onClick={retry}>
             Retry
           </MiniButton>

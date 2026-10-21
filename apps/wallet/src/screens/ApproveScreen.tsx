@@ -45,6 +45,11 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
     setAcknowledged(false);
   }, [req.action, req.summary]);
 
+  // ANT-341 FR1: move focus to the error on failed approve (SR + keyboard).
+  useEffect(() => {
+    if (req.error) document.getElementById("approve-error")?.focus?.();
+  }, [req.error]);
+
   const onApprove = useCallback(() => {
     void req.approve({ unknownAcknowledged: acknowledged });
   }, [req.approve, acknowledged]);
@@ -85,7 +90,7 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
       {req.phase === "failed" && (
         <UIButton title="Close" onPress={() => void req.deny(req.expectedPid ? "wrong_account" : "access_denied")} />
       )}
-      {req.error && <Text style={s.error}>{req.error}</Text>}
+      {req.error && <Text role="alert" tabIndex={-1} id="approve-error" style={s.error}>{req.error}</Text>}
     </View>
   );
 }

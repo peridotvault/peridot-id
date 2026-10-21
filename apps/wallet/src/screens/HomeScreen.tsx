@@ -67,10 +67,10 @@ export function HomeScreen({
         onClose={() => setChoice(false)}
       />
 
-      {d.error && <Text style={s.error}>{d.error}</Text>}
+      {d.error && <Text role="alert" style={s.error}>{d.error}</Text>}
 
       {d.activated && d.passkeys.length === 0 && !d.busy && (
-        <TouchableOpacity onPress={goPasskeys}>
+        <TouchableOpacity onPress={goPasskeys} accessibilityLabel="Add a passkey in Security">
           <View className="border border-border bg-muted p-3">
             <Text className="text-center font-sans text-[13px] text-muted-foreground">No passkey — add one in Security to authorize withdrawals.</Text>
           </View>
