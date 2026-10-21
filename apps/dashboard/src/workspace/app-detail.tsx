@@ -295,7 +295,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   if (loading) {
     return (
       <section className="mt-8">
-        <p className={`text-sm ${MUTED}`}>Loading…</p>
+        <p role="status" className={`text-sm ${MUTED}`}>Loading…</p>
       </section>
     );
   }
@@ -320,7 +320,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         ← All apps
       </Link>
 
-      <div className="mt-3 flex items-center justify-between gap-3">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         {editingName ? (
           <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} className={`${FIELD} text-xl font-semibold`} />
         ) : (
@@ -328,7 +328,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
             {app.name} {!app.isActive && <span className={`text-sm font-normal ${MUTED}`}>(disabled)</span>}{" "}
             {app.isVerified && (
               <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 align-middle text-xs font-semibold text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
-                ✓ Verified partner — 0% PeridotID fee
+                <span aria-hidden="true">✓</span> Verified partner — 0% PeridotID fee
               </span>
             )}
           </h1>
@@ -370,13 +370,20 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-2 text-sm">
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
         <span className={MUTED}>client_id</span>
         <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{app.clientId}</code>
         <CopyButton text={app.clientId} />
       </div>
 
-      {error && <p className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
+      {error && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <p className={`text-sm ${ERROR}`}>{error}</p>
+          <MiniButton size="sm" onClick={() => void load()}>
+            Retry
+          </MiniButton>
+        </div>
+      )}
       {msg && <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{msg}</p>}
 
       <div className="mt-6 grid gap-4">

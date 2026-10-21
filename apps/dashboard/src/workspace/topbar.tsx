@@ -31,12 +31,12 @@ export function Topbar({
   const isSandbox = env !== "production";
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-      <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-4 px-5 py-2 sm:px-8">
-        <span className="inline-flex items-center gap-2.5 justify-self-start">
+      <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-4 overflow-x-auto px-5 py-2 sm:px-8">
+        <span className="inline-flex shrink-0 items-center gap-2.5 justify-self-start">
           <span className={`h-6 w-6 bg-foreground ${LOGO_CUT}`} aria-hidden="true" />
           <span className="text-[15px] font-semibold tracking-tight">PeridotID</span>
         </span>
-        <nav className="flex items-center gap-1 rounded-md border border-border bg-muted p-1" aria-label="Workspace">
+        <nav className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-muted p-1" aria-label="Workspace">
           {tabs.map((t) => (
             <button
               key={t.key}
@@ -53,7 +53,7 @@ export function Topbar({
             </button>
           ))}
         </nav>
-        <div className="flex items-center gap-3 justify-self-end">
+        <div className="flex shrink-0 items-center gap-3 justify-self-end">
           {isSandbox ? (
             <span
               title="Sandbox: DOKU test mode — no real money moves here."
@@ -78,7 +78,7 @@ export function Topbar({
           >
             {isSandbox ? "Switch to production" : "Open sandbox"}
           </a>
-          <span className="truncate text-xs text-muted-foreground">
+          <span className="truncate text-xs text-muted-foreground" title={sessionLabel}>
             {isAdmin && (
               <span className="mr-2 rounded-[3px] bg-brand-1 px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-brand-2 dark:text-[#07170f]">
                 admin
