@@ -252,6 +252,18 @@ describe("AuthService", () => {
 
     const app = await service.issueAppAccessToken("owner@pid", "pidapp_x");
     expect(jwtPayload(app.accessToken)).toMatchObject({ iss: "peridot-id", aud: "pid-app", type: "access" });
+    expect(jwtPayload(app.accessToken)).not.toHaveProperty("scope");
+  });
+
+  it("embeds the fiat:transfer scope claim on scoped machine tokens (ANT-286b)", async () => {
+    const { service } = setup();
+    const scoped = await service.issueAppAccessToken("owner@pid", "pidapp_x", "fiat:transfer");
+    expect(jwtPayload(scoped.accessToken)).toMatchObject({ app: "pidapp_x", scope: "fiat:transfer" });
+  });
+
+  it("rejects novel scopes service-side even if DTO validation is bypassed (Tobias residual #4)", async () => {
+    const { service } = setup();
+    await expect(service.issueAppAccessToken("owner@pid", "pidapp_x", "other")).rejects.toThrow("scope must be");
   });
 
   it("rejects a refresh token minted for another audience (cross-class confusion)", async () => {
@@ -466,6 +478,13 @@ describe("AuthService app sessions (per-first-party logout isolation)", () => {
     expect(names).toContain("pid_refresh_web");
     expect(names).not.toContain("pid_access");
     expect(names).not.toContain("pid_refresh");
+  });
+
+  it("issueSession rejects a scope outside SCOPE_RE (fail-closed for future callers)", async () => {
+    const { service, res } = setup();
+    await expect(service.issueSession(res as never, A, "ua", undefined, undefined, "_evil")).rejects.toThrow(
+      "invalid scope",
+    );
   });
 
   it("scoped logout clears only the app session, never the wallet's", async () => {

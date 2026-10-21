@@ -143,6 +143,39 @@ client's authorized redirect URIs. Never add localhost URIs to the prod client.
 **WebAuthn** uses `sandbox.pid.peridotvault.com` as RP id → passkeys are isolated
 per environment.
 
+### Sandbox SLA + faucet (ANT-287 sandbox MVP, DevOps ANT-290)
+
+**No prod SLA for the sandbox in MVP — it is a best-effort test bed.**
+Same VPS as prod (noisy-neighbor risk), no uptime target, deploys and
+maintenance may interrupt it without notice. Never point production traffic
+or real money at it; DOKU runs in sandbox mode there so real money can never
+move anyway.
+
+**Faucet (instant test money).** The API registers
+`POST /v1/fiat/test-credit` ONLY when `PID_FAUCET_ENABLED` is exactly
+`"true"` (fail-closed: unset/anything-else ⇒ route absent ⇒ 404, zero
+ledger writes):
+
+- Sandbox: `PID_FAUCET_ENABLED=true` (`deploy/.env.test.example` + Infisical
+  test env `/apps/api`). Mints land on the internal fiat ledger via
+  `fiat_issue` with `source='faucet'` (backend contract, ANT-289).
+- Production: `PID_FAUCET_ENABLED=false`, set explicitly in
+  `deploy/.env.main.example` + Infisical main env. Verify after every deploy
+  touching fiat: `POST /v1/fiat/test-credit` on prod ⇒ 404.
+- Caps (proposed, CTO confirms via ANT-287 OQ-1): per-call max Rp50.000,
+  Rp100.000 + 10 calls/identity/day, backend-hardcoded.
+- Abuse alert: `deploy/alerts/faucet-abuse-check.sh` — cron it (sandbox
+  `*/15`, production `*/5` with `ALERT_ENV=production` for the prod-zero
+  invariant). See `deploy/alerts/README.md`.
+
+**Dashboard env switch.** Both stacks bake `VITE_OTHER_WORKSPACE_URL` at
+build time (`up.sh` defaults: sandbox → `https://dashboard.peridot.id`,
+prod → `https://sandbox-dashboard.peridot.id`; overridable via
+`DASHBOARD_OTHER_WORKSPACE_URL` env or Infisical `/apps/api|/apps/wallet`
+same key). If the var is ever unset, the topbar switch hides — the Frontend
+derivation fallback (ANT-291 AC-D1) removes that single point of failure;
+until it lands, keep the var set in both deploys.
+
 ## Update
 
 ```sh

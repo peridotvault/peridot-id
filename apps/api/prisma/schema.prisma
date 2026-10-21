@@ -57,9 +57,9 @@ model Identity {
   pid       String         @id
   status    IdentityStatus @default(active)
   role      Role           @default(user)
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  deletedAt DateTime?
+  createdAt DateTime @db.Timestamptz(3)       @default(now())
+  updatedAt DateTime @db.Timestamptz(3)       @updatedAt
+  deletedAt DateTime? @db.Timestamptz(3)
 
   // Back-refs below are Prisma-mandatory declarations (a relation needs both
   // sides); they cost nothing at runtime. Convention: never `include` from
@@ -93,8 +93,8 @@ model Profile {
   displayName String?
   avatarUrl   String?
   locale      String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @db.Timestamptz(3) @default(now())
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
 
   @@map("profiles")
 }
@@ -111,8 +111,8 @@ model IdentityCredential {
   // email IS NOT NULL — Prisma cannot express it here. Claim flow maps the
   // P2002 violation to 409 (ANT-233 F3).
   email          String?
-  linkedAt       DateTime  @default(now())
-  lastLoginAt    DateTime?
+  linkedAt       DateTime @db.Timestamptz(3)  @default(now())
+  lastLoginAt    DateTime? @db.Timestamptz(3)
 
   @@unique([provider, providerUserId])
   @@index([pid])
@@ -128,8 +128,8 @@ model Device {
   // pre-existing rows, treated as "google" (shorter cap). Preserved across
   // refresh rotations, which keep the same device.
   authMethod String?
-  lastSeenAt DateTime  @default(now())
-  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime @db.Timestamptz(3)  @default(now())
+  createdAt  DateTime @db.Timestamptz(3)  @default(now())
   sessions   Session[]
 
   @@index([pid])
@@ -141,9 +141,9 @@ model Session {
   deviceId    String
   device      Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   rotatedFrom String?
-  revokedAt   DateTime?
-  expiresAt   DateTime
-  createdAt   DateTime  @default(now())
+  revokedAt   DateTime? @db.Timestamptz(3)
+  expiresAt   DateTime @db.Timestamptz(3)
+  createdAt   DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([deviceId])
   @@map("sessions")
@@ -164,9 +164,9 @@ model CredentialChallenge {
   challenge         String
   approvalChallenge String?
   isAdditional      Boolean   @default(false)
-  expiresAt         DateTime
-  consumedAt        DateTime?
-  createdAt         DateTime  @default(now())
+  expiresAt         DateTime @db.Timestamptz(3)
+  consumedAt        DateTime? @db.Timestamptz(3)
+  createdAt         DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([pid])
   @@map("credential_challenges")
@@ -189,8 +189,8 @@ model ChainAccount {
   status             ChainAccountStatus @default(inactivated)
   activationBalance  BigInt? // lamports detected at last poll (null = unpolled)
   activationRequired BigInt? // lamports needed to activate (rent+fee+margin)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  createdAt          DateTime @db.Timestamptz(3)           @default(now())
+  updatedAt          DateTime @db.Timestamptz(3)           @updatedAt
 
   feePayers    WalletFeePayer[]
   transactions Transaction[]
@@ -210,8 +210,8 @@ model Authority {
   publicKey    Bytes
   credentialId String?
   status       AuthorityStatus @default(active)
-  createdAt    DateTime        @default(now())
-  lastUsedAt   DateTime?
+  createdAt    DateTime @db.Timestamptz(3)        @default(now())
+  lastUsedAt   DateTime? @db.Timestamptz(3)
 
   @@index([pid])
   @@map("authorities")
@@ -224,7 +224,7 @@ model WalletFeePayer {
   chainAccount   ChainAccount   @relation(fields: [chainAccountId], references: [id], onDelete: Cascade)
   address        String
   status         IdentityStatus @default(active)
-  createdAt      DateTime       @default(now())
+  createdAt      DateTime @db.Timestamptz(3)       @default(now())
 
   @@unique([chainAccountId, address])
   @@map("wallet_fee_payers")
@@ -239,8 +239,8 @@ model Intent {
   type      String
   payload   Json
   status    IntentStatus @default(pending)
-  createdAt DateTime     @default(now())
-  expiresAt DateTime
+  createdAt DateTime @db.Timestamptz(3)     @default(now())
+  expiresAt DateTime @db.Timestamptz(3)
 
   transactions Transaction[]
 
@@ -269,8 +269,8 @@ model Transaction {
   // recordTransaction replay check is the UX-friendly 400 on top.
   txHash         String?         @unique
   status         TransactionStatus @default(prepared)
-  createdAt      DateTime          @default(now())
-  confirmedAt    DateTime?
+  createdAt      DateTime @db.Timestamptz(3)          @default(now())
+  confirmedAt    DateTime? @db.Timestamptz(3)
   errorCode      String?
   errorMessage   String?
 
@@ -288,7 +288,7 @@ model SecurityEvent {
   identity  Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
   eventType String
   metadata  Json
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@index([pid])
   @@map("security_events")
@@ -307,9 +307,9 @@ model ClaimTicket {
   avatarUrl      String?
   redirectTo     String?
   clientId       String?
-  consumedAt     DateTime?
-  expiresAt      DateTime
-  createdAt      DateTime  @default(now())
+  consumedAt     DateTime? @db.Timestamptz(3)
+  expiresAt      DateTime @db.Timestamptz(3)
+  createdAt      DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([expiresAt])
   @@map("claim_tickets")
@@ -323,11 +323,11 @@ model EmailOtp {
   id         String    @id @default(uuid())
   email      String
   codeHash   String
-  expiresAt  DateTime
+  expiresAt  DateTime @db.Timestamptz(3)
   attempts   Int       @default(0)
-  consumedAt DateTime?
+  consumedAt DateTime? @db.Timestamptz(3)
   requestIp  String?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([email])
   @@index([expiresAt])
@@ -345,9 +345,14 @@ model SsoCode {
   sessionId  String?
   redirectTo String
   clientId   String?
-  consumedAt DateTime?
-  expiresAt  DateTime
-  createdAt  DateTime  @default(now())
+  // PKCE S256 (ANT-284): public clients bind the code to a challenge at
+  // issue time; exchange must present the verifier. NULL = no PKCE (legacy
+  // confidential-client flow with redirect_uri + client_secret binding).
+  codeChallenge       String?
+  codeChallengeMethod String?
+  consumedAt DateTime? @db.Timestamptz(3)
+  expiresAt  DateTime @db.Timestamptz(3)
+  createdAt  DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([pid])
   @@map("sso_codes")
@@ -361,9 +366,9 @@ model SsoGrant {
   pid         String
   origin      String
   clientId    String?
-  firstSeenAt DateTime  @default(now())
-  lastUsedAt  DateTime  @default(now())
-  revokedAt   DateTime?
+  firstSeenAt DateTime @db.Timestamptz(3)  @default(now())
+  lastUsedAt  DateTime @db.Timestamptz(3)  @default(now())
+  revokedAt   DateTime? @db.Timestamptz(3)
 
   @@unique([pid, origin])
   @@map("sso_grants")
@@ -385,8 +390,8 @@ model Chain {
   logoUrl      String?
   isTestnet    Boolean  @default(true)
   isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @db.Timestamptz(3) @default(now())
+  updatedAt    DateTime @db.Timestamptz(3) @updatedAt
 
   contracts ChainContract[]
   accounts  ChainAccount[]
@@ -405,8 +410,8 @@ model ChainContract {
   versionLabel String?
   deployTxHash String?
   isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @db.Timestamptz(3) @default(now())
+  updatedAt    DateTime @db.Timestamptz(3) @updatedAt
 
   @@unique([chainId, type])
   @@map("chain_contracts")
@@ -422,8 +427,8 @@ model EvmRelayerKey {
   chainId   String   @unique
   chain     Chain    @relation(fields: [chainId], references: [id], onDelete: Cascade)
   secret    String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt
 
   @@map("evm_relayer_keys")
 }
@@ -463,11 +468,11 @@ model FiatProviderAccount {
   accountStatus      String    @default("creating")
   currency           String    @default("IDR")
   lastBalance        String?
-  lastBalanceAt      DateTime?
+  lastBalanceAt      DateTime? @db.Timestamptz(3)
   registerRef        String?   @unique
   providerResponse   Json?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime @db.Timestamptz(3)  @default(now())
+  updatedAt          DateTime @db.Timestamptz(3)  @updatedAt
 
   @@unique([pid, provider])
   @@index([providerAccountId])
@@ -563,8 +568,8 @@ model FiatProviderTransaction {
    * Extinguished rows never count toward outstanding, forever.
    */
   extinguished          Boolean  @default(false)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @db.Timestamptz(3) @default(now())
+  updatedAt             DateTime @db.Timestamptz(3) @updatedAt
 
   @@index([pid])
   @@index([accountId])
@@ -581,7 +586,7 @@ model FiatWebhookEvent {
   eventType  String
   payload    Json
   status     String   @default("received")
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
 
   @@map("fiat_webhook_events")
 }
@@ -603,7 +608,7 @@ model FiatFeePolicy {
   /** PPN (VAT) on the PeridotID fee, basis points (1100 = 11%). */
   taxBps     Int      @default(1100)
   active     Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
 
   @@map("fiat_fee_policies")
 }
@@ -613,7 +618,7 @@ model FiatFeePolicy {
 model FiatTaxSetting {
   id         Int      @id @default(1)
   dokuTaxBps Int      @default(1100)
-  updatedAt  DateTime @updatedAt
+  updatedAt  DateTime @db.Timestamptz(3) @updatedAt
 
   @@map("fiat_tax_settings")
 }
@@ -645,7 +650,7 @@ model FiatLedgerEntry {
   prevHash         String?
   hash             String?
   hashSeq          BigInt?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime @db.Timestamptz(3) @default(now())
 
   @@index([pid])
   @@index([entryGroup])
@@ -671,10 +676,10 @@ model FiatLedgerEvent {
   /** pending | delivered | failed */
   status        String    @default("pending")
   attempts      Int       @default(0)
-  nextAttemptAt DateTime  @default(now())
+  nextAttemptAt DateTime @db.Timestamptz(3)  @default(now())
   lastError     String?
-  createdAt     DateTime  @default(now())
-  deliveredAt   DateTime?
+  createdAt     DateTime @db.Timestamptz(3)  @default(now())
+  deliveredAt   DateTime? @db.Timestamptz(3)
 
   @@index([status, nextAttemptAt])
   @@map("fiat_ledger_events")
@@ -701,18 +706,24 @@ model PidApp {
   // When set, code exchange requires the matching secret.
   clientSecretHash      String?
   clientSecretPrefix    String?
-  clientSecretCreatedAt DateTime?
+  clientSecretCreatedAt DateTime? @db.Timestamptz(3)
   // Rotation deadline: exchanges/token requests past this fail closed until
   // the owner rotates (ANT-227 item 5). Pre-policy NULL rows were backfilled
   // by 20261022_app_secret_expiry_backfill (ANT-233 F2); NULL now means
   // "no secret set" (public client), never "immortal secret".
-  clientSecretExpiresAt DateTime?
+  clientSecretExpiresAt DateTime? @db.Timestamptz(3)
+  // Previous-hash grace window (ANT-283): rotation moves the replaced hash
+  // here with a short overlap deadline (APP_CLIENT_SECRET_GRACE). Both hashes
+  // verify until the previous deadline passes, then it is ignored. NULL =
+  // no previous secret (never rotated, or grace already superseded).
+  prevClientSecretHash      String?
+  prevClientSecretExpiresAt DateTime? @db.Timestamptz(3)
   // Per-app callback endpoint + HMAC signing secret (set together). The
   // ledger posts signed events here (X-Pid-Signature). See docs/FIAT_LEDGER.md.
   webhookUrl            String?
   webhookSecret         String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  createdAt             DateTime @db.Timestamptz(3)  @default(now())
+  updatedAt             DateTime @db.Timestamptz(3)  @updatedAt
 
   fees PidAppFee[]
 
@@ -733,8 +744,8 @@ model PidAppFee {
   minIdr     BigInt   @default(0)
   maxIdr     BigInt   @default(0)
   enabled    Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
+  updatedAt  DateTime @db.Timestamptz(3) @updatedAt
 
   @@unique([appId, operation])
   @@map("pid_app_fees")
@@ -754,8 +765,8 @@ model PaymentGatewayFeeRate {
   minIdr     BigInt   @default(0)
   maxIdr     BigInt   @default(0)
   enabled    Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
+  updatedAt  DateTime @db.Timestamptz(3) @updatedAt
 
   @@map("payment_gateway_fee_rates")
 }
@@ -768,7 +779,7 @@ model PaymentGatewayFeeRate {
 model BootstrapAdminLock {
   id        String   @id
   pid       String
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@map("bootstrap_admin_locks")
 }

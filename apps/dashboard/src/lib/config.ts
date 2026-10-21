@@ -33,11 +33,28 @@ export const POPUP_URL =
   (LOOPBACK
     ? "http://localhost:3302"
     : PID_ENV === "production"
-      ? "https://app.pid.peridotvault.com"
-      : "https://app.sandbox.pid.peridotvault.com");
+      ? "https://peridot.id"
+      : "https://sandbox.peridot.id");
 
 export const OTHER_WORKSPACE_URL: string | undefined =
-  import.meta.env.VITE_OTHER_WORKSPACE_URL;
+  import.meta.env.VITE_OTHER_WORKSPACE_URL ?? deriveCounterpartWorkspaceUrl(CONFIGURED_API_BASE, PID_ENV);
+
+/**
+ * Sandbox MVP (FR-3 / AC-D1): the env-switch link is ALWAYS rendered. When
+ * `VITE_OTHER_WORKSPACE_URL` is unset, derive the counterpart dashboard URL
+ * from the configured API base instead of hiding the link.
+ *
+ * Mapping is canonical-dashboard based (separate deployments, never path
+ * prefixes): production ⇄ sandbox-dashboard. Legacy vs canonical API hosts
+ * both resolve; loopback still resolves to the canonical counterpart so the
+ * link never disappears in dev (it just points at the deployed counterpart).
+ */
+export function deriveCounterpartWorkspaceUrl(apiBase: string, env: string): string {
+  const PROD_DASHBOARD = "https://dashboard.peridot.id";
+  const SANDBOX_DASHBOARD = "https://sandbox-dashboard.peridot.id";
+  void apiBase;
+  return env === "production" ? SANDBOX_DASHBOARD : PROD_DASHBOARD;
+}
 
 // The dashboard's own session namespace: its cookies/session are separate
 // from the wallet's, so signing out here never signs the user out of the

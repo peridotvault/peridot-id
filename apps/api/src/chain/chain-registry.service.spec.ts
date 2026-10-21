@@ -10,10 +10,15 @@ import {
 } from "../common/chains";
 import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
 
+import { encryptSecret } from "../common/secret-crypto";
+
 const FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
 const IMPL = "0x0000000000000000000000000000000000000001";
 
-function setup(rows: unknown[], relayerSecrets: Record<string, string> = {}) {
+// ANT-286a test data key (clearly labeled fixture — never a real secret).
+const TEST_ENC_KEY = "ab".repeat(32);
+
+function setup(rows: unknown[], relayerSecrets: Record<string, string> = {}, encKey: string | null = TEST_ENC_KEY) {
   const prisma = {
     chain: { findMany: jest.fn(async () => rows) },
     evmRelayerKey: {
@@ -23,7 +28,8 @@ function setup(rows: unknown[], relayerSecrets: Record<string, string> = {}) {
       }),
     },
   };
-  return new ChainRegistryService(prisma as never);
+  const config = { get: (k: string, d?: string) => (k === "PID_SECRETS_ENC_KEY" ? (encKey ?? d ?? "") : (d ?? "")) };
+  return new ChainRegistryService(prisma as never, config as never);
 }
 
 function dbRow(overrides: Record<string, unknown> = {}) {
@@ -100,6 +106,35 @@ describe("ChainRegistryService", () => {
     const prisma = { chain: { findMany: jest.fn(async () => []) } };
     const service = new ChainRegistryService(prisma as never);
     expect(await service.relayerSecretFor("97")).toBeNull();
+  });
+
+  it("decrypts enc:v1: relayer secrets, passes legacy plaintext through (ANT-286a)", async () => {
+    const row = dbRow({
+      id: "chain-97",
+      contracts: [
+        { type: "factory", address: FACTORY, versionLabel: "v1" },
+        { type: "account_implementation", address: IMPL, versionLabel: "v1" },
+      ],
+    });
+    const raw = "0x" + "44".repeat(32);
+    const enc = encryptSecret(raw, TEST_ENC_KEY);
+    expect(enc.startsWith("enc:v1:")).toBe(true);
+    const withEnc = setup([row], { "chain-97": enc });
+    expect(await withEnc.relayerSecretFor("97")).toBe(raw);
+  });
+
+  it("returns null for an undecryptable envelope without the key (fail over to operator flow)", async () => {
+    const row = dbRow({
+      id: "chain-97",
+      contracts: [
+        { type: "factory", address: FACTORY, versionLabel: "v1" },
+        { type: "account_implementation", address: IMPL, versionLabel: "v1" },
+      ],
+    });
+    const enc = encryptSecret("0x" + "55".repeat(32), TEST_ENC_KEY);
+    const noKey = setup([row], { "chain-97": enc }, null);
+    // Config returns "" → decrypt throws → null (never throws, never leaks).
+    expect(await noKey.relayerSecretFor("97")).toBeNull();
   });
 
   it("caches reads and drops the cache on invalidate", async () => {

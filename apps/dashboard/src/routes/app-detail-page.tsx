@@ -4,7 +4,7 @@ import { AppDetail } from "../workspace/app-detail";
 import { useWorkspace } from "../workspace/workspace-provider";
 import { MUTED } from "../workspace/ui";
 
-/** App Detail: escrow balance, callback endpoint, per-app fee schedule. */
+/** App Detail: your fiat balance, allowed origins, backend secret, per-app fee schedule. */
 export default function AppDetailPage() {
   const { client, status } = useWorkspace();
   const { id = "" } = useParams();

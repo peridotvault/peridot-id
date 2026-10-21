@@ -11,6 +11,7 @@ import {
   clearClaimCookie,
   clearOAuthStateCookie,
   clearScopedAuthCookies,
+  normalizeScope,
   scopeAccessCookie,
   scopeRefreshCookie,
   setAccountRefreshCookie,
@@ -232,5 +233,23 @@ describe("cookie transport hardening (ANT-228)", () => {
     clearScopedAuthCookies(clear as never, configMock(HTTPS) as never, "ws");
     expect(clear.clearCookie).toHaveBeenCalledWith("pid_access_ws", expect.objectContaining({ path: "/" }));
     expect(clear.clearCookie).toHaveBeenCalledWith("pid_refresh_ws", expect.objectContaining({ path: "/v1/auth" }));
+  });
+});
+
+describe("normalizeScope (ANT-284)", () => {
+  it("accepts lowercase alnum scopes", () => {
+    expect(normalizeScope("web")).toBe("web");
+    expect(normalizeScope("embed")).toBe("embed");
+    expect(normalizeScope("WS")).toBe("ws");
+    expect(normalizeScope(["web"])).toBe("web");
+  });
+
+  it("rejects leading-underscore scopes (account-cookie namespace collision)", () => {
+    expect(normalizeScope("_evil")).toBeNull();
+    expect(normalizeScope("_")).toBeNull();
+    expect(normalizeScope("")).toBeNull();
+    expect(normalizeScope(undefined)).toBeNull();
+    expect(normalizeScope("has space")).toBeNull();
+    expect(normalizeScope("_upper_ok")).toBeNull();
   });
 });

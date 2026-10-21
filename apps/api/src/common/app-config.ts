@@ -60,6 +60,12 @@ export const JWT_ACCESS_AUDIENCES = [JWT_AUD_SESSION, JWT_AUD_APP, JWT_AUD_SSO] 
 
 /** App client-secret lifetime from (re)generation (ANT-227 item 5). */
 export const APP_CLIENT_SECRET_MAX_AGE = "365d";
+/**
+ * Previous-secret overlap window (ANT-283): after POST /v1/apps/:id/secret
+ * the replaced hash keeps verifying until this TTL elapses, so concurrent
+ * deploys pick up the new secret without instant 401s.
+ */
+export const APP_CLIENT_SECRET_GRACE = "24h";
 
 /**
  * Parse an `ms`-compatible duration string to milliseconds. Throws on
@@ -95,6 +101,7 @@ for (const [name, ttl] of [
   ["SSO_EXCHANGE_TOKEN_TTL", SSO_EXCHANGE_TOKEN_TTL],
   ["APP_TOKEN_TTL", APP_TOKEN_TTL],
   ["APP_CLIENT_SECRET_MAX_AGE", APP_CLIENT_SECRET_MAX_AGE],
+  ["APP_CLIENT_SECRET_GRACE", APP_CLIENT_SECRET_GRACE],
 ] as const) {
   parseTtlMs(ttl, name);
 }

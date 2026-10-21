@@ -6,13 +6,32 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { SSO_EXCHANGE_TOKEN_TTL, resolveServiceUrls, serviceOrigins, JWT_AUD_SSO, JWT_ISSUER, ttlSeconds } from "../common/app-config";
 import { PidAppsService } from "./apps.service";
 
 const CODE_TTL_MS = 5 * 60 * 1000;
+
+/** PKCE (ANT-284): S256 only. `plain` is rejected — it saves nothing over the wire. */
+export const PKCE_METHOD_S256 = "S256";
+const CODE_CHALLENGE_RE = /^[A-Za-z0-9_-]{43,128}$/;
+const CODE_VERIFIER_RE = /^[A-Za-z0-9_~.-]{43,128}$/;
+
+/** S256 challenge for a verifier (RFC 7636 §4.2). */
+export function pkceS256Challenge(verifier: string): string {
+  return createHash("sha256").update(verifier, "ascii").digest("base64url");
+}
+
+/** True when the verifier matches the stored S256 challenge (constant-time). */
+export function pkceVerifyS256(verifier: string, challenge: string): boolean {
+  if (!CODE_VERIFIER_RE.test(verifier) || !CODE_CHALLENGE_RE.test(challenge)) return false;
+  const expected = pkceS256Challenge(verifier);
+  const a = Buffer.from(expected, "ascii");
+  const b = Buffer.from(challenge, "ascii");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 export interface SsoIdentity {
   pid: string;
@@ -143,16 +162,22 @@ export class SsoService {
 
   /**
    * Validate a cross-domain return target. Loopback URLs are always allowed (no
-   * registration needed — safe by network topology). With a clientId the returnTo's
-   * origin must be in the app's managed allowed-origins list (the exact return URL is
-   * passed in code at login time); without one, fall back to the global origin
-   * allowlist. Returns null when rejected. Arbitrary hosts are NEVER allowed
-   * (open-redirector identity theft) — register them via POST /v1/apps instead.
+   * registration needed — safe by network topology). With a clientId the app
+   * must still exist and (for non-loopback) the returnTo's origin must be in
+   * the app's managed allowed-origins list (the exact return URL is passed in
+   * code at login time); without one, fall back to the global origin
+   * allowlist. Unknown clientIds are rejected even on loopback (ANT-284):
+   * otherwise any party could mint codes bound to an arbitrary client_id the
+   * real app could never exchange. Returns null when rejected. Arbitrary
+   * hosts are NEVER allowed (open-redirector identity theft) — register them
+   * via POST /v1/apps instead.
    */
   async resolveReturnTo(returnTo: string | undefined, clientId?: string): Promise<ResolvedReturnTo | null> {
     if (!returnTo || !validHttpUrl(returnTo)) return null;
     if (isLoopbackReturnTo(returnTo)) {
-      // Binding still recorded when supplied, so exchange rules stay uniform.
+      // Binding still recorded when supplied, so exchange rules stay uniform —
+      // but the app must exist, or the code could never be exchanged.
+      if (clientId && !(await this.apps.findActive(clientId))) return null;
       return { redirectTo: returnTo, clientId };
     }
     if (clientId) {
@@ -171,7 +196,26 @@ export class SsoService {
   }
 
   /** Issue a single-use code bound to an identity (called right after login). */
-  async issue(pid: string, redirectTo: string, opts?: { clientId?: string; sessionId?: string }): Promise<string> {
+  async issue(
+    pid: string,
+    redirectTo: string,
+    opts?: { clientId?: string; sessionId?: string; codeChallenge?: string; codeChallengeMethod?: string },
+  ): Promise<string> {
+    // PKCE (ANT-284): public clients bind an S256 challenge at issue time.
+    // Only S256 is accepted; `plain` and unknown methods are rejected here
+    // (fail-closed at mint, not at exchange).
+    let codeChallenge: string | null = null;
+    let codeChallengeMethod: string | null = null;
+    if (opts?.codeChallenge !== undefined) {
+      const method = opts.codeChallengeMethod ?? PKCE_METHOD_S256;
+      if (method !== PKCE_METHOD_S256 || !CODE_CHALLENGE_RE.test(opts.codeChallenge)) {
+        throw new Error("sso_pkce_invalid");
+      }
+      codeChallenge = opts.codeChallenge;
+      codeChallengeMethod = PKCE_METHOD_S256;
+    } else if (opts?.codeChallengeMethod !== undefined) {
+      throw new Error("sso_pkce_invalid");
+    }
     const code = randomBytes(24).toString("base64url");
     await this.prisma.ssoCode.create({
       data: {
@@ -180,6 +224,7 @@ export class SsoService {
         sessionId: opts?.sessionId ?? null,
         redirectTo,
         clientId: opts?.clientId ?? null,
+        ...(codeChallenge ? { codeChallenge, codeChallengeMethod } : {}),
         expiresAt: new Date(Date.now() + CODE_TTL_MS),
       },
     });
@@ -188,7 +233,13 @@ export class SsoService {
   }
 
   /** Consume a code and return the identity payload for the relying party. */
-  async consume(code: string, redirectUri: string, clientId?: string, clientSecret?: string): Promise<SsoIdentity> {
+  async consume(
+    code: string,
+    redirectUri: string,
+    clientId?: string,
+    clientSecret?: string,
+    codeVerifier?: string,
+  ): Promise<SsoIdentity> {
     const row = await this.prisma.ssoCode.findUnique({ where: { code } });
     if (!row || row.consumedAt || row.expiresAt < new Date()) {
       throw new Error("sso_code_invalid");
@@ -197,6 +248,16 @@ export class SsoService {
     // redirect_uri the code was issued for. Missing/mismatched yields the
     // same uniform error as an unknown code — no oracle for code scanners.
     if (!redirectUri || row.redirectTo !== redirectUri) {
+      throw new Error("sso_code_invalid");
+    }
+    // PKCE verification (ANT-284): a challenged code only exchanges with its
+    // verifier; an unchallenged code must not carry one (confusion guard).
+    // Same uniform error either way — no oracle for challenge scanners.
+    if (row.codeChallenge) {
+      if (!codeVerifier || row.codeChallengeMethod !== PKCE_METHOD_S256 || !pkceVerifyS256(codeVerifier, row.codeChallenge)) {
+        throw new Error("sso_code_invalid");
+      }
+    } else if (codeVerifier) {
       throw new Error("sso_code_invalid");
     }
     // Codes bound to an app only exchange with the same client_id — and with a

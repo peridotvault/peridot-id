@@ -1,10 +1,14 @@
 import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { AdminGuard } from "../common/admin.guard";
+import { decryptSecret } from "../common/secret-crypto";
 import { AdminService } from "./admin.service";
 import { mockSecurity } from "../../test/factories";
 
 
 const FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
+
+// ANT-286a test data key (clearly labeled fixture — never a real secret).
+const TEST_ENC_KEY = "ab".repeat(32);
 
 function setup() {
   const prisma = {
@@ -32,7 +36,8 @@ function setup() {
   };
   const chains = { invalidate: jest.fn() };
   const security = mockSecurity();
-  const service = new AdminService(prisma as never, chains as never, security as never);
+  const config = { get: (k: string, d?: string) => (k === "PID_SECRETS_ENC_KEY" ? TEST_ENC_KEY : (d ?? "")) };
+  const service = new AdminService(prisma as never, chains as never, security as never, config as never);
   const guard = new AdminGuard(prisma as never);
   return { service, prisma, chains, security, guard };
 }
@@ -155,18 +160,31 @@ describe("AdminService", () => {
     await expect(guard.canActivate(ctx(IDENTITY))).resolves.toBe(true);
   });
 
-  it("sets the EVM relayer key write-only (secret never returned, event logged)", async () => {
+  it("sets the EVM relayer key write-only (envelope-encrypted at rest, event logged)", async () => {
     const { service, prisma, security } = setup();
     prisma.chain.findUnique.mockResolvedValue({ id: "chain-97", namespace: "eip155", reference: "97" });
     const secret = "0x" + "22".repeat(32);
     const res = await service.setEvmRelayer(IDENTITY, "chain-97", secret);
-    expect(prisma.evmRelayerKey.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { chainId: "chain-97" }, create: { chainId: "chain-97", secret } }),
-    );
+    const upsertArg = (prisma.evmRelayerKey.upsert as jest.Mock).mock.calls[0][0];
+    const stored = upsertArg.create.secret as string;
+    // ANT-286a: stored value is the enc:v1: envelope, never plaintext.
+    expect(stored.startsWith("enc:v1:")).toBe(true);
+    expect(stored).not.toContain(secret);
+    expect(decryptSecret(stored, TEST_ENC_KEY)).toBe(secret);
+    expect(upsertArg.update.secret).toBe(stored);
     expect(res).toEqual({ chainId: "chain-97", hasSecret: true, updatedAt: expect.any(Date) });
     expect(JSON.stringify(res)).not.toContain("22".repeat(8));
     expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.evm_relayer.set", { chainId: "chain-97" });
     expect(security.log).not.toHaveBeenCalledWith(IDENTITY, "admin.evm_relayer.set", expect.objectContaining({ secret }));
+  });
+
+  it("fails closed on setEvmRelayer without a usable data key (never stores plaintext)", async () => {
+    const { prisma, chains, security } = setup();
+    const noKey = new AdminService(prisma as never, chains as never, security as never, { get: () => "" } as never);
+    prisma.chain.findUnique.mockResolvedValue({ id: "chain-97", namespace: "eip155", reference: "97" });
+    const secret = "0x" + "33".repeat(32);
+    await expect(noKey.setEvmRelayer(IDENTITY, "chain-97", secret)).rejects.toThrow("PID_SECRETS_ENC_KEY");
+    expect(prisma.evmRelayerKey.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects the EVM relayer key for missing chains and non-EVM chains", async () => {
