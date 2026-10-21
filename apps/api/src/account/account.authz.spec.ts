@@ -139,6 +139,12 @@ describe("Account authorization & abuse cases (routes)", () => {
     expect(res.body[0]).not.toHaveProperty("pid");
   });
 
+  it("rejects a machine (app) token on account writes (ANT-233 F1)", async () => {
+    state.identities.set("pid_a", "active");
+    const t = await token("pid_a", { app: "pidapp_x" });
+    await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${t}`).expect(403);
+  });
+
   it("never returns another PID's wallet (isolation by construction — no ids in routes)", async () => {
     state.identities.set("pid_a", "active");
     state.identities.set("pid_b", "active");

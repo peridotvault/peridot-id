@@ -244,6 +244,16 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     expect(state.wallets.get("pid_a")?.address).toBe("addr-new");
   });
 
+  it("rejects a machine (app) token on user-wallet writes (ANT-233 F1)", async () => {
+    state.identities.set("pid_a", "active");
+    const t = await token("pid_a", { app: "pidapp_x" });
+    await request(app.getHttpServer())
+      .post("/v1/wallet")
+      .set("Cookie", `pid_access=${t}`)
+      .send({ address: "addr-new" })
+      .expect(403);
+  });
+
   it("returns the existing wallet on a duplicate create (no replay beyond cardinality)", async () => {
     state.identities.set("pid_a", "active");
     state.wallets.set("pid_a", {

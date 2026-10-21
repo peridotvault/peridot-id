@@ -141,7 +141,7 @@ describe("SsoService", () => {
     const { service } = setup();
     const jwt = (service as unknown as { jwt: { signAsync: jest.Mock } }).jwt;
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
-    const identity = await service.consume(code);
+    const identity = await service.consume(code, "https://live2dev.com/auth/callback");
     expect(jwt.signAsync).toHaveBeenCalledWith(
       expect.objectContaining({ sub: "pid_1", type: "access", scope: "read" }),
       expect.objectContaining({ issuer: "peridot-id", audience: "pid-sso" }),
@@ -339,8 +339,8 @@ describe("SsoService", () => {
     };
     const { service } = setup({ findActive: async () => expired, clientSecretValid: expired.clientSecretValid });
     const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await expect(service.consume(code, "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
     // Failed attempts don't consume the code.
-    await expect(service.consume(code, "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
   });
 });

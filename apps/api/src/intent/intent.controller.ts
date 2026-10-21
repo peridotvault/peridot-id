@@ -4,6 +4,7 @@ import { ChainRegistryService } from "../chain/chain-registry.service";
 import { CHAIN_REFERENCE_HEADER, CHAIN_REFERENCE_QUERY } from "../common/chains";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { CreateIntentDto, RecordActivityDto, RecordTransactionDto } from "./dto/intent.dto";
 import { IntentService, IntentView, TransactionView } from "./intent.service";
 
@@ -28,7 +29,7 @@ export class IntentController {
   @Post("intents")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async createIntent(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateIntentDto,
@@ -51,7 +52,7 @@ export class IntentController {
   @Post("transactions/submit")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   recordTransaction(@CurrentUser() user: AuthenticatedUser, @Body() dto: RecordTransactionDto): Promise<TransactionView> {
     return this.intentService.recordTransaction(user.pid, dto);
   }
@@ -59,7 +60,7 @@ export class IntentController {
   @Post("transactions")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async recordActivity(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: RecordActivityDto,
