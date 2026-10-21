@@ -47,7 +47,7 @@ export class WalletController {
     return this.walletService.create(user.pid, dto.address);
   }
 
-  /** Attested fee + policy + chain time for the client to sign a maxFee-capped authorization. */
+  /** Attested fee + policy + chain time for the client to sign a drift-bound authorization (submit attested fee must be ≤120% of quoted; not a maxFee cap). */
   @Post("withdraw/quote")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 60, ttl: 60000 } })

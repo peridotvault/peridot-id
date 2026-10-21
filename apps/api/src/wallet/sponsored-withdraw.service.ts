@@ -92,6 +92,15 @@ export class SponsoredWithdrawService {
     return treasuryPubkey(this.pidSolana, this.config);
   }
 
+  /** Parse a user-supplied base58 address, mapping constructor throws to 400 (never 500). */
+  private pubkeyOr400(PublicKeyCtor: new (v: string) => PublicKey, value: string, what: string): PublicKey {
+    try {
+      return new PublicKeyCtor(value);
+    } catch {
+      throw new BadRequestException(`${what} is not a valid Solana address`);
+    }
+  }
+
   private async adapter(selection?: SolanaSelection): Promise<SolanaAdapter> {
     const [rpcUrl, programId] = await Promise.all([this.chains.solanaRpcUrl(selection), this.chains.solanaProgramId(selection)]);
     return solanaAdapter(this.pidSolana, rpcUrl, programId);
@@ -209,7 +218,7 @@ export class SponsoredWithdrawService {
       }
     } else {
       const { PublicKey } = this.pidSolana;
-      const mint = new PublicKey(dto.asset);
+      const mint = this.pubkeyOr400(PublicKey, dto.asset, "Asset mint");
       const sourceAta = await adapter.tokenAta(pid, mint);
       const balances = await adapter.getTokenBalancesOf(sourceAta.toBase58()).catch(() => []);
       const row = balances.find((b) => b.mint === mint.toBase58());
@@ -225,7 +234,7 @@ export class SponsoredWithdrawService {
     // Relayer float pre-check (same fail-fast as activation).
     const relayerBal = await adapter.getBalanceOf(this.relayer().publicKey.toBase58());
     const feeForTx = await adapter.estimateWithdrawFee().catch(() => 5000n);
-    if (relayerBal < Number(feeForTx)) {
+    if (BigInt(relayerBal) < feeForTx) {
       await this.security.log(pid, "withdraw.relayer_unfunded", {});
       throw new ServiceUnavailableException(
         "Peridot's fee service is briefly unavailable. No SOL was deducted from your wallet — please try again in a moment.",
@@ -250,7 +259,7 @@ export class SponsoredWithdrawService {
       signature = await adapter.sponsoredWithdrawSolV3(
         pid,
         authorityCompressed,
-        new PublicKey(dto.to),
+        this.pubkeyOr400(PublicKey, dto.to, "Destination"),
         amount,
         version,
         networkFee,
@@ -261,7 +270,7 @@ export class SponsoredWithdrawService {
         this.treasury(),
       );
     } else {
-      const mint = new PublicKey(dto.asset);
+      const mint = this.pubkeyOr400(PublicKey, dto.asset, "Asset mint");
       const sourceAta = await adapter.tokenAta(pid, mint);
       if (!(await adapter.hasAccount(sourceAta.toBase58()))) {
         throw new BadRequestException("Token account is not registered on this wallet yet");
@@ -270,7 +279,7 @@ export class SponsoredWithdrawService {
         pid,
         authorityCompressed,
         mint,
-        new PublicKey(dto.to),
+        this.pubkeyOr400(PublicKey, dto.to, "Destination"),
         amount,
         version,
         networkFee,
@@ -351,7 +360,7 @@ export class SponsoredWithdrawService {
   ): Promise<{ target: PublicKey; metas: { address: PublicKey; writable: boolean; signer: boolean }[]; data: Uint8Array }> {
     const { PublicKey, b64urlToBytes } = this.pidSolana;
     const programId = await this.chains.solanaProgramId(selection);
-    const target = new PublicKey(call.target);
+    const target = this.pubkeyOr400(PublicKey, call.target, "Target");
     if (target.toBase58() === new PublicKey(programId).toBase58()) {
       throw new BadRequestException("Target cannot be the smart-account program");
     }
@@ -362,7 +371,7 @@ export class SponsoredWithdrawService {
     if (data.length > 10_240) {
       throw new BadRequestException("Execute data exceeds 10_240 bytes");
     }
-    const metas = call.metas.map((m) => ({ address: new PublicKey(m.address), writable: m.writable, signer: m.signer }));
+    const metas = call.metas.map((m) => ({ address: this.pubkeyOr400(PublicKey, m.address, "Execute meta"), writable: m.writable, signer: m.signer }));
     const delegates = metas.some((m) => m.signer && m.address.toBase58() === chainAddress);
     if (!delegates) {
       throw new BadRequestException("Execute must delegate the smart account as a signer");
@@ -464,7 +473,7 @@ export class SponsoredWithdrawService {
     // Relayer float pre-check (same fail-fast as activation).
     const relayerBal = await adapter.getBalanceOf(this.relayer().publicKey.toBase58());
     const feeForTx = await adapter.estimateExecuteFee(decoded.target, decoded.metas, decoded.data.length).catch(() => 5000n);
-    if (relayerBal < Number(feeForTx)) {
+    if (BigInt(relayerBal) < feeForTx) {
       await this.security.log(pid, "execute.relayer_unfunded", {});
       throw new ServiceUnavailableException(
         "Peridot's fee service is briefly unavailable. No SOL was deducted from your wallet — please try again in a moment.",

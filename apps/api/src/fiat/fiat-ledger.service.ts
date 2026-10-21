@@ -358,6 +358,13 @@ export class FiatLedgerService {
     try {
       await this.prisma.$transaction(async (tx) => {
         await this.lockAccounts(tx as never, [pid, beneficiaryPid]);
+        // Close the cancel-vs-confirm race: cancelIntent takes the same
+        // identity lock, so this status read is serialized against cancel.
+        // A cancelled (or otherwise closed) intent must never post legs.
+        const fresh = await tx.fiatLedgerEntry.findFirst({ where: { id: intent.id } });
+        if (!fresh || fresh.status !== "created") {
+          throw new BadRequestException("Transfer is closed — start a new inquiry");
+        }
         const senderBalance = await this.postedBalanceTx(tx as never, pid);
         if (senderBalance < gross) {
           throw new BadRequestException("Insufficient internal credit");
@@ -438,14 +445,26 @@ export class FiatLedgerService {
     return this.toTxView(done as never);
   }
 
-  /** Cancel a created (not yet posted) intent. Posted intents are immutable. */
+  /** Cancel a created (not yet posted) intent. Posted intents are immutable.
+   * Takes the same identity lock as transferConfirm so cancel-vs-confirm is
+   * serialized: whoever holds the lock first wins, the loser sees final status. */
   async cancelIntent(pid: string, id: string): Promise<FiatLedgerEntryView> {
-    const row = await this.prisma.fiatLedgerEntry.findFirst({ where: { id, pid } });
-    if (!row) throw new NotFoundException("Transfer not found");
-    if (row.status !== "created") return this.toTxView(row as never);
-    return this.toTxView((await this.prisma.fiatLedgerEntry.update({
-      where: { id: row.id }, data: { status: "cancelled" },
-    })) as never);
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAccounts(tx as never, [pid]);
+      const row = await tx.fiatLedgerEntry.findFirst({ where: { id, pid } });
+      if (!row) throw new NotFoundException("Transfer not found");
+      if (row.status !== "created") return this.toTxView(row as never);
+      // Guarded claim: a concurrent confirm that already posted (status flip
+      // between the read above and here) makes count === 0 and we return the
+      // posted row instead of overwriting it back to cancelled.
+      await tx.fiatLedgerEntry.updateMany({
+        where: { id: row.id, status: "created" },
+        data: { status: "cancelled" },
+      });
+      const final = await tx.fiatLedgerEntry.findFirst({ where: { id: row.id } });
+      if (!final) throw new NotFoundException("Transfer not found");
+      return this.toTxView(final as never);
+    });
   }
 
   // --- reads (replay is the balance) ---
@@ -464,6 +483,9 @@ export class FiatLedgerService {
     const legs = groups.length === 0 ? [] : await this.prisma.fiatLedgerEntry.findMany({
       where: { entryGroup: { in: groups } }, take: 10000, orderBy: { replaySeq: "asc" },
     });
+    // Bounded reads must never silently compute a wrong balance: flag
+    // truncation so callers (and the UI) know the verdict is partial.
+    const truncated = mine.length >= 5000 || legs.length >= 10000;
     const replayed = replayFiatLedger(legs.map((r) => ({
       kind: r.kind, pid: r.pid, idempotencyKey: r.idempotencyKey, entryGroup: r.entryGroup,
       amountIdr: r.amountIdr, direction: r.direction, status: r.status, replaySeq: r.replaySeq,
@@ -474,26 +496,28 @@ export class FiatLedgerService {
     replayed.errors = replayed.errors.filter(
       (e) => !e.startsWith("owner ") || e.startsWith(`owner ${pid} `),
     );
-    return { mine, replayed };
+    return { mine, replayed, truncated };
   }
 
   /** Current internal-credit balance (replayed from posted rows). */
   async balance(pid: string) {
-    const { replayed } = await this.replayForPid(pid);
+    const { replayed, truncated } = await this.replayForPid(pid);
     return {
       balanceIdr: (replayed.balances.get(pid) ?? 0n).toString(),
       currency: "IDR" as const,
       source: "fiat-ledger" as const,
       replayErrors: replayed.errors,
+      truncated,
     };
   }
 
   /** Immutable journal export + replay verdict for one PID. */
   async journal(pid: string) {
-    const { mine: rows, replayed } = await this.replayForPid(pid);
+    const { mine: rows, replayed, truncated } = await this.replayForPid(pid);
     return {
       pid,
       balanceIdr: (replayed.balances.get(pid) ?? 0n).toString(),
+      truncated,
       treasuryCreditedIdr: replayed.treasury.toString(),
       taxCreditedIdr: replayed.tax.toString(),
       inFlight: replayed.inFlight,
@@ -777,10 +801,29 @@ export class FiatLedgerService {
   }
 
   private sumPosted(rows: Array<{ kind: string; amountIdr: bigint; direction: string | null }>): bigint {
+    // Kind-aware to match replayFiatLedger exactly: fiat_fee / fiat_tax rows
+    // credit the treasury / tax buckets and never debit the owner, so the
+    // in-txn guard must not subtract them either (else the guard balance
+    // drifts below the displayed replay balance by cumulative fees+tax).
     let bal = 0n;
     for (const r of rows) {
-      if (r.direction === "in") bal += r.amountIdr;
-      else if (r.direction === "out") bal -= r.amountIdr;
+      switch (r.kind) {
+        case "fiat_issue":
+        case "fiat_transfer_in":
+        case "fiat_app_fee":
+          if (r.direction === "in") bal += r.amountIdr;
+          break;
+        case "fiat_transfer_out":
+          if (r.direction === "out") bal -= r.amountIdr;
+          break;
+        case "fiat_adjust":
+          if (r.direction === "in") bal += r.amountIdr;
+          else if (r.direction === "out") bal -= r.amountIdr;
+          break;
+        // fiat_fee / fiat_tax (and unknown kinds): no owner-side effect.
+        default:
+          break;
+      }
     }
     return bal;
   }

@@ -226,7 +226,7 @@ model WalletFeePayer {
   status         IdentityStatus @default(active)
   createdAt      DateTime       @default(now())
 
-  @@index([chainAccountId])
+  @@unique([chainAccountId, address])
   @@map("wallet_fee_payers")
 }
 
