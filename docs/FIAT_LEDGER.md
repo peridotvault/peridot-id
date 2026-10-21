@@ -140,9 +140,17 @@ PPN is folded into `Transfer Fee`; the API still returns the parts separately.
 ## Atomicity / no double-spend
 
 - Confirm runs in one Prisma `$transaction`: lock sender+recipient `identities`
-  rows (`SELECT … FOR UPDATE`, PID-sorted, deadlock-free) → recompute sender
+  rows (`SELECT … FOR UPDATE`, PID-sorted, deadlock-free) → re-read intent
+  status **inside the txn** (a `cancel` racing `confirm` loses: cancel takes
+  the same lock, so whoever holds it first wins) → recompute sender
   balance from `posted` rows **inside the txn** → reject if `balance < gross`
   → post all legs (chained) + flip intent to `posted`.
+- Balance reads are bounded (`take: 5000/10000`) and return `truncated: true`
+  when the cap is hit — a truncated verdict is partial, never silently exact.
+- Scope: these guarantees cover the **fiat internal-credit rail only**.
+  Wallet SOL/SPL flows (`withdraw`/`execute`) are lock-free check-then-broadcast
+  against live RPC balances with on-chain nonce replay protection — they do not
+  inherit this section's transactional guarantees.
 
 ## Flags
 

@@ -78,8 +78,11 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
           return r;
         }),
         update: jest.fn(async (args: any) => ({ id: "j0", ...args.data })),
+        updateMany: jest.fn(async () => ({ count: 1 })),
         findMany: jest.fn(async () => []),
-        findFirst: jest.fn(async () => null),
+        // Default in-txn intent re-read: a created intent (transferConfirm's
+        // cancel-vs-confirm recheck passes unless a test overrides it).
+        findFirst: jest.fn(async () => ({ id: "intent1", status: "created" })),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
@@ -169,7 +172,9 @@ describe("FiatLedgerService transfers", () => {
           return r;
         }),
         update: jest.fn(async (args: any) => ({ ...args.data })),
-        findFirst: jest.fn(async () => null),
+        // First in-txn read is transferConfirm's cancel-vs-confirm recheck
+        // (created → proceeds); the head lookup in appendChained finds nothing.
+        findFirst: jest.fn(async (): Promise<any> => null).mockResolvedValueOnce({ id: "intent1", status: "created" }),
         findMany: jest.fn(async () => [
           { kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" },
         ]),
@@ -201,7 +206,9 @@ describe("FiatLedgerService transfers", () => {
       fiatLedgerEntry: {
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(async () => ({ count: 1 })),
         findMany: jest.fn(async () => []),
+        findFirst: jest.fn(async () => ({ id: "intent1", status: "created" })),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
@@ -209,6 +216,140 @@ describe("FiatLedgerService transfers", () => {
     // transferConfirm rethrows BadRequestException from inside the txn.
     await expect(service.transferConfirm("live2dev@pid", "intent1")).rejects.toThrow("Insufficient");
     expect(created).toHaveLength(0);
+  });
+
+  it("rejects confirm when the intent was cancelled mid-race (no legs posted)", async () => {
+    const { service, prisma, created } = setup();
+    // Outer pre-read still sees created; the in-txn recheck sees cancelled.
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      entryGroup: "CT-RACE", amountIdr: 100_000n, status: "created",
+      feePolicyVersion: 3, counterparty: {}, createdAt: new Date(),
+    });
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        create: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(async () => ({ count: 0 })),
+        findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
+        findFirst: jest.fn(async () => ({ id: "intent1", status: "cancelled" })),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    await expect(service.transferConfirm("dev@pid", "intent1")).rejects.toThrow("Transfer is closed");
+    expect(created).toHaveLength(0);
+  });
+
+  it("counts the guard the same way replay does (fee/tax legs do not debit the owner)", async () => {
+    const { service, prisma, created } = setup();
+    // Replay balance after a 475k-net deposit with a 25k fee leg is 475k.
+    // The old direction-only guard read 450k and wrongly rejected a 475k send.
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      entryGroup: "CT-FEE", amountIdr: 475_000n, status: "created",
+      feePolicyVersion: 3,
+      counterparty: { feeQuote: "25000", taxQuote: "0", netQuote: "450000" },
+      createdAt: new Date(),
+    });
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        create: jest.fn(async (args: any) => {
+          const r = { id: `j${created.length}`, createdAt: new Date(), ...args.data };
+          created.push(r);
+          return r;
+        }),
+        update: jest.fn(async (args: any) => ({ ...args.data })),
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        findFirst: jest.fn(async (): Promise<any> => null).mockResolvedValueOnce({ id: "intent1", status: "created" }),
+        findMany: jest.fn(async () => [
+          { kind: "fiat_issue", amountIdr: 475_000n, direction: "in" },
+          { kind: "fiat_fee", amountIdr: 25_000n, direction: "out" },
+        ]),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", entryGroup: "CT-FEE",
+      counterpartyPid: "rani@pid", amountIdr: 475_000n, status: "posted",
+      counterparty: { feeQuote: "25000", taxQuote: "0", netQuote: "450000" },
+      createdAt: new Date(),
+    });
+    const view = await service.transferConfirm("dev@pid", "intent1");
+    expect(view.status).toBe("posted");
+    expect(created.map((r: any) => `${r.kind}:${r.amountIdr}`)).toContain("fiat_transfer_in:450000");
+  });
+
+  it("cancel takes the identity lock and leaves a posted intent untouched", async () => {
+    const { service, prisma } = setup();
+    const posted = {
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", entryGroup: "CT-P",
+      counterpartyPid: "rani@pid", amountIdr: 10_000n, direction: "out",
+      status: "posted", createdAt: new Date(),
+    };
+    const txMocks: any = {};
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        findFirst: jest.fn(async () => posted),
+        updateMany: jest.fn(async () => {
+          txMocks.updated = true;
+          return { count: 0 };
+        }),
+      },
+      $queryRaw: jest.fn(async (...a: any[]) => {
+        txMocks.locked = true;
+        return [];
+      }),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    const view = await service.cancelIntent("dev@pid", "intent1");
+    expect(view.status).toBe("posted");
+    expect(txMocks.locked).toBe(true);
+    expect(txMocks.updated).toBeUndefined();
+  });
+
+  it("cancel claims a created intent with a guarded update", async () => {
+    const { service, prisma } = setup();
+    const row = (status: string) => ({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", entryGroup: "CT-C",
+      counterpartyPid: "rani@pid", amountIdr: 10_000n, direction: "out",
+      status, createdAt: new Date(),
+    });
+    let claimed: any = null;
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        findFirst: jest.fn(async () => row("created")).mockResolvedValueOnce(row("created")).mockResolvedValueOnce(row("cancelled")),
+        updateMany: jest.fn(async (args: any) => {
+          claimed = args;
+          return { count: 1 };
+        }),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    const view = await service.cancelIntent("dev@pid", "intent1");
+    expect(view.status).toBe("cancelled");
+    expect(claimed).toMatchObject({ where: { id: "intent1", status: "created" } });
+  });
+
+  it("balance and journal flag truncated replays instead of silently rounding", async () => {
+    const { service, prisma } = setup();
+    const big = Array.from({ length: 5000 }, (_, i) => ({
+      pid: "dev@pid", entryGroup: `G-${i % 10}`, kind: "fiat_issue",
+      idempotencyKey: `K-${i}`, amountIdr: 1n, direction: "in", status: "posted", replaySeq: BigInt(i),
+    }));
+    prisma.fiatLedgerEntry.findMany.mockResolvedValueOnce(big).mockResolvedValueOnce([]);
+    const b = await service.balance("dev@pid");
+    expect(b.truncated).toBe(true);
+    const small = [{
+      pid: "dev@pid", entryGroup: "G-1", kind: "fiat_issue",
+      idempotencyKey: "K-1", amountIdr: 100n, direction: "in", status: "posted", replaySeq: 1n,
+    }];
+    prisma.fiatLedgerEntry.findMany.mockResolvedValueOnce(small).mockResolvedValueOnce(small);
+    const b2 = await service.balance("dev@pid");
+    expect(b2.truncated).toBe(false);
+    expect(b2.balanceIdr).toBe("100");
   });
 });
 
@@ -301,7 +442,7 @@ describe("FiatLedgerService callbacks", () => {
       fiatLedgerEntry: {
         create: jest.fn(async (args: any) => ({ id: `j${Math.random()}`, createdAt: new Date(), ...args.data })),
         update: jest.fn(async (args: any) => ({ id: "intent1", ...args.data })),
-        findFirst: jest.fn(async () => null),
+        findFirst: jest.fn(async (): Promise<any> => null).mockResolvedValueOnce({ id: "intent1", status: "created" }),
         findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
       },
       $queryRaw: jest.fn(async () => []),
