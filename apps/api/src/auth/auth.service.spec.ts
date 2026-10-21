@@ -261,6 +261,11 @@ describe("AuthService", () => {
     expect(jwtPayload(scoped.accessToken)).toMatchObject({ app: "pidapp_x", scope: "fiat:transfer" });
   });
 
+  it("rejects novel scopes service-side even if DTO validation is bypassed (Tobias residual #4)", async () => {
+    const { service } = setup();
+    await expect(service.issueAppAccessToken("owner@pid", "pidapp_x", "other")).rejects.toThrow("scope must be");
+  });
+
   it("rejects a refresh token minted for another audience (cross-class confusion)", async () => {
     const { service, res } = setup();
     const jwt = new JwtService({});
