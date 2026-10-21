@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, GoneException } from "@nestjs/common";
 import { ClaimService } from "./claim.service";
 
-const PROFILE = { id: "google-1", displayName: "New User", emails: [{ value: "new@example.com" }], photos: [{ value: "http://pic" }] };
+const PROFILE = { id: "google-1", displayName: "New User", emails: [{ value: "new@example.com", verified: true }], photos: [{ value: "http://pic" }] };
 
 function setup() {
   const prisma: Record<string, any> = {
@@ -56,6 +56,24 @@ describe("ClaimService", () => {
         data: expect.objectContaining({ provider: "google", providerUserId: "google-1", email: "new@example.com" }),
       }),
     );
+  });
+
+  it("refuses to mint from an unverified Google email (M4)", async () => {
+    const { service, prisma } = setup();
+    await expect(
+      service.mint({ id: "google-2", emails: [{ value: "unverified@example.com", verified: false }] }),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.mint({ id: "google-3", emails: [{ value: "unverified@example.com", verified: false }] }),
+    ).rejects.toThrow(/not verified/);
+    expect(prisma.claimTicket.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses to mint when the Google profile carries no email at all (M4)", async () => {
+    const { service, prisma } = setup();
+    await expect(service.mint({ id: "google-4", emails: [] })).rejects.toThrow(BadRequestException);
+    await expect(service.mint({ id: "google-5" })).rejects.toThrow(BadRequestException);
+    expect(prisma.claimTicket.create).not.toHaveBeenCalled();
   });
 
   it("reports status for a live ticket, null otherwise", async () => {
