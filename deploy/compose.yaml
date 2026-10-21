@@ -41,6 +41,9 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.api
+      # ANT-385: baked into the image as ENV GIT_SHA, reported by /v1/health.
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: peridot-id-api${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
     logging: *default-logging

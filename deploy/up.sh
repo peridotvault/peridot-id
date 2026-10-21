@@ -26,6 +26,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV="${1:-main}"
 
+# ANT-385: immutable images. Every build is tagged with the short git SHA
+# (TAG defaults to it; pre-set TAG wins for tag-switch rollbacks) and :latest
+# is re-pointed at the same image IDs so `latest` stays a usable alias.
+# Rollback without rebuild: TAG=<prev-sha> SKIP_BUILD=1 ./deploy/up.sh <env>.
+# Each deploy appends one line to deploy/.deploys.log (gitignored).
+if [ -z "${GIT_SHA:-}" ]; then
+  GIT_SHA="$(git -C "$SCRIPT_DIR/.." rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  export GIT_SHA
+fi
+export TAG="${TAG:-$GIT_SHA}"
+
 PROJECT="peridot-id"
 [ "$ENV" = "test" ] && PROJECT="peridot-id-test"
 
@@ -123,10 +134,15 @@ fi
 # Serial builds (small VPS): api + app are the proven set; dashboard
 # (ANT-118) joins the same loop — same pattern, independent image.
 # (docs left the loop in ANT-124: Mintlify-hosted, no VPS image to build.)
-for s in api app dashboard; do
-  echo "==> build $s"
-  COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
-done
+# SKIP_BUILD=1 skips the loop for tag-switch rollbacks (TAG=<prev-sha>).
+if [ "${SKIP_BUILD:-0}" != "1" ]; then
+  for s in api app dashboard; do
+    echo "==> build $s"
+    COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
+  done
+else
+  echo "==> SKIP_BUILD=1: reusing existing images (rollback path)"
+fi
 
 # ANT-347 LOW-5: pre-deploy migration check — fail fast if the DB is
 # unreachable or migrations have drifted, BEFORE swapping containers.
@@ -138,5 +154,29 @@ COMPOSE_PROJECT_NAME="$PROJECT" compose run --rm api node_modules/.bin/prisma mi
 # --remove-orphans: drops stale containers (renamed services, interrupted recreates)
 # that would otherwise squat on container names and fail the next recreate.
 COMPOSE_PROJECT_NAME="$PROJECT" compose up -d --remove-orphans
+
+# ANT-385: alias :latest to the just-built :TAG images, record the deploy,
+# and (re)install the alert crons. `docker tag` never pulls — source images
+# were just built above (or reused via SKIP_BUILD=1).
+for s in api app dashboard; do
+  SRC="peridot-id-$s${NAMESPACE}:$TAG"
+  if docker image inspect "$SRC" >/dev/null 2>&1; then
+    docker tag "$SRC" "peridot-id-$s${NAMESPACE}:latest"
+  else
+    echo "warn: image $SRC not found — :latest alias skipped for $s" >&2
+  fi
+done
+printf '%s env=%s sha=%s tag=%s\n' "$(date -u +%FT%TZ)" "$ENV" "$GIT_SHA" "$TAG" >> "$SCRIPT_DIR/.deploys.log"
+
+# Alert crons (ANT-385 observability): idempotent, runtime secrets only.
+# Warn-and-continue so a crontab failure can't fail an otherwise good deploy;
+# verify with `crontab -l | grep peridot-alert`. Opt out: INSTALL_ALERT_CRONS=0.
+if [ "${INSTALL_ALERT_CRONS:-1}" = "1" ]; then
+  if bash "$SCRIPT_DIR/alerts/install.sh" "$ENV"; then
+    crontab -l 2>/dev/null | grep 'peridot-alert' || true
+  else
+    echo "warn: alert cron install failed — run deploy/alerts/install.sh $ENV on the VPS" >&2
+  fi
+fi
 
 echo "Done."

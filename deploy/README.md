@@ -168,8 +168,8 @@ ledger writes):
   `true` in the main env aborts the deploy before any container builds.
 - Caps (proposed, CTO confirms via ANT-287 OQ-1): per-call max Rp50.000,
   Rp100.000 + 10 calls/identity/day, backend-hardcoded.
-- Abuse alert: `deploy/alerts/faucet-abuse-check.sh` — cron it (sandbox
-  `*/15`, production `*/5` with `ALERT_ENV=production` for the prod-zero
+- Abuse alert: installed automatically by `up.sh` (`deploy/alerts/install.sh`;
+  sandbox `*/15`, production `*/5` with `ALERT_ENV=production` for the prod-zero
   invariant). See `deploy/alerts/README.md`.
 
 **Dashboard env switch.** Both stacks bake `VITE_OTHER_WORKSPACE_URL` at
@@ -187,6 +187,24 @@ until it lands, keep the var set in both deploys.
 git pull && ./deploy/up.sh main      # production (branch main)
 git pull && ./deploy/up.sh test      # sandbox (branch test)
 ```
+
+## Rollback (ANT-385: tag-switch, no rebuild)
+
+Every build is tagged `:<short-sha>` (default `TAG`) and aliased to `:latest`;
+each deploy appends `<timestamp> env=<env> sha=<sha> tag=<tag>` to
+`deploy/.deploys.log` (gitignored, lives on the VPS). Roll back by
+re-running `up.sh` against a recorded tag — containers restart on the
+existing images, nothing rebuilds:
+
+```sh
+tail -5 deploy/.deploys.log                      # pick the last-good tag
+TAG=<prev-sha> SKIP_BUILD=1 ./deploy/up.sh main  # tag-switch rollback
+curl -sk https://api.peridot.id/v1/health        # {"status":"ok","db":"up","sha":"<prev-sha>"}
+```
+
+`GIT_SHA` is baked into the API image and reported by `/v1/health`, so the
+running version is always observable. Crons (`install.sh`) are idempotent —
+re-running install on rollback is safe.
 
 ## Operate
 

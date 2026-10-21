@@ -20,11 +20,19 @@ event / device / hour** → page/notify.
   `OK:`/`ALERT:`, exits 0/2 (3 = config/query failure). Optional
   `ALERT_WEBHOOK_URL` POSTs the message as `{"text": ...}`.
 
-## Enable (needs VPS/deploy access — not done from this branch)
+## Enable (ANT-385: automatic)
 
-```cron
-*/5 * * * *  DATABASE_URL='postgresql://...' /opt/peridot-id/deploy/alerts/refresh-reuse-check.sh
+`deploy/up.sh` calls `deploy/alerts/install.sh <env>` after every deploy —
+no manual crontab edit. To install by hand on the VPS:
+
+```sh
+./deploy/alerts/install.sh main   # or: test
+crontab -l | grep peridot-alert   # verify
 ```
+
+Each line execs `run-with-infisical.sh`, which pulls `DATABASE_URL` from
+Infisical (`/apps/api`, per-stack env) at run time. Rollback:
+`crontab -l | grep -v '#peridot-alert' | crontab -`.
 
 Secrets are injected at runtime via `DATABASE_URL` env — never baked into
 these files. The check opens a read-only SELECT session; no app, schema, or
@@ -95,12 +103,12 @@ faucet-source row on prod is critical (the route must be absent there, AC-F2).
   backend's `source` string), `FAUCET_HOURLY_MAX` (30),
   `FAUCET_DAILY_MAX_COUNT` (10), `FAUCET_DAILY_MAX_IDR` (100000).
 
-### Enable (needs VPS/deploy access — not done from this branch)
+### Enable (ANT-385: automatic)
 
-```cron
-*/15 * * * *  DATABASE_URL='postgresql://...' ALERT_ENV=sandbox    /opt/peridot-id/deploy/alerts/faucet-abuse-check.sh
-*/5  * * * *  DATABASE_URL='postgresql://...' ALERT_ENV=production /opt/peridot-id/deploy/alerts/faucet-abuse-check.sh
-```
+Same installer as above — `install.sh main` writes the `production` line,
+`install.sh test` the `sandbox` line (cadence `*/15` sandbox / `*/5`
+production per the thresholds below). Manual cron lines with a pasted
+`DATABASE_URL` are not supported: secrets come from Infisical at run time.
 
 Secrets are injected at runtime via `DATABASE_URL` env — never baked into
 these files. The check opens a read-only SELECT session; no app, schema, or
