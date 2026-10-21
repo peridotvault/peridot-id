@@ -54,12 +54,15 @@ function baseOpts(config: ConfigService): Record<string, unknown> {
   return opts;
 }
 
-/** Domain attribute for cookie *clearing* (must match the `domain` used at set time). */
-function clearDomain(config: ConfigService): Record<string, unknown> {
-  const domain = config.get<string>("COOKIE_DOMAIN", "");
-  const opts: Record<string, unknown> = {};
-  if (domain && domain !== "localhost") opts.domain = domain;
-  return opts;
+/**
+ * Clearing must mirror the set flags (M5): a `clearCookie` is matched by
+ * name + domain + path, and strict clients compare the full attribute set —
+ * a clear missing `domain`/`path` (or with different Secure/SameSite/
+ * HttpOnly) can silently no-op, leaving the session alive after logout.
+ * Every clear below therefore reuses the exact `baseOpts` the setter used.
+ */
+function clearOpts(config: ConfigService, path?: string): Record<string, unknown> {
+  return path ? { ...baseOpts(config), path } : baseOpts(config);
 }
 
 export function setAuthCookies(res: Response, config: ConfigService, access: string, refresh: string, pid?: string): void {
@@ -87,8 +90,23 @@ export function setAccountRefreshCookie(res: Response, config: ConfigService, pi
 }
 
 export function clearAccountRefreshCookie(res: Response, config: ConfigService, pid: string): void {
-  const opts: Record<string, unknown> = { path: REFRESH_PATH, ...clearDomain(config) };
-  res.clearCookie(accountRefreshCookieName(pid), opts);
+  res.clearCookie(accountRefreshCookieName(pid), clearOpts(config, REFRESH_PATH));
+}
+
+/** Clear a linked-account refresh cookie by its exact cookie name (no pid needed). */
+export function clearAccountRefreshCookieByName(res: Response, config: ConfigService, name: string): void {
+  res.clearCookie(name, clearOpts(config, REFRESH_PATH));
+}
+
+/** Clear every linked-account refresh cookie present on the request. Returns the cleared names. */
+export function clearAllAccountRefreshCookies(
+  res: Response,
+  config: ConfigService,
+  cookies: Record<string, string> | undefined,
+): string[] {
+  const names = accountRefreshCookieNames(cookies);
+  for (const name of names) clearAccountRefreshCookieByName(res, config, name);
+  return names;
 }
 
 /**
@@ -121,15 +139,49 @@ export function setScopedAuthCookies(res: Response, config: ConfigService, scope
 }
 
 export function clearScopedAuthCookies(res: Response, config: ConfigService, scope: string): void {
-  const opts: Record<string, unknown> = { ...clearDomain(config) };
-  res.clearCookie(scopeAccessCookie(scope), opts);
-  res.clearCookie(scopeRefreshCookie(scope), { ...opts, path: REFRESH_PATH });
+  res.clearCookie(scopeAccessCookie(scope), clearOpts(config));
+  res.clearCookie(scopeRefreshCookie(scope), clearOpts(config, REFRESH_PATH));
+}
+
+/**
+ * Scope encoded in a cookie name, or null. Account cookies (`pid_refresh__<hash>`,
+ * double underscore, refresh-only) are never scopes — even though `_…` passes
+ * SCOPE_RE, the refresh side excludes a leading underscore to avoid colliding
+ * with them. (Access cookies have no account counterpart, so any SCOPE_RE
+ * match counts.)
+ */
+function scopeFromCookieName(name: string): string | null {
+  const accessPrefix = "pid_access_";
+  const refreshPrefix = "pid_refresh_";
+  if (name.startsWith(accessPrefix)) {
+    const scope = name.slice(accessPrefix.length);
+    return SCOPE_RE.test(scope) ? scope : null;
+  }
+  if (name.startsWith(refreshPrefix)) {
+    const scope = name.slice(refreshPrefix.length);
+    return SCOPE_RE.test(scope) && !scope.startsWith("_") ? scope : null;
+  }
+  return null;
+}
+
+/** Clear every app-scoped session present on the request. Returns the cleared scopes. */
+export function clearAllScopedAuthCookies(
+  res: Response,
+  config: ConfigService,
+  cookies: Record<string, string> | undefined,
+): string[] {
+  const scopes = new Set<string>();
+  for (const name of Object.keys(cookies ?? {})) {
+    const scope = scopeFromCookieName(name);
+    if (scope) scopes.add(scope);
+  }
+  for (const scope of scopes) clearScopedAuthCookies(res, config, scope);
+  return [...scopes];
 }
 
 export function clearAuthCookies(res: Response, config: ConfigService): void {
-  const opts: Record<string, unknown> = { ...clearDomain(config) };
-  res.clearCookie(ACCESS_COOKIE, opts);
-  res.clearCookie(REFRESH_COOKIE, { ...opts, path: REFRESH_PATH });
+  res.clearCookie(ACCESS_COOKIE, clearOpts(config));
+  res.clearCookie(REFRESH_COOKIE, clearOpts(config, REFRESH_PATH));
 }
 
 /** Pending-claim ticket cookie (opaque ticket id, 10 min, auth paths only). */
@@ -139,6 +191,22 @@ export function setClaimCookie(res: Response, config: ConfigService, ticketId: s
 }
 
 export function clearClaimCookie(res: Response, config: ConfigService): void {
-  const opts: Record<string, unknown> = { path: REFRESH_PATH, ...clearDomain(config) };
-  res.clearCookie(CLAIM_COOKIE, opts);
+  res.clearCookie(CLAIM_COOKIE, clearOpts(config, REFRESH_PATH));
+}
+
+/**
+ * OAuth state nonce cookie (M3): HttpOnly, 10-min TTL, auth paths only. Binds
+ * the Google `state` round-trip to this browser — the callback refuses any
+ * state that does not verify against this cookie's nonce (CSRF / login-fixation
+ * guard). Single-use: the callback clears it even on failure.
+ */
+export const OAUTH_STATE_COOKIE = "pid_oauth_state";
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+export function setOAuthStateCookie(res: Response, config: ConfigService, nonce: string): void {
+  res.cookie(OAUTH_STATE_COOKIE, nonce, { ...baseOpts(config), path: REFRESH_PATH, maxAge: OAUTH_STATE_TTL_MS });
+}
+
+export function clearOAuthStateCookie(res: Response, config: ConfigService): void {
+  res.clearCookie(OAUTH_STATE_COOKIE, clearOpts(config, REFRESH_PATH));
 }
