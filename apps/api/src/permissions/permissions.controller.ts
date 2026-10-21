@@ -12,18 +12,14 @@ export class PermissionsController {
   /**
    * Validate a permission grant and return the canonical permission id +
    * owner challenge (what the passkey signs). Authenticated: the caller proves
-   * pid ownership.
-   *
-   * ANT-285(d) caller-binding invariant (documented, enforced at submission):
-   * `dto.account` is the caller's EVM counterfactual account, but this
-   * endpoint is intentionally stateless (no DB/chain) so it CANNOT re-derive
-   * the CREATE2 address here — derivation needs the registry factory +
-   * implementation per chainId. BOLA is closed one layer down: the relay /
-   * submission path verifies the grant's account belongs to the caller's pid
-   * (same check as `POST /v1/session-keys/grants/validate`, which DOES bind
-   * `accountId == sha256(caller pid)` inline because that derivation is pure).
-   * Do not add account-scoped writes behind this endpoint without adding the
-   * same inline binding check.
+   * pid ownership. No server submission path exists — the owner-signed payload
+   * is the pid→account binding (account + chainId are part of the signed
+   * payload); any future relay must re-check pid ownership before forwarding
+   * (see PermissionsService). ANT-285(d): this endpoint is intentionally
+   * stateless so it cannot re-derive the CREATE2 address inline — do not add
+   * account-scoped writes behind it without adding an inline binding check
+   * (cf. `POST /v1/session-keys/grants/validate`, which binds
+   * `accountId == sha256(caller pid)` because that derivation is pure).
    */
   @Post("grants/validate")
   @HttpCode(HttpStatus.OK)

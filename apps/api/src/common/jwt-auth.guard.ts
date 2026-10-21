@@ -1,4 +1,4 @@
-import { ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
+import { ExecutionContext, ForbiddenException, Injectable, Logger } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { Request } from "express";
 import { ACCESS_COOKIE, normalizeScope, scopeAccessCookie } from "./cookies";
@@ -34,6 +34,8 @@ const READ_SCOPE_WRITE_ALLOW = [/^\/v1\/fiat\/deposits\/[^/]+\/sync\/?$/];
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard("jwt") {
+  private readonly logger = new Logger(JwtAuthGuard.name);
+
   constructor() {
     super({});
   }
@@ -42,7 +44,10 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
    * Tokens with `scope: "read"` (e.g. the SSO exchange token handed to a relying
    * party's backend) are limited to safe methods — they can read balance/ledger
    * but can never trigger a write (transfer, withdraw, credential, profile…).
-   * Full machine tokens (`/v1/auth/token`) carry no scope and keep app powers.
+   * ANT-286b: machine tokens (`app` claim) carrying a scope other than
+   * `fiat:transfer` are 403 on `POST /v1/fiat/transfers/*` (fail closed —
+   * a mis-scoped credential never moves money). Unscoped legacy app tokens
+   * still pass (back-compat) but are logged so SOC can track migration.
    */
   handleRequest<TUser = unknown>(
     err: unknown,
@@ -56,6 +61,21 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
       if (req.method !== "GET" && req.method !== "HEAD") {
         const allowed = READ_SCOPE_WRITE_ALLOW.some((re) => re.test(req.path));
         if (!allowed) throw new ForbiddenException("This token is read-only");
+      }
+      return authed;
+    }
+    const claims = authed as { app?: string; scope?: string } | null | undefined;
+    if (authed && claims?.app) {
+      if (claims.scope === undefined) {
+        // Legacy unscoped machine token — allowed, but visible for migration.
+        this.logger.warn(`legacy app token without scope used: app=${claims.app}`);
+        return authed;
+      }
+      if (claims.scope !== "fiat:transfer") {
+        const req = context.switchToHttp().getRequest<Request>();
+        if (req.method === "POST" && /^\/v1\/fiat\/transfers(\/|$)/.test(req.path)) {
+          throw new ForbiddenException("Machine token scope not authorized for transfers");
+        }
       }
     }
     return authed;

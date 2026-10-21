@@ -85,15 +85,43 @@ the source of truth; apps can also poll `GET /v1/fiat/ledger`.
 
 ## Machine auth (app backend)
 
-`POST /v1/auth/token { clientId, clientSecret? }` issues a short-lived bearer
-token bound to the app owner's pid, carrying the app's `clientId`. Use
+`POST /v1/auth/token { clientId, clientSecret?, scope? }` issues a short-lived
+bearer token bound to the app owner's pid, carrying the app's `clientId`. Use
 `Authorization: Bearer <token>` — no browser session. It accepts `clientSecret`
 when the app has one set (timing-safe). Admin routes reject machine tokens even
 for an admin owner. `APP_TOKEN_TTL` (default `1h`).
 
+Pass `scope: "fiat:transfer"` for the least-privilege escrow-release form
+(ANT-286b): scoped tokens are the only machine tokens that should initiate
+`POST /v1/fiat/transfers/*`; a machine token carrying any other scope is 403
+on those routes (fail closed). Unscoped legacy tokens still work (back-compat)
+but are logged server-side (`fiat.transfer.legacy_app_token`) so SOC can track
+migration. Every app-token use on inquiry AND confirm also emits
+`fiat.transfer.app_token` with `{ app, scope }` — the SOC anomaly signal for a
+leaked `pidsk_` (an app token appearing from an unexpected network/pattern).
+
 Typical backend use: read the escrow balance (`GET /v1/fiat/balance`), list the
 statement (`GET /v1/fiat/ledger`), initiate escrow releases
 (`POST /v1/fiat/transfers/*`), manage fees (`GET/PUT /v1/apps/:id/fees`).
+
+### `pidsk_` rotation guidance
+
+The backend secret (`pidsk_…`, set via `POST /v1/apps/:id/secret`) expires
+after 365 days (`clientSecretExpiresAt`); past expiry every exchange/token call
+with the old secret fails closed until the owner rotates. Rotate proactively:
+
+- **Schedule:** rotate at least every 365 days (before expiry) and on every
+  staff exit with backend-secret access.
+- **Suspected leak:** rotate immediately, then review `fiat.transfer.app_token`
+  + `fiat.transfer.legacy_app_token` SOC events for unexpected app-token use
+  (unknown source, odd hours, unfamiliar amounts).
+- **Grace procedure:** mint the new secret (`POST /v1/apps/:id/secret` returns
+  it ONCE — store it in the backend vault, never in code), deploy the backend
+  to the new value, verify `POST /v1/auth/token` + one read (`GET
+  /v1/fiat/balance`) with the new secret, then retire the old value. There is
+  no overlap window server-side — the single stored hash flips on rotation —
+  so keep the cutover tight and confirm the first scoped
+  (`scope: "fiat:transfer"`) transfer inquiry succeeds before closing.
 
 ## Per-app fees (API)
 

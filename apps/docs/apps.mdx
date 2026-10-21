@@ -18,6 +18,11 @@ is where every setting lives:
 - **client_id** — public identifier for login and API calls.
 - **Allowed origins** — websites allowed to receive `pid_code`s and call the API.
 - **Backend secret** — for confidential clients; shown once when generated.
+  Rotation (`POST /v1/apps/:id/secret`) keeps a **24h grace window**: the
+  replaced secret keeps verifying until `graceExpiresAt`, so rolling deploys
+  pick up the new value without instant 401s. Procedure: rotate → deploy the
+  new secret everywhere → confirm no traffic still uses the old value → grace
+  expiry completes the cutover. Rotating again supersedes the previous window.
 - **Fees** — per-operation fee schedule (below).
 - **Escrow balance** — the app account's spendable IDR balance.
 

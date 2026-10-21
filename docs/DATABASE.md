@@ -68,6 +68,12 @@ identities 1--* fiat_ledger_entries
   accounts, authorities) use `Cascade`.
 - Money movements lock the `identities` rows (`SELECT … FOR UPDATE`, PID-sorted)
   — no separate marker table (the deleted `internal_credit_accounts` taught us that).
+- Time is always an instant: every `DateTime` field maps to `TIMESTAMPTZ`
+  (`@db.Timestamptz(3)`, ANT-317). Naive `timestamp without time zone` stored
+  DB-default `now()` walls in the session TZ while Prisma binds UTC walls, so
+  due/expiry filters skewed by the UTC offset in non-UTC deployments. New
+  DateTime fields must carry the attribute (guarded by
+  `schema-timestamptz.spec.ts`); never compare raw wall-clock strings.
 
 Invariants:
 

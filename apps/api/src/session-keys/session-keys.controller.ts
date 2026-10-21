@@ -25,9 +25,11 @@ export class SessionKeysController {
   /**
    * Validate a session grant and return the canonical session address +
    * owner challenge (what the passkey signs). Authenticated: the caller proves
-   * pid ownership. BOLA: `dto.accountId` MUST equal sha256(caller pid) — a
-   * caller cannot mint challenges for another identity's account; the relay
-   * path re-enforces submission-time vault binding (defense in depth).
+   * pid ownership. BOLA (ANT-285(d)): `dto.accountId` MUST equal sha256(caller
+   * pid) — a caller cannot mint challenges for another identity's account.
+   * The signed payload lands on-chain via the client, where `register_session`
+   * enforces vault/authority binding; this inline check closes the
+   * cross-pid challenge oracle one layer up (defense in depth).
    */
   @Post("grants/validate")
   @HttpCode(HttpStatus.OK)

@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { ConfigService } from "@nestjs/config";
+import { encryptSecret } from "../common/secret-crypto";
 import { FiatLedgerService } from "./fiat-ledger.service";
 
 function configStub(store: Record<string, string> = {}) {
@@ -746,6 +747,90 @@ describe("FiatLedgerService adminAdjust (ANT-254 fiat_adjust writer)", () => {
     expect(created.filter((r: any) => r.kind === "fiat_adjust")).toHaveLength(2);
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("AUDIT-SINK-FAILURE fiat.adjust"));
     errSpy.mockRestore();
+  });
+});
+
+describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", () => {
+  const TEST_KEY = "ab".repeat(32);
+
+  it("dispatches with a decrypted enc:v1: webhook secret (legacy plaintext still works)", async () => {
+    const { service, prisma } = setup({ PID_SECRETS_ENC_KEY: TEST_KEY });
+    const raw = "pidwh_testsecret123";
+    const enc = encryptSecret(raw, TEST_KEY);
+    expect(enc.startsWith("enc:v1:")).toBe(true);
+    prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
+      { id: "e-enc", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: { hello: "world" }, attempts: 0 },
+    ]);
+    prisma.pidApp.findFirst.mockResolvedValueOnce({ webhookSecret: enc });
+    const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
+    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+
+    const res = await service.dispatchEvents({});
+    expect(res.sent).toBe(1);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string>; body: string }];
+    const expected = "sha256=" + createHmac("sha256", raw).update(init.body).digest("hex");
+    expect(init.headers["X-Pid-Signature"]).toBe(expected);
+  });
+
+  it("refuses dispatch when the envelope is undecryptable without the key (never empty-key HMAC)", async () => {
+    const enc = encryptSecret("pidwh_secret", TEST_KEY);
+    const { service, prisma } = setup({ PID_SECRETS_ENC_KEY: "" });
+    prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
+      { id: "e-nokey", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: {}, attempts: 0 },
+    ]);
+    prisma.pidApp.findFirst.mockResolvedValueOnce({ webhookSecret: enc });
+    const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
+    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+
+    const res = await service.dispatchEvents({});
+    expect(res.sent).toBe(0);
+    expect(res.failed).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("emits fiat.transfer.app_token with app+scope on inquiry AND confirm", async () => {
+    const { service, prisma, security } = setup();
+    prisma.identity.findUnique.mockResolvedValue({ pid: "rani@pid" });
+    const inq = await service.transferInquiry(
+      "dev@pid",
+      { amountIdr: "500000", beneficiaryPid: "rani@pid" },
+      null,
+      { app: "pidapp_x", scope: "fiat:transfer" },
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      "dev@pid",
+      "fiat.transfer.app_token",
+      expect.objectContaining({ app: "pidapp_x", scope: "fiat:transfer", phase: "inquiry" }),
+    );
+
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      entryGroup: inq.entryGroup, amountIdr: 500_000n, status: "created",
+      feePolicyVersion: 3, counterparty: {}, createdAt: new Date(),
+    });
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        create: jest.fn(async (args: any) => ({ id: "j1", createdAt: new Date(), ...args.data })),
+        update: jest.fn(async (args: any) => ({ id: "intent1", ...args.data })),
+        findFirst: jest.fn(async () => ({ id: "intent1", status: "created" })),
+        findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
+      },
+      pidApp: { findMany: jest.fn(async () => []) },
+      fiatLedgerEvent: { findFirst: jest.fn(async () => ({ id: "e0" })), create: jest.fn(async () => ({})) },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      entryGroup: inq.entryGroup, amountIdr: 500_000n, status: "posted",
+      direction: "out", counterparty: {}, createdAt: new Date(),
+    });
+    await service.transferConfirm("dev@pid", "intent1", { app: "pidapp_x", scope: "fiat:transfer" });
+    expect(security.log).toHaveBeenCalledWith(
+      "dev@pid",
+      "fiat.transfer.app_token",
+      expect.objectContaining({ app: "pidapp_x", scope: "fiat:transfer", phase: "confirm" }),
+    );
   });
 });
 
