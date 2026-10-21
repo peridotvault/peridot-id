@@ -128,6 +128,13 @@ for s in api app dashboard; do
   COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
 done
 
+# ANT-347 LOW-5: pre-deploy migration check — fail fast if the DB is
+# unreachable or migrations have drifted, BEFORE swapping containers.
+# `migrate status` is read-only; the actual `migrate deploy` runs at API
+# container boot (Dockerfile.api CMD). Rollback: fix DB/schema, re-run up.sh.
+echo "==> prisma migrate status (pre-deploy check)"
+COMPOSE_PROJECT_NAME="$PROJECT" compose run --rm api node_modules/.bin/prisma migrate status
+
 # --remove-orphans: drops stale containers (renamed services, interrupted recreates)
 # that would otherwise squat on container names and fail the next recreate.
 COMPOSE_PROJECT_NAME="$PROJECT" compose up -d --remove-orphans
