@@ -1,20 +1,22 @@
 //! Smart account state.
 //!
-//! V1 layout (80 bytes, frozen for reads):
+//! Single 80-byte layout (ANT-197 domain-free):
 //! `version‖type‖status‖nonce u64LE‖authority[33]‖account_id[32]`
 //!
-//! V2 layout (112 bytes): the V1 80-byte prefix is intact, then `rp_id_hash[32]`
-//! (sha256 of the WebAuthn RP ID) so the program enforces the same RP-ID + UV
-//! semantics as the EVM counterpart. Writers always stamp v2; v1 states remain
-//! readable but cannot authorize V2 operations (which require an RP-ID hash).
+//! Historical note: a V2 layout (112 bytes) previously appended `rp_id_hash[32]`
+//! (sha256 of the WebAuthn RP ID) after the 80-byte prefix. ANT-197 removed all
+//! on-chain domain pinning, so the V2 layout collapsed back to 80 bytes and no
+//! `rp_id_hash` is stored or verified anywhere. Writers stamp version 2; states
+//! stamped 1 (legacy) remain readable with identical semantics.
 
 use crate::errors::PeridotError;
 use pinocchio::error::ProgramError;
 
-/// V1 state length (frozen, read-only legacy).
+/// State length (80 bytes, domain-free since ANT-197).
 pub const STATE_LEN_V1: usize = 80;
-/// V2 state length (V1 prefix + 32-byte RP-ID hash).
-pub const STATE_LEN_V2: usize = 112;
+/// State length written by current creators (80 bytes — the former V2 112-byte
+/// layout collapsed back to the 80-byte prefix when `rp_id_hash` was removed).
+pub const STATE_LEN_V2: usize = 80;
 
 pub const AUTHORITY_TYPE_ED25519: u8 = 0; // legacy — unused in V1
 pub const AUTHORITY_TYPE_SECP256R1: u8 = 1; // passkey owner authority
@@ -28,7 +30,8 @@ pub const VERSION_V1: u8 = 1;
 pub const VERSION: u8 = 2;
 
 pub const AUTHORITY_LEN: usize = 33; // compressed secp256r1 public key
-pub const RP_ID_LEN: usize = 32; // sha256(WebAuthn RP ID)
+
+/// Byte offsets into the account data.
 
 /// Byte offsets into the account data (shared V1/V2 prefix).
 const OFF_VERSION: usize = 0;
@@ -37,8 +40,6 @@ const OFF_STATUS: usize = 2;
 const OFF_NONCE: usize = 4; // u64 LE
 const OFF_AUTHORITY: usize = 12; // [u8; 33]
 const OFF_ACCOUNT_ID: usize = 48; // [u8; 32] (aligned after the 33-byte authority)
-/// V2-only: RP-ID hash appended after the V1 prefix.
-const OFF_RP_ID: usize = 80; // [u8; 32]
 
 /// Smart account state. Immutable/read-only views borrow the account data.
 #[derive(Clone, Copy)]
@@ -48,24 +49,20 @@ pub struct SmartAccount<'data> {
 
 impl<'data> SmartAccount<'data> {
     pub fn try_from_bytes(data: &'data [u8]) -> Result<Self, ProgramError> {
-        if data.len() == STATE_LEN_V1 {
-            if data[OFF_VERSION] != VERSION_V1 {
-                return Err(ProgramError::InvalidAccountData);
-            }
-            return Ok(Self { data });
+        // Single 80-byte layout (ANT-197): V1 (version 1, legacy) and V2
+        // (version 2, current) share the same length; both version bytes read.
+        if data.len() != STATE_LEN_V1 && data.len() != STATE_LEN_V2 {
+            return Err(ProgramError::InvalidAccountData);
         }
-        if data.len() == STATE_LEN_V2 {
-            if data[OFF_VERSION] != VERSION {
-                return Err(ProgramError::InvalidAccountData);
-            }
-            return Ok(Self { data });
+        if data[OFF_VERSION] != VERSION_V1 && data[OFF_VERSION] != VERSION {
+            return Err(ProgramError::InvalidAccountData);
         }
-        Err(ProgramError::InvalidAccountData)
+        Ok(Self { data })
     }
 
-    /// True for V2 states (carry an RP-ID hash).
+    /// True for states stamped with the current version.
     pub fn is_v2(&self) -> bool {
-        self.data.len() == STATE_LEN_V2
+        self.data[OFF_VERSION] == VERSION
     }
 
     pub fn authority(&self) -> [u8; 33] {
@@ -78,16 +75,6 @@ impl<'data> SmartAccount<'data> {
         self.data[OFF_ACCOUNT_ID..OFF_ACCOUNT_ID + 32]
             .try_into()
             .expect("slice is 32 bytes")
-    }
-
-    /// RP-ID hash. V1 states have none → `MissingRpIdHash` (re-onboard required).
-    pub fn rp_id_hash(&self) -> Result<[u8; 32], ProgramError> {
-        if self.data.len() != STATE_LEN_V2 {
-            return Err(PeridotError::MissingRpIdHash.into());
-        }
-        Ok(self.data[OFF_RP_ID..OFF_RP_ID + RP_ID_LEN]
-            .try_into()
-            .expect("slice is 32 bytes"))
     }
 
     pub fn authority_type(&self) -> u8 {
@@ -124,14 +111,13 @@ impl<'data> SmartAccountMut<'data> {
         Ok(Self { data })
     }
 
-    pub fn initialize(&mut self, account_id: [u8; 32], authority: [u8; 33], rp_id_hash: [u8; 32]) {
+    pub fn initialize(&mut self, account_id: [u8; 32], authority: [u8; 33]) {
         self.data[OFF_VERSION] = VERSION;
         self.data[OFF_AUTHORITY_TYPE] = AUTHORITY_TYPE_SECP256R1;
         self.data[OFF_STATUS] = STATUS_ACTIVE;
         self.data[OFF_NONCE..OFF_NONCE + 8].copy_from_slice(&0u64.to_le_bytes());
         self.data[OFF_AUTHORITY..OFF_AUTHORITY + AUTHORITY_LEN].copy_from_slice(&authority);
         self.data[OFF_ACCOUNT_ID..OFF_ACCOUNT_ID + 32].copy_from_slice(&account_id);
-        self.data[OFF_RP_ID..OFF_RP_ID + RP_ID_LEN].copy_from_slice(&rp_id_hash);
     }
 
     pub fn set_authority(&mut self, authority: [u8; 33]) {

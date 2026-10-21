@@ -3,8 +3,9 @@
 // Runs against a local `solana-test-validator`. Covers the V3 authorization + fee
 // schema (contracts/WHITEPAPER.md §2, canonical): op-tagged + account-bound
 // payloads with policy-only fee binding, attested networkFee + fixed protocol %,
-// canonical revenue vault, RP-ID/UV parity with EVM, TTL caps, plus the adversarial
+// canonical revenue vault, UV enforcement, TTL caps, plus the adversarial
 // list (squat, replay, substitution, rotation, close, tokens, rounding).
+// Domain-free since ANT-197: no RP-ID hash is stored or verified on-chain.
 //
 // Usage:
 //   export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
@@ -28,7 +29,10 @@ const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 const INSTRUCTIONS = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 const DOMAIN_V3 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3");
 const DOMAIN_V2 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v2");
-const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
+// Authenticator-data prefix for fixtures. The program never compares these
+// bytes (ANT-197 domain-free); any 32-byte prefix verifies if key/message/
+// challenge/UV pass. Neutral value — never a real RP hash.
+const AUTH_PREFIX = crypto.createHash("sha256").update("test-rp").digest();
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 
 const OP = { initialize: 0, withdrawSol: 1, withdrawToken: 2, updateAuthority: 3, close: 4, activate: 5, execute: 6 };
@@ -69,17 +73,17 @@ function compressedPub(pub) {
   return Buffer.concat([Buffer.from([(raw[64] & 1) ? 0x03 : 0x02]), X]);
 }
 
-// V3 authenticatorData: rpIdHash ‖ UV flag ‖ counter. The program enforces the
-// RP-ID hash and the UV bit exactly like the EVM counterpart.
-function authData(rpId = RP_ID_HASH, flags = 0x05) {
-  return Buffer.concat([rpId, Buffer.from([flags]), Buffer.from([0, 0, 0, 1])]);
+// V3 authenticatorData: 32-byte prefix ‖ UV flag ‖ counter. The program checks
+// only the UV bit — the prefix is never compared (ANT-197 domain-free).
+function authData(prefix = AUTH_PREFIX, flags = 0x05) {
+  return Buffer.concat([prefix, Buffer.from([flags]), Buffer.from([0, 0, 0, 1])]);
 }
 
-function makeAssertion(payloadHash, { rpId, flags } = {}) {
+function makeAssertion(payloadHash, { prefix, flags } = {}) {
   const clientDataJSON = Buffer.from(JSON.stringify({
-    type: "webauthn.get", challenge: b64url(payloadHash), origin: "https://peridot-id.example",
+    type: "webauthn.get", challenge: b64url(payloadHash), origin: "test.invalid",
   }));
-  const ad = authData(rpId, flags);
+  const ad = authData(prefix, flags);
   return { clientDataJSON, messageData: Buffer.concat([ad, sha256(clientDataJSON)]) };
 }
 
@@ -95,10 +99,10 @@ const i64 = (v) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); re
 const u16 = (v) => { const b = Buffer.alloc(2); b.writeUInt16LE(v); return b; };
 
 // ---- V3 payload builders (mirror contracts/WHITEPAPER.md §§2, 6) ----
-const initPayloadV3 = (accountId32, authorityComp, rpId) =>
-  sha256(Buffer.concat([DOMAIN_V3, Buffer.from([OP.initialize]), accountId32, authorityComp, rpId]));
-const activatePayloadV3 = (accountId32, authorityComp, rpId, policy, expiry) =>
-  sha256(Buffer.concat([DOMAIN_V3, Buffer.from([OP.activate]), accountId32, authorityComp, rpId, u16(policy), i64(expiry)]));
+const initPayloadV3 = (accountId32, authorityComp) =>
+  sha256(Buffer.concat([DOMAIN_V3, Buffer.from([OP.initialize]), accountId32, authorityComp]));
+const activatePayloadV3 = (accountId32, authorityComp, policy, expiry) =>
+  sha256(Buffer.concat([DOMAIN_V3, Buffer.from([OP.activate]), accountId32, authorityComp, u16(policy), i64(expiry)]));
 const withdrawPayloadV3 = (accountId32, nonce, amount, destBytes, expiry, policy, sourceBytes = null) => {
   const op = sourceBytes ? OP.withdrawToken : OP.withdrawSol;
   const parts = [DOMAIN_V3, Buffer.from([op]), accountId32, u64(nonce), u64(amount), destBytes, i64(expiry), u16(policy)];
@@ -191,9 +195,9 @@ function updateAuthIx(pda, accountId32, nonce, newAuth, expiry, keypair, asserti
   return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
 }
 
-// disc=0 initialize V3: account_id|authority|rp_id|len|json
-function initTx(accountId32, authorityComp, rpId, payerPub, pda, keypair, assertionOpts) {
-  const s = signPayload(keypair, initPayloadV3(accountId32, authorityComp, rpId), assertionOpts);
+// disc=0 initialize V3: account_id|authority|len|json
+function initTx(accountId32, authorityComp, payerPub, pda, keypair, assertionOpts) {
+  const s = signPayload(keypair, initPayloadV3(accountId32, authorityComp), assertionOpts);
   const programIx = new TransactionInstruction({
     keys: [
       { pubkey: payerPub, isSigner: true, isWritable: true },
@@ -202,14 +206,14 @@ function initTx(accountId32, authorityComp, rpId, payerPub, pda, keypair, assert
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
     ],
     programId: PROGRAM,
-    data: Buffer.concat([Buffer.from([0]), accountId32, authorityComp, rpId, u16(s.clientDataJSON.length), s.clientDataJSON]),
+    data: Buffer.concat([Buffer.from([0]), accountId32, authorityComp, u16(s.clientDataJSON.length), s.clientDataJSON]),
   });
   return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
 }
 
-// disc=5 activate V3: account_id|authority|rp_id|policy|expiry|network_fee|len|json
-function activateIx(accountId32, authorityComp, rpId, policy, expiry, networkFee, relayerPub, pda, keypair, assertionOpts) {
-  const s = signPayload(keypair, activatePayloadV3(accountId32, authorityComp, rpId, policy, expiry), assertionOpts);
+// disc=5 activate V3: account_id|authority|policy|expiry|network_fee|len|json
+function activateIx(accountId32, authorityComp, policy, expiry, networkFee, relayerPub, pda, keypair, assertionOpts) {
+  const s = signPayload(keypair, activatePayloadV3(accountId32, authorityComp, policy, expiry), assertionOpts);
   const programIx = new TransactionInstruction({
     keys: [
       { pubkey: relayerPub, isSigner: true, isWritable: true },
@@ -219,7 +223,7 @@ function activateIx(accountId32, authorityComp, rpId, policy, expiry, networkFee
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
     ],
     programId: PROGRAM,
-    data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, rpId, u16(policy), i64(expiry), u64(networkFee), u16(s.clientDataJSON.length), s.clientDataJSON]),
+    data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, u16(policy), i64(expiry), u64(networkFee), u16(s.clientDataJSON.length), s.clientDataJSON]),
   });
   return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
 }
@@ -291,7 +295,7 @@ async function main() {
 
   // ---- initialize: stranger payer rejected even with a valid self-signature ----
   await expectErr(
-    initTx(accountId32, authorityComp, RP_ID_HASH, rentPayer.publicKey, pda, { privateKey, publicKey }),
+    initTx(accountId32, authorityComp, rentPayer.publicKey, pda, { privateKey, publicKey }),
     [rentPayer],
     "stranger-funded initialize rejected (Forbidden)",
   );
@@ -301,43 +305,49 @@ async function main() {
   const [squatPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), squatId], PROGRAM);
   const squatAuth = compressedPub(p2);
   await expectErr(
-    initTx(squatId, squatAuth, RP_ID_HASH, rentPayer.publicKey, squatPda, { privateKey: k2, publicKey: p2 }),
+    initTx(squatId, squatAuth, rentPayer.publicKey, squatPda, { privateKey: k2, publicKey: p2 }),
     [rentPayer],
     "squat rejected (Forbidden)",
   );
   assert.equal(await conn.getAccountInfo(squatPda), null, "squat created nothing");
 
-  // ---- initialize (backend-paid, passkey-signed, V2 state) ----
+  // ---- initialize (backend-paid, passkey-signed, domain-free state) ----
   await expectOk(
-    initTx(accountId32, authorityComp, RP_ID_HASH, backend.publicKey, pda, { privateKey, publicKey }),
+    initTx(accountId32, authorityComp, backend.publicKey, pda, { privateKey, publicKey }),
     [backend],
     "initialize",
   );
 
   const acct = await conn.getAccountInfo(pda);
-  assert.equal(acct.data.length, 112, "state len 112 (v2)");
+  assert.equal(acct.data.length, 80, "state len 80 (domain-free)");
   assert.equal(acct.data[0], 2, "version = 2");
   assert.equal(acct.data[1], 1, "authority_type = secp256r1");
   assert.equal(acct.data.readBigUInt64LE(4), 0n, "nonce = 0");
   assert.equal(Buffer.from(acct.data.subarray(12, 45)).equals(authorityComp), true, "authority stored");
   assert.equal(Buffer.from(acct.data.subarray(48, 80)).equals(accountId32), true, "account_id stored");
-  assert.equal(Buffer.from(acct.data.subarray(80, 112)).equals(RP_ID_HASH), true, "rp_id_hash stored");
-  results.push("PASS v2 state layout");
+  results.push("PASS domain-free state layout");
 
   // ---- initialize again → AlreadyInitialized ----
   await expectErr(
-    initTx(accountId32, authorityComp, RP_ID_HASH, backend.publicKey, pda, { privateKey, publicKey }),
+    initTx(accountId32, authorityComp, backend.publicKey, pda, { privateKey, publicKey }),
     [backend],
     "re-initialize rejected",
   );
 
-  // ---- RP-ID mismatch at creation is impossible (payload binds it); wrong-RP assertion fails ----
-  await expectErr(
-    initTx(squatId, squatAuth, RP_ID_HASH, backend.publicKey, squatPda, { privateKey: k2, publicKey: p2 },
-      { rpId: sha256("evil.example") }),
-    [backend],
-    "wrong-RP assertion rejected (Unauthorized)",
-  );
+  // ---- domain-free creation (ANT-197): a foreign-prefix assertion creates fine ----
+  // The RP-ID pin is gone: only backend payer + self-signature gate creation.
+  {
+    const freeId = pidToSeed32("testfree@pid");
+    const [freePda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), freeId], PROGRAM);
+    await expectOk(
+      initTx(freeId, authorityComp, backend.publicKey, freePda, { privateKey, publicKey },
+        { prefix: sha256("other-rp") }),
+      [backend],
+      "foreign-prefix assertion accepted (domain-free)",
+    );
+    const freeAcct = await conn.getAccountInfo(freePda);
+    assert.equal(freeAcct.data.length, 80, "foreign-prefix account is 80 bytes");
+  }
 
   // ---- activate: Peridot-sponsored claim + attested split (disc 5) ----
   {
@@ -352,19 +362,19 @@ async function main() {
     const beforeTreasury = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
     const actExpiry = exp();
     await expectErr(
-      activateIx(actId, authorityComp, RP_ID_HASH, POLICY_V1, actExpiry, NETWORK_FEE, rentPayer.publicKey, actPda, { privateKey, publicKey }),
+      activateIx(actId, authorityComp, POLICY_V1, actExpiry, NETWORK_FEE, rentPayer.publicKey, actPda, { privateKey, publicKey }),
       [rentPayer],
       "stranger-relayed activate rejected (Forbidden)",
     );
     await expectOk(
-      activateIx(actId, authorityComp, RP_ID_HASH, POLICY_V1, actExpiry, NETWORK_FEE, backend.publicKey, actPda, { privateKey, publicKey }),
+      activateIx(actId, authorityComp, POLICY_V1, actExpiry, NETWORK_FEE, backend.publicKey, actPda, { privateKey, publicKey }),
       [backend],
       "activate claims PDA and splits relayer/protocol",
     );
 
     const claimed = await conn.getAccountInfo(actPda);
     assert.ok(claimed, "activate created on-chain account");
-    assert.equal(claimed.data.length, 112, "activate wrote 112-byte v2 state");
+    assert.equal(claimed.data.length, 80, "activate wrote 80-byte domain-free state");
     assert.equal(claimed.owner.toBase58(), PROGRAM.toBase58(), "activate transferred ownership to program");
     assert.equal(claimed.lamports, funded - Number(TOTAL_FEE), "total fee reimbursed out of PDA");
     // Backend paid the tx fee (~5000) on top, so assert protocol exactly, relayer at-least.
@@ -377,7 +387,7 @@ async function main() {
 
   // ---- activate an already-initialized account → rejected ----
   await expectErr(
-    activateIx(accountId32, authorityComp, RP_ID_HASH, POLICY_V1, exp(), NETWORK_FEE, backend.publicKey, pda, { privateKey, publicKey }),
+    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, backend.publicKey, pda, { privateKey, publicKey }),
     [backend],
     "activate on initialized account rejected",
   );
@@ -391,7 +401,7 @@ async function main() {
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     // V3 has no per-call treasury: tamper the account list instead.
     const s = signPayload({ privateKey, publicKey },
-      activatePayloadV3(swapId, authorityComp, RP_ID_HASH, POLICY_V1, exp()));
+      activatePayloadV3(swapId, authorityComp, POLICY_V1, exp()));
     const evilTreasury = Keypair.generate();
     const swapIx = new TransactionInstruction({
       keys: [
@@ -402,7 +412,7 @@ async function main() {
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
-      data: Buffer.concat([Buffer.from([5]), swapId, authorityComp, RP_ID_HASH, u16(POLICY_V1), i64(exp()), u64(NETWORK_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
+      data: Buffer.concat([Buffer.from([5]), swapId, authorityComp, u16(POLICY_V1), i64(exp()), u64(NETWORK_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
     });
     await expectErr(
       new Transaction().add(swapIx, buildSecpIx(s.comp, s.sig, s.messageData)),
@@ -420,7 +430,7 @@ async function main() {
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: polPda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     await expectErr(
-      activateIx(polId, authorityComp, RP_ID_HASH, 2, exp(), NETWORK_FEE, backend.publicKey, polPda, { privateKey, publicKey }),
+      activateIx(polId, authorityComp, 2, exp(), NETWORK_FEE, backend.publicKey, polPda, { privateKey, publicKey }),
       [backend],
       "unknown policy rejected (UnknownFeePolicy)",
     );
@@ -525,7 +535,7 @@ async function main() {
     const sibId = pidToSeed32("testsibling@pid");
     const [sibPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), sibId], PROGRAM);
     await expectOk(
-      initTx(sibId, authorityComp, RP_ID_HASH, backend.publicKey, sibPda, { privateKey, publicKey }),
+      initTx(sibId, authorityComp, backend.publicKey, sibPda, { privateKey, publicKey }),
       [backend],
       "sibling initialized under shared authority",
     );
@@ -551,14 +561,16 @@ async function main() {
       "cross-account replay rejected (InvalidChallenge)",
     );
     assert.equal((await conn.getAccountInfo(sibPda)).lamports, sibBefore, "sibling untouched by replay");
+    // Domain-free (ANT-197): a foreign-prefix assertion verifies on the sibling
+    // (same key, nonce 0) — no RP comparison remains on-chain.
+    await expectOk(
+      withdrawIx(sibPda, dest.publicKey, rentPayer.publicKey, 0, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, sibId, { prefix: sha256("other-rp") }),
+      [rentPayer],
+      "foreign-prefix assertion accepted (domain-free)",
+    );
   }
 
-  // ---- wrong-RP and missing-UV assertions rejected ----
-  await expectErr(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32, { rpId: sha256("evil.example") }),
-    [rentPayer],
-    "wrong-RP assertion rejected (Unauthorized)",
-  );
+  // ---- missing-UV assertion still rejected (UV is not domain pinning) ----
   await expectErr(
     withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32, { flags: 0x01 }),
     [rentPayer],
@@ -629,7 +641,7 @@ async function main() {
     const closeId = pidToSeed32("testclose@pid");
     const [closePda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), closeId], PROGRAM);
     await expectOk(
-      initTx(closeId, authorityComp, RP_ID_HASH, backend.publicKey, closePda, { privateKey, publicKey }),
+      initTx(closeId, authorityComp, backend.publicKey, closePda, { privateKey, publicKey }),
       [backend],
       "close-test account initialized",
     );

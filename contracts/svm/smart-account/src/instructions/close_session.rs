@@ -61,11 +61,11 @@ pub fn process(
     let client_json_len = u16::from_le_bytes(data.read_array::<2>(CLIENT_JSON_LEN_OFFSET)?) as usize;
     let client_json = data.read_bytes(CLIENT_JSON_LEN_OFFSET + 2, client_json_len)?;
 
-    let (authority, account_id, rp_id_hash) = {
+    let (authority, account_id) = {
         let borrowed = vault.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id(), state.rp_id_hash()?)
+        (state.authority(), state.account_id())
     };
     verify_pda(vault, program_id, account_id)?;
     verify_session_pda(session, program_id, account_id, session_key)?;
@@ -96,7 +96,7 @@ pub fn process(
         &expiry.to_le_bytes(),
     ]);
     auth::check_expiry(expiry)?;
-    auth::verify_secp256r1_v2(instructions, &authority, &rp_id_hash, client_json, &payload)?;
+    auth::verify_secp256r1_v2(instructions, &authority, client_json, &payload)?;
 
     // Effects first (checks-effects-interactions): burn the vault nonce BEFORE
     // the rent moves + close. A failure below reverts atomically, so this is

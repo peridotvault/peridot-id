@@ -74,10 +74,16 @@ async function main() {
 
   const dest = Keypair.generate();
 
+  // Real PDA for the mock account row: wallet.getBalance() reads smart.address
+  // from /v1/account and passes it to new PublicKey() — placeholder "x" throws
+  // `Invalid public key input`. Derive the on-chain truth (program CiwLJ…).
+  const direct = new SolanaAdapter(new SolanaRpc(RPC));
+  const SMART_ADDRESS = direct.getAddress(PID).toBase58();
+
   const mockApi = {
     async get(path) {
       if (path === "/v1/identity/me") return { ok: true, data: { pid: PID } };
-      if (path === "/v1/account") return { ok: true, data: [{ id: "c1", pid: PID, chainId: "chain-sol", chainNamespace: "solana", chainReference: "ref", address: "x", accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] };
+      if (path === "/v1/account") return { ok: true, data: [{ id: "c1", pid: PID, chainId: "chain-sol", chainNamespace: "solana", chainReference: "ref", address: SMART_ADDRESS, accountType: "smart_account", status: "active", createdAt: new Date().toISOString() }] };
       if (path === "/v1/credentials") return { ok: true, data: [{ id: "a1", type: "secp256r1", credentialId: "cred", publicKey: AUTHORITY_B64, createdAt: new Date().toISOString(), lastUsedAt: null }] };
       if (path === "/v1/chains") return { ok: true, data: [CHAIN_VIEW] };
       return { ok: true, data: {} };
@@ -113,11 +119,10 @@ async function main() {
   });
 
   // Backend-gated, passkey-signed initialize (idempotent — skip if live).
-  const { SolanaAdapter: Adapter, SolanaRpc: Rpc } = await import("@peridotvault/pid-solana");
-  const direct = new Adapter(new Rpc(RPC));
+  // (direct adapter hoisted above for the mock account row)
   const authorityComp = Buffer.from(AUTHORITY_B64, "base64url");
   if (!(await direct.isInitialized(PID))) {
-    const initSig = await direct.initialize(PID, authorityComp, RP_ID_HASH, backend, signer);
+    const initSig = await direct.initialize(PID, authorityComp, backend, signer);
     await conn.confirmTransaction(initSig, "confirmed");
     console.log("initialize OK:", initSig);
   } else {

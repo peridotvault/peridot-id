@@ -99,8 +99,6 @@ contract PeridotAccount {
 
     bytes32 public authorityX;
     bytes32 public authorityY;
-    /// @dev sha256 of the WebAuthn RP ID; must equal `authenticatorData[0:32]`.
-    bytes32 public rpIdHash;
     uint64 public nonce;
     bool public initialized;
     /// @dev Canonical revenue recipient: the deploying factory itself, which
@@ -242,8 +240,8 @@ contract PeridotAccount {
 
     /// @notice One-time setup, called atomically by the factory's passkey-bound
     /// `deployAndInit`. Verifies the user's activation authorization (which binds
-    /// salt, authority, rpIdHash, policy, deadline, chainid, factory) before
-    /// writing any state. The account is pre-funded at its counterfactual
+    /// salt, authority, policy, deadline, chainid, factory — no domain bytes,
+    /// ANT-197) before writing any state. The account is pre-funded at its
     /// address (first-top-up, like SVM `activate`); the attested `networkFee`
     /// is split relayerFee → `payer` (the relayer EOA that floated the
     /// deploy; `msg.sender` here is the factory itself),
@@ -253,7 +251,6 @@ contract PeridotAccount {
         bytes32 salt,
         bytes32 x,
         bytes32 y,
-        bytes32 _rpIdHash,
         uint16 feePolicyVersion,
         uint64 deadline,
         uint256 networkFee,
@@ -284,17 +281,15 @@ contract PeridotAccount {
                 salt,
                 x,
                 y,
-                _rpIdHash,
                 feePolicyVersion,
                 deadline,
                 block.chainid,
                 _factory
             )
         );
-        _verifyWithKeyAndRpId(x, y, _rpIdHash, expected, authenticatorData, clientDataJSON, r, s);
+        _verifyWithKey(x, y, expected, authenticatorData, clientDataJSON, r, s);
         authorityX = x;
         authorityY = y;
-        rpIdHash = _rpIdHash;
         uint256 protocolFee = _protocolFee(networkFee, bps);
         factory = _factory;
         initialized = true;
@@ -337,7 +332,6 @@ contract PeridotAccount {
         uint256 bps = _policyProtocolBps(feePolicyVersion);
         bytes32 expected = _executePayload(to, value, data, deadline, feePolicyVersion);
         _verify(expected, authenticatorData, clientDataJSON, r, s);
-        _checkGasSanity(startGas, networkFee);
         uint256 protocolFee = _protocolFee(networkFee, bps);
         if (address(this).balance < value + networkFee + protocolFee) revert InsufficientFunds();
         nonce++;
@@ -351,6 +345,11 @@ contract PeridotAccount {
             (ok, ) = factory.call{value: protocolFee}("");
             if (!ok) revert CallFailed();
         }
+        // Full-frame sanity bound: measured AFTER the call + payouts so the
+        // bound covers the whole execution (ANT-206). A pre-call check only
+        // sees the verify prefix and rejects honest estimate-based
+        // attestation. Revert rolls the call + payouts back atomically.
+        _checkGasSanity(startGas, networkFee);
         emit Executed(to, value, networkFee, protocolFee, nonce - 1);
     }
 
@@ -417,11 +416,20 @@ contract PeridotAccount {
         return (networkFee * bps) / 10000;
     }
 
-    /// @dev Sanity-bound the attested networkFee against measured execution gas.
-    /// A bound, not pricing: covers verification/payout overhead inside the
-    /// measured region plus testnet L2 data fees with headroom. Prevents wild
-    /// over-attestation; exact attestation-vs-actual matching is verified by
-    /// receipt reconciliation (backend/indexer), which also carries L1-fee oracles.
+    /// @dev Sanity-bound the attested networkFee against the FULL execution
+    /// frame: `startGas` is captured on entry and the check runs AFTER the
+    /// target call + fee payouts, so `measured` covers verification, the
+    /// untrusted call, and both payouts. A bound, not pricing: covers
+    /// verification/payout overhead plus testnet L2 data fees with headroom.
+    /// Prevents wild over-attestation; exact attestation-vs-actual matching
+    /// is verified by receipt reconciliation (backend/indexer), which also
+    /// carries L1-fee oracles. A pre-call check only measures the verify
+    /// prefix and rejects honest estimate-based attestation (ANT-206).
+    /// @dev Revert is atomic: a bound violation rolls back the target call
+    /// and both payouts (same pattern as `PeridotFactory.deployAndInit`,
+    /// which checks after its sub-call). The check is view-only and runs
+    /// under the caller's `nonReentrant` lock; moving it post-call changes
+    /// no state ordering (effects still precede the untrusted call).
     function _checkGasSanity(uint256 startGas, uint256 networkFee) internal view {
         uint256 measured = (startGas - gasleft()) * tx.gasprice * GAS_SANITY_NUMERATOR;
         if (networkFee > measured) revert GasAnomaly();
@@ -429,7 +437,7 @@ contract PeridotAccount {
 
     /// @dev Mirrors `auth.rs::verify_secp256r1_v2`: signer == stored authority,
     /// message binds `sha256(clientDataJSON)`, challenge == recomputed payload.
-    /// Plus RP-ID hash + user-verification flag hardening (cheap on EVM).
+    /// Plus user-verification flag hardening (the RP-ID pin was removed, ANT-197).
     function _verify(
         bytes32 expectedPayload,
         bytes memory authenticatorData,
@@ -440,10 +448,15 @@ contract PeridotAccount {
         _verifyWithKey(authorityX, authorityY, expectedPayload, authenticatorData, clientDataJSON, r, s);
     }
 
-    /// @dev Same WebAuthn/P-256 checks as `_verify` but against an explicit key.
-    /// Used for session keys (PERM domain payloads) and ERC-1271. The caller is
-    /// responsible for domain separation: passing the owner key with a PERM
-    /// payload (or vice versa) can never verify because the challenge binds the domain.
+    /// @dev Full WebAuthn/P-256 verification against an explicit key: UV flag,
+    /// message binding, challenge equality, and P-256 signature. Used by
+    /// `initialize` (candidate key, nothing stored yet — verify-before-write)
+    /// and by every other path with the stored authority via `_verify`.
+    /// The RP-ID prefix bytes of `authenticatorData` are intentionally NOT
+    /// compared (ANT-197 domain-free). Used for session keys (PERM domain
+    /// payloads) and ERC-1271. The caller is responsible for domain separation:
+    /// passing the owner key with a PERM payload (or vice versa) can never
+    /// verify because the challenge binds the domain.
     function _verifyWithKey(
         bytes32 x,
         bytes32 y,
@@ -453,32 +466,8 @@ contract PeridotAccount {
         bytes32 r,
         bytes32 s
     ) internal view {
-        _verifyWithKeyAndRpId(x, y, rpIdHash, expectedPayload, authenticatorData, clientDataJSON, r, s);
-    }
-
-    /// @dev Full WebAuthn/P-256 verification against an explicit key AND an
-    /// explicit RP-ID hash. Used by `initialize`, where the candidate authority
-    /// and RP ID arrive as calldata and NOTHING is stored yet: verifying first
-    /// (before any state write) requires checking against the candidates, not
-    /// against empty storage. Every other path delegates here with the stored
-    /// `rpIdHash` via `_verifyWithKey`.
-    function _verifyWithKeyAndRpId(
-        bytes32 x,
-        bytes32 y,
-        bytes32 _rpIdHash,
-        bytes32 expectedPayload,
-        bytes memory authenticatorData,
-        bytes memory clientDataJSON,
-        bytes32 r,
-        bytes32 s
-    ) internal view {
-        // 1. RP-ID + user verification (first 32B of authenticatorData, flag bit 0x04).
+        // 1. User verification (flag bit 0x04 on the 33rd authenticator byte).
         if (authenticatorData.length < 37) revert Unauthorized();
-        bytes32 rpId;
-        assembly ("memory-safe") {
-            rpId := mload(add(authenticatorData, 32))
-        }
-        if (rpId != _rpIdHash) revert Unauthorized();
         if (uint8(authenticatorData[32]) & 0x04 == 0) revert Unauthorized();
         // 2. Signed message binds the exact attested bytes.
         bytes32 h = sha256(bytes.concat(authenticatorData, sha256(clientDataJSON)));
@@ -757,7 +746,6 @@ contract PeridotAccount {
         _verifyWithKey(p.sessionX, p.sessionY, expected, a.authenticatorData, a.clientDataJSON, a.r, a.s);
         _enforceScope(p, a.target, a.value, a.data);
         p.seq = a.seq + 1;
-        _checkGasSanity(startGas, a.networkFee);
         uint256 protocolFee = _protocolFee(a.networkFee, bps);
         if (address(this).balance < a.value + a.networkFee + protocolFee) revert InsufficientFunds();
         (bool ok, bytes memory result) = a.target.call{value: a.value}(a.data);
@@ -770,6 +758,9 @@ contract PeridotAccount {
             (ok, ) = factory.call{value: protocolFee}("");
             if (!ok) revert CallFailed();
         }
+        // Full-frame sanity bound (ANT-206): see `execute` — pre-call checks
+        // reject honest estimate-based attestation on fast precompiles.
+        _checkGasSanity(startGas, a.networkFee);
         emit PermissionExecuted(a.permissionId, a.seq, a.target, a.value);
         _lastResult = result;
     }
@@ -1008,7 +999,6 @@ contract PeridotAccount {
             )
         );
         _verify(expected, a.authenticatorData, a.clientDataJSON, a.r, a.s);
-        _checkGasSanity(startGas, a.networkFee);
         uint256 protocolFee = _protocolFee(a.networkFee, bps);
         if (address(this).balance < a.value + a.networkFee + protocolFee) revert InsufficientFunds();
         nonce++;
@@ -1022,6 +1012,9 @@ contract PeridotAccount {
             (ok, ) = factory.call{value: protocolFee}("");
             if (!ok) revert CallFailed();
         }
+        // Full-frame sanity bound (ANT-206): see `execute` — pre-call checks
+        // reject honest estimate-based attestation on fast precompiles.
+        _checkGasSanity(startGas, a.networkFee);
         emit Executed(a.target, a.value, a.networkFee, protocolFee, nonce - 1);
     }
 
@@ -1088,11 +1081,7 @@ contract PeridotAccount {
         bytes32 expected =
             keccak256(abi.encodePacked(DOMAIN_V3, OP_1271, block.chainid, address(this), hash));
         if (authenticatorData.length < 37) return MAGIC_1271_INVALID;
-        bytes32 rpIdCheck;
-        assembly ("memory-safe") {
-            rpIdCheck := mload(add(authenticatorData, 32))
-        }
-        if (rpIdCheck != rpIdHash) return MAGIC_1271_INVALID;
+        // No RP-ID comparison (ANT-197 domain-free); UV flag still enforced.
         if (uint8(authenticatorData[32]) & 0x04 == 0) return MAGIC_1271_INVALID;
         bytes32 h = sha256(bytes.concat(authenticatorData, sha256(clientDataJSON)));
         if (_extractChallenge(clientDataJSON) != expected) return MAGIC_1271_INVALID;

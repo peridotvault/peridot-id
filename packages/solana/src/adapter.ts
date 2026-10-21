@@ -102,25 +102,23 @@ export class SolanaAdapter {
   }
 
   /**
-   * Initialize the smart account (V3 payload; ix layout unchanged from V2). Passkey-signed: only the new authority's key can
+   * Initialize the smart account (V3 payload; domain-free). Passkey-signed: only the new authority's key can
    * claim the PDA (no squatting). The payer funds rent and signs as fee payer.
-   * Writes v2 state (112B with RP-ID hash).
+   * Writes v2 state (80B, domain-free).
    */
   async initialize(
     pid: string,
     authorityCompressed: Uint8Array,
-    rpIdHash32: Uint8Array,
     payer: Keypair,
     signer: PasskeySigner,
   ): Promise<string> {
     const smartAccount = this.getAddress(pid);
     const accountId = pidToSeed32(pid);
-    const payload = await buildInitializePayloadV3(accountId, authorityCompressed, rpIdHash32);
+    const payload = await buildInitializePayloadV3(accountId, authorityCompressed);
     const assertion = await signer.sign(payload, {});
     const programIx = buildInitializeInstructionV2(
       accountId,
       authorityCompressed,
-      rpIdHash32,
       payer.publicKey,
       smartAccount,
       assertion.clientDataJSON,
@@ -131,7 +129,7 @@ export class SolanaAdapter {
 
   /**
    * Activate the smart account via the relayer, V2 (disc 5). The claim is passkey-signed
-   * (payload binds op-tag, account, authority, RP-ID hash, maxFee, policy, expiry) —
+   * (payload binds op-tag, account, authority, maxFee, policy, expiry) —
    * the caller supplies the client's assertion; the relayer only submits and floats
    * rent/gas. `fee` is the attested total reimbursement (`fee ≤ maxFee` enforced
    * on-chain). Returns the tx signature.
@@ -139,7 +137,6 @@ export class SolanaAdapter {
   async activate(
     pid: string,
     authorityCompressed: Uint8Array<ArrayBufferLike>,
-    rpIdHash32: Uint8Array,
     maxFeeLamports: bigint,
     feePolicyVersion: number,
     feeLamports: bigint,
@@ -152,7 +149,6 @@ export class SolanaAdapter {
     const programIx = buildActivateInstructionV2(
       pidToSeed32(pid),
       authorityCompressed,
-      rpIdHash32,
       maxFeeLamports,
       feePolicyVersion,
       expiry,
@@ -168,7 +164,7 @@ export class SolanaAdapter {
 
   /**
    * Activate the smart account via the relayer, V3 (disc 5). The claim is passkey-signed
-   * (V3 payload binds op-tag, account, authority, RP-ID hash, policy, expiry — no
+   * (V3 payload binds op-tag, account, authority, policy, expiry — no
    * amounts); the caller supplies the client's assertion. `networkFeeLamports` is the
    * backend-attested realtime network cost; the program recomputes `protocolFee`
    * from policy and splits relayerFee → relayer, protocolFee → revenue vault.
@@ -176,7 +172,6 @@ export class SolanaAdapter {
   async activateV3(
     pid: string,
     authorityCompressed: Uint8Array<ArrayBufferLike>,
-    rpIdHash32: Uint8Array,
     feePolicyVersion: number,
     networkFeeLamports: bigint,
     expiry: number,
@@ -188,7 +183,6 @@ export class SolanaAdapter {
     const programIx = buildActivateInstructionV3(
       pidToSeed32(pid),
       authorityCompressed,
-      rpIdHash32,
       feePolicyVersion,
       expiry,
       networkFeeLamports,
@@ -207,7 +201,7 @@ export class SolanaAdapter {
     return this.rpc.getBalance(pub);
   }
 
-  /** Real-time cost to activate: rent(112B v2 state) + message fee, before policy markup. */
+  /** Real-time cost to activate: rent(v2 state) + message fee, before policy markup. */
   async estimateActivationCost(marginRate: number): Promise<{
     rentLamports: bigint;
     feeLamports: bigint;
@@ -217,14 +211,12 @@ export class SolanaAdapter {
     const conn = this.rpc.connection;
     const pid = "dummy";
     const dummyAuthority = new Uint8Array(33);
-    const dummyRpId = new Uint8Array(32);
     const smartAccount = this.getAddress(pid);
     const dummyRelayer = Keypair.generate().publicKey;
     const dummyTreasury = Keypair.generate().publicKey;
     const ix = buildActivateInstructionV2(
       pidToSeed32(pid),
       dummyAuthority,
-      dummyRpId,
       0n,
       1,
       0,

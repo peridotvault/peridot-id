@@ -10,8 +10,11 @@
 //! 2. the signed message is exactly `authenticatorData ‖ sha256(clientDataJSON)`
 //!    where `clientDataJSON` is a program argument (binds the exact bytes the
 //!    passkey attested);
-//! 3. `authenticatorData[0:32]` equals the stored RP-ID hash and the user-verification
-//!    flag (`0x04`) is set — the same semantics the EVM counterpart enforces;
+//! 3. `authenticatorData[32]` carries the user-verification flag (`0x04`) —
+//!    the same assurance the EVM counterpart enforces. The RP-ID bytes
+//!    (`authenticatorData[0:32]`) are deliberately NOT compared: ANT-197 made
+//!    programs domain-agnostic, so any ceremony origin verifies as long as the
+//!    key, message, and challenge checks pass;
 //! 4. the `"challenge"` inside `clientDataJSON` decodes to the V2 authorization
 //!    payload the program recomputes from its own arguments (domain ‖ op-tag ‖
 //!    account ‖ action ‖ expiry ‖ fee cap) — preventing transaction substitution;
@@ -209,13 +212,14 @@ pub fn verify_secp256r1(
 }
 
 /// Full V2 passkey authorization check. `expected_payload` is the V2 payload hash
-/// the program recomputes from its own instruction args; `expected_rp_id` is the
-/// account's stored RP-ID hash. Enforces the same RP-ID + user-verification
-/// semantics as the EVM counterpart (`PeridotAccount._verify`).
+/// the program recomputes from its own instruction args. Enforces the stored
+/// authority match, exact `authenticatorData ‖ sha256(clientDataJSON)` message
+/// binding, the user-verification flag, and challenge equality — the same
+/// semantics as the EVM counterpart (`PeridotAccount._verify`), minus the
+/// removed RP-ID-hash pinning (ANT-197 domain-free).
 pub fn verify_secp256r1_v2(
     instructions_account: &AccountView,
     expected_authority: &[u8; 33],
-    expected_rp_id: &[u8; 32],
     client_data_json: &[u8],
     expected_payload: &[u8; 32],
 ) -> Result<(), ProgramError> {
@@ -239,10 +243,9 @@ pub fn verify_secp256r1_v2(
     }
     let authenticator_data = &message[..message.len() - 32];
 
-    // 3. RP-ID hash + user-verification flag, matching the EVM `_verify` rule.
-    if authenticator_data[0..32] != expected_rp_id[..] {
-        return Err(PeridotError::Unauthorized.into());
-    }
+    // 3. User-verification flag, matching the EVM `_verify` rule. The RP-ID
+    //    bytes (authenticatorData[0:32]) are intentionally unchecked (ANT-197:
+    //    domain-agnostic programs; ceremony origin is enforced off-chain).
     if authenticator_data[32] & 0x04 == 0 {
         return Err(PeridotError::Unauthorized.into());
     }
@@ -298,7 +301,7 @@ mod tests {
     fn extract_challenge_parses_webauthn_client_data() {
         let payload = [0xabu8; 32];
         let json = format!(
-            r#"{{"type":"webauthn.get","challenge":"{}","origin":"https://peridot-id.example"}}"#,
+            r#"{{"type":"webauthn.get","challenge":"{}","origin":"test.invalid"}}"#,
             base64_url_encode(&payload)
         );
         let mut out = [0u8; 32];

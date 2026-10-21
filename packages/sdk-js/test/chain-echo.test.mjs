@@ -151,7 +151,6 @@ test("activate: mismatched chain echo blocks sign/broadcast with a cluster-misma
         chainTime: Math.floor(Date.now() / 1000),
         treasury: "11111111111111111111111111111111",
         feePolicyVersion: 1,
-        rpIdHash: Buffer.alloc(32, 1).toString("base64url"),
         chain: { namespace: "solana", reference: "mismatched-ref" },
       },
     },
