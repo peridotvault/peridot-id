@@ -27,7 +27,7 @@ export default function AppDetailPage() {
 
   return (
     <main className="mx-auto w-full max-w-7xl px-5 pb-16 pt-8 sm:px-8">
-      <AppDetail client={client} appId={appId} />
+      <AppDetail key={appId} client={client} appId={appId} />
     </main>
   );
 }
