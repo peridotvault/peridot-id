@@ -678,9 +678,30 @@ export class FiatLedgerService {
     let sent = 0;
     let failed = 0;
     for (const ev of due) {
-      const app = await this.prisma.pidApp.findFirst({ where: { ownerPid: ev.targetPid, isActive: true }, select: { webhookSecret: true } });
+      // Resolve the secret for the exact app this event targets (owner + URL),
+      // not just the first active app under the owner. A missing/inactive app
+      // or secret is fail-closed: never dispatch with an empty-key HMAC —
+      // record and retry with backoff like any delivery failure.
+      const app = await this.prisma.pidApp.findFirst({
+        where: { ownerPid: ev.targetPid, webhookUrl: ev.targetUrl, isActive: true },
+        select: { webhookSecret: true },
+      });
+      const failNoSecret = async (reason: string) => {
+        const attempts = ev.attempts + 1;
+        const dead = attempts >= 6;
+        const backoffMs = Math.min(3_600_000, 1000 * 2 ** attempts);
+        await this.prisma.fiatLedgerEvent.update({
+          where: { id: ev.id },
+          data: { status: dead ? "failed" : "pending", attempts, nextAttemptAt: new Date(Date.now() + backoffMs), lastError: reason.slice(0, 200) },
+        });
+        failed++;
+      };
+      if (!app?.webhookSecret) {
+        await failNoSecret("webhook app missing, inactive, or secret unset — refusing unsigned dispatch");
+        continue;
+      }
       const body = JSON.stringify(ev.payload);
-      const sig = "sha256=" + createHmac("sha256", app?.webhookSecret ?? "").update(body).digest("hex");
+      const sig = "sha256=" + createHmac("sha256", app.webhookSecret).update(body).digest("hex");
       try {
         const res = await fetch(ev.targetUrl, {
           method: "POST",
