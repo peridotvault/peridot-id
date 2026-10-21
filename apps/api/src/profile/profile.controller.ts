@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Patch, UseGuards } from "@nestjs/common";
+import { ThrottlerGuard } from "@nestjs/throttler";
 import { Profile } from "@prisma/client";
 import { CurrentUser, AuthenticatedUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
@@ -7,6 +8,7 @@ import { UpdateProfileDto } from "./dto/update-profile.dto";
 import { ProfileService } from "./profile.service";
 
 @Controller("v1/profile")
+@UseGuards(ThrottlerGuard)
 export class ProfileController {
   constructor(private readonly profileService: ProfileService) {}
 

@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
-import { ThrottlerModule } from "@nestjs/throttler";
+import { APP_GUARD } from "@nestjs/core";
+import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { AccountModule } from "./account/account.module";
 import { AdminModule } from "./admin/admin.module";
 import { AuthModule } from "./auth/auth.module";
@@ -38,6 +39,13 @@ import { HealthModule } from "./health/health.module";
     SessionKeysModule,
     SecurityModule,
     OpenApiModule,
+  ],
+  providers: [
+    // ANT-285(a): the ThrottlerModule limit (100/min default) is inert without
+    // a guard. Global guard = secure by default; per-route @Throttle()
+    // overrides (e.g. 10/min on OTP/auth) still apply. Least-privilege:
+    // every route is rate-limited unless explicitly skipped.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

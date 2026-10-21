@@ -6,6 +6,7 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
+import { PrismaExceptionFilter, Sanitize500Filter } from "./common/prisma-exception.filter";
 import { APP_ORIGINS_TTL_MS, isOriginAllowed, staticOriginsFor } from "./common/cors";
 import { PrismaService } from "./prisma/prisma.service";
 
@@ -78,6 +79,8 @@ async function bootstrap(): Promise<void> {
   });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // ANT-285(b): P2002→409 / P2025→404 globally; unhandled 500s sanitized.
+  app.useGlobalFilters(new PrismaExceptionFilter(), new Sanitize500Filter());
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle("PeridotID API")
