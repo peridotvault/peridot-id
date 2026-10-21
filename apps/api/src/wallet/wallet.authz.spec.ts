@@ -235,6 +235,9 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     const res = await request(app.getHttpServer())
       .post("/v1/wallet")
       .set("Cookie", `pid_access=${t}`)
+      // ANT-367: cookie-authed writes require an allowlisted Origin (browsers always send one).
+      // localhost:3302 = this spec's mock WALLET_URL (cookieExtractor walletOrigin + CSRF allowlist).
+      .set("Origin", "http://localhost:3302")
       .send({ address: "addr-new" })
       .expect(200);
 
@@ -250,6 +253,9 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     await request(app.getHttpServer())
       .post("/v1/wallet")
       .set("Cookie", `pid_access=${t}`)
+      // ANT-367: cookie-authed writes require an allowlisted Origin (browsers always send one).
+      // localhost:3302 = this spec's mock WALLET_URL (cookieExtractor walletOrigin + CSRF allowlist).
+      .set("Origin", "http://localhost:3302")
       .send({ address: "addr-new" })
       .expect(403);
   });
@@ -267,6 +273,9 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     const res = await request(app.getHttpServer())
       .post("/v1/wallet")
       .set("Cookie", `pid_access=${t}`)
+      // ANT-367: cookie-authed writes require an allowlisted Origin (browsers always send one).
+      // localhost:3302 = this spec's mock WALLET_URL (cookieExtractor walletOrigin + CSRF allowlist).
+      .set("Origin", "http://localhost:3302")
       .send({ address: "addr-2" })
       .expect(200);
 
@@ -281,6 +290,9 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     await request(app.getHttpServer())
       .post("/v1/wallet")
       .set("Cookie", `pid_access=${t}`)
+      // ANT-367: cookie-authed writes require an allowlisted Origin (browsers always send one).
+      // localhost:3302 = this spec's mock WALLET_URL (cookieExtractor walletOrigin + CSRF allowlist).
+      .set("Origin", "http://localhost:3302")
       .send({ address: "" })
       .expect(400);
   });
@@ -294,6 +306,9 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     const res = await request(app.getHttpServer())
       .post("/v1/wallet/withdraw")
       .set("Cookie", `pid_access=${t}`)
+      // ANT-367: cookie-authed writes require an allowlisted Origin (browsers always send one).
+      // localhost:3302 = this spec's mock WALLET_URL (cookieExtractor walletOrigin + CSRF allowlist).
+      .set("Origin", "http://localhost:3302")
       .send({
         asset: "SOL",
         to: "DeSt1111111111111111111111111111111111111",
@@ -315,6 +330,9 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     await request(app.getHttpServer())
       .post("/v1/wallet/withdraw")
       .set("Cookie", `pid_access=${t}`)
+      // ANT-367: cookie-authed writes require an allowlisted Origin (browsers always send one).
+      // localhost:3302 = this spec's mock WALLET_URL (cookieExtractor walletOrigin + CSRF allowlist).
+      .set("Origin", "http://localhost:3302")
       .send({
         asset: "SOL",
         to: "DeSt1111111111111111111111111111111111111",
@@ -335,6 +353,9 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     const res = await request(app.getHttpServer())
       .post("/v1/wallet/rotate")
       .set("Cookie", `pid_access=${t}`)
+      // ANT-367: cookie-authed writes require an allowlisted Origin (browsers always send one).
+      // localhost:3302 = this spec's mock WALLET_URL (cookieExtractor walletOrigin + CSRF allowlist).
+      .set("Origin", "http://localhost:3302")
       .send({
         oldCredentialId: "cred-old",
         newCredentialId: "cred-new",
