@@ -61,7 +61,7 @@ export function SolActivationModal({
                   : "Send SOL to this address first."}
             </Text>
           )}
-          {gate.error && <Text style={s.error}>{gate.error}</Text>}
+          {gate.error && <Text role="alert" style={s.error}>{gate.error}</Text>}
           {!gate.isActive && (
             <UIButton
               title={gate.busy ? "Activating…" : "Activate Account"}

@@ -32,7 +32,7 @@ export default function WorkspacePage() {
           <p className={`mt-1 text-sm ${MUTED}`}>
             Register <code>client_id</code>s, edit allowed origins, and generate backend secrets.
           </p>
-          {error && <p className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
+          {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <CutButton
               type="button"

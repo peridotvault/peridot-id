@@ -60,7 +60,7 @@ export function EditProfileScreen({ onDone }: { onDone: () => void }) {
       <Text style={s.label}>Display Name</Text>
       <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={displayName} onChangeText={setDisplayName} placeholder="Display name" />
 
-      {error && <Text style={s.error}>{error}</Text>}
+      {error && <Text role="alert" style={s.error}>{error}</Text>}
       {saved && <Text className="font-sans text-[13px] text-success">Saved</Text>}
       <UIButton title={busy ? "Saving…" : "Save"} onPress={save} disabled={busy} variant="primary" />
       <UIButton title="Back" onPress={onDone} />

@@ -62,7 +62,7 @@ export function EditChainView() {
         {loading ? (
           <p className={`text-sm ${MUTED}`}>Loading…</p>
         ) : error ? (
-          <p className={`text-sm ${ERROR}`}>{error}</p>
+          <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
         ) : !id || !chain ? (
           <p className={`text-sm ${MUTED}`}>
             Chain not found. <Link to="/chains" className="underline">Back to chains</Link>

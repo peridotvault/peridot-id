@@ -62,7 +62,7 @@ export function FiatLedgerDetailScreen({ item: initial, onDone }: { item: FiatLe
       <Field label="Reference" value={tx.entryGroup} />
       <Field label="Created" value={fmtDate(item.createdAt)} />
 
-      {error && <Text style={s.error}>{error}</Text>}
+      {error && <Text role="alert" style={s.error}>{error}</Text>}
 
       {cancellable && (
         <UIButton title={busy ? "Cancelling…" : "Cancel transfer"} onPress={cancel} disabled={busy} variant="danger" />

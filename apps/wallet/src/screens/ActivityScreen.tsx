@@ -39,7 +39,7 @@ export function ActivityScreen({
     <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
       <ActivityHeader tab={tab} onTabChange={setTab} onRefresh={feed.reload} busy={feed.busy} />
 
-      {feed.error && <Text style={s.error}>{feed.error}</Text>}
+      {feed.error && <Text role="alert" style={s.error}>{feed.error}</Text>}
       {feed.busy && <Text style={s.hint}>Loading…</Text>}
 
       {tab !== "idr" && visible.length === 0 && !feed.busy && (

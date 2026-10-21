@@ -42,7 +42,7 @@ export function SsoConsentModal({
         <Text className="text-center font-sans text-xs text-muted-foreground">
           Signed in as {sessionLabel}. The app receives your ID, display name and email — never your passkeys.
         </Text>
-        {error && <Text style={s.error}>{error}</Text>}
+        {error && <Text role="alert" style={s.error}>{error}</Text>}
         <View className="mt-1 gap-3">
           <UIButton title={busy ? "Authorizing…" : "Allow"} onPress={onAllow} disabled={busy} variant="primary" />
           <UIButton title="Use a different account" onPress={onDifferent} disabled={busy} />

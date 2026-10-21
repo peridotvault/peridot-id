@@ -32,9 +32,21 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
         title="Chains"
         description="Control which chains the wallet renders and activation uses."
       />
-      {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
+      {error && <p role="alert" className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
       {loading ? (
         <p className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
+      ) : chains.length === 0 ? (
+        // ANT-341 FR7: explicit empty state (never a bare grid with just "+ Add chain").
+        <div className="mt-4">
+          <p className={`text-sm ${MUTED}`}>No chains registered yet — add your first chain below.</p>
+          <Link
+            to="/chains/create"
+            className="focus-ring mt-3 flex min-h-32 w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-1/2 lg:w-1/3"
+          >
+            <span aria-hidden="true" className="text-2xl leading-none">+</span>
+            Add chain
+          </Link>
+        </div>
       ) : (
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Link
@@ -114,7 +126,8 @@ function ChainCard({
         <MiniButton size="sm" disabled={busy} onClick={() => setActive(!chain.isActive)}>
           {chain.isActive ? "Disable" : "Enable"}
         </MiniButton>
-        <MiniButton size="sm" onClick={() => navigate(`/chains/edit?id=${chain.id}`)}>
+        {/* ANT-341 FR7: chain ids are encoded — never raw `?id=` into the URL. */}
+        <MiniButton size="sm" onClick={() => navigate(`/chains/edit?id=${encodeURIComponent(chain.id)}`)}>
           Edit
         </MiniButton>
         <MiniButton size="sm" onClick={() => openContracts(chain.id)}>

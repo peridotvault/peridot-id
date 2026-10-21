@@ -59,7 +59,7 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
       <Text style={s.title}>Sessions / Devices</Text>
       <Text style={s.subtitle}>Devices currently signed in to your Peridot ID.</Text>
 
-      {error && <Text style={s.error}>{error}</Text>}
+      {error && <Text role="alert" style={s.error}>{error}</Text>}
 
       {sessions.length > 1 && (
         <UIButton title={busy ? "Signing out…" : "Sign out other sessions"} onPress={revokeAllOthers} disabled={busy} />

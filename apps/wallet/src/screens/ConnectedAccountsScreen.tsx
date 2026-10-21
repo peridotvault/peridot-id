@@ -57,7 +57,7 @@ export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
       <Text style={s.title}>Connected Accounts</Text>
       <Text style={s.subtitle}>Login methods linked to this Peridot ID. Google is the fallback/recovery path for your passkeys.</Text>
 
-      {error && <Text style={s.error}>{error}</Text>}
+      {error && <Text role="alert" style={s.error}>{error}</Text>}
       {justUnlinked && <Text className="font-sans text-[13px] text-success">Account unlinked.</Text>}
 
       {credentials.map((c) => (

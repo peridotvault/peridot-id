@@ -31,6 +31,7 @@ interface WorkspaceContextValue {
   onTab: (key: string) => void;
   contractChainId: string | null;
   openContracts: (chainId?: string) => void;
+  clearContractChainId: () => void;
   env: string;
   otherWorkspaceUrl?: string;
   busy: boolean;
@@ -155,6 +156,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [navigate],
   );
+  // ANT-341 FR7: the handoff is single-use — ContractsManager clears it after
+  // consume so a later visit never re-selects a stale chain.
+  const clearContractChainId = useCallback(() => setContractChainId(null), []);
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
@@ -168,6 +172,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       onTab,
       contractChainId,
       openContracts,
+      clearContractChainId,
       env: PID_ENV,
       otherWorkspaceUrl: OTHER_WORKSPACE_URL,
       busy,
@@ -175,7 +180,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
     }),
-    [client, status, role, isAdmin, pid, tabs, tab, onTab, contractChainId, openContracts, busy, error, signIn, signOut],
+    [client, status, role, isAdmin, pid, tabs, tab, onTab, contractChainId, openContracts, clearContractChainId, busy, error, signIn, signOut],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

@@ -36,7 +36,7 @@ export function AccountSwitcherModal({
       closeDisabled={busy}
       scrimLabel="Close account switcher"
     >
-      {error && <Text style={s.error}>{error}</Text>}
+      {error && <Text role="alert" style={s.error}>{error}</Text>}
 
       <ScrollView className="grow-0">
         <View className="gap-2 py-1">

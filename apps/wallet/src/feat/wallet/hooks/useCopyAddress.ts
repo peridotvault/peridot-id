@@ -1,16 +1,25 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Keyed clipboard with a 2s "copied" flag per key. Covers both the
 // multi-address list (ReceiveScreen, keyed by target) and single-address
 // cases (ActivationScreen, keyed "address").
 export function useCopyAddress() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // ANT-341 FR7: flag timer cleaned up on unmount (no setState-after-unmount).
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   const copy = useCallback(async (key: string, address: string) => {
     try {
       await navigator.clipboard.writeText(address);
       setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 2000);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopiedKey(null), 2000);
     } catch {
       // clipboard unavailable — nothing to do
     }

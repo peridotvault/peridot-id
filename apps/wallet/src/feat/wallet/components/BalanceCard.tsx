@@ -43,7 +43,7 @@ export function BalanceCard({
       <View className="flex-1 justify-between gap-1.5 p-5">
         {balanceError ? (
           <>
-            <Text style={s.error}>{balanceError}</Text>
+            <Text role="alert" style={s.error}>{balanceError}</Text>
             <UIButton title="Retry" onPress={onRetry} />
           </>
         ) : (

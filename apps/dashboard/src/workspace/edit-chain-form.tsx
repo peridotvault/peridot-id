@@ -64,7 +64,7 @@ export function EditChainForm({
       <div className={`rounded-lg border border-border px-3 py-2 font-mono text-xs ${MUTED}`}>
         {chain.namespace}:{chain.reference} · id {chain.id}
       </div>
-      {error && <p className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
+      {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="text-sm">
           Name

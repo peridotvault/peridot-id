@@ -73,7 +73,7 @@ export function PartnersManager({ client }: { client: PeridotClient }) {
         title="Partners"
         description="Every registered app. Verified partners skip the PeridotID fiat fee — users see a ✓ badge at login."
       />
-      {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
+      {error && <p role="alert" className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}

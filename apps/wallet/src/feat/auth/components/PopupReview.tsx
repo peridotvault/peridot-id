@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "../../../shared/primitives";
 import { styles as s } from "../../../shared/theme";
 import { UIButton } from "../../../shared/components/UIButton";
@@ -35,6 +35,14 @@ export function PopupReview({
   onAcknowledgedChange?: (next: boolean) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  // ANT-341 FR7: flag timer cleaned up on unmount (no setState-after-unmount).
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
   const unknown = gate?.kind === "unknown" ? gate : null;
   const invalid = gate?.kind === "invalid" ? gate : null;
   // AC3/AC6: unknown requires acknowledgement; malformed blocks Approve entirely.
@@ -45,7 +53,8 @@ export function PopupReview({
     if (!unknown) return;
     const done = () => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
     };
     try {
       const clip = (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
@@ -99,7 +108,7 @@ export function PopupReview({
       )}
       {invalid && (
         <View style={s.card}>
-          <Text style={s.error}>Cannot approve this request</Text>
+          <Text role="alert" style={s.error}>Cannot approve this request</Text>
           <Text style={s.hint}>{invalid.reason}</Text>
         </View>
       )}

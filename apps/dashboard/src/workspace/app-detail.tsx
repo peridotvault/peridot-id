@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
@@ -65,13 +65,22 @@ async function copy(text: string): Promise<boolean> {
 
 function CopyButton({ text }: { text: string }) {
   const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+  // ANT-341 FR7: reset timer cleaned up on unmount.
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
   return (
     <MiniButton
       onClick={() => {
         void copy(text).then((ok) => {
           // ANT-333: only claim success when the clipboard write succeeded.
           setState(ok ? "done" : "failed");
-          setTimeout(() => setState("idle"), 1500);
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => setState("idle"), 1500);
         });
       }}
       title={state === "failed" ? "Copy failed — your browser blocked clipboard access" : undefined}
@@ -107,12 +116,27 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   const [faucetError, setFaucetError] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null);
 
+  // ANT-341 FR7: flash timeout cleaned up on unmount (no setState-after-unmount).
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
   const flash = (m: string) => {
     setMsg(m);
-    setTimeout(() => setMsg(null), 2500);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setMsg(null), 2500);
   };
 
   const load = useCallback(async () => {
+    // ANT-341 FR7: never fire API calls with an empty app id.
+    if (!appId) {
+      setLoading(false);
+      setNotFound(true);
+      return;
+    }
     setLoading(true);
     setError(null);
     setNotFound(false);
@@ -376,7 +400,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         <CopyButton text={app.clientId} />
       </div>
 
-      {error && <p className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
+      {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
       {msg && <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{msg}</p>}
 
       <div className="mt-6 grid gap-4">
@@ -398,7 +422,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
                 ? ` ${fmtIdr(String(dailyRemaining))} remaining today.`
                 : " Daily cap Rp100.000 per identity."}
             </p>
-            {faucetError && <p className={`mt-2 text-xs ${ERROR}`}>{faucetError}</p>}
+            {faucetError && <p role="alert" className={`mt-2 text-xs ${ERROR}`}>{faucetError}</p>}
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <label htmlFor="faucet-amount" className="sr-only">
                 Faucet amount in IDR
@@ -468,7 +492,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
               Add
             </MiniButton>
           </div>
-          {originError && <p className={`mt-2 text-xs ${ERROR}`}>{originError}</p>}
+          {originError && <p role="alert" className={`mt-2 text-xs ${ERROR}`}>{originError}</p>}
         </Card>
 
         <Card>

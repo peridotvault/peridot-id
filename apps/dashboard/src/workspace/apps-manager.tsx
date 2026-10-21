@@ -53,7 +53,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
         title="Apps"
         description="Open an app to manage its origins, backend secret, fees, and balance."
       />
-      {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
+      {error && <p role="alert" className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
       {loading ? (
         <p className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
       ) : (
