@@ -71,7 +71,15 @@ export function AppsManager({ client }: { client: PeridotClient }) {
               <span className={`text-xs ${MUTED}`}>{app.isActive ? "Active" : "Disabled"} →</span>
             </Link>
           ))}
-          {apps.length === 0 && !error && <p className={`text-sm ${MUTED}`}>No apps yet — register your first below.</p>}
+          {apps.length === 0 && !error && (
+            <p className={`text-sm ${MUTED}`}>
+              No apps yet — register your first below. New here?{" "}
+              <Link to="/demo" className="underline underline-offset-2 hover:text-foreground">
+                Try the sandbox sample
+              </Link>
+              .
+            </p>
+          )}
         </div>
       )}
 

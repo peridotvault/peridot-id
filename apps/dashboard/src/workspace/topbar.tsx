@@ -69,11 +69,15 @@ export function Topbar({
               production
             </span>
           )}
-          {otherWorkspaceUrl && (
-            <a href={otherWorkspaceUrl} className="text-xs text-muted-foreground underline-offset-2 hover:underline">
-              {isSandbox ? "Switch to production" : "Open sandbox"}
-            </a>
-          )}
+          {/* Sandbox MVP (FR-3 / AC-D1): env switch ALWAYS rendered. The href
+              is the configured VITE_OTHER_WORKSPACE_URL or the derived
+              counterpart (see lib/config.ts) — never hidden. */}
+          <a
+            href={otherWorkspaceUrl ?? (isSandbox ? "https://dashboard.peridot.id" : "https://sandbox-dashboard.peridot.id")}
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+          >
+            {isSandbox ? "Switch to production" : "Open sandbox"}
+          </a>
           <span className="truncate text-xs text-muted-foreground">
             {isAdmin && (
               <span className="mr-2 rounded-[3px] bg-brand-1 px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-brand-2 dark:text-[#07170f]">

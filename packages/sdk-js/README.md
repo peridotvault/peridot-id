@@ -23,9 +23,9 @@ npm install @peridotvault/pid-sdk-js
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
-  baseUrl: 'https://api.pid.peridotvault.com',
+  baseUrl: 'https://api.peridot.id',
   solanaRpcUrl: 'https://api.devnet.solana.com', // for smart-account txs
-  popupBaseUrl: 'https://app.pid.peridotvault.com', // trust-critical actions open here
+  popupBaseUrl: 'https://peridot.id', // trust-critical actions open here
   onUnauthorized: async () => {
     const ok = await peridot.auth.refresh();
     if (!ok) {
@@ -51,7 +51,12 @@ const available = await peridot.auth.pidAvailable('ifal'); // { available, pid }
 | Profile | `peridot.profile` | `me()`, `update(input)` |
 | Passkey credentials | `peridot.passkey` | `list()`, `register()`, `revoke(id)` |
 | Wallet | `peridot.wallet` | smart-account balance, history, deposit, withdraw (see `PeridotWallet`) |
-| Fiat | `peridot.fiat` | balance, statement (`ledger`), send/receive, DOKU Checkout top-up (writes approve via popup, see below) |
+| Fiat | `peridot.fiat` | balance, statement (`ledger`), send/receive, DOKU Checkout top-up (writes approve via popup, see below), sandbox faucet `testCredit()` |
+
+> **Canonical hosts (FR-4).** `Peridot()` presets now target `https://api.peridot.id`
+> / `https://sandbox-api.peridot.id` (popup `https://peridot.id` /
+> `https://sandbox.peridot.id`). Legacy `*.pid.peridotvault.com` hosts still work
+> for one release with a console deprecation warning, then are removed.
 
 EVM permissions (WHITEPAPER.md §10) are not SDK-wrapped yet: use `@peridotvault/pid-evm`
 (payload + calldata builders) with the `v1/permissions` API directly
@@ -131,9 +136,9 @@ origin, where the user approves with the address bar visible:
 
 ```ts
 const peridot = Peridot({
-  baseUrl: 'https://api.pid.peridotvault.com',
+  baseUrl: 'https://api.peridot.id',
   solanaRpcUrl: 'https://api.devnet.solana.com',
-  popupBaseUrl: 'https://app.pid.peridotvault.com',
+  popupBaseUrl: 'https://peridot.id',
 });
 
 await peridot.wallet.withdraw({ amount: '5000000', asset: 'SOL', to: '...' });
@@ -182,6 +187,21 @@ A minimal third-party sample is tracked in the dashboard backlog (ANT-104):
 it lives in `apps/dashboard` once re-implemented
 (behaves like an external dapp: popup only, no session).
 
+## Sandbox (test money + env check)
+
+```ts
+// Startup env check — GETs /v1/env and compares with the SDK env.
+// Resolves { ok: true } on match, { ok: false, expected, actual } on mismatch.
+const envCheck = await peridot.checkEnv();
+if (!envCheck.ok) throw new Error(`Wrong environment: expected ${envCheck.expected}, hit ${envCheck.actual}`);
+
+// Sandbox faucet — instant test credit, no DOKU checkout (sandbox only;
+// production returns 404, route absent).
+const credit = await peridot.fiat.testCredit(50000);
+// { ok: true, creditId, amountMinor: 50000, currency: "IDR",
+//   env: "sandbox", dailyRemainingMinor: 50000 }
+```
+
 ## Error contract
 
 - Fiat methods **throw** `Error` (message = server message or fallback).
@@ -208,7 +228,7 @@ entry point.
 | `baseUrl` | `string` | PeridotID API base URL |
 | `solanaRpcUrl` | `string \| string[]` | Solana RPC for smart-account txs |
 | `passkeySigner` | `PasskeySigner` | optional; inline signer — first-party PeridotID origin only. Omit on third-party origins (with `popupBaseUrl`): `withdraw`/`execute`/`activate`/`rotate`/`topup` then delegate to the popup |
-| `popupBaseUrl` | `string` | optional; popup host for delegated ceremonies, e.g. `https://app.pid.peridotvault.com` (no prod default) |
+| `popupBaseUrl` | `string` | optional; popup host for delegated ceremonies, e.g. `https://peridot.id` (no prod default) |
 | `feePayerStore` | `SecretStore` | optional; defaults to in-memory |
 | `historyStore` | `HistoryStore` | optional; defaults to localStorage-backed |
 | `onUnauthorized` | `() => void` | called on `401` (except `/v1/auth/*`) |

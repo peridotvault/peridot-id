@@ -7,6 +7,13 @@ PeridotID runs **two fully separate environments**. They share no database,
 credentials, or app registrations — only the same code and (for now) the same
 Google OAuth client.
 
+> **Separate deployments, not a path prefix.** Sandbox is the *same API* on
+> sandbox hosts — there is no `/sandbox/*` path on the production API and no
+> `?env=sandbox` query. If you can reach `GET /v1/env`, it tells you which
+> deployment you hit: `{ "env": "sandbox" }` vs `{ "env": "production" }`.
+> Pointing a sandbox build at the production host (or vice versa) is a
+> configuration bug — the SDK's `checkEnv()` startup check catches it.
+
 | | Production | Sandbox (test) |
 |---|---|---|
 | Docs (Mintlify) | `https://docs.peridot.id` (new canonical; old `https://pid.peridotvault.com/docs*` still serves until cutover) | `https://docs.peridot.id` (single docs for all envs; old `https://sandbox.pid.peridotvault.com/docs*` still serves until cutover) |
@@ -43,12 +50,39 @@ There is no per-app environment switch.
    // omit env on production; no URLs, no passkeySigner → popup/tab mode
    ```
 3. Top up / send with test flows — DOKU runs in sandbox, so nothing is real.
+   For instant test money skip DOKU entirely with the sandbox faucet:
+   ```ts
+   // Sandbox only. Production returns 404 (route absent).
+   const credit = await peridot.fiat.testCredit(50000);
+   // { ok: true, creditId, amountMinor: 50000, currency: "IDR",
+   //   env: "sandbox", dailyRemainingMinor: 50000 }
+   ```
+   Faucet caps (proposed — CTO confirms): per-call max **Rp50.000**, daily cap
+   **Rp100.000 per identity**, max **10 calls/day**. Over the cap →
+   `422 { error: "faucet_cap_exceeded", dailyRemainingMinor: 0 }`.
 4. When it works, register the same app in **production** and build with
    `NODE_ENV=production` — same code, production hosts.
 
 > Never point a sandbox build at the production API, or a production build at the
 > sandbox. The SDK derives the environment from `NODE_ENV`; if you override
-> `baseUrl`, **you** own staying on the right environment.
+> `baseUrl`, **you** own staying on the right environment. Call
+> `await peridot.checkEnv()` at startup — it GETs `/v1/env` and reports a
+> mismatch before you move money.
+
+## Promote to production (manual checklist for MVP)
+
+Sandbox and production registrations are independent — there is no automatic
+promote/export. When your sandbox integration works:
+
+1. Register the app again in the **production** dashboard (same name is fine —
+   the `client_id` will differ).
+2. Add the production **allowed origins** (no localhost).
+3. Generate a fresh production **backend secret** (`pidsk_…`) — never reuse the
+   sandbox secret.
+4. Re-create **fees** per operation and the **webhook** endpoint + signing secret.
+5. Re-run the DOKU onboarding against **production** (real money).
+6. Build with `NODE_ENV=production` and verify `GET /v1/env` →
+   `{ "env": "production" }`.
 
 Fees, the fiat ledger, and webhooks behave identically in both environments; only
 the DOKU mode and data differ. See [Fiat & payments](/fiat) and

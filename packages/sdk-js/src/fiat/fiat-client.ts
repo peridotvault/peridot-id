@@ -12,6 +12,16 @@ export interface FiatBalanceView {
   replayErrors: string[];
 }
 
+/** Sandbox faucet result (FR-2 contract, ANT-287 §3). */
+export interface TestCreditView {
+  ok: boolean;
+  creditId: string;
+  amountMinor: number;
+  currency: string;
+  env: string;
+  dailyRemainingMinor: number;
+}
+
 /** One immutable ledger entry (a double-entry leg). */
 export interface FiatLedgerEntry {
   id: string;
@@ -297,6 +307,18 @@ export class PeridotFiat {
   /** Corroborate a pending deposit against DOKU and credit the ledger. */
   async syncTransaction(id: string): Promise<FiatDepositView> {
     return unwrap(await this.api.post<FiatDepositView>(`${BASE}/deposits/${id}/sync`), "Sync failed");
+  }
+
+  // --- sandbox faucet (test money, FR-2) ---
+
+  /**
+   * Sandbox faucet: instant test credit without a DOKU checkout.
+   * Sandbox deployments only — production returns 404 (route absent, no
+   * oracle). Server enforces the daily cap (proposed Rp100.000/day, max
+   * 10 calls/day — CTO to confirm per ANT-287 OQ-1).
+   */
+  async testCredit(amountMinor: number): Promise<TestCreditView> {
+    return unwrap(await this.api.post<TestCreditView>(`${BASE}/test-credit`, { amountMinor }), "Faucet request failed");
   }
 
   // --- send / receive (internal ledger) ---
