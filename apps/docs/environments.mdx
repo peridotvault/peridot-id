@@ -55,10 +55,10 @@ There is no per-app environment switch.
    // Sandbox only. Production returns 404 (route absent).
    const credit = await peridot.fiat.testCredit(50000);
    // { ok: true, creditId, amountMinor: 50000, currency: "IDR",
-   //   env: "sandbox", dailyRemainingMinor: 50000 }
+   //   env: "sandbox", dailyRemainingMinor: 450000 }
    ```
-   Faucet caps (proposed — CTO confirms): per-call max **Rp50.000**, daily cap
-   **Rp100.000 per identity**, max **10 calls/day**. Over the cap →
+   Faucet caps (board-confirmed on ANT-290): per-call max **Rp50.000**, daily cap
+   **Rp500.000 per identity**, max **10 calls/day**. Over the cap →
    `422 { error: "faucet_cap_exceeded", dailyRemainingMinor: 0 }`.
 4. When it works, register the same app in **production** and build with
    `NODE_ENV=production` — same code, production hosts.

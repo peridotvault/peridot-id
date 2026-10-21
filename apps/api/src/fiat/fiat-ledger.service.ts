@@ -291,11 +291,12 @@ export class FiatLedgerService {
   // --- send/receive (generic primitive + phase-1 policy gate) ---
 
   /**
-   * Sandbox faucet caps (ANT-287 §6, proposed values — CTO confirms via
-   * parent OQ-1; adjust here and in the openapi spec together).
+   * Sandbox faucet caps (ANT-287 §6; daily leg lifted to Rp500.000 by board
+   * decision on ANT-290, implemented ANT-318 — adjust here and in the
+   * openapi spec together).
    */
   static readonly FAUCET_PER_CALL_MAX_IDR = 50_000n;
-  static readonly FAUCET_DAILY_CAP_IDR = 100_000n;
+  static readonly FAUCET_DAILY_CAP_IDR = 500_000n;
   static readonly FAUCET_DAILY_MAX_CALLS = 10;
 
   /**

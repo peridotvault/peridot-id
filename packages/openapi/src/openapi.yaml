@@ -1833,7 +1833,7 @@ paths:
         same `fiat_issue` path as corroborated DOKU deposits (identical
         balance/webhook behavior) without touching DOKU — works even when DOKU
         sandbox is down. Every mint is audited. Per-identity caps: Rp50.000 per
-        call, Rp100.000/day, 10 calls/day (proposed — CTO confirms). The route
+        call, Rp500.000/day, 10 calls/day (board-confirmed on ANT-290). The route
         is registered only when the server flag `PID_FAUCET_ENABLED` is exactly
         `"true"` (fail-closed; unset/false ⇒ absent). On production the route
         does not exist: 404 (not 401/403 — no oracle).

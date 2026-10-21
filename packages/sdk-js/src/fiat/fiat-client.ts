@@ -314,8 +314,8 @@ export class PeridotFiat {
   /**
    * Sandbox faucet: instant test credit without a DOKU checkout.
    * Sandbox deployments only — production returns 404 (route absent, no
-   * oracle). Server enforces the daily cap (proposed Rp100.000/day, max
-   * 10 calls/day — CTO to confirm per ANT-287 OQ-1).
+   * oracle). Server enforces the daily cap (Rp500.000/day, max
+   * 10 calls/day — board-confirmed on ANT-290).
    */
   async testCredit(amountMinor: number): Promise<TestCreditView> {
     return unwrap(await this.api.post<TestCreditView>(`${BASE}/test-credit`, { amountMinor }), "Faucet request failed");

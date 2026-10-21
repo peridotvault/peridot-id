@@ -47,7 +47,7 @@ describe("FiatLedgerService.mintTestCredit (sandbox faucet)", () => {
   it("mints a posted fiat_issue leg and audits it", async () => {
     const { service, created, security } = setup();
     const out = await service.mintTestCredit("dev@pid", 50000);
-    expect(out).toMatchObject({ amountMinor: "50000", currency: "IDR", env: "sandbox", dailyRemainingMinor: "50000" });
+    expect(out).toMatchObject({ amountMinor: "50000", currency: "IDR", env: "sandbox", dailyRemainingMinor: "450000" });
     expect(out.creditId).toMatch(/^[0-9a-f-]{36}$/);
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({ kind: "fiat_issue", pid: "dev@pid", direction: "in", status: "posted", source: "faucet" });
@@ -70,11 +70,27 @@ describe("FiatLedgerService.mintTestCredit (sandbox faucet)", () => {
     const { service } = setup();
     const out = await service.mintTestCredit("dev@pid", "50000");
     expect(out.amountMinor).toBe("50000");
-    expect(out.dailyRemainingMinor).toBe("50000");
+    expect(out.dailyRemainingMinor).toBe("450000");
   });
 
-  it("enforces the daily cap with remaining quota", async () => {
+  it("passes the old 100k boundary (60k spent + 50k now mints under the 500k cap)", async () => {
     const { service, created } = setup({}, [{ amountIdr: 60_000n }]);
+    const out = await service.mintTestCredit("dev@pid", 50000);
+    expect(out.amountMinor).toBe("50000");
+    expect(out.dailyRemainingMinor).toBe("390000");
+    expect(created).toHaveLength(1);
+  });
+
+  it("allows filling the daily cap exactly to 500000", async () => {
+    const prior = Array.from({ length: 9 }, () => ({ amountIdr: 50_000n }));
+    const { service, created } = setup({}, prior);
+    const out = await service.mintTestCredit("dev@pid", 50000);
+    expect(out.dailyRemainingMinor).toBe("0");
+    expect(created).toHaveLength(1);
+  });
+
+  it("enforces the 500k daily cap with remaining quota", async () => {
+    const { service, created } = setup({}, [{ amountIdr: 460_000n }]);
     const { status, body } = await codeOf(service.mintTestCredit("dev@pid", 50000));
     expect(status).toBe(422);
     expect(body).toMatchObject({ error: "faucet_cap_exceeded", dailyRemainingMinor: "40000" });
