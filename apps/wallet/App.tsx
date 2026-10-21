@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { SafeAreaView, StyleSheet, View } from "./src/shared/primitives";
+import { SafeAreaView, StyleSheet, Text, View } from "./src/shared/primitives";
 import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
 import { readPopupParams } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL } from "./src/shared/config";
@@ -33,6 +33,7 @@ import { AppConnectionsScreen } from "./src/screens/AppConnectionsScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { ActivityDetailScreen } from "./src/screens/ActivityDetailScreen";
 import { FiatDetailScreen } from "./src/screens/FiatDetailScreen";
+import { UIButton } from "./src/shared/components/UIButton";
 import { FiatTransferScreen } from "./src/screens/FiatTransferScreen";
 import { FiatLedgerDetailScreen } from "./src/screens/FiatLedgerDetailScreen";
 import { TabBar, type TabKey } from "./src/shared/components/TabBar";
@@ -192,11 +193,25 @@ export default function App() {
       case "app-connections":
         return <AppConnectionsScreen onDone={pop} />;
       case "activity-detail":
-        return activityTx ? <ActivityDetailScreen tx={activityTx} onDone={pop} /> : undefined;
+        // ANT-341 FR4: null payload never strands a bare overlay — fallback
+        // with a working Close that pops the stack.
+        return activityTx ? (
+          <ActivityDetailScreen tx={activityTx} onDone={pop} />
+        ) : (
+          <NullOverlayFallback label="Activity detail" onClose={pop} />
+        );
       case "fiat-detail":
-        return fiatItem ? <FiatDetailScreen item={fiatItem} onDone={pop} /> : undefined;
+        return fiatItem ? (
+          <FiatDetailScreen item={fiatItem} onDone={pop} />
+        ) : (
+          <NullOverlayFallback label="Fiat detail" onClose={pop} />
+        );
       case "fiat-ledger-detail":
-        return ledgerItem ? <FiatLedgerDetailScreen item={ledgerItem} onDone={pop} /> : undefined;
+        return ledgerItem ? (
+          <FiatLedgerDetailScreen item={ledgerItem} onDone={pop} />
+        ) : (
+          <NullOverlayFallback label="Ledger detail" onClose={pop} />
+        );
       default:
         return undefined;
     }
@@ -314,3 +329,16 @@ const styles = StyleSheet.create({
   safe: { flex: 1 },
   base: { flex: 1 },
 });
+
+/** ANT-341 FR4: stranded-screen guard — a detail overlay pushed with a null
+ * payload renders an explicit fallback with a working Close (pops the stack)
+ * instead of a bare undefined overlay. */
+function NullOverlayFallback({ label, onClose }: { label: string; onClose: () => void }) {
+  return (
+    <View style={styles.base}>
+      <Text style={{ fontSize: 18, fontWeight: "700" }}>{label} unavailable</Text>
+      <Text style={{ fontSize: 14, opacity: 0.7 }}>This item is no longer available.</Text>
+      <UIButton title="Close" onPress={onClose} variant="primary" />
+    </View>
+  );
+}

@@ -21,13 +21,16 @@ export function BottomSheet({
   children: ReactNode;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} label={title}>
       <Pressable
         style={styles.scrim}
         onPress={closeDisabled ? undefined : onClose}
         accessibilityLabel={scrimLabel ?? `Close ${title}`}
       />
-      <View className="absolute bottom-0 left-0 right-0 mx-auto max-h-[75%] w-full max-w-[576px] gap-3 self-center border-t border-border bg-surface p-5 pb-7">
+      <View
+        className="absolute bottom-0 left-0 right-0 mx-auto max-h-[75%] w-full max-w-[576px] gap-3 self-center border-t border-border bg-surface p-5 pb-7"
+        style={{ overflowY: "auto" }}
+      >
         <View style={{ flexDirection: "row" }} className="items-center justify-between">
           <Text className="font-serif text-[22px] tracking-[-0.3px] text-foreground">{title}</Text>
           <Pressable onPress={onClose} disabled={closeDisabled} accessibilityLabel="Close">
