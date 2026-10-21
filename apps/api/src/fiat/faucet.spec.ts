@@ -4,7 +4,9 @@ import { TestCreditDto } from "./dto/faucet.dto";
 import { FiatLedgerService } from "./fiat-ledger.service";
 
 function configStub(store: Record<string, string> = {}) {
-  const base: Record<string, string> = { PID_FIAT_LEDGER_ENABLED: "true", DOKU_MODE: "sandbox", ...store };
+  // Faucet gate default ON here so happy-path tests stay focused; the
+  // fail-closed tests below override with "false"/unset explicitly.
+  const base: Record<string, string> = { PID_FIAT_LEDGER_ENABLED: "true", PID_FAUCET_ENABLED: "true", ...store };
   return { get: (k: string, d?: string) => base[k] ?? d ?? "" } as unknown as ConfigService;
 }
 
@@ -98,8 +100,18 @@ describe("FiatLedgerService.mintTestCredit (sandbox faucet)", () => {
     expect(prisma.fiatLedgerEntry.findMany).not.toHaveBeenCalled();
   });
 
-  it("404s when the server env flag is production (route absent)", async () => {
-    const { service, created } = setup({ DOKU_MODE: "production" });
+  it.each([["false"], [""], ["1"], ["TRUE"]])(
+    "404s when PID_FAUCET_ENABLED is %p (fail-closed, route absent)",
+    async (flag) => {
+      const { service, created } = setup({ PID_FAUCET_ENABLED: flag as unknown as string });
+      const { status } = await codeOf(service.mintTestCredit("dev@pid", 10000));
+      expect(status).toBe(404);
+      expect(created).toHaveLength(0);
+    },
+  );
+
+  it("404s when PID_FAUCET_ENABLED is unset (fail-closed default)", async () => {
+    const { service, created } = setup({ PID_FAUCET_ENABLED: undefined as unknown as string });
     const { status } = await codeOf(service.mintTestCredit("dev@pid", 10000));
     expect(status).toBe(404);
     expect(created).toHaveLength(0);
@@ -137,10 +149,20 @@ describe("TestCreditDto boundary passthrough", () => {
 });
 
 describe("FaucetController production gate", () => {
-  it("throws 404 before touching the ledger when DOKU_MODE=production", async () => {
+  it("throws 404 before touching the ledger when PID_FAUCET_ENABLED=false", async () => {
     const { FaucetController } = await import("./faucet.controller");
     const ledger = { mintTestCredit: jest.fn() };
-    const ctrl = new FaucetController(ledger as never, configStub({ DOKU_MODE: "production" }));
+    const ctrl = new FaucetController(ledger as never, configStub({ PID_FAUCET_ENABLED: "false" }));
+    await expect(ctrl.testCredit({ pid: "dev@pid" } as never, { amountMinor: 1000 } as never)).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(ledger.mintTestCredit).not.toHaveBeenCalled();
+  });
+
+  it("throws 404 before touching the ledger when PID_FAUCET_ENABLED is unset", async () => {
+    const { FaucetController } = await import("./faucet.controller");
+    const ledger = { mintTestCredit: jest.fn() };
+    const ctrl = new FaucetController(ledger as never, configStub({ PID_FAUCET_ENABLED: undefined as unknown as string }));
     await expect(ctrl.testCredit({ pid: "dev@pid" } as never, { amountMinor: 1000 } as never)).rejects.toThrow(
       NotFoundException,
     );

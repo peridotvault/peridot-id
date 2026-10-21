@@ -33,7 +33,10 @@ export class FaucetController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   async testCredit(@CurrentUser() user: AuthenticatedUser, @Body() dto: TestCreditDto) {
-    if (this.config.get<string>("DOKU_MODE", "sandbox") === "production") {
+    // Runtime re-check of the ANT-290 gate flag (module registration is the
+    // primary gate; this covers env-changed-after-boot). Exact string match,
+    // fail-closed — never DOKU_MODE (it defaults to sandbox: fail-open).
+    if (this.config.get<string>("PID_FAUCET_ENABLED", "false") !== "true") {
       throw new NotFoundException("Not found");
     }
     const out = await this.ledger.mintTestCredit(user.pid, dto.amountMinor);

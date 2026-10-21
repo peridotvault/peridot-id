@@ -12,12 +12,15 @@ import { PaymentFeeService } from "./payment-fee.service";
 import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
 
 /**
- * Server env flag read at boot: the faucet route is registered ONLY on the
- * sandbox stack. A production deploy gets no `/v1/fiat/test-credit` route at
- * all, so it 404s (not 401/403 — no oracle). The controller re-checks the
- * flag at runtime in case the env changed after boot (defense in depth).
+ * Faucet gate flag (ANT-290 contract, deploy/compose.yaml): the faucet route
+ * is registered IFF `PID_FAUCET_ENABLED` is exactly `"true"`. Anything else
+ * (unset, "false", any other string) ⇒ route absent ⇒ 404, zero ledger
+ * writes. Fail-closed default: compose passes `false` unless the sandbox
+ * deploy sets `true`. The controller + service re-check at runtime in case
+ * the env changed after boot (defense in depth). Never gate on DOKU_MODE —
+ * it defaults to sandbox and would fail open.
  */
-const FAUCET_ENABLED = (process.env.DOKU_MODE ?? "sandbox") !== "production";
+const FAUCET_ENABLED = process.env.PID_FAUCET_ENABLED === "true";
 
 @Module({
   imports: [SecurityModule],

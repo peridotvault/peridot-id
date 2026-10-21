@@ -297,9 +297,13 @@ export class FiatLedgerService {
   static readonly FAUCET_DAILY_CAP_IDR = 100_000n;
   static readonly FAUCET_DAILY_MAX_CALLS = 10;
 
-  /** Server env flag: the faucet route exists only on the sandbox stack. */
-  dokuMode(): "sandbox" | "production" {
-    return this.config.get<string>("DOKU_MODE", "sandbox") === "production" ? "production" : "sandbox";
+  /**
+   * Faucet gate flag (ANT-290 contract): true IFF `PID_FAUCET_ENABLED` is
+   * exactly `"true"`. Fail-closed — unset/"false"/anything-else ⇒ off.
+   * Never DOKU_MODE (defaults to sandbox ⇒ would fail open).
+   */
+  faucetEnabled(): boolean {
+    return this.config.get<string>("PID_FAUCET_ENABLED", "false") === "true";
   }
 
   /** Boundary check for faucet amounts: null/missing/zero/negative/over-max → 422 (never 400). */
@@ -345,7 +349,7 @@ export class FiatLedgerService {
     amountMinor: unknown,
   ): Promise<{ creditId: string; amountMinor: string; currency: "IDR"; env: "sandbox"; dailyRemainingMinor: string }> {
     this.requireUsable();
-    if (this.dokuMode() !== "sandbox") throw new NotFoundException("Not found");
+    if (!this.faucetEnabled()) throw new NotFoundException("Not found");
     const amount = this.parseFaucetAmount(amountMinor);
     const creditId = randomUUID();
     const issueKey = `FAUCET-${creditId}`;
