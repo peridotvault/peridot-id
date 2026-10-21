@@ -1,4 +1,5 @@
 import { Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Req, Res, UseGuards } from "@nestjs/common";
+import { ThrottlerGuard } from "@nestjs/throttler";
 import { ConfigService } from "@nestjs/config";
 import { Identity } from "@prisma/client";
 import { Request, Response } from "express";
@@ -15,6 +16,7 @@ import { UserTokenGuard } from "../common/user-token.guard";
 import { IdentityService } from "./identity.service";
 
 @Controller("v1/identity")
+@UseGuards(ThrottlerGuard)
 export class IdentityController {
   constructor(
     private readonly identityService: IdentityService,

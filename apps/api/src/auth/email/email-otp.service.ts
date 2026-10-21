@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { ThrottlerException } from "@nestjs/throttler";
 import { ConfigService } from "@nestjs/config";
-import { createHash, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, hkdfSync, randomInt, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { EmailService } from "./email.service";
 
@@ -13,6 +13,38 @@ const OTP_MAX_PER_HOUR = 5;
 
 function hashCode(code: string, pepper: string): string {
   return createHash("sha256").update(`${pepper}:${code}`).digest("hex");
+}
+
+/**
+ * Domain constant for the derived email-OTP pepper (ANT-285(c)). Changing this
+ * string invalidates all outstanding OTP hashes — rotate deliberately.
+ */
+export const EMAIL_OTP_HKDF_INFO = "peridot-id/email-otp/v1";
+
+/**
+ * Server pepper for email-OTP code hashes (ANT-285(c) key separation).
+ *
+ * A dedicated `EMAIL_OTP_PEPPER` wins when set — provision it in deployed
+ * envs. Otherwise the pepper is derived from `JWT_REFRESH_SECRET` via
+ * HKDF-SHA256 with a fixed domain constant, so the OTP pepper is
+ * cryptographically isolated in the direction that matters: a leak of the
+ * derived pepper never forges refresh JWTs and never reveals the master
+ * secret. (A master-secret leak still compromises both — as before — so
+ * provision the dedicated pepper in deployed envs for full isolation.)
+ *
+ * Fail-closed: in production a missing master (no dedicated pepper AND no
+ * refresh secret) throws instead of hashing with a hardcoded dev string.
+ * Non-production keeps the dev fallback so `pnpm dev` works without secrets.
+ */
+export function emailOtpPepper(get: (key: string, def?: string) => unknown): string {
+  const dedicated = get("EMAIL_OTP_PEPPER", "") as string;
+  if (dedicated) return dedicated;
+  const master = get("JWT_REFRESH_SECRET", "") as string;
+  if (master) return Buffer.from(hkdfSync("sha256", master, "", EMAIL_OTP_HKDF_INFO, 32)).toString("hex");
+  if ((get("NODE_ENV", "development") as string) === "production") {
+    throw new Error("Email OTP pepper is not configured (EMAIL_OTP_PEPPER or JWT_REFRESH_SECRET)");
+  }
+  return "email-otp-dev-pepper";
 }
 
 function codesEqual(a: string, b: string): boolean {
@@ -35,10 +67,7 @@ export class EmailOtpService {
   ) {}
 
   private pepper(): string {
-    return (
-      this.config.get<string>("EMAIL_OTP_PEPPER", "") ||
-      this.config.get<string>("JWT_REFRESH_SECRET", "email-otp-dev-pepper")
-    );
+    return emailOtpPepper((key, def) => this.config.get(key, def));
   }
 
   /**
