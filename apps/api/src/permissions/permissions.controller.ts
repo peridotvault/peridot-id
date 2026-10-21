@@ -12,7 +12,10 @@ export class PermissionsController {
   /**
    * Validate a permission grant and return the canonical permission id +
    * owner challenge (what the passkey signs). Authenticated: the caller proves
-   * pid ownership; submission-time account binding is enforced by the relay path.
+   * pid ownership. No server submission path exists — the owner-signed payload
+   * is the pid→account binding (account + chainId are part of the signed
+   * payload); any future relay must re-check pid ownership before forwarding
+   * (see PermissionsService).
    */
   @Post("grants/validate")
   @HttpCode(HttpStatus.OK)
@@ -22,7 +25,15 @@ export class PermissionsController {
     return this.permissions.validateGrant(dto);
   }
 
-  /** Selectors a nonfinancial permission may never invoke (mirror of `_deniedSelector`). */
+  /**
+   * Selectors a nonfinancial permission may never invoke (mirror of `_deniedSelector`).
+   * Deliberately public (ANT-284): the set is client-side hygiene, not a
+   * secret — it mirrors on-chain `grantPermission` checks plus the
+   * `@peridotvault/pid-evm` SDK constants, all readable by anyone. Gating it
+   * behind auth would break pre-login consent screens with zero security
+   * gain; the enforcement point is `validateGrant` + the contract, never
+   * obscurity of this list.
+   */
   @Get("denied-selectors")
   @HttpCode(HttpStatus.OK)
   deniedSelectors(): { selectors: string[] } {

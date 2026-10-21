@@ -1,4 +1,4 @@
-import { decodeState, encodeState, isLoopbackReturnTo, SsoService } from "./sso.service";
+import { decodeState, encodeState, isLoopbackReturnTo, pkceS256Challenge, pkceVerifyS256, SsoService } from "./sso.service";
 import { PidAppsService } from "./apps.service";
 import { mockSecurity } from "../../test/factories";
 
@@ -196,7 +196,7 @@ describe("SsoService", () => {
   });
 
   it("loopback return targets are always allowed (any port/path, ± clientId)", async () => {
-    const { service } = setup({ findActive: async () => null });
+    const { service } = setup({ findActive: async (id) => (id === "pidapp_known" ? DEV_APP : null) });
     await expect(service.resolveReturnTo("http://localhost:3000")).resolves.toEqual({
       redirectTo: "http://localhost:3000",
       clientId: undefined,
@@ -207,11 +207,14 @@ describe("SsoService", () => {
     await expect(service.resolveReturnTo("http://127.0.0.1:4000/")).resolves.toMatchObject({
       redirectTo: "http://127.0.0.1:4000/",
     });
-    // clientId recorded but no registry lookup needed on loopback
-    await expect(service.resolveReturnTo("http://localhost:3000", "pidapp_unregistered")).resolves.toEqual({
+    // Known clientId recorded, no origin-registry check needed on loopback.
+    await expect(service.resolveReturnTo("http://localhost:3000", "pidapp_known")).resolves.toEqual({
       redirectTo: "http://localhost:3000",
-      clientId: "pidapp_unregistered",
+      clientId: "pidapp_known",
     });
+    // ANT-284: unknown clientIds are rejected even on loopback — a code bound
+    // to them could never be exchanged, so minting it only creates confusion.
+    await expect(service.resolveReturnTo("http://localhost:3000", "pidapp_unregistered")).resolves.toBeNull();
   });
 
   it("isLoopbackReturnTo rejects lookalikes and non-http schemes", () => {
@@ -342,5 +345,47 @@ describe("SsoService", () => {
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
     // Failed attempts don't consume the code.
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
+  });
+
+  // PKCE S256 for public clients (ANT-284).
+  const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+  const CHALLENGE = pkceS256Challenge(VERIFIER);
+
+  it("pkceS256Challenge matches the RFC 7636 appendix-B vector", () => {
+    expect(pkceS256Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")).toBe("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+  });
+
+  it("exchanges a challenged code only with its verifier (uniform error otherwise)", async () => {
+    const { service } = setup();
+    const code = await service.issue("pid_1", "http://localhost:3000/cb", { codeChallenge: CHALLENGE });
+    // Missing verifier: same uniform error, no oracle.
+    await expect(service.consume(code, "http://localhost:3000/cb")).rejects.toThrow("sso_code_invalid");
+    // Wrong verifier: same uniform error.
+    await expect(service.consume(code, "http://localhost:3000/cb", undefined, undefined, `${VERIFIER}XX`)).rejects.toThrow(
+      "sso_code_invalid",
+    );
+    // Verifier on an unchallenged code: rejected too (confusion guard).
+    const plain = await service.issue("pid_1", "http://localhost:3000/cb");
+    await expect(service.consume(plain, "http://localhost:3000/cb", undefined, undefined, VERIFIER)).rejects.toThrow(
+      "sso_code_invalid",
+    );
+    // Correct verifier exchanges.
+    await expect(service.consume(code, "http://localhost:3000/cb", undefined, undefined, VERIFIER)).resolves.toMatchObject({
+      pid: "pid_1",
+    });
+  });
+
+  it("rejects non-S256 methods and malformed challenges at issue time", async () => {
+    const { service } = setup();
+    await expect(service.issue("pid_1", "http://localhost:3000/cb", { codeChallenge: "whatever", codeChallengeMethod: "plain" })).rejects.toThrow(
+      "sso_pkce_invalid",
+    );
+    await expect(service.issue("pid_1", "http://localhost:3000/cb", { codeChallenge: "too-short" })).rejects.toThrow(
+      "sso_pkce_invalid",
+    );
+    await expect(service.issue("pid_1", "http://localhost:3000/cb", { codeChallengeMethod: "S256" })).rejects.toThrow(
+      "sso_pkce_invalid",
+    );
+    expect(pkceVerifyS256("short", CHALLENGE)).toBe(false);
   });
 });

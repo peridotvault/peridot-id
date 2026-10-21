@@ -203,7 +203,7 @@ export class AuthController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async exchange(@Body() dto: ExchangeDto) {
     try {
-      return await this.ssoService.consume(dto.code, dto.redirectUri, dto.clientId, dto.clientSecret);
+      return await this.ssoService.consume(dto.code, dto.redirectUri, dto.clientId, dto.clientSecret, dto.codeVerifier);
     } catch {
       throw new BadRequestException("Code is invalid, expired, or already used");
     }
@@ -232,7 +232,10 @@ export class AuthController {
     if (await this.ssoService.isRevoked(user.pid, resolved.redirectTo)) {
       throw new BadRequestException("App connection revoked — sign in again from the site to reconnect.");
     }
-    const pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, { clientId: resolved.clientId });
+    const pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, {
+      clientId: resolved.clientId,
+      ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+    });
     return { pidCode };
   }
 

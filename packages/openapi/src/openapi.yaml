@@ -452,6 +452,9 @@ paths:
                 clientSecret:
                   type: string
                   description: Required only when the bound app has a secret set (backend-only, never ship in frontend code)
+                codeVerifier:
+                  type: string
+                  description: PKCE verifier (RFC 7636); required iff the code was issued with a codeChallenge
             example:
               code: "mF8xQ2vT9nR4kL7pZ3wX6yA1bD5eF0gH"
               clientId: "pidapp_0123456789abcdef0123456789abcdef"
@@ -784,6 +787,9 @@ paths:
                 clientId:
                   type: string
                   description: Binds the issued code to the app
+                codeChallenge:
+                  type: string
+                  description: PKCE S256 challenge (43-128 base64url chars); the exchange must present the matching verifier. Public clients only — confidential clients use their secret instead.
       responses:
         "200":
           description: The minted code
