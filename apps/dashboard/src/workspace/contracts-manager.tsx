@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Chain, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
-import { Card, DIVIDER, ERROR, FIELD, MUTED } from "./ui";
+import { Card, DIVIDER, ERROR, FIELD, MUTED, MiniButton } from "./ui";
 import { PageHeader } from "./page-header";
 import { useWorkspace } from "./workspace-provider";
 import { CutButton } from "./cut-button";
@@ -28,6 +28,15 @@ export function ContractsManager({ client }: { client: PeridotClient }) {
       .finally(() => setLoading(false));
   }, [load]);
 
+  // Inline retry next to the error: without this the only recovery is a full
+  // page reload. Same load path as the initial fetch.
+  const retry = useCallback(() => {
+    setLoading(true);
+    load()
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load chains"))
+      .finally(() => setLoading(false));
+  }, [load]);
+
   useEffect(() => {
     if (contractChainId) {
       setSelectedId(contractChainId);
@@ -46,9 +55,16 @@ export function ContractsManager({ client }: { client: PeridotClient }) {
         title="Contracts"
         description="Set factory, implementation, verifier, and paymaster addresses per chain."
       />
-      {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
+      {error && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p className={`text-sm ${ERROR}`}>{error}</p>
+          <MiniButton size="sm" onClick={retry}>
+            Retry
+          </MiniButton>
+        </div>
+      )}
       {loading ? (
-        <p className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
+        <p role="status" className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
       ) : chains.length === 0 ? (
         <p className={`mt-4 text-sm ${MUTED}`}>No chains registered.</p>
       ) : (
@@ -73,7 +89,7 @@ export function ContractsManager({ client }: { client: PeridotClient }) {
                 {(chain.contracts ?? []).map((k) => (
                   <div key={k.type} className="flex items-center gap-2 font-mono text-xs">
                     <span className="w-44 shrink-0 font-sans font-medium">{k.type}</span>
-                    <span className="truncate">{k.address}</span>
+                    <span className="truncate" title={k.address}>{k.address}</span>
                     {!k.isActive && <span className={`font-sans ${ERROR}`}>disabled</span>}
                   </div>
                 ))}

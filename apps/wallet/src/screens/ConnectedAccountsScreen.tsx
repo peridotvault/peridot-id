@@ -5,7 +5,6 @@ import type { IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { BackButton } from "../shared/components/BackButton";
-import { UIButton } from "../shared/components/UIButton";
 
 export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -81,7 +80,6 @@ export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
         </View>
       ))}
 
-      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }

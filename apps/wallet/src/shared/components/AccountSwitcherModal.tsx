@@ -51,15 +51,15 @@ export function AccountSwitcherModal({
                 {a.avatarUrl ? (
                   <Image source={{ uri: a.avatarUrl }} className="h-9 w-9 rounded-full border border-border" />
                 ) : (
-                  <View className="h-9 w-9 items-center justify-center rounded-full bg-muted">
-                    <Text className="font-serif text-[15px] text-foreground">{(a.displayName ?? a.pid).slice(0, 1).toUpperCase()}</Text>
+                  <View className="h-9 w-9 items-center justify-center rounded-full bg-muted" aria-label="No profile photo">
+                    <Text aria-hidden="true" className="font-serif text-[15px] text-foreground">{(a.displayName ?? a.pid).slice(0, 1).toUpperCase()}</Text>
                   </View>
                 )}
                 <View className="flex-1 gap-0.5">
-                  <Text className="font-sans text-[15px] font-medium text-foreground" numberOfLines={1}>
+                  <Text className="font-sans text-[15px] font-medium text-foreground" numberOfLines={1} title={a.displayName ?? a.pid}>
                     {a.displayName ?? a.pid}
                   </Text>
-                  <Text className="font-sans text-xs text-muted-foreground" numberOfLines={1}>
+                  <Text className="font-sans text-xs text-muted-foreground" numberOfLines={1} title={a.pid}>
                     {a.pid}
                   </Text>
                 </View>

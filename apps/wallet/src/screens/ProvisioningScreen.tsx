@@ -37,6 +37,15 @@ function glyph(status: StepStatus): string {
   }
 }
 
+function stepStatusLabel(status: StepStatus): string {
+  switch (status) {
+    case "done": return "done";
+    case "failed": return "failed";
+    case "running": return "in progress";
+    default: return "pending";
+  }
+}
+
 /**
  * Post-auth provisioning stepper (login + PID-claim funnel).
  * Runs identity → wallet with visible progress; every step is idempotent,
@@ -85,7 +94,10 @@ export function ProvisioningScreen({ onContinue }: { onContinue: () => void }) {
         return (
           <View key={step.key} className="mt-3 gap-2 border border-border bg-surface p-3">
             <View style={{ flexDirection: "row" }} className="items-center gap-3">
-              <Text className={`w-7 text-center font-sans text-xl font-semibold ${st.status === "done" ? "text-success" : st.status === "failed" ? "text-danger" : "text-muted-foreground"}`}>
+              <Text
+                className={`w-7 text-center font-sans text-xl font-semibold ${st.status === "done" ? "text-success" : st.status === "failed" ? "text-danger" : "text-muted-foreground"}`}
+                accessibilityLabel={`${step.label}: ${stepStatusLabel(st.status)}`}
+              >
                 {glyph(st.status)}
               </Text>
               <View className="flex-1 gap-0.5">

@@ -13,7 +13,7 @@ export function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: F
   const tinted = color === theme.colors.success;
   // Only live money gets a sign: failed/cancelled/expired moved nothing.
   const live = ["settled", "success", "processing", "created"].includes(tx.providerStatus);
-  const sign = live ? (incoming ? "+" : "−") : "";
+  const sign = live ? (incoming ? "+" : "-") : "";
   // Fee rows move the fee, not the parent gross — show what actually moved.
   // Headline rule everywhere: show NET (what the user gets), fall back to
   // gross while unsettled.

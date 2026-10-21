@@ -91,7 +91,7 @@ export function PopupReview({
             accessibilityLabel="I understand this calls an unknown program"
           >
             <View className={`h-[22px] w-[22px] items-center justify-center border ${acknowledged === true ? "border-foreground" : "border-muted-foreground"}`}>
-              {acknowledged === true && <Text className="font-sans text-sm text-foreground">✓</Text>}
+              {acknowledged === true && <Text aria-hidden="true" className="font-sans text-sm text-foreground">✓</Text>}
             </View>
             <Text className="flex-1 font-sans text-xs text-muted-foreground">I understand this calls an unknown program</Text>
           </Pressable>

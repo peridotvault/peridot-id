@@ -140,7 +140,8 @@ export function SettingsScreen({ goPasskeys, goSessions, goConnected, onDone }: 
       </TouchableOpacity>
 
       <Text className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Preferences</Text>
-      <View style={{ flexDirection: "row" }} className="items-center gap-2 border border-border bg-surface p-3.5">
+      {/* flexWrap: at 320px the two currency pills drop below the label instead of squeezing. */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap" }} className="items-center gap-2 border border-border bg-surface p-3.5">
         <View className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
           <Banknote size={18} className="text-foreground" />
         </View>
