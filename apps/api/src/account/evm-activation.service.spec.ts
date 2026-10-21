@@ -1,4 +1,3 @@
-import { createHash } from "crypto";
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { keccak256, fromAscii, toHex } from "@peridotvault/pid-evm";
 import { EvmActivationService } from "./evm-activation.service";
@@ -19,14 +18,12 @@ let viewOverrides: Record<string, string> = {};
 const sel = (sig: string) => `0x${toHex(keccak256(fromAscii(sig)).subarray(0, 4))}`;
 const word = (hex: string) => `0x${hex.replace(/^0x/, "").toLowerCase().padStart(64, "0")}`;
 const CRED = coseToRawXy(Buffer.from(COSE_HEX, "hex"));
-const RP_HASH = createHash("sha256").update("localhost").digest();
 
 function defaultView(data: string): string {
   if (data === sel("initialized()")) return word("1");
   if (data === sel("factory()")) return word(FACTORY);
   if (data === sel("authorityX()")) return word(toHex(new Uint8Array(CRED.x)));
   if (data === sel("authorityY()")) return word(toHex(new Uint8Array(CRED.y)));
-  if (data === sel("rpIdHash()")) return word(toHex(new Uint8Array(RP_HASH)));
   return word("0");
 }
 

@@ -11,7 +11,7 @@ import {PeridotAccount} from "./PeridotAccount.sol";
 /// the implementation first, then the factory with identical constructor args)
 /// and every account keeps one address on Monad / BSC / Arbitrum.
 /// @dev V3: `deployAndInit` is relayer-submitted but user-authorized — the user's
-/// passkey binds salt, authority, rpIdHash, policy, deadline, chainid and
+/// passkey binds salt, authority, policy, deadline, chainid and
 /// this factory (no amounts). There is intentionally NO bare `deploy`: a
 /// deployed-but-uninitialized proxy plus ungated `initialize` is a squat vector,
 /// so the path does not exist.
@@ -127,7 +127,6 @@ contract PeridotFactory {
         bytes32 salt,
         bytes32 x,
         bytes32 y,
-        bytes32 rpIdHash,
         uint16 feePolicyVersion,
         uint64 deadline,
         uint256 networkFee,
@@ -146,7 +145,6 @@ contract PeridotFactory {
                     salt,
                     x,
                     y,
-                    rpIdHash,
                     feePolicyVersion,
                     deadline,
                     networkFee,

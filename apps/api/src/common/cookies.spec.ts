@@ -14,6 +14,7 @@ import {
   scopeAccessCookie,
   scopeRefreshCookie,
   setAccountRefreshCookie,
+  setActiveAuthCookies,
   setAuthCookies,
   setClaimCookie,
   setOAuthStateCookie,
@@ -58,8 +59,9 @@ describe("cookies clear-mirror-set (M5)", () => {
 
     const setAccess = setOpts(res, ACCESS_COOKIE);
     const clearAccess = clearOpts(res, ACCESS_COOKIE);
-    expect(clearAccess).toEqual({ httpOnly: true, sameSite: "lax", secure: true, domain: "pid.peridotvault.com" });
+    expect(clearAccess).toEqual({ httpOnly: true, sameSite: "lax", secure: true, domain: "pid.peridotvault.com", path: "/" });
     expect(clearAccess).toMatchObject({ httpOnly: setAccess.httpOnly, sameSite: setAccess.sameSite, secure: setAccess.secure, domain: setAccess.domain });
+    expect(clearAccess.path).toBe(setAccess.path);
 
     const setRefresh = setOpts(res, REFRESH_COOKIE);
     const clearRefresh = clearOpts(res, REFRESH_COOKIE);
@@ -74,7 +76,7 @@ describe("cookies clear-mirror-set (M5)", () => {
     clearScopedAuthCookies(res as never, config, "web");
 
     expect(clearOpts(res, scopeAccessCookie("web"))).toEqual(
-      expect.objectContaining({ httpOnly: true, sameSite: "lax", secure: true, domain: "pid.peridotvault.com" }),
+      expect.objectContaining({ httpOnly: true, sameSite: "lax", secure: true, domain: "pid.peridotvault.com", path: "/" }),
     );
     expect(clearOpts(res, scopeRefreshCookie("web"))).toEqual(
       expect.objectContaining({ httpOnly: true, path: "/v1/auth" }),
@@ -155,5 +157,80 @@ describe("cookies clear-mirror-set (M5)", () => {
     const cleared = (res.clearCookie as jest.Mock).mock.calls.map(([n]) => n);
     expect(cleared).toEqual(expect.arrayContaining(names));
     expect(cleared).not.toContain(REFRESH_COOKIE);
+  });
+});
+
+const HTTPS = { API_URL: "https://api.peridot.id", COOKIE_DOMAIN: "", COOKIE_SECURE: "" };
+const HTTP_LOCAL = { API_URL: "http://localhost:3300", COOKIE_DOMAIN: "localhost", COOKIE_SECURE: "" };
+
+describe("cookie transport hardening (ANT-228)", () => {
+  it("fails closed on transport: Secure defaults true behind https", () => {
+    const res = resMock();
+    setAuthCookies(res as never, configMock(HTTPS) as never, "a", "r", undefined);
+    expect(res.cookie).toHaveBeenCalledWith(ACCESS_COOKIE, "a", expect.objectContaining({ secure: true }));
+    expect(res.cookie).toHaveBeenCalledWith(REFRESH_COOKIE, "r", expect.objectContaining({ secure: true }));
+  });
+
+  it("keeps localhost dev working (http origin → Secure false)", () => {
+    const res = resMock();
+    setAuthCookies(res as never, configMock(HTTP_LOCAL) as never, "a", "r", undefined);
+    expect(res.cookie).toHaveBeenCalledWith(ACCESS_COOKIE, "a", expect.objectContaining({ secure: false }));
+  });
+
+  it("honors an explicit COOKIE_SECURE either way", () => {
+    const forceOn = resMock();
+    setAuthCookies(forceOn as never, configMock({ ...HTTP_LOCAL, COOKIE_SECURE: "true" }) as never, "a", "r", undefined);
+    expect(forceOn.cookie).toHaveBeenCalledWith(ACCESS_COOKIE, "a", expect.objectContaining({ secure: true }));
+
+    const forceOff = resMock();
+    setAuthCookies(forceOff as never, configMock({ ...HTTPS, COOKIE_SECURE: "false" }) as never, "a", "r", undefined);
+    expect(forceOff.cookie).toHaveBeenCalledWith(ACCESS_COOKIE, "a", expect.objectContaining({ secure: false }));
+  });
+
+  it("pins SameSite to Lax/Strict: None throws without a CSRF guard", () => {
+    const res = resMock();
+    expect(() =>
+      setAuthCookies(res as never, configMock({ ...HTTPS, COOKIE_SAMESITE: "none" }) as never, "a", "r", undefined),
+    ).toThrow(/CSRF/);
+    expect(res.cookie).not.toHaveBeenCalled();
+  });
+
+  it("defaults unknown SameSite values to Lax (never None)", () => {
+    const res = resMock();
+    setAuthCookies(res as never, configMock({ ...HTTPS, COOKIE_SAMESITE: "bogus" }) as never, "a", "r", undefined);
+    expect(res.cookie).toHaveBeenCalledWith(ACCESS_COOKIE, "a", expect.objectContaining({ sameSite: "lax" }));
+  });
+
+  it("restricts the access cookie to Path=/ and clears with the same path", () => {
+    const res = resMock();
+    setAuthCookies(res as never, configMock(HTTPS) as never, "a", "r", undefined);
+    expect(res.cookie).toHaveBeenCalledWith(
+      ACCESS_COOKIE,
+      "a",
+      expect.objectContaining({ path: "/", httpOnly: true }),
+    );
+    // Refresh stays least-privilege: only sent on /v1/auth.
+    expect(res.cookie).toHaveBeenCalledWith(REFRESH_COOKIE, "r", expect.objectContaining({ path: "/v1/auth" }));
+
+    const clear = resMock();
+    clearAuthCookies(clear as never, configMock(HTTPS) as never);
+    expect(clear.clearCookie).toHaveBeenCalledWith(ACCESS_COOKIE, expect.objectContaining({ path: "/" }));
+    expect(clear.clearCookie).toHaveBeenCalledWith(REFRESH_COOKIE, expect.objectContaining({ path: "/v1/auth" }));
+  });
+
+  it("applies the same Path discipline to scoped + rotated cookies", () => {
+    const res = resMock();
+    setActiveAuthCookies(res as never, configMock(HTTPS) as never, "a", "r");
+    expect(res.cookie).toHaveBeenCalledWith(ACCESS_COOKIE, "a", expect.objectContaining({ path: "/" }));
+
+    const scoped = resMock();
+    setScopedAuthCookies(scoped as never, configMock(HTTPS) as never, "ws", "a", "r");
+    expect(scoped.cookie).toHaveBeenCalledWith("pid_access_ws", "a", expect.objectContaining({ path: "/" }));
+    expect(scoped.cookie).toHaveBeenCalledWith("pid_refresh_ws", "r", expect.objectContaining({ path: "/v1/auth" }));
+
+    const clear = resMock();
+    clearScopedAuthCookies(clear as never, configMock(HTTPS) as never, "ws");
+    expect(clear.clearCookie).toHaveBeenCalledWith("pid_access_ws", expect.objectContaining({ path: "/" }));
+    expect(clear.clearCookie).toHaveBeenCalledWith("pid_refresh_ws", expect.objectContaining({ path: "/v1/auth" }));
   });
 });

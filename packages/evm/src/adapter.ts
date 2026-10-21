@@ -244,14 +244,13 @@ export class EvmAdapter {
   }
 
   /** V3 `deployAndInit` calldata: passkey-bound activation (salt, authority,
-   *  rpIdHash, policy, deadline, networkFee + assertion). Matches the V3 factory:
-   *  `deployAndInit(bytes32,bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)`.
+   *  policy, deadline, networkFee + assertion). Matches the V3 factory:
+   *  `deployAndInit(bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)`.
    *  Static tail follows parameter order: offsets first, then r/s. */
   buildDeployAndInitDataV3(args: {
     salt: Bytes | string;
     x: Bytes;
     y: Bytes;
-    rpIdHash: Bytes;
     feePolicyVersion: number;
     deadline: bigint | number;
     networkFee: bigint | number;
@@ -261,17 +260,16 @@ export class EvmAdapter {
     s: Bytes;
   }): string {
     const saltHex = typeof args.salt === "string" ? args.salt : "0x" + toHex(args.salt);
-    const sel = "0x" + toHex(selector("deployAndInit(bytes32,bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)"));
+    const sel = "0x" + toHex(selector("deployAndInit(bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)"));
     const head = [
       pad32(saltHex),
       pad32("0x" + toHex(args.x)),
       pad32("0x" + toHex(args.y)),
-      pad32("0x" + toHex(args.rpIdHash)),
       pad32("0x" + toHex(ube(args.feePolicyVersion, 2))),
       pad32("0x" + toHex(ube(args.deadline, 8))),
       pad32("0x" + toHex(ube(args.networkFee, 32))),
     ];
-    const staticSize = 11 * 32;
+    const staticSize = 10 * 32;
     const authData = args.authenticatorData;
     const clientData = args.clientDataJSON;
     constCoderCheck(authData, clientData, args.r, args.s);
@@ -380,7 +378,6 @@ export class EvmAdapter {
     salt: Bytes | string;
     x: Bytes;
     y: Bytes;
-    rpIdHash: Bytes;
     feePolicyVersion: number;
     deadline: bigint | number;
     chainId: bigint | number;
@@ -391,7 +388,6 @@ export class EvmAdapter {
       saltBytes,
       args.x,
       args.y,
-      args.rpIdHash,
       ube(args.feePolicyVersion, 2),
       ube(args.deadline, 8),
       ube(args.chainId, 32),
@@ -399,8 +395,8 @@ export class EvmAdapter {
     ]);
   }
 
-  /** eth_call data for the read-only poll checks (initialized/authorityX/authorityY/rpIdHash/factory). */
-  viewCalldata(): { initialized: string; authorityX: string; authorityY: string; rpIdHash: string; factory: string } {
+  /** eth_call data for the read-only poll checks (initialized/authorityX/authorityY/factory). */
+  viewCalldata(): { initialized: string; authorityX: string; authorityY: string; factory: string } {
     return buildViewCalldata();
   }
 
@@ -597,7 +593,6 @@ export function buildViewCalldata(): {
   initialized: string;
   authorityX: string;
   authorityY: string;
-  rpIdHash: string;
   factory: string;
 } {
   const sel = (sig: string) => "0x" + toHex(selector(sig));
@@ -605,7 +600,6 @@ export function buildViewCalldata(): {
     initialized: sel("initialized()"),
     authorityX: sel("authorityX()"),
     authorityY: sel("authorityY()"),
-    rpIdHash: sel("rpIdHash()"),
     factory: sel("factory()"),
   };
 }

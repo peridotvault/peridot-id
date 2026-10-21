@@ -29,20 +29,34 @@ export function accountRefreshCookieNames(cookies: Record<string, string> | unde
  * Cookie attributes derived from the ONE service-URL set (ANT-193):
  * - `secure` from the API origin protocol (https in every deployed env),
  *   explicit COOKIE_SECURE wins when set (edge: http API behind https proxy).
+ *   Fail-closed (ANT-228): with no explicit COOKIE_SECURE, an https API
+ *   origin yields `Secure` cookies — every deployed env serves https, so
+ *   prod is safe by default; only localhost dev (http origin) gets `false`.
  * - `domain` defaults to host-only (dual-serve safe: a Domain suffix set from
  *   one dual-serve host is silently dropped on the other — see compose.yaml);
  *   explicit COOKIE_DOMAIN wins when set (edge: cross-subdomain visibility).
- * - `sameSite` defaults to lax (same-site subdomains included); explicit
- *   COOKIE_SAMESITE wins when set (edge: embedded cross-site flows).
+ * - `sameSite` defaults to lax (same-site subdomains included). `none` is
+ *   REJECTED (ANT-228): browsers drop `SameSite=None` without `Secure`, and
+ *   cross-site cookie auth without a CSRF token (double-submit or
+ *   synchronizer — not yet implemented) is a session-riding vector. Wallet
+ *   cookies stay Lax until a CSRF guard lands.
+ * - `__Host-` prefix considered and deliberately NOT adopted (ANT-228): it
+ *   forbids the `Domain` attribute, which dual-serve needs when per-env
+ *   cross-subdomain visibility is pinned. `Path=/` + `Secure` + `HttpOnly`
+ *   gives equivalent fixation resistance without breaking dual-serve.
  */
 function cookieAttrs(config: ConfigService): { secure: boolean; domain: string; sameSite: "lax" | "strict" | "none" } {
   const get = (key: string, def?: string): unknown => config.get(key, def);
   const secureRaw = config.get<string>("COOKIE_SECURE", "");
   const secure = secureRaw ? secureRaw === "true" : apiServesHttps(get);
+  const sameSiteRaw = (config.get<string>("COOKIE_SAMESITE", "lax") ?? "lax").toLowerCase();
+  if (sameSiteRaw === "none") {
+    throw new Error("COOKIE_SAMESITE=none requires a CSRF guard (double-submit tokens not yet implemented) — refusing cross-site cookies");
+  }
   return {
     secure,
     domain: config.get<string>("COOKIE_DOMAIN", ""),
-    sameSite: config.get<string>("COOKIE_SAMESITE", "lax") as "lax" | "strict" | "none",
+    sameSite: sameSiteRaw === "strict" ? "strict" : "lax",
   };
 }
 
@@ -65,9 +79,19 @@ function clearOpts(config: ConfigService, path?: string): Record<string, unknown
   return path ? { ...baseOpts(config), path } : baseOpts(config);
 }
 
+/**
+ * Access cookies are scoped to `/` (ANT-228): without an explicit Path the
+ * browser defaults it to the *issuing request path* (`/v1/auth/...`), so the
+ * access cookie would silently stop being sent on other routes. Refresh and
+ * claim cookies stay path-restricted to `/v1/auth` (least privilege — they
+ * are only ever consumed there). Every clear mirrors its set path, otherwise
+ * the clear is a no-op and the session survives logout.
+ */
+const ACCESS_PATH = "/";
+
 export function setAuthCookies(res: Response, config: ConfigService, access: string, refresh: string, pid?: string): void {
   const opts = baseOpts(config);
-  res.cookie(ACCESS_COOKIE, access, { ...opts, maxAge: ms(ACCESS_TOKEN_TTL) });
+  res.cookie(ACCESS_COOKIE, access, { ...opts, path: ACCESS_PATH, maxAge: ms(ACCESS_TOKEN_TTL) });
   res.cookie(REFRESH_COOKIE, refresh, { ...opts, path: REFRESH_PATH, maxAge: ms(REFRESH_TOKEN_TTL) });
   // Remember this identity so the wallet can switch back to it without a re-login.
   if (pid) setAccountRefreshCookie(res, config, pid, refresh);
@@ -76,7 +100,7 @@ export function setAuthCookies(res: Response, config: ConfigService, access: str
 /** Rotate only the active identity's cookies (used when switching accounts). */
 export function setActiveAuthCookies(res: Response, config: ConfigService, access: string, refresh: string): void {
   const opts = baseOpts(config);
-  res.cookie(ACCESS_COOKIE, access, { ...opts, maxAge: ms(ACCESS_TOKEN_TTL) });
+  res.cookie(ACCESS_COOKIE, access, { ...opts, path: ACCESS_PATH, maxAge: ms(ACCESS_TOKEN_TTL) });
   res.cookie(REFRESH_COOKIE, refresh, { ...opts, path: REFRESH_PATH, maxAge: ms(REFRESH_TOKEN_TTL) });
 }
 
@@ -134,12 +158,12 @@ export function scopeRefreshCookie(scope: string): string {
 
 export function setScopedAuthCookies(res: Response, config: ConfigService, scope: string, access: string, refresh: string): void {
   const opts = baseOpts(config);
-  res.cookie(scopeAccessCookie(scope), access, { ...opts, maxAge: ms(ACCESS_TOKEN_TTL) });
+  res.cookie(scopeAccessCookie(scope), access, { ...opts, path: ACCESS_PATH, maxAge: ms(ACCESS_TOKEN_TTL) });
   res.cookie(scopeRefreshCookie(scope), refresh, { ...opts, path: REFRESH_PATH, maxAge: ms(REFRESH_TOKEN_TTL) });
 }
 
 export function clearScopedAuthCookies(res: Response, config: ConfigService, scope: string): void {
-  res.clearCookie(scopeAccessCookie(scope), clearOpts(config));
+  res.clearCookie(scopeAccessCookie(scope), clearOpts(config, ACCESS_PATH));
   res.clearCookie(scopeRefreshCookie(scope), clearOpts(config, REFRESH_PATH));
 }
 
@@ -180,7 +204,7 @@ export function clearAllScopedAuthCookies(
 }
 
 export function clearAuthCookies(res: Response, config: ConfigService): void {
-  res.clearCookie(ACCESS_COOKIE, clearOpts(config));
+  res.clearCookie(ACCESS_COOKIE, clearOpts(config, ACCESS_PATH));
   res.clearCookie(REFRESH_COOKIE, clearOpts(config, REFRESH_PATH));
 }
 

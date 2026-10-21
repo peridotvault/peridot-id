@@ -52,11 +52,11 @@ pub fn process(
     let client_json = data
         .read_bytes(CLIENT_JSON_LEN_OFFSET + 2, client_json_len)?;
 
-    let (authority, account_id, rp_id_hash) = {
+    let (authority, account_id) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id(), state.rp_id_hash()?)
+        (state.authority(), state.account_id())
     };
     verify_pda(smart_account, program_id, account_id)?;
 
@@ -70,7 +70,7 @@ pub fn process(
         &expiry.to_le_bytes(),
     ]);
     auth::check_expiry(expiry)?;
-    auth::verify_secp256r1_v2(instructions, &authority, &rp_id_hash, client_json, &payload)?;
+    auth::verify_secp256r1_v2(instructions, &authority, client_json, &payload)?;
 
     let lamports = smart_account.lamports();
     let to = *destination;

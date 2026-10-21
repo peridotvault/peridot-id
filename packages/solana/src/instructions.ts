@@ -53,8 +53,8 @@ export function buildInitializeInstruction(
 }
 
 /**
- * Build the V2 passkey-signed `initialize(account_id, authority, rp_id_hash, clientDataJSON)`
- * instruction (disc 0). Writes v2 state (112B with RP-ID hash).
+ * Build the V2 passkey-signed `initialize(account_id, authority, clientDataJSON)`
+ * instruction (disc 0). Writes v2 state (80B, domain-free).
  *
  * @deprecated ANT-16(e) (board fee decision d4ebecff): direct `initialize`
  * bypasses the 50% sponsored-creation fee — `activate` (builders below) is
@@ -64,7 +64,6 @@ export function buildInitializeInstruction(
 export function buildInitializeInstructionV2(
   accountId32: Uint8Array,
   authorityCompressed: Uint8Array,
-  rpIdHash32: Uint8Array,
   payer: PublicKey,
   smartAccount: PublicKey,
   clientDataJSON: Uint8Array,
@@ -72,7 +71,6 @@ export function buildInitializeInstructionV2(
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
-  if (rpIdHash32.length !== 32) throw new Error("rpIdHash32 must be 32 bytes");
   return new TransactionInstruction({
     keys: [
       { pubkey: payer, isSigner: true, isWritable: true },
@@ -81,7 +79,7 @@ export function buildInitializeInstructionV2(
       { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
     ],
     programId,
-    data: concat([IX.initialize], accountId32, authorityCompressed, rpIdHash32, u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+    data: concat([IX.initialize], accountId32, authorityCompressed, u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
 
@@ -118,14 +116,13 @@ export function buildActivateInstruction(
 
 /**
  * Build the V2 `activate` instruction (disc 5): `account_id | authority |
- * rp_id_hash | max_fee | policy | expiry | fee | clientDataJSON`. The program
+ * max_fee | policy | expiry | fee | clientDataJSON`. The program
  * enforces `fee ≤ max_fee` and splits base → relayer, markup → canonical
  * treasury. `treasury` must be the canonical `config::TREASURY`.
  */
 export function buildActivateInstructionV2(
   accountId32: Uint8Array,
   authorityCompressed: Uint8Array,
-  rpIdHash32: Uint8Array,
   maxFeeLamports: bigint,
   feePolicyVersion: number,
   expiry: number,
@@ -138,7 +135,6 @@ export function buildActivateInstructionV2(
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
-  if (rpIdHash32.length !== 32) throw new Error("rpIdHash32 must be 32 bytes");
   return new TransactionInstruction({
     keys: [
       { pubkey: relayer, isSigner: true, isWritable: true },
@@ -148,20 +144,19 @@ export function buildActivateInstructionV2(
       { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
     ],
     programId,
-    data: concat([IX.activate], accountId32, authorityCompressed, rpIdHash32, u64le(maxFeeLamports), u16le(feePolicyVersion), i64le(expiry), u64le(feeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+    data: concat([IX.activate], accountId32, authorityCompressed, u64le(maxFeeLamports), u16le(feePolicyVersion), i64le(expiry), u64le(feeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
 
 /**
  * Build the V3 `activate` instruction (disc 5): `account_id | authority |
- * rp_id_hash | policy | expiry | network_fee | clientDataJSON`. The program
+ * policy | expiry | network_fee | clientDataJSON`. The program
  * recomputes `protocol_fee` from the signed policy and splits relayerFee →
  * relayer, protocolFee → canonical revenue vault.
  */
 export function buildActivateInstructionV3(
   accountId32: Uint8Array,
   authorityCompressed: Uint8Array,
-  rpIdHash32: Uint8Array,
   feePolicyVersion: number,
   expiry: number,
   networkFeeLamports: bigint,
@@ -173,7 +168,6 @@ export function buildActivateInstructionV3(
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
-  if (rpIdHash32.length !== 32) throw new Error("rpIdHash32 must be 32 bytes");
   return new TransactionInstruction({
     keys: [
       { pubkey: relayer, isSigner: true, isWritable: true },
@@ -183,7 +177,7 @@ export function buildActivateInstructionV3(
       { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
     ],
     programId,
-    data: concat([IX.activate], accountId32, authorityCompressed, rpIdHash32, u16le(feePolicyVersion), i64le(expiry), u64le(networkFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+    data: concat([IX.activate], accountId32, authorityCompressed, u16le(feePolicyVersion), i64le(expiry), u64le(networkFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
 

@@ -33,8 +33,6 @@ pub enum PeridotError {
     RetiredFeeExceedsMax = 12,
     /// The fee-policy version is unknown or unsupported.
     UnknownFeePolicy = 13,
-    /// The account has no RP-ID hash (pre-V2 state; re-onboard required).
-    MissingRpIdHash = 14,
     /// A policy percentage exceeds the protocol maximum.
     ExceedsMaxBps = 15,
     /// The CPI target is forbidden (the smart account cannot call itself).
