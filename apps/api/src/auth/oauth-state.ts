@@ -98,8 +98,10 @@ export const OAUTH_STATE_HKDF_INFO = "peridot-id/oauth-state/v1";
  * A dedicated `OAUTH_STATE_SECRET` wins when set — provision it in deployed
  * envs. Otherwise the key is derived from `JWT_ACCESS_SECRET` via HKDF-SHA256
  * with a fixed domain constant, so the OAuth-state HMAC key is
- * cryptographically isolated from the JWT signing key: a leak of one never
- * forges the other, and neither reveals the master secret. Same inputs always
+ * cryptographically isolated in the direction that matters: a leak of the
+ * derived key never forges JWTs and never reveals the master secret. (A
+ * master-secret leak still compromises both — as before — so provision the
+ * dedicated secret in deployed envs for full isolation.) Same inputs always
  * derive the same key (no per-boot randomness — sign and verify agree across
  * replicas and restarts).
  *
