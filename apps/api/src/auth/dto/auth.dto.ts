@@ -17,6 +17,14 @@ export class ExchangeDto {
   @Matches(/^[A-Za-z0-9_-]{20,}$/, { message: "Invalid code" })
   code!: string;
 
+  /**
+   * OAuth-style `redirect_uri` binding: the exact redirect target the code
+   * was issued for. Must equal the stored `redirectTo` byte-for-byte —
+   * missing or mismatched yields 400 (no oracle).
+   */
+  @IsString()
+  redirectUri!: string;
+
   /** Must match the client_id the code was issued for (when bound). */
   @IsOptional()
   @IsString()

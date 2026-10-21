@@ -44,7 +44,7 @@ const peridot = Peridot({ clientId: 'pidapp_…' }); // environment auto-detecte
 async function signIn() {
   const { pidCode } = await peridot.auth.loginPopup(); // opens a popup (tab fallback)
   if (pidCode) {
-    const identity = await peridot.auth.exchange(pidCode);
+    const identity = await peridot.auth.exchange(pidCode, window.location.origin + window.location.pathname);
     // { pid, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }
   }
 }

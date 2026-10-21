@@ -19,6 +19,7 @@ import {
 import { ACCESS_TOKEN_TTL, APP_TOKEN_TTL, GOOGLE_FAMILY_MAX_AGE, PASSKEY_FAMILY_MAX_AGE, REFRESH_TOKEN_TTL } from "../common/app-config";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
+import { SecurityEventService } from "../security/security-event.service";
 
 export interface AccessTokenPayload {
   sub: string;
@@ -54,12 +55,14 @@ export interface GoogleProfile {
 // Family caps are hardcoded constants (ANT-184) — see common/app-config.ts.
 
 /**
- * Grace window for the multi-tab rotation race: two tabs refreshing with the
- * same token near-simultaneously must not log one of them out. The loser
- * follows the already-issued child (via the rotatedFrom link) instead of
- * throwing. No schema change — the link column already exists.
+ * Reuse detection is fail-closed (M2): replaying a revoked refresh token
+ * revokes the whole device family, logs a `refresh.reuse_detected` anomaly,
+ * and forces a fresh login. There is deliberately NO rotation-race grace on
+ * the mint path — a replayed token never yields new tokens. Read paths
+ * (session liveness checks, account listing) keep pure live-checks and were
+ * never granted a grace window either; the only grace is the stateless one —
+ * already-issued access tokens keep working for reads until their 15m expiry.
  */
-const ROTATION_GRACE_MS = 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -67,6 +70,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly security: SecurityEventService,
   ) {}
 
   /**
@@ -204,27 +208,25 @@ export class AuthService {
 
     const session = await this.prisma.session.findUnique({ where: { id: payload.jti }, include: { device: true } });
     if (!session || session.revokedAt || session.expiresAt <= new Date()) {
-      // Rotation race: this token was already rotated moments ago (another
-      // tab won). Follow the live child instead of logging the user out.
-      // Anything older than the grace window still fails closed.
-      const child = !session
-        ? null
-        : await this.prisma.session.findFirst({
-            where: {
-              rotatedFrom: payload.jti,
-              revokedAt: null,
-              expiresAt: { gt: new Date() },
-              createdAt: { gt: new Date(Date.now() - ROTATION_GRACE_MS) },
-            },
-            include: { device: true },
-          });
-      if (!child?.device) throw new UnauthorizedException("Refresh token revoked");
-      // Chain from the child: the family keeps a single live head, so the
-      // grace path never forks a second valid chain. (The winner passed the
-      // family-cap check <60s ago when it rotated, so no re-check here.)
-      await this.prisma.session.update({ where: { id: child.id }, data: { revokedAt: new Date() } });
-      await this.issueSession(res, payload.sub, req.headers["user-agent"], child.id, undefined, scope);
-      return;
+      // Fail-closed reuse detection (M2): a presented token whose session is
+      // already revoked means the token was replayed after rotation/logout —
+      // the classic stolen-refresh-token signal. Nuke the whole device family
+      // (all sessions on the compromised device), log the anomaly, and force
+      // a fresh login. No new tokens are minted on this path, ever.
+      // (Expired-but-never-revoked and unknown jtis are lifecycle noise, not
+      // theft signals: plain 401, no family revocation.)
+      if (session?.revokedAt && session.device) {
+        await this.prisma.session.updateMany({
+          where: { deviceId: session.deviceId },
+          data: { revokedAt: new Date() },
+        });
+        await this.security.log(session.device.pid, "refresh.reuse_detected", {
+          deviceId: session.deviceId,
+          jti: payload.jti,
+        });
+        throw new UnauthorizedException("Session compromised — sign in again.");
+      }
+      throw new UnauthorizedException("Refresh token revoked");
     }
 
     // Absolute family cap: past it, only a fresh login (passkey-first UI)

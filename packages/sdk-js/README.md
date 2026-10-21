@@ -90,13 +90,15 @@ The browser lands on `https://live2dev.com/auth/callback?pid_code=...`. Your pag
 (server-side) exchanges the code for the identity:
 
 ```ts
-const identity = await peridot.auth.exchange(code);
+const identity = await peridot.auth.exchange(code, 'https://live2dev.com/auth/callback');
 // identity = { pid, identityId (deprecated shim), profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }
 ```
 
 `returnTo` must be an origin in your app's `allowedOrigins` (registered via
 `POST /v1/apps`), otherwise the login request is rejected. (Legacy global
-`CLIENT_REDIRECT_ALLOWLIST` still covers pre-`client_id` integrations.)
+`CLIENT_REDIRECT_ALLOWLIST` still covers pre-`client_id` integrations.) At
+exchange time, pass the exact redirect URL you received the code on as
+`redirectUri` — the exchange is rejected unless it matches byte-for-byte.
 
 ### Third-party apps ("Sign in with PeridotID")
 
@@ -108,7 +110,7 @@ with the same `clientId`:
 const url = await peridot.auth.login({ clientId: 'pidapp_...', returnTo: 'https://mygame.dev/callback' });
 if (url) window.location.assign(url);
 const res = await peridot.auth.loginWithPasskey({ clientId: 'pidapp_...', returnTo: 'https://mygame.dev/callback' });
-const identity = await peridot.auth.exchange(code, 'pidapp_...');
+const identity = await peridot.auth.exchange(code, 'https://mygame.dev/callback', 'pidapp_...');
 ```
 
 For React apps, wrap the flow in your own button + hook: `peridot.auth.loginPopup()`

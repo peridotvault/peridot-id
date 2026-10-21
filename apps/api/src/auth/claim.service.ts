@@ -43,10 +43,22 @@ export class ClaimService {
     return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).includes(pid.toLowerCase());
   }
 
-  /** Mint a ticket from a verified Google profile (+ SSO targets). Returns the opaque id. */
+  /**
+   * Mint a ticket from a verified Google profile (+ SSO targets). The verified-
+   * email gate lives HERE (M4), not just in the strategy: mint() is the trust
+   * boundary where an unverified address must never become a claim ticket.
+   * Throws 400 when the profile carries no verified email.
+   */
   async mint(profile: GoogleProfile, opts?: { redirectTo?: string; clientId?: string }): Promise<string> {
+    const firstEmail = profile.emails?.[0];
+    const email = firstEmail?.value ?? null;
+    if (!email || firstEmail?.verified !== true) {
+      throw new BadRequestException(
+        "Google account email is not verified — verify it with Google and sign in again.",
+      );
+    }
     return this.mintCredential(
-      { provider: "google", providerUserId: profile.id, email: profile.emails?.[0]?.value ?? null },
+      { provider: "google", providerUserId: profile.id, email },
       { displayName: profile.displayName ?? null, avatarUrl: profile.photos?.[0]?.value ?? null },
       opts,
     );
