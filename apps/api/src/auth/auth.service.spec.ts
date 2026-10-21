@@ -272,6 +272,12 @@ describe("AuthService", () => {
       "refresh.reuse_detected",
       expect.objectContaining({ jti: oldJti }),
     );
+    // F4: race-vs-theft triage fields — replay latency + request UA.
+    expect(security.log).toHaveBeenCalledWith(
+      "identity-1",
+      "refresh.reuse_detected",
+      expect.objectContaining({ revokedAgoMs: expect.any(Number), userAgent: expect.any(String) }),
+    );
     // The winner's session died with the family: no live sessions remain.
     const sessions = await service.listSessions("identity-1", null);
     expect(sessions).toHaveLength(0);
