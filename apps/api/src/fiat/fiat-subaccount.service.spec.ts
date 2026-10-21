@@ -612,6 +612,33 @@ describe("FiatSubAccountService", () => {
     );
   });
 
+  it("webhook drops oversized bodies before any DB write (ANT-271 size cap)", async () => {
+    const { service, prisma, ledger } = setup();
+    const big = JSON.stringify({ partnerReferenceNo: "FORGED", pad: "x".repeat(40 * 1024) });
+    expect(Buffer.byteLength(big, "utf8")).toBeGreaterThan(32 * 1024);
+    await expect(service.webhook("ext-big", big)).resolves.toEqual({ ok: false });
+    expect(prisma.fiatWebhookEvent.create).not.toHaveBeenCalled();
+    expect(prisma.fiatProviderTransaction.findUnique).not.toHaveBeenCalled();
+    expect(prisma.fiatProviderTransaction.upsert).not.toHaveBeenCalled();
+    expect(ledger.issueForDeposit).not.toHaveBeenCalled();
+  });
+
+  it("spoofed-notify flood persists as received without issuance (ANT-271)", async () => {
+    const { service, prisma, ledger } = setup();
+    prisma.fiatProviderTransaction.findUnique.mockResolvedValueOnce(null);
+    // Forged notify naming an unknown ref our account does not own.
+    await expect(
+      service.webhook("ext-spoof", JSON.stringify({ partnerReferenceNo: "SPOOF-1", toAccount: "9999999999", amount: { value: "500000.00", currency: "IDR" } })),
+    ).resolves.toEqual({ ok: true });
+    expect(prisma.fiatWebhookEvent.create).toHaveBeenCalledTimes(1);
+    expect(prisma.fiatProviderTransaction.upsert).not.toHaveBeenCalled();
+    expect(ledger.issueForDeposit).not.toHaveBeenCalled();
+    // Stays `received` for admin review — never marked applied.
+    expect(prisma.fiatWebhookEvent.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { externalId: "ext-spoof" } }),
+    );
+  });
+
   it("webhook records BRI VA deposits against the static VA number", async () => {
     const { service, prisma } = setup();
     prisma.fiatProviderTransaction.findUnique.mockResolvedValueOnce(null);

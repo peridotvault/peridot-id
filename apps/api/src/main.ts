@@ -38,8 +38,13 @@ async function bootstrap(): Promise<void> {
       crossOriginResourcePolicy: false,
     }),
   );
-  // DOKU signs the exact raw bytes — keep them for the notify route (req.rawBody).
+  // Inbound DOKU notifies are UNSIGNED (no published signing contract — ANT-271):
+  // never trust the body; keep raw bytes only so the persisted event is an
+  // exact copy, then corroborate server-side before any terminal write.
+  // Explicit 64kb route-level cap (body-parser default is 100kb); the service
+  // layer enforces a tighter per-webhook byte budget before persisting.
   app.useBodyParser("json", {
+    limit: "64kb",
     verify: (req: unknown, _res: unknown, buf: Buffer) => {
       (req as { rawBody?: string }).rawBody = buf.toString("utf8");
     },
