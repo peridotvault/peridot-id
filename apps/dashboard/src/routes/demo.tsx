@@ -64,7 +64,9 @@ export default function DemoPage() {
         },
       });
       if (!pidCode) throw new Error("Sign-in was rejected.");
-      const me = await peridot.auth.exchange(pidCode, CLIENT_ID);
+      // ANT-238: exchange requires the exact redirect target the code was
+      // issued for. The popup login binds it to this origin — present it byte-exact.
+      const me = await peridot.auth.exchange(pidCode, window.location.origin, CLIENT_ID);
       if ("statusCode" in me) throw new Error("Exchange failed.");
       setPid(me.pid);
       setName(me.profile?.displayName ?? null);

@@ -76,7 +76,9 @@ export function PeridotWalletEmbed(props: PeridotWalletEmbedProps) {
     try {
       const { pidCode } = await peridot.auth.loginPopup({ clientId });
       if (!pidCode) throw new Error("Sign-in was cancelled.");
-      const result = await peridot.auth.exchange(pidCode, clientId);
+      // ANT-238: exchange binds redirectUri to the issued redirect target.
+      // Popup login issues the code for this origin, so present it byte-exact.
+      const result = await peridot.auth.exchange(pidCode, window.location.origin, clientId);
       if (isApiError(result)) throw new Error("Sign-in exchange failed.");
       bearerRef.current = result.accessToken;
       post({ type: EMBED_TOKEN, token: result.accessToken });

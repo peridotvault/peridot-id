@@ -57,7 +57,7 @@ function prismaMock() {
       },
       device: {
         create: jest.fn(async (args: { data: { pid: string; userAgent: string | null; authMethod?: string | null } }) => {
-          const device = { id: `device-${devices.size + 1}`, createdAt: new Date(), authMethod: args.data.authMethod ?? null };
+          const device = { id: `device-${devices.size + 1}`, createdAt: new Date(), authMethod: args.data.authMethod ?? null, pid: args.data.pid };
           devices.set(device.id, device);
           return { ...device, ...args.data };
         }),
@@ -107,8 +107,19 @@ function prismaMock() {
           if (s) s.revokedAt = data.revokedAt;
           return s ?? null;
         }),
-        updateMany: jest.fn(async ({ where, data }: { where: { id: string }; data: { revokedAt: Date } }) => {
-          const s = sessions.get(where.id);
+        updateMany: jest.fn(async ({ where, data }: { where: { id?: string; deviceId?: string }; data: { revokedAt: Date } }) => {
+          // Family-wide revocation (M2 fail-closed): revoke every session on the device.
+          if (where.deviceId) {
+            let count = 0;
+            for (const s of sessions.values()) {
+              if (s.deviceId === where.deviceId && !s.revokedAt) {
+                s.revokedAt = data.revokedAt;
+                count++;
+              }
+            }
+            return { count };
+          }
+          const s = where.id ? sessions.get(where.id) : undefined;
           if (s) s.revokedAt = data.revokedAt;
           return { count: s ? 1 : 0 };
         }),
@@ -144,8 +155,9 @@ function setup(overrides: Record<string, unknown> = {}) {
   const prisma = prismaMock();
   const jwt = new JwtService({});
   const config = configMock(overrides);
-  const service = new AuthService(prisma as never, jwt, config as never);
-  return { service, prisma, config, res: resMock() };
+  const security = { log: jest.fn(async () => undefined) };
+  const service = new AuthService(prisma as never, jwt, config as never, security as never);
+  return { service, prisma, config, res: resMock(), security };
 }
 
 function reqWithToken(token: string) {
@@ -232,6 +244,27 @@ describe("AuthService", () => {
     expect(names).toEqual(["pid_access", "pid_refresh", accountRefreshCookieName("identity-1")]);
   });
 
+  it("mints issuer + per-class audience on session tokens (ANT-227 item 1)", async () => {
+    const { service, res } = setup();
+    const tokens = await service.issueSession(res as never, "identity-1", "test-agent");
+    expect(jwtPayload(tokens.accessToken)).toMatchObject({ iss: "peridot-id", aud: "pid-session", type: "access" });
+    expect(jwtPayload(tokens.refreshToken)).toMatchObject({ iss: "peridot-id", aud: "pid-refresh", type: "refresh" });
+
+    const app = await service.issueAppAccessToken("owner@pid", "pidapp_x");
+    expect(jwtPayload(app.accessToken)).toMatchObject({ iss: "peridot-id", aud: "pid-app", type: "access" });
+  });
+
+  it("rejects a refresh token minted for another audience (cross-class confusion)", async () => {
+    const { service, res } = setup();
+    const jwt = new JwtService({});
+    // Right secret, right subject — but the session audience, not the refresh one.
+    const confused = await jwt.signAsync(
+      { sub: "victim", jti: "does-not-exist", type: "refresh" },
+      { secret: "refresh-secret-test", expiresIn: "30d", issuer: "peridot-id", audience: "pid-session" },
+    );
+    await expect(service.rotateSession(reqWithToken(confused), res as never)).rejects.toThrow(UnauthorizedException);
+  });
+
   it("rotateSession revokes the old token and issues a new one", async () => {
     const { service, prisma, res } = setup();
     const first = await service.issueSession(res as never, "identity-1", "test-agent");
@@ -243,30 +276,45 @@ describe("AuthService", () => {
     expect(old.revokedAt).toBeInstanceOf(Date);
   });
 
-  it("reuses the rotation child on concurrent reuse inside the grace window", async () => {
-    const { service, prisma, res } = setup();
+  it("replay of a revoked token revokes the whole device family, logs anomaly, forces fresh login (M2)", async () => {
+    const { service, res, security } = setup();
     const first = await service.issueSession(res as never, "identity-1", "test-agent");
     const oldJti = jwtPayload(first.refreshToken).jti;
     await service.rotateSession(reqWithToken(first.refreshToken), res as never);
 
-    // Loser tab retries with the same superseded token: follows the child,
-    // keeps a single live head (child revoked, grandchild live).
-    await service.rotateSession(reqWithToken(first.refreshToken), res as never);
-    const child = (await prisma.session.findFirst({ where: { rotatedFrom: oldJti } })) as StoredSession;
-    expect(child.revokedAt).toBeInstanceOf(Date);
-  });
-
-  it("rejects reuse past the rotation grace window", async () => {
-    const { service, prisma, res } = setup();
-    const first = await service.issueSession(res as never, "identity-1", "test-agent");
-    const oldJti = jwtPayload(first.refreshToken).jti;
-    await service.rotateSession(reqWithToken(first.refreshToken), res as never);
-    const child = (await prisma.session.findFirst({ where: { rotatedFrom: oldJti } })) as StoredSession;
-    child.createdAt = new Date(Date.now() - 61 * 1000);
-
+    // Attacker (or stale tab) replays the superseded token: fail closed.
     const err = await service.rotateSession(reqWithToken(first.refreshToken), res as never).catch((e) => e);
     expect(err).toBeInstanceOf(UnauthorizedException);
-    expect(JSON.stringify(err.getResponse())).not.toContain("step_up_required");
+    expect(String(err.message)).toMatch(/compromised|sign in again/i);
+
+    // Anomaly logged with device + token identity for SOC review.
+    expect(security.log).toHaveBeenCalledWith(
+      "identity-1",
+      "refresh.reuse_detected",
+      expect.objectContaining({ jti: oldJti }),
+    );
+    // F4: race-vs-theft triage fields — replay latency + request UA.
+    expect(security.log).toHaveBeenCalledWith(
+      "identity-1",
+      "refresh.reuse_detected",
+      expect.objectContaining({ revokedAgoMs: expect.any(Number), userAgent: expect.any(String) }),
+    );
+    // The winner's session died with the family: no live sessions remain.
+    const sessions = await service.listSessions("identity-1", null);
+    expect(sessions).toHaveLength(0);
+  });
+
+  it("replay mints no tokens and a second replay still fails closed (M2)", async () => {
+    const { service, res, security } = setup();
+    const first = await service.issueSession(res as never, "identity-1", "test-agent");
+    await service.rotateSession(reqWithToken(first.refreshToken), res as never);
+
+    const cookiesBefore = (res.cookie as jest.Mock).mock.calls.length;
+    const err = await service.rotateSession(reqWithToken(first.refreshToken), res as never).catch((e) => e);
+    expect(err).toBeInstanceOf(UnauthorizedException);
+    // No Set-Cookie on the fail-closed path: nothing new was issued.
+    expect((res.cookie as jest.Mock).mock.calls.length).toBe(cookiesBefore);
+    expect(security.log).toHaveBeenCalledWith("identity-1", "refresh.reuse_detected", expect.anything());
   });
 
   it("rejects a forged refresh token", async () => {

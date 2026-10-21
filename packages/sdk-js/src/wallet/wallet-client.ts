@@ -128,8 +128,6 @@ export interface ActivationView {
   chainTime: number;
   treasury: string;
   feePolicyVersion: number;
-  /** base64url sha256 of the WebAuthn RP ID (bound into the activation payload). */
-  rpIdHash: string;
   /** Optional chain echo (ANT-39/ANT-41): present when the registry has a Solana row. */
   chain?: ChainEcho;
 }
@@ -518,7 +516,7 @@ export class PeridotWallet {
 
   /**
    * Activate the smart account (V3). The claim is passkey-signed (payload binds op-tag,
-   * account, authority, RP-ID hash, policy, expiry — no amounts) so nobody else can
+   * account, authority, policy, expiry — no amounts) so nobody else can
    * squat the PDA or change the fee policy; the server's relayer only submits.
    * Reads the live view first for policy + chain time.
    */
@@ -531,12 +529,10 @@ export class PeridotWallet {
     // Missing echo → legacy path (proceed). Throws ClusterMismatchError on mismatch.
     assertChainEcho(viewRes.chain, await this.selectedSolanaReference());
     const authority = await this.authorityCompressed();
-    const rpIdHash = b64urlToBytes(viewRes.rpIdHash);
     const expiry = Math.floor(viewRes.chainTime) + 300;
     const payload = await buildActivatePayloadV3(
       pidToSeed32(pid),
       authority,
-      rpIdHash,
       viewRes.feePolicyVersion,
       expiry,
     );

@@ -4,6 +4,7 @@ import { ChainRegistryService } from "../chain/chain-registry.service";
 import { CHAIN_REFERENCE_HEADER, CHAIN_REFERENCE_QUERY } from "../common/chains";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { ActivationService, ActivationView } from "./activation.service";
 import { AccountService, ChainAccountView } from "./account.service";
 import { EvmActivationService, EvmActivationView } from "./evm-activation.service";
@@ -35,7 +36,7 @@ export class AccountController {
   @Post()
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async create(
     @CurrentUser() user: AuthenticatedUser,
     @Headers(CHAIN_REFERENCE_HEADER) chainRefHeader?: string,
@@ -69,7 +70,7 @@ export class AccountController {
   @Post("activate")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async activate(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ActivateDto,
@@ -91,7 +92,7 @@ export class AccountController {
   @Post("evm/:chainRef/activate")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   evmActivate(
     @CurrentUser() user: AuthenticatedUser,
     @Param("chainRef") chainRef: string,

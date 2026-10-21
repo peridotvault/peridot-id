@@ -118,22 +118,22 @@ contract PeridotPermissionTest is Test {
     uint64 constant DEADLINE = 1_000_300;
     uint16 constant POLICY = 1;
 
-    bytes32 constant VEC_ACT_R = 0x09e5b78b9ce736236dfb152bb32f32ca6e14e41b6830725f9f1f6a9a7a2f8232;
-    bytes32 constant VEC_ACT_S = 0x5d9b60bf78ee752a6ee2d3891af58c94d23183b8e26398b11680cfe1a4313161;
+    bytes32 constant VEC_ACT_R = 0xe833d5ba603d6a180091a10e6cc56ae051abce1624970cbe8bf278d8e6858636;
+    bytes32 constant VEC_ACT_S = 0x6a961eb397aa853a23248b4af0d4d84c3d103a4451959793117939d73bf69a30;
 
     bytes4 constant MAGIC_1271 = 0x1626ba7e;
     bytes4 constant MAGIC_INVALID = 0xffffffff;
 
     PeridotFactory factory;
     PeridotAccount account;
-    bytes32 rpIdHash;
+    bytes32 authPrefix; // neutral authenticator prefix (never compared, ANT-197)
 
     receive() external payable {}
 
     function setUp() public {
         vm.warp(1_000_000);
         vm.txGasPrice(10 gwei);
-        rpIdHash = sha256("localhost");
+        authPrefix = sha256("test-rp");
         address[] memory admins = new address[](1);
         admins[0] = address(this);
         // Same deploy order as the V3 suite → same factory address → VEC_ACT reusable.
@@ -143,7 +143,7 @@ contract PeridotPermissionTest is Test {
         account = PeridotAccount(
             payable(
                 factory.deployAndInit(
-                    SALT, GX, GY, rpIdHash, POLICY, DEADLINE, 0.002 ether, _authData(), _clientData(_actPayload()),
+                    SALT, GX, GY, POLICY, DEADLINE, 0.002 ether, _authData(), _clientData(_actPayload()),
                     VEC_ACT_R, VEC_ACT_S
                 )
             )
@@ -158,14 +158,14 @@ contract PeridotPermissionTest is Test {
     }
 
     function _authData() internal view returns (bytes memory) {
-        return bytes.concat(rpIdHash, bytes1(0x05), bytes4(uint32(1)));
+        return bytes.concat(authPrefix, bytes1(0x05), bytes4(uint32(1)));
     }
 
     function _clientData(bytes32 challenge) internal pure returns (bytes memory) {
         return bytes.concat(
             '{"type":"webauthn.get","challenge":"',
             bytes(b64url(abi.encodePacked(challenge))),
-            '","origin":"http://localhost:8081"}'
+            '","origin":"test.invalid"}'
         );
     }
 
@@ -190,7 +190,7 @@ contract PeridotPermissionTest is Test {
 
     function _actPayload() internal view returns (bytes32) {
         return keccak256(
-            abi.encodePacked(DOMAIN_V3, uint8(0x05), SALT, GX, GY, rpIdHash, POLICY, DEADLINE, block.chainid, address(factory))
+            abi.encodePacked(DOMAIN_V3, uint8(0x05), SALT, GX, GY, POLICY, DEADLINE, block.chainid, address(factory))
         );
     }
 
@@ -813,11 +813,11 @@ contract PeridotPermissionTest is Test {
         vm.deal(predicted2, 0.01 ether);
         uint64 n = account.nonce();
         bytes32 actPayload = keccak256(
-            abi.encodePacked(DOMAIN_V3, uint8(0x05), salt2, GX, GY, rpIdHash, POLICY, DEADLINE, block.chainid, address(factory))
+            abi.encodePacked(DOMAIN_V3, uint8(0x05), salt2, GX, GY, POLICY, DEADLINE, block.chainid, address(factory))
         );
         (bytes memory auth0, bytes memory client0, bytes32 r0, bytes32 s0) = _sigOwner(actPayload);
         PeridotAccount account2 = PeridotAccount(
-            payable(factory.deployAndInit(salt2, GX, GY, rpIdHash, POLICY, DEADLINE, 0.002 ether, auth0, client0, r0, s0))
+            payable(factory.deployAndInit(salt2, GX, GY, POLICY, DEADLINE, 0.002 ether, auth0, client0, r0, s0))
         );
         assertEq(account.nonce(), n); // sanity: deploying B consumed no nonce on A
         bytes32 hash = keccak256("replay me");

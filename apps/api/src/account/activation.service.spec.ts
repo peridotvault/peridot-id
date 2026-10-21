@@ -308,14 +308,13 @@ describe("ActivationService", () => {
     expect(adapterMock.activateV3).not.toHaveBeenCalled();
   });
 
-  it("exposes the fee policy version and RP-ID hash in the activation view", async () => {
+  it("exposes the fee policy version without any domain binding in the activation view", async () => {
     const { service } = setup();
     const view = await service.viewOf({ pid: IDENTITY_ID });
     expect(view.feePolicyVersion).toBe(1);
     expect(view.networkFeeLamports).toBe(NETWORK);
     expect(view.protocolFeeBps).toBe(5000);
-    expect(typeof view.rpIdHash).toBe("string");
-    expect(view.rpIdHash.length).toBeGreaterThan(0);
+    expect(view).not.toHaveProperty("rpIdHash");
   });
 
   it("omits the chain echo when the registry has no Solana row", async () => {

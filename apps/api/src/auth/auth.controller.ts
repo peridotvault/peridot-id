@@ -4,20 +4,22 @@ import { ConfigService } from "@nestjs/config";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { Request, Response } from "express";
 import { LoginResponse } from "@peridotvault/pid-types";
-import { CLAIM_COOKIE, REFRESH_COOKIE, clearClaimCookie, normalizeScope, setClaimCookie } from "../common/cookies";
+import { CLAIM_COOKIE, REFRESH_COOKIE, clearClaimCookie, clearOAuthStateCookie, normalizeScope, OAUTH_STATE_COOKIE, setClaimCookie } from "../common/cookies";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { AuthenticateFinishDto } from "../credentials/dto/credential.dto";
 import { AuthenticateStartResult, CredentialService } from "../credentials/credential.service";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { AuthService } from "./auth.service";
-import { ClaimService } from "./claim.service";
+import { ClaimService, isUnverifiedEmailError } from "./claim.service";
 import { EmailStartDto, EmailVerifyDto } from "./email/dto/email.dto";
 import { EmailOtpService } from "./email/email-otp.service";
 import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { isPendingGoogleClaim } from "./google.strategy";
 import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto, GrantScopeDto } from "./dto/auth.dto";
 import { PidAppsService } from "./apps.service";
-import { decodeState, encodeState, SsoService } from "./sso.service";
+import { encodeState, SsoService } from "./sso.service";
+import { oauthStateSecret, verifyOAuthState } from "./oauth-state";
 import { resolveServiceUrls } from "../common/app-config";
 
 /** Redirect target with a pid_code appended (keeps any existing query string). */
@@ -74,7 +76,7 @@ export class AuthController {
   async appToken(@Body() dto: AppTokenDto) {
     const app = await this.apps.findActive(dto.clientId);
     if (!app) throw new UnauthorizedException("Invalid client");
-    if (app.clientSecretHash && !PidAppsService.secretMatches(dto.clientSecret ?? "", app.clientSecretHash)) {
+    if (!this.apps.clientSecretValid(app, dto.clientSecret ?? "")) {
       throw new UnauthorizedException("Invalid client");
     }
     return this.authService.issueAppAccessToken(app.ownerPid, app.clientId);
@@ -201,7 +203,7 @@ export class AuthController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async exchange(@Body() dto: ExchangeDto) {
     try {
-      return await this.ssoService.consume(dto.code, dto.clientId, dto.clientSecret);
+      return await this.ssoService.consume(dto.code, dto.redirectUri, dto.clientId, dto.clientSecret);
     } catch {
       throw new BadRequestException("Code is invalid, expired, or already used");
     }
@@ -215,7 +217,7 @@ export class AuthController {
    */
   @Post("authorize")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async authorize(
     @CurrentUser() user: AuthenticatedUser,
@@ -280,7 +282,7 @@ export class AuthController {
 
   @Delete("grants/:id")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async revokeGrant(
     @CurrentUser() user: AuthenticatedUser,
@@ -309,18 +311,48 @@ export class AuthController {
       res.redirect(withErrorFlag(successUrl, req.user.authError));
       return;
     }
-    // state is user-controlled (comes back via Google) — re-validate before trusting it.
+    // M3: `state` round-tripped through the user agent and Google — it is
+    // attacker-visible until the guard signed it. Verify the signature AND the
+    // HttpOnly nonce cookie BEFORE trusting (or even decoding) it. Unsigned,
+    // foreign, tampered, replayed, or expired states bounce to retry UI with
+    // `invalid_state` and never reach resolveReturnTo.
     const rawState = typeof req.query.state === "string" ? req.query.state : undefined;
-    const { returnTo, clientId } = rawState ? decodeState(rawState) : { returnTo: undefined, clientId: undefined };
+    const nonce = (req as Request & { cookies?: Record<string, string> }).cookies?.[OAUTH_STATE_COOKIE];
+    clearOAuthStateCookie(res, this.config);
+    const verified = verifyOAuthState(
+      rawState,
+      nonce,
+      oauthStateSecret((key, def) => this.config.get(key, def)),
+    );
+    if (!verified) {
+      this.logger.warn("google callback: invalid oauth state (bad signature, nonce mismatch, or expired)");
+      res.redirect(withErrorFlag(successUrl, "invalid_state"));
+      return;
+    }
+    const { returnTo, clientId } = verified;
     const resolved = returnTo ? await this.ssoService.resolveReturnTo(returnTo, clientId) : null;
 
     // Verified credential, no identity yet → mint a claim ticket and send the
-    // user to the PID picker. Nothing is created until they claim.
+    // user to the PID picker. Nothing is created until they claim. An
+    // unverified Google email never becomes a ticket (ClaimService enforces
+    // the verified-email gate) — back to retry UI with a specific code.
     if (isPendingGoogleClaim(req.user)) {
-      const ticketId = await this.claimService.mint(req.user.claimProfile, {
-        ...(resolved ? { redirectTo: resolved.redirectTo, clientId: resolved.clientId } : {}),
-      });
-      setClaimCookie(res, this.config, ticketId);
+      try {
+        const ticketId = await this.claimService.mint(req.user.claimProfile, {
+          ...(resolved ? { redirectTo: resolved.redirectTo, clientId: resolved.clientId } : {}),
+        });
+        setClaimCookie(res, this.config, ticketId);
+      } catch (err) {
+        // F2: only the verified-email-gate rejection maps to `email_unverified`
+        // (matched on its stable code, not the bare 400). Any other mint()
+        // failure propagates as its real error instead of a misleading label.
+        if (isUnverifiedEmailError(err)) {
+          this.logger.warn("google callback: unverified email, no claim ticket minted");
+          res.redirect(withErrorFlag(successUrl, "email_unverified"));
+          return;
+        }
+        throw err;
+      }
       this.logger.log("google callback: claim ticket minted");
       res.redirect(withClaimFlag(successUrl));
       return;
@@ -404,7 +436,7 @@ export class AuthController {
    */
   @Post("session/scope")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async grantScope(
     @Req() req: Request,
@@ -430,7 +462,7 @@ export class AuthController {
 
   @Delete("sessions/revoke-others")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async revokeOtherSessions(
     @Req() req: Request,
@@ -444,7 +476,7 @@ export class AuthController {
 
   @Delete("sessions/:id")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async revokeSession(
     @CurrentUser() user: AuthenticatedUser,

@@ -80,9 +80,10 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
         update: jest.fn(async (args: any) => ({ id: "j0", ...args.data })),
         updateMany: jest.fn(async () => ({ count: 1 })),
         findMany: jest.fn(async () => []),
-        // Default in-txn intent re-read: a created intent (transferConfirm's
-        // cancel-vs-confirm recheck passes unless a test overrides it).
-        findFirst: jest.fn(async () => ({ id: "intent1", status: "created" })),
+        // Default null: transferConfirm's in-txn recheck and cancelIntent's
+        // in-txn read see "no row" unless a test stages one (e.g. cross-pid
+        // must read NotFound, never a staged created row).
+        findFirst: jest.fn(async () => null),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
@@ -192,6 +193,18 @@ describe("FiatLedgerService transfers", () => {
     const kinds = created.map((r: any) => `${r.kind}:${r.amountIdr}:${r.status}`);
     expect(kinds).toContain("fiat_transfer_in:475000:posted");
     expect(kinds).toContain("fiat_fee:25000:posted");
+  });
+
+  it("denies cross-pid confirm and cancel (no IDOR on intents)", async () => {
+    const { service, prisma } = setup();
+    // Intent belongs to dev@pid; attacker rani@pid must see NotFound, and
+    // nothing may be written.
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValue(null);
+    await expect(service.transferConfirm("rani@pid", "intent1")).rejects.toThrow("Transfer not found");
+    await expect(service.cancelIntent("rani@pid", "intent1")).rejects.toThrow("Transfer not found");
+    expect(prisma.fiatLedgerEntry.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: "intent1", pid: "rani@pid" }) }),
+    );
   });
 
   it("rejects confirm on insufficient balance without posting", async () => {
@@ -423,6 +436,47 @@ describe("FiatLedgerService callbacks", () => {
 
     const res = await service.dispatchEvents({});
     expect(res.failed).toBe(1);
+    expect(prisma.fiatLedgerEvent.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "pending", attempts: 1 }) }),
+    );
+  });
+
+  it("signs with the secret of the app matching the event URL (not the first app)", async () => {
+    const { service, prisma } = setup();
+    prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
+      { id: "e3", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://b/hook", payload: { hello: "world" }, attempts: 0 },
+    ]);
+    // Owner holds two apps; the ownerPid-only lookup used to pick app A's
+    // secret for app B's URL. The service must resolve by (ownerPid, URL).
+    prisma.pidApp.findFirst.mockImplementationOnce(async (args: any) =>
+      args?.where?.webhookUrl === "https://b/hook" ? { webhookSecret: "secret-B" } : { webhookSecret: "secret-A" },
+    );
+    const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
+    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+
+    const res = await service.dispatchEvents({});
+    expect(res.sent).toBe(1);
+    expect(prisma.pidApp.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ ownerPid: "app@pid", webhookUrl: "https://b/hook" }) }),
+    );
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string>; body: string }];
+    const expected = "sha256=" + createHmac("sha256", "secret-B").update(init.body).digest("hex");
+    expect(init.headers["X-Pid-Signature"]).toBe(expected);
+  });
+
+  it("refuses unsigned dispatch when the target app/secret is gone", async () => {
+    const { service, prisma } = setup();
+    prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
+      { id: "e4", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://gone/hook", payload: {}, attempts: 0 },
+    ]);
+    prisma.pidApp.findFirst.mockResolvedValueOnce(null); // revoked/deleted app
+    const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
+    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+
+    const res = await service.dispatchEvents({});
+    expect(res.sent).toBe(0);
+    expect(res.failed).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled(); // never send with an empty-key HMAC
     expect(prisma.fiatLedgerEvent.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "pending", attempts: 1 }) }),
     );

@@ -4,6 +4,7 @@ import { ChainRegistryService } from "../chain/chain-registry.service";
 import { CHAIN_REFERENCE_HEADER, CHAIN_REFERENCE_QUERY } from "../common/chains";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { CreateWalletDto } from "./dto/create-wallet.dto";
 import { RotateAuthorityDto, RotateAuthorityResult } from "./dto/rotate.dto";
 import { RotateService } from "./rotate.service";
@@ -41,7 +42,7 @@ export class WalletController {
   @Post()
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateWalletDto): Promise<WalletView> {
     return this.walletService.create(user.pid, dto.address);
   }
@@ -50,7 +51,7 @@ export class WalletController {
   @Post("withdraw/quote")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 60, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async quote(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: WithdrawQuoteDto,
@@ -65,7 +66,7 @@ export class WalletController {
   @Post("withdraw")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async withdraw(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SponsoredWithdrawDto,
@@ -92,7 +93,7 @@ export class WalletController {
   @Post("execute")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async execute(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SponsoredExecuteDto,
@@ -119,7 +120,7 @@ export class WalletController {
   @Post("execute/quote")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 60, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async executeQuote(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ExecuteQuoteDto,
@@ -146,7 +147,7 @@ export class WalletController {
   @Post("rotate")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async rotate(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: RotateAuthorityDto,

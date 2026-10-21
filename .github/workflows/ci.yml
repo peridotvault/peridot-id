@@ -6,6 +6,68 @@ on:
   pull_request:
 
 jobs:
+  svm-program-id:
+    # ANT-215 (Tobias ANT-212 Finding 3): a typo'd PID_PROGRAM_ID that still
+    # base58-decodes to 32 bytes builds green and bricks at runtime
+    # (IncorrectProgramId). This job pins the guard that deploy jobs run
+    # before cargo build-sbf: contracts/svm/assert-program-id.sh equality
+    # against the cluster deploy keypair, plus the build.rs hard error when
+    # PID_PROGRAM_ID is unset for testnet/mainnet builds. Hermetic on purpose
+    # (bash + python3 stdlib only, no Solana toolchain) so it stays fast and
+    # never flakes on toolchain downloads. Blast radius: this job only —
+    # it builds nothing and cannot break the TS/EVM jobs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Program-ID deploy guard
+        run: |
+          GUARD=contracts/svm/assert-program-id.sh
+          LOCAL_ID="CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT"
+          TESTNET_ID="D6TpM7caN3tG31Trq6cffKKnWbS4pP7nWJJbd2ALVsg3"
+          bash -n "$GUARD"
+          test -x "$GUARD"
+
+          # 1. Canonical IDs pass the length-only check (sanity).
+          PID_PROGRAM_ID="$LOCAL_ID" "$GUARD"
+          PID_PROGRAM_ID="$TESTNET_ID" "$GUARD"
+
+          # 2. Equality path: exact match succeeds with --require-explicit.
+          PID_PROGRAM_ID="$TESTNET_ID" "$GUARD" --expected "$TESTNET_ID" --require-explicit
+
+          # 3. Finding-3 trap: single-char typo still decodes to 32 bytes, so
+          #    the length-only check passes — but equality MUST fail. This is
+          #    why deploy jobs pass --keypair instead of relying on build.rs.
+          TYPO="${TESTNET_ID%3}4"
+          PID_PROGRAM_ID="$TYPO" "$GUARD"  # length-only: passes (the trap)
+          if PID_PROGRAM_ID="$TYPO" "$GUARD" --expected "$TESTNET_ID"; then
+            echo "::error::guard missed a typo'd PID_PROGRAM_ID — equality check broken"
+            exit 1
+          fi
+
+          # 4. Malformed input fails closed.
+          if PID_PROGRAM_ID='!!!not-base58!!!' "$GUARD"; then
+            echo "::error::guard accepted malformed PID_PROGRAM_ID"
+            exit 1
+          fi
+
+          # 5. Unset + --require-explicit is a hard error (testnet deploy jobs).
+          if env -u PID_PROGRAM_ID "$GUARD" --require-explicit; then
+            echo "::error::guard allowed unset PID_PROGRAM_ID under --require-explicit"
+            exit 1
+          fi
+          # Without the flag, unset stays a warning (local/devnet default).
+          env -u PID_PROGRAM_ID "$GUARD"
+
+          # 6. build.rs keeps the matching build-time gate so the two cannot
+          #    drift apart: PID_PROGRAM_ID_REQUIRED=1 / SOLANA_CLUSTER=testnet*
+          #    makes an unset PID_PROGRAM_ID a compile error, not a default.
+          #    (plain grep: this job installs nothing, so no ripgrep on runner.)
+          grep -q 'PID_PROGRAM_ID_REQUIRED' contracts/svm/smart-account/build.rs
+          grep -q 'SOLANA_CLUSTER' contracts/svm/smart-account/build.rs
+
+          echo "svm-program-id guard: all assertions held"
+
   check:
     runs-on: ubuntu-latest
     steps:

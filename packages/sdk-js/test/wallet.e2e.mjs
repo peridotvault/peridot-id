@@ -51,7 +51,7 @@ const mockApi = {
   },
   async post(){ return { ok: true, data: {} }; },
 };
-// mock passkey signer (V3: authenticatorData carries the RP-ID hash + UV flag)
+// mock passkey signer (V3: authenticatorData carries an RP-ID hash + UV flag)
 const signer = { async sign(challenge){ const cj=Buffer.from(JSON.stringify({type:"webauthn.get",challenge:b64url(challenge),origin:"x"})); const ad=Buffer.concat([RP_ID_HASH,Buffer.from([0x05,0,0,0,1])]); const md=await buildWebAuthnMessage(ad,cj); let s=crypto.sign("sha256",md,{key:passkey.privateKey,dsaEncoding:"ieee-p1363"}); const r=BigInt("0x"+s.subarray(0,32).toString("hex"));let ss=BigInt("0x"+s.subarray(32).toString("hex"));if(ss>N/2n)ss=N-ss; return {credentialId:"cred",signature:Buffer.concat([Buffer.from(r.toString(16).padStart(64,"0"),"hex"),Buffer.from(ss.toString(16).padStart(64,"0"),"hex")]),authenticatorData:ad,clientDataJSON:cj}; } };
 const storeMap = new Map([["peridot.feePayer.ed25519", Buffer.from(feePayer.secretKey).toString("hex")]]);
 const wallet = new PeridotWallet(mockApi, { passkeySigner: signer, feePayerStore: { get: async(k)=>storeMap.get(k) ?? null, set: async(k,v)=>storeMap.set(k,v) } });
@@ -63,7 +63,7 @@ await conn.confirmTransaction(await conn.requestAirdrop(dest.publicKey, 2*LAMPOR
 const me = await wallet.me();
 assert.equal(me[0].id, "c1");
 // backend-gated, passkey-signed V3 initialize (no squat without the key + backend)
-const initSig = await adapter.initialize(PID, AUTHORITY_COMP, RP_ID_HASH, backend, signer);
+const initSig = await adapter.initialize(PID, AUTHORITY_COMP, backend, signer);
 await conn.confirmTransaction(initSig, "confirmed");
 assert.equal(await adapter.isInitialized(PID), true, "initialized");
 // topup is deposit-only now (creation is the activate flow)
