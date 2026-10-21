@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node --test test/execute-gate.test.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
     "dev": "vite --port 3302 --host",
     "dev:web": "vite --port 3302 --host",
     "build": "tsc -b && vite build",

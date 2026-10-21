@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
+import { normalizeOriginInput } from "./origins";
 import type { AppFee, PidApp } from "./app-types";
 import { Card, DIVIDER, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "./ui";
 
@@ -36,22 +37,7 @@ function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;
 }
 
-/** Client-side mirror of the API bare-origin rule (app.dto.ts ORIGIN_PATTERN +
- *  apps.service.ts normalizeOrigin): trim, strip trailing slashes, lowercase,
- *  then require scheme + host + optional port with no path/query/fragment.
- *  Returns the normalized origin, or null when invalid. */
-function normalizeOriginInput(value: string): string | null {
-  const trimmed = value.trim().replace(/\/+$/, "").toLowerCase();
-  if (!/^https?:\/\/[^/:?#]+(?::\d+)?$/.test(trimmed)) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    if (parsed.origin !== trimmed) return null;
-    return parsed.origin;
-  } catch {
-    return null;
-  }
-}
+/** Client-side origin check lives in ./origins (exported for unit tests). */
 
 async function copy(text: string): Promise<boolean> {
   try {
@@ -191,17 +177,17 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   const addOrigin = () => {
     const raw = newOrigin.trim();
     if (!raw || !app) return;
-    const normalized = normalizeOriginInput(raw);
-    if (!normalized) {
-      setOriginError("Use a bare http(s) origin — scheme + host + optional port, no path. e.g. https://mygame.dev");
+    const checked = normalizeOriginInput(raw);
+    if ("error" in checked) {
+      setOriginError(checked.error);
       return;
     }
     setOriginError(null);
-    if (app.allowedOrigins.includes(normalized)) {
+    if (app.allowedOrigins.includes(checked.origin)) {
       setNewOrigin("");
       return;
     }
-    void save({ allowedOrigins: [...app.allowedOrigins, normalized] }, () => setNewOrigin(""));
+    void save({ allowedOrigins: [...app.allowedOrigins, checked.origin] }, () => setNewOrigin(""));
   };
 
   const rotateSecret = async () => {

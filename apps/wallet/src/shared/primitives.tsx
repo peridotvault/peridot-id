@@ -10,6 +10,7 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
 } from "react";
+import { assertSafeExternalUrl } from "./safeUrl";
 
 // DOM shims with the react-native call-shape, so screens keep their JSX and
 // StyleSheet objects verbatim. Web-only wallet: no native runtime, so these
@@ -353,7 +354,10 @@ export const Alert = {
 
 export const Linking = {
   // Anchor click, not a popup call (CI forbids those outside feat/embed).
+  // ANT-346 M10: https-only — a non-https target rejects instead of opening,
+  // so a poisoned paymentUrl / explorer link can't downgrade navigation.
   openURL(url: string): Promise<void> {
+    assertSafeExternalUrl(url);
     const a = document.createElement("a");
     a.href = url;
     a.target = "_blank";

@@ -58,14 +58,37 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Security headers (ANT-346 H1). Static SPA: the API allowlist below names
+    # the first-party API origins. The trailing `https:` in connect-src covers
+    # registry-provided Solana RPC endpoints + token-metadata URIs, whose hosts
+    # are dynamic per chain registry / NFT collection and can't be enumerated
+    # here. frame-ancestors allows https parents deliberately: the embed product
+    # (pid-react-embed) renders the wallet in a third-party iframe, and every
+    # trust-critical action escapes to a top-level PeridotID popup (address bar
+    # visible). Tightening framing to a per-app allowlist needs a dynamic
+    # header (Trevor/nginx + API) — tracked as follow-up.
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self' https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.pid.peridotvault.com https://api.peridot.id https:; upgrade-insecure-requests" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=()" always;
+
     gzip on;
     gzip_types application/javascript text/css image/svg+xml application/json;
     gzip_min_length 1024;
 
     # Vite emits content-hashed filenames: immutable, cache for a year.
+    # NOTE: any add_header here replaces the server-level set for /assets/*
+    # responses (nginx inheritance rule), so the security headers are
+    # repeated verbatim.
     location /assets/ {
         expires 1y;
-        add_header Cache-Control "public, immutable";
+        add_header Cache-Control "public, immutable" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self' https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.pid.peridotvault.com https://api.peridot.id https:; upgrade-insecure-requests" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=()" always;
     }
 
     location / {
