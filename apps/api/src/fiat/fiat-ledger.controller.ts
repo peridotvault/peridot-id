@@ -3,7 +3,6 @@ import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { SecurityEventService } from "../security/security-event.service";
 import { FiatLedgerService } from "./fiat-ledger.service";
 import { DispatchEventsDto, LedgerAdjustDto, LedgerFreezeDto, LedgerTransferInquiryDto } from "./dto/ledger.dto";
 
@@ -19,7 +18,6 @@ import { DispatchEventsDto, LedgerAdjustDto, LedgerFreezeDto, LedgerTransferInqu
 export class FiatLedgerController {
   constructor(
     private readonly ledger: FiatLedgerService,
-    private readonly security: SecurityEventService,
   ) {}
 
   /** Current internal-credit balance (replayed, source labelled). */
@@ -39,11 +37,13 @@ export class FiatLedgerController {
   /**
    * Send step 1: inquiry only (moves no money). Phase-1 policy enforced.
    *
-   * INTENTIONAL app-token allowlist (ANT-233 F1-finding-1, decided explicitly):
-   * app backends initiate escrow releases through these routes — see
-   * docs/FIAT_LEDGER.md "Machine auth". The token is bound to the app owner's
-   * pid and spends only that owner's funds; stolen-secret blast radius is
-   * bounded by the 1h APP_TOKEN_TTL + (post-ANT-227) secret expiry. On-chain
+   * INTENTIONAL app-token allowlist (ANT-233 F1-finding-1, decided explicitly,
+   * narrowed by ANT-344 H3): app backends initiate escrow releases through
+   * these routes ONLY with a `scope: "fiat:transfer"` machine token —
+   * JwtAuthGuard + the service layer both reject unscoped/mis-scoped tokens
+   * fail-closed. See docs/FIAT_LEDGER.md "Machine auth". The token is bound
+   * to the app owner's pid and spends only that owner's funds; stolen-secret
+   * blast radius is bounded by the 1h APP_TOKEN_TTL + secret expiry. On-chain
    * wallet writes stay user-session-only (UserTokenGuard).
    */
   @Post("transfers/inquiry")
@@ -51,12 +51,6 @@ export class FiatLedgerController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   async inquiry(@CurrentUser() user: AuthenticatedUser, @Body() dto: LedgerTransferInquiryDto) {
-    // ANT-286b: unscoped legacy machine tokens still work (back-compat) but
-    // emit a migration signal; the service emits fiat.transfer.app_token on
-    // every app-token use (SOC anomaly signal for a leaked pidsk_).
-    if (user.app && !user.scope) {
-      await this.security.log(user.pid, "fiat.transfer.legacy_app_token", { app: user.app, route: "POST /v1/fiat/transfers/inquiry" }).catch(() => undefined);
-    }
     return this.ledger.transferInquiry(user.pid, dto, dto.clientId ?? user.app ?? null, { app: user.app, scope: user.scope });
   }
 
@@ -66,9 +60,6 @@ export class FiatLedgerController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   async confirm(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    if (user.app && !user.scope) {
-      await this.security.log(user.pid, "fiat.transfer.legacy_app_token", { app: user.app, route: "POST /v1/fiat/transfers/:id/confirm" }).catch(() => undefined);
-    }
     return this.ledger.transferConfirm(user.pid, id, { app: user.app, scope: user.scope });
   }
 

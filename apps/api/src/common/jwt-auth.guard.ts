@@ -44,10 +44,9 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
    * Tokens with `scope: "read"` (e.g. the SSO exchange token handed to a relying
    * party's backend) are limited to safe methods — they can read balance/ledger
    * but can never trigger a write (transfer, withdraw, credential, profile…).
-   * ANT-286b: machine tokens (`app` claim) carrying a scope other than
-   * `fiat:transfer` are 403 on `POST /v1/fiat/transfers/*` (fail closed —
-   * a mis-scoped credential never moves money). Unscoped legacy app tokens
-   * still pass (back-compat) but are logged so SOC can track migration.
+   * ANT-344 H3: machine tokens (`app` claim) on `POST /v1/fiat/transfers/*`
+   * must carry `scope: "fiat:transfer"` — unscoped legacy app tokens are
+   * rejected fail-closed (migration complete), as is any other scope.
    */
   handleRequest<TUser = unknown>(
     err: unknown,
@@ -66,14 +65,16 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     }
     const claims = authed as { app?: string; scope?: string } | null | undefined;
     if (authed && claims?.app) {
-      if (claims.scope === undefined) {
-        // Legacy unscoped machine token — allowed, but visible for migration.
-        this.logger.warn(`legacy app token without scope used: app=${claims.app}`);
-        return authed;
-      }
+      // ANT-344 H3: transfer power requires the explicit transfer scope.
+      // Legacy unscoped machine tokens are rejected here (no back-compat
+      // pass); the SOC signal is the 403 itself plus the service-level
+      // `fiat.transfer.app_token` event on allowed uses.
       if (claims.scope !== "fiat:transfer") {
         const req = context.switchToHttp().getRequest<Request>();
-        if (req.method === "POST" && /^\/v1\/fiat\/transfers(\/|$)/.test(req.path)) {
+        if (req.method !== "GET" && req.method !== "HEAD" && /^\/v1\/fiat\/transfers(\/|$)/.test(req.path)) {
+          if (claims.scope === undefined) {
+            this.logger.warn(`rejected legacy app token without scope: app=${claims.app}`);
+          }
           throw new ForbiddenException("Machine token scope not authorized for transfers");
         }
       }
