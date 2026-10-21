@@ -468,6 +468,13 @@ describe("AuthService app sessions (per-first-party logout isolation)", () => {
     expect(names).not.toContain("pid_refresh");
   });
 
+  it("issueSession rejects a scope outside SCOPE_RE (fail-closed for future callers)", async () => {
+    const { service, res } = setup();
+    await expect(service.issueSession(res as never, A, "ua", undefined, undefined, "_evil")).rejects.toThrow(
+      "invalid scope",
+    );
+  });
+
   it("scoped logout clears only the app session, never the wallet's", async () => {
     const { service, res } = setup();
     const wallet = await service.issueSession(res as never, A, "ua");

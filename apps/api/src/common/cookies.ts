@@ -150,6 +150,7 @@ export function clearAllAccountRefreshCookies(
  * matters (which origins may receive a code) lives in SsoService.
  */
 const SCOPE_RE = /^[a-z0-9][a-z0-9_]{0,31}$/;
+export { SCOPE_RE };
 
 /** Sanitize an app scope from a request header; null when absent/invalid. */
 export function normalizeScope(scope: string | string[] | undefined): string | null {
@@ -178,10 +179,10 @@ export function clearScopedAuthCookies(res: Response, config: ConfigService, sco
 
 /**
  * Scope encoded in a cookie name, or null. Account cookies (`pid_refresh__<hash>`,
- * double underscore, refresh-only) are never scopes — even though `_…` passes
- * SCOPE_RE, the refresh side excludes a leading underscore to avoid colliding
- * with them. (Access cookies have no account counterpart, so any SCOPE_RE
- * match counts.)
+ * double underscore, refresh-only) are never scopes — since ANT-284 SCOPE_RE
+ * already rejects a leading underscore, and the refresh side additionally
+ * excludes it as defense-in-depth to avoid colliding with them.
+ * (Access cookies have no account counterpart, so any SCOPE_RE match counts.)
  */
 function scopeFromCookieName(name: string): string | null {
   const accessPrefix = "pid_access_";

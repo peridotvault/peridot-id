@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { randomUUID } from "crypto";
@@ -10,6 +10,7 @@ import {
   clearAuthCookies,
   clearScopedAuthCookies,
   REFRESH_COOKIE,
+  SCOPE_RE,
   scopeRefreshCookie,
   setActiveAuthCookies,
   setAuthCookies,
@@ -164,6 +165,9 @@ export class AuthService {
     authMethod?: "google" | "email" | "passkey",
     scope?: string | null,
   ): Promise<{ accessToken: string; refreshToken: string }> {
+    // Defense-in-depth (ANT-307 F3): sole caller today is DTO-validated, but any
+    // future caller must pass a cookie-namespace-safe scope — fail closed here.
+    if (scope != null && !SCOPE_RE.test(scope)) throw new BadRequestException("invalid scope");
     const accessTtl = ACCESS_TOKEN_TTL;
     const refreshTtl = REFRESH_TOKEN_TTL;
 
