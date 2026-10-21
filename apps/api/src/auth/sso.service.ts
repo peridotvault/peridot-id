@@ -12,7 +12,9 @@ import { SecurityEventService } from "../security/security-event.service";
 import { SSO_EXCHANGE_TOKEN_TTL, resolveServiceUrls, serviceOrigins, JWT_AUD_SSO, JWT_ISSUER, ttlSeconds } from "../common/app-config";
 import { PidAppsService } from "./apps.service";
 
-const CODE_TTL_MS = 5 * 60 * 1000;
+// Single-use SSO exchange code TTL (ANT-368: 60s, was 5min — bounds the
+// window a leaked redirect URL carrying a pid_code stays usable).
+export const CODE_TTL_MS = 60 * 1000;
 
 /** PKCE (ANT-284): S256 only. `plain` is rejected — it saves nothing over the wire. */
 export const PKCE_METHOD_S256 = "S256";
