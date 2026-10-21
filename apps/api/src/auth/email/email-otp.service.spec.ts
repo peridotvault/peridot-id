@@ -54,8 +54,11 @@ describe("EmailOtpService", () => {
       data: expect.objectContaining({ email: "user@example.com", requestIp: "1.2.3.4" }),
     });
     expect(rows[0].codeHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(rows[0].codeHash).not.toContain("123");
-    expect(email.sendOtp).toHaveBeenCalledWith("user@example.com", expect.stringMatching(/^\d{6}$/));
+    const sentCode: string = (email.sendOtp as jest.Mock).mock.calls[0][1];
+    expect(sentCode).toMatch(/^\d{6}$/);
+    expect(rows[0].codeHash).toBe(hashOf(sentCode)); // stored value is the hash of the sent code...
+    expect(rows[0].codeHash).not.toBe(sentCode); // ...never the plaintext code itself
+    expect(email.sendOtp).toHaveBeenCalledWith("user@example.com", sentCode);
   });
 
   it("rejects a resend within the cooldown and caps hourly requests", async () => {
