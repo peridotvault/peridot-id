@@ -242,7 +242,7 @@ export class AuthController {
   }
 
   @Get("grants")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async grants(@CurrentUser() user: AuthenticatedUser) {
     return this.ssoService.listGrants(user.pid);
@@ -454,7 +454,7 @@ export class AuthController {
   }
 
   @Get("sessions")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async sessions(
     @Req() req: Request,

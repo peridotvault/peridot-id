@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
@@ -78,9 +78,14 @@ export class AdminController {
   @Get("apps")
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, AdminGuard)
-  listAllApps(@Query("clientId") clientId?: string, @Query("q") q?: string) {
+  listAllApps(
+    @Query("clientId") clientId?: string,
+    @Query("q") q?: string,
+    @Query("limit", new ParseIntPipe({ optional: true })) limit?: number,
+    @Query("offset", new ParseIntPipe({ optional: true })) offset?: number,
+  ) {
     // Exact lookup mode for the verify workflow; substring search; else everything.
     if (clientId) return this.adminService.findAppByClientId(clientId);
-    return this.adminService.listAllApps(q);
+    return this.adminService.listAllApps(q, limit, offset);
   }
 }

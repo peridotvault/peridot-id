@@ -121,7 +121,7 @@ describe("AdminService", () => {
     expect(apps).toHaveLength(2);
     expect(apps[0]).toMatchObject({ id: "a1", isVerified: true });
     expect(apps[0]).not.toHaveProperty("webhookSecret");
-    expect(prisma.pidApp.findMany).toHaveBeenCalledWith({ orderBy: { createdAt: "desc" } });
+    expect(prisma.pidApp.findMany).toHaveBeenCalledWith({ orderBy: { createdAt: "desc" }, take: 500, skip: undefined });
   });
 
   it("searches apps by name or clientId substring", async () => {
@@ -132,9 +132,24 @@ describe("AdminService", () => {
         OR: [{ name: { contains: "live", mode: "insensitive" } }, { clientId: { contains: "live" } }],
       },
       orderBy: { createdAt: "desc" },
+      take: 500,
+      skip: undefined,
     });
     await service.listAllApps("   ");
-    expect(prisma.pidApp.findMany).toHaveBeenLastCalledWith({ orderBy: { createdAt: "desc" } });
+    expect(prisma.pidApp.findMany).toHaveBeenLastCalledWith({ orderBy: { createdAt: "desc" }, take: 500, skip: undefined });
+  });
+
+  it("bounds pages: caps take, clamps negative skip (ANT-344 L5)", async () => {
+    const { service, prisma } = setup();
+    (prisma.pidApp.findMany as jest.Mock).mockResolvedValue([]);
+    await service.listAllApps(undefined, 10, 20);
+    expect(prisma.pidApp.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 10, skip: 20 }),
+    );
+    await service.listAllApps(undefined, 10_000, -5);
+    expect(prisma.pidApp.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ take: 500, skip: undefined }),
+    );
   });
 
   it("finds apps by clientId for admins without secrets", async () => {

@@ -141,14 +141,20 @@ export class AdminService {
   }
 
   /** Every registered app, newest first (secrets omitted). Admin-only.
-   *  Optional substring filter over name (case-insensitive) or clientId. */
-  async listAllApps(q?: string) {
+   *  Optional substring filter over name (case-insensitive) or clientId.
+   *  ANT-344 L5: bounded paging — `take` defaults to 500 and is capped, so
+   *  the directory can never issue an unbounded table scan. */
+  async listAllApps(q?: string, take?: number, skip?: number) {
     const needle = q?.trim() || undefined;
+    const limit = Math.min(Math.max(Math.floor(take ?? 500), 1), 500);
+    const offset = Math.max(Math.floor(skip ?? 0), 0);
     const apps = await this.prisma.pidApp.findMany({
       ...(needle
         ? { where: { OR: [{ name: { contains: needle, mode: "insensitive" } }, { clientId: { contains: needle } }] } }
         : {}),
       orderBy: { createdAt: "desc" },
+      take: limit,
+      skip: offset || undefined,
     });
     return apps.map((app) => {
       const { webhookSecret: _s, clientSecretHash: _h, prevClientSecretHash: _p, ...safe } = app as typeof app & { prevClientSecretHash?: unknown };

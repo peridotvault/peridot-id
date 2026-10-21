@@ -50,6 +50,12 @@ async function bootstrap(): Promise<void> {
       (req as { rawBody?: string }).rawBody = buf.toString("utf8");
     },
   });
+  // ANT-344 M1: trust exactly ONE proxy hop (Traefik). deploy/compose.yaml
+  // publishes no service ports — Traefik is the sole ingress and appends the
+  // real client IP to X-Forwarded-For, so hop 1 is edge-attested and any
+  // client-spoofed prefix beyond it is ignored. Do not raise this count
+  // (each extra hop lets a spoofed prefix become req.ip and defeats the
+  // OTP/login throttles); proxy-addr is pinned >=2.0.8 (GHSA-jqcg-44mw-7w3h).
   app.set("trust proxy", 1);
 
   const staticOrigins = staticOriginsFor(config);

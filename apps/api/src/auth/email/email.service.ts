@@ -1,5 +1,6 @@
 import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { maskEmail } from "../../common/redact";
 
 const BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email";
 const SEND_TIMEOUT_MS = 10_000;
@@ -29,7 +30,7 @@ export class EmailService {
       if (this.config.get<string>("NODE_ENV", "development") === "production") {
         throw new ServiceUnavailableException("Email sign-in is not available right now — please try again later.");
       }
-      this.logger.log(`email OTP for ${to} (dev fallback, Brevo not configured)`);
+      this.logger.log(`email OTP for ${maskEmail(to)} (dev fallback, Brevo not configured)`);
       return;
     }
 

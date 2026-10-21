@@ -29,8 +29,20 @@ describe("JwtAuthGuard read-scope", () => {
     expect(u).toMatchObject({ pid: "a@pid" });
   });
 
-  it("allows writes for unscoped machine tokens (legacy back-compat, logged)", () => {
-    const u = guard.handleRequest(null, { pid: "a@pid", app: "pidapp_x" }, null, ctx("POST", "/v1/fiat/transfers/x/confirm"));
+  it("rejects unscoped legacy machine tokens on transfers (ANT-344 H3: migration complete)", () => {
+    expect(() =>
+      guard.handleRequest(null, { pid: "a@pid", app: "pidapp_x" }, null, ctx("POST", "/v1/fiat/transfers/x/confirm")),
+    ).toThrow(ForbiddenException);
+    expect(() =>
+      guard.handleRequest(null, { pid: "a@pid", app: "pidapp_x" }, null, ctx("POST", "/v1/fiat/transfers/inquiry")),
+    ).toThrow(ForbiddenException);
+    expect(() =>
+      guard.handleRequest(null, { pid: "a@pid", app: "pidapp_x" }, null, ctx("POST", "/v1/fiat/transfers/x/cancel")),
+    ).toThrow(ForbiddenException);
+  });
+
+  it("still allows unscoped machine tokens on reads (no transfer power needed)", () => {
+    const u = guard.handleRequest(null, { pid: "a@pid", app: "pidapp_x" }, null, ctx("GET", "/v1/fiat/balance"));
     expect(u).toMatchObject({ pid: "a@pid" });
   });
 

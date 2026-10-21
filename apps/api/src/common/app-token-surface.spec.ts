@@ -64,7 +64,9 @@ const WRITE_METHODS = new Set([RequestMethod.POST, RequestMethod.PUT, RequestMet
  * silently. Fiat transfers are the documented escrow-release path
  * (docs/FIAT_LEDGER.md "Machine auth"); fiat money-in moves no funds out;
  * validators are stateless (no DB writes); deposit sync is the Tobias-blessed
- * corroboration path (ANT-239).
+ * corroboration path (ANT-239). ANT-344 H3 removed
+ * SessionKeysController.validateGrant from this list — it now carries
+ * UserTokenGuard, so a leaked app secret cannot mint owner passkey challenges.
  */
 const ALLOWLIST: Record<string, string> = {
   "FiatLedgerController.inquiry": "documented escrow-release path (owner pid spends own funds; 1h TTL bounds theft)",
@@ -73,7 +75,6 @@ const ALLOWLIST: Record<string, string> = {
   "FiatController.quoteDeposit": "money-in quote only; moves no funds",
   "FiatController.checkoutDeposit": "money-in initiation (creates DOKU invoice); moves no funds out",
   "FiatController.syncDeposit": "Tobias-blessed corroboration of caller's own pending deposit; moves no other funds",
-  "SessionKeysController.validateGrant": "stateless validation; no DB writes",
   "PermissionsController.validateGrant": "stateless validation; no DB writes",
 };
 
@@ -107,4 +108,34 @@ describe("app-token write surface (ANT-233 F1)", () => {
       void id;
     }
   });
+});
+
+describe("user-only reads (ANT-344 H3)", () => {
+  /**
+   * Owner-data reads + the session-grant oracle must reject machine tokens:
+   * a leaked pidsk_* inherits the owner's pid, so any app-readable owner
+   * route is a BOLA/confused-deputy path. Removing UserTokenGuard from one of
+   * these routes fails this test until the route is re-guarded or the removal
+   * is justified here with a SecurityEngineer sign-off.
+   */
+  const USER_ONLY_READS: Array<{ controller: object; method: string }> = [
+    { controller: AuthController.prototype, method: "grants" },
+    { controller: AuthController.prototype, method: "sessions" },
+    { controller: PidAppsController.prototype, method: "list" },
+    { controller: PidAppsController.prototype, method: "get" },
+    { controller: PidAppsController.prototype, method: "listFees" },
+    { controller: SessionKeysController.prototype, method: "validateGrant" },
+  ];
+
+  it.each(USER_ONLY_READS.map((r) => [(r.controller as object).constructor.name + "." + r.method, r] as const))(
+    "%s carries UserTokenGuard",
+    (_id, { controller, method }) => {
+      const ctor = (controller as object).constructor;
+      const classGuards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, ctor) ?? [];
+      const handler = (controller as Record<string, object>)[method];
+      const guards: unknown[] = [...classGuards, ...(Reflect.getMetadata(GUARDS_METADATA, handler) ?? [])];
+      expect(guards).toContain(JwtAuthGuard);
+      expect(guards).toContain(UserTokenGuard);
+    },
+  );
 });

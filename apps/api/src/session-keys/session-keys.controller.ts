@@ -3,6 +3,7 @@ import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { RegisterSessionDto } from "./dto/session-key.dto";
 import { SessionKeysService, ValidatedSessionGrant } from "./session-keys.service";
 
@@ -25,7 +26,9 @@ export class SessionKeysController {
   /**
    * Validate a session grant and return the canonical session address +
    * owner challenge (what the passkey signs). Authenticated: the caller proves
-   * pid ownership. BOLA (ANT-285(d)): `dto.accountId` MUST equal sha256(caller
+   * pid ownership. User-session-only (ANT-344 H3): `UserTokenGuard` rejects
+   * machine tokens, so a leaked app secret cannot mint owner passkey
+   * challenges. BOLA (ANT-285(d)): `dto.accountId` MUST equal sha256(caller
    * pid) — a caller cannot mint challenges for another identity's account.
    * The signed payload lands on-chain via the client, where `register_session`
    * enforces vault/authority binding; this inline check closes the
@@ -34,7 +37,7 @@ export class SessionKeysController {
   @Post("grants/validate")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   validateGrant(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: RegisterSessionDto,

@@ -228,6 +228,42 @@ describe("FiatLedgerService transfers", () => {
     );
   });
 
+  it("rejects machine tokens without fiat:transfer scope on money paths (ANT-344 H3)", async () => {
+    const { service, prisma } = setup();
+    prisma.identity.findUnique.mockResolvedValue({ pid: "rani@pid" });
+    // Unscoped legacy app token: fail closed before any DB write.
+    await expect(
+      service.transferInquiry(
+        "dev@pid",
+        { amountIdr: "500000", beneficiaryPid: "rani@pid" },
+        "pidapp_x",
+        { app: "pidapp_x" },
+      ),
+    ).rejects.toThrow("Machine token scope not authorized for transfers");
+    // Wrong scope: also fail closed.
+    await expect(
+      service.transferConfirm("dev@pid", "intent1", { app: "pidapp_x", scope: "read" }),
+    ).rejects.toThrow("Machine token scope not authorized for transfers");
+    expect(prisma.fiatLedgerEntry.create).not.toHaveBeenCalled();
+    expect(prisma.fiatLedgerEntry.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("allows machine tokens with fiat:transfer scope on money paths (ANT-344 H3)", async () => {
+    const { service, prisma } = setup();
+    prisma.identity.findUnique.mockResolvedValueOnce({ pid: "rani@pid" });
+    const inq = await service.transferInquiry(
+      "dev@pid",
+      { amountIdr: "500000", beneficiaryPid: "rani@pid" },
+      "pidapp_x",
+      { app: "pidapp_x", scope: "fiat:transfer" },
+    );
+    expect(inq.grossIdr).toBe("500000");
+    // User sessions (no app claim) are unaffected by the scope gate.
+    prisma.identity.findUnique.mockResolvedValueOnce({ pid: "rani@pid" });
+    const inq2 = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "rani@pid" });
+    expect(inq2.grossIdr).toBe("500000");
+  });
+
   it("rejects confirm on insufficient balance without posting", async () => {
     const { service, prisma, created } = setup();
     prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({

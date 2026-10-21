@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import {
@@ -419,12 +419,24 @@ export class FiatLedgerService {
    * NO allowlist is enforced here (see the class doc: Phase-1 escrow-only
    * is a stated policy with no check; user→user sends succeed today).
    */
+  /**
+   * ANT-344 H3 defense in depth: money paths reject machine tokens without
+   * the explicit `fiat:transfer` scope even if a route guard is bypassed or
+   * miswired. User sessions (no `app` claim) are unaffected.
+   */
+  private requireTransferScope(auth?: { app?: string; scope?: string }): void {
+    if (auth?.app && auth.scope !== "fiat:transfer") {
+      throw new ForbiddenException("Machine token scope not authorized for transfers");
+    }
+  }
+
   async transferInquiry(
     pid: string,
     input: { amountIdr: string; beneficiaryPid: string; remark?: string; operation?: FeeOperation },
     appClientId?: string | null,
     auth?: { app?: string; scope?: string },
   ) {
+    this.requireTransferScope(auth);
     this.requireUsable();
     const gross = this.parseAmount(input.amountIdr);
     const beneficiaryPid = input.beneficiaryPid.trim().toLowerCase();
@@ -475,6 +487,7 @@ export class FiatLedgerService {
    * no double-spend.
    */
   async transferConfirm(pid: string, id: string, auth?: { app?: string; scope?: string }): Promise<FiatLedgerEntryView> {
+    this.requireTransferScope(auth);
     this.requireUsable();
     const intent = await this.prisma.fiatLedgerEntry.findFirst({ where: { id, pid } });
     if (!intent) throw new NotFoundException("Transfer not found");
@@ -501,7 +514,9 @@ export class FiatLedgerService {
         // Close the cancel-vs-confirm race: cancelIntent takes the same
         // identity lock, so this status read is serialized against cancel.
         // A cancelled (or otherwise closed) intent must never post legs.
-        const fresh = await tx.fiatLedgerEntry.findFirst({ where: { id: intent.id } });
+        // ANT-344 L1: re-read stays pid-scoped — a row id alone must never
+        // resolve another identity's intent inside the txn.
+        const fresh = await tx.fiatLedgerEntry.findFirst({ where: { id: intent.id, pid } });
         if (!fresh || fresh.status !== "created") {
           throw new BadRequestException("Transfer is closed — start a new inquiry");
         }
@@ -615,7 +630,8 @@ export class FiatLedgerService {
         where: { id: row.id, status: "created" },
         data: { status: "cancelled" },
       });
-      const final = await tx.fiatLedgerEntry.findFirst({ where: { id: row.id } });
+      // ANT-344 L1: re-read stays pid-scoped (same rationale as confirm).
+      const final = await tx.fiatLedgerEntry.findFirst({ where: { id: row.id, pid } });
       if (!final) throw new NotFoundException("Transfer not found");
       return this.toTxView(final as never);
     });
@@ -659,7 +675,9 @@ export class FiatLedgerService {
     }
     for (const pid of [fromPid, toPid]) {
       const ident = await this.prisma.identity.findUnique({ where: { pid } }).catch(() => null);
-      if (!ident) throw new NotFoundException(`Identity not found: ${pid}`);
+      // ANT-344 L9: never echo the queried identifier in a client-visible
+      // error — the admin caller already knows the input they sent.
+      if (!ident) throw new NotFoundException("Identity not found");
     }
     // Deterministic keys when the caller supplies requestId; random per-POST
     // otherwise (legacy behavior, documented above).
