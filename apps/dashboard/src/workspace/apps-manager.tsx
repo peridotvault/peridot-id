@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import type { PidApp } from "./app-types";
 import { unwrap } from "./api";
-import { Card, ERROR, FIELD, MUTED } from "./ui";
+import { Card, ERROR, FIELD, MUTED, MiniButton } from "./ui";
 import { PageHeader } from "./page-header";
 import { CutButton } from "./cut-button";
 
@@ -23,6 +23,15 @@ export function AppsManager({ client }: { client: PeridotClient }) {
   }, [client]);
 
   useEffect(() => {
+    load()
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load apps"))
+      .finally(() => setLoading(false));
+  }, [load]);
+
+  // Inline retry next to the error: without this the only recovery is a full
+  // page reload (header refresh). Same load path as the initial fetch.
+  const retry = useCallback(() => {
+    setLoading(true);
     load()
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load apps"))
       .finally(() => setLoading(false));
@@ -53,9 +62,16 @@ export function AppsManager({ client }: { client: PeridotClient }) {
         title="Apps"
         description="Open an app to manage its origins, backend secret, fees, and balance."
       />
-      {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
+      {error && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p className={`text-sm ${ERROR}`}>{error}</p>
+          <MiniButton size="sm" onClick={retry}>
+            Retry
+          </MiniButton>
+        </div>
+      )}
       {loading ? (
-        <p className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
+        <p role="status" className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
       ) : (
         <div className="mt-4 flex flex-col gap-2">
           {apps.map((app) => (
@@ -66,9 +82,14 @@ export function AppsManager({ client }: { client: PeridotClient }) {
             >
               <span className="font-semibold tracking-tight">
                 {app.name}{" "}
-                {app.isVerified && <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">✓</span>}
+                {app.isVerified && (
+                  <>
+                    <span aria-hidden="true" className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">✓</span>
+                    <span className="sr-only">Verified</span>
+                  </>
+                )}
               </span>
-              <span className={`text-xs ${MUTED}`}>{app.isActive ? "Active" : "Disabled"} →</span>
+              <span className={`text-xs ${MUTED}`}>{app.isActive ? "Active" : "Disabled"} <span aria-hidden="true">→</span></span>
             </Link>
           ))}
           {apps.length === 0 && !error && (

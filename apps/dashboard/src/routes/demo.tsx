@@ -93,7 +93,7 @@ export default function DemoPage() {
     });
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-5 py-16 sm:px-8">
+    <main id="main-content" className="mx-auto w-full max-w-3xl px-5 py-16 sm:px-8">
       <PageHeader eyebrow="Sample dapp" title="Third-party demo" />
       <p className={`mt-2 text-sm ${MUTED}`}>
         Behaves like an external app: no session, no signer — approvals open the PeridotID popup.

@@ -1,12 +1,14 @@
 services:
   postgres:
-    image: postgres:16
+    # ANT-347 LOW-1: digest-pinned for immutable builds.
+    image: postgres:16@sha256:a902560563d3a5661228585f53474c5065e7f273b21ffd77e555a8b5682c5690
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: peridot_id
     ports:
-      - "5432:5432"
+      # ANT-347 LOW-3: localhost-only; dev DB must never bind the LAN.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 

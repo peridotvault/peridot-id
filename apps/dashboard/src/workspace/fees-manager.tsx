@@ -165,7 +165,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
   if (loading) {
     return (
       <section className="mt-8">
-        <p className={`text-sm ${MUTED}`}>Loading…</p>
+        <p role="status" className={`text-sm ${MUTED}`}>Loading…</p>
       </section>
     );
   }
@@ -177,7 +177,14 @@ export function FeesManager({ client }: { client: PeridotClient }) {
         title="Fees"
         description="The PeridotID platform fee and the DOKU payment-gateway fees and PPN charged on top-ups."
       />
-      {error && <p className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
+      {error && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <p className={`text-sm ${ERROR}`}>{error}</p>
+          <MiniButton size="sm" onClick={() => void load()}>
+            Retry
+          </MiniButton>
+        </div>
+      )}
       {msg && <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{msg}</p>}
 
       <div className="mt-6 flex w-fit gap-1 rounded-md border border-border bg-muted p-1" role="tablist" aria-label="Fee settings">

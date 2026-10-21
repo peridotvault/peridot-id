@@ -52,7 +52,7 @@ export function fmtAmount(t: WalletTransaction): string {
   if (t.amount == null) return "";
   const asset = t.asset === "SOL" ? "SOL" : t.asset;
   const value = Number(t.amount) / (t.asset === "SOL" ? LAMPORTS_PER_SOL : 1e6);
-  const sign = t.direction === "in" ? "+" : t.direction === "out" ? "−" : "";
+  const sign = t.direction === "in" ? "+" : t.direction === "out" ? "-" : "";
   return `${sign}${value.toLocaleString("en-US", { maximumFractionDigits: 4 })} ${asset}`;
 }
 

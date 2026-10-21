@@ -97,8 +97,8 @@ export function ProfileScreen({
           {profile?.avatarUrl ? (
             <Image source={{ uri: profile.avatarUrl }} className="h-[34px] w-[34px] rounded-full border border-border" />
           ) : (
-            <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
-              <Text className="font-serif text-[15px] text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
+            <View className="h-[34px] w-[34px] items-center justify-center rounded-full bg-muted" aria-label="No profile photo">
+              <Text aria-hidden="true" className="font-serif text-[15px] text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
             </View>
           )}
           <Text className="flex-1 font-sans text-[15px] font-medium text-foreground">Edit Profile</Text>

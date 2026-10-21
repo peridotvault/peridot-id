@@ -115,9 +115,10 @@ function ProfileAvatar({ uri, initial, active }: { uri: string | null; initial: 
       />
     );
   }
+  // Initial fallback: decorative letter — the tab already announces "Profile".
   return (
-    <View className="h-6 w-6 items-center justify-center rounded-full bg-muted">
-      <Text className="font-serif text-xs text-foreground">{initial}</Text>
+    <View className="h-6 w-6 items-center justify-center rounded-full bg-muted" aria-label="No profile photo">
+      <Text aria-hidden="true" className="font-serif text-xs text-foreground">{initial}</Text>
     </View>
   );
 }

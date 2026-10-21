@@ -62,7 +62,7 @@ export function PidClaimForm({
             />
             <Text pointerEvents="none" className="absolute right-3 font-sans text-[15px] text-muted-foreground">@pid</Text>
           </View>
-          {handleStatus === "free" && <Text className="font-sans text-xs text-success">✓ {handle.trim().toLowerCase()}@pid is available</Text>}
+          {handleStatus === "free" && <Text className="font-sans text-xs text-success"><Text aria-hidden="true">✓ </Text>{handle.trim().toLowerCase()}@pid is available</Text>}
           {handleStatus === "taken" && <Text style={s.error}>Taken — try another handle.</Text>}
           {handleStatus === "invalid" && handle.length > 0 && (
             <Text style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</Text>
@@ -76,7 +76,7 @@ export function PidClaimForm({
             accessibilityState={{ checked: ackPermanent }}
           >
             <View className={`h-[22px] w-[22px] items-center justify-center border ${ackPermanent ? "border-foreground" : "border-muted-foreground"}`}>
-              {ackPermanent && <Text className="font-sans text-sm text-foreground">✓</Text>}
+              {ackPermanent && <Text aria-hidden="true" className="font-sans text-sm text-foreground">✓</Text>}
             </View>
             <Text className="flex-1 font-sans text-xs text-muted-foreground">
               Your PID is permanent — it can never be changed, reused, or reassigned. Choose carefully.

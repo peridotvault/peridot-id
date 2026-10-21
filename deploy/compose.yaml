@@ -44,6 +44,10 @@ services:
     image: peridot-id-api${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
     logging: *default-logging
+    # ANT-347 LOW-4: bound memory + drop all caps (least privilege).
+    mem_limit: 768m
+    mem_reservation: 384m
+    cap_drop: [ALL]
     networks: [proxy]
     expose: ["3301"]
     environment:
@@ -149,6 +153,10 @@ services:
     image: peridot-id-app${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
     logging: *default-logging
+    # ANT-347 LOW-4: bound memory + drop all caps (least privilege).
+    mem_limit: 256m
+    mem_reservation: 128m
+    cap_drop: [ALL]
     networks: [proxy]
     expose: ["3000"]
     healthcheck:
@@ -200,6 +208,11 @@ services:
         VITE_OTHER_WORKSPACE_URL: ${DASHBOARD_OTHER_WORKSPACE_URL:-}
     image: peridot-id-dashboard${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
+    logging: *default-logging
+    # ANT-347 LOW-4: bound memory + drop all caps (least privilege).
+    mem_limit: 256m
+    mem_reservation: 128m
+    cap_drop: [ALL]
     networks: [proxy]
     expose: ["3001"]
     healthcheck:
