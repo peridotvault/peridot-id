@@ -119,11 +119,11 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   };
 
   const rotateSecret = async () => {
-    if (!window.confirm("Generate a new backend secret? The current one stops working immediately.")) return;
+    if (!window.confirm("Generate a new backend secret? The previous secret keeps working for 24h (grace window) while you roll out the new one.")) return;
     setBusy(true);
     setError(null);
     try {
-      const res = unwrap(await client.post<{ secret: string; prefix: string }>(`/v1/apps/${appId}/secret`, {}), "Secret rotation");
+      const res = unwrap(await client.post<{ secret: string; prefix: string; graceExpiresAt: string | null }>(`/v1/apps/${appId}/secret`, {}), "Secret rotation");
       setRevealed(res.secret);
       await load();
     } catch {
