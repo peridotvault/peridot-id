@@ -1,11 +1,10 @@
-import { ValidationPipe } from "@nestjs/common";
+import { Logger, ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import { Logger } from "@nestjs/common";
 import { AppModule } from "./app.module";
 import { APP_ORIGINS_TTL_MS, isOriginAllowed, staticOriginsFor } from "./common/cors";
 import { PrismaService } from "./prisma/prisma.service";
