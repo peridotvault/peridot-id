@@ -14,7 +14,7 @@ export function LedgerRow({ item, onSelect }: { item: FiatLedgerItem; onSelect: 
   const tone = !posted ? "text-muted-foreground" : incoming ? "text-success" : "text-foreground";
   const amount = tx.amountIdr;
   // Only posted money gets a sign: pending/failed/cancelled moved nothing.
-  const sign = posted ? (incoming ? "+" : "−") : "";
+  const sign = posted ? (incoming ? "+" : "-") : "";
   return (
     <TouchableOpacity key={tx.id} style={s.card} onPress={() => onSelect(item)}>
       <View style={{ flexDirection: "row" }} className="items-center gap-3">

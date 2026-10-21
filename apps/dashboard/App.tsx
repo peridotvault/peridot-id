@@ -20,6 +20,12 @@ export default function App() {
   return (
     <BrowserRouter>
       <WorkspaceProvider>
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-foreground focus:px-3 focus:py-2 focus:text-sm focus:text-background"
+        >
+          Skip to content
+        </a>
         <WorkspaceTopbar />
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -40,7 +46,7 @@ export default function App() {
 
 function NotFound() {
   return (
-    <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+    <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
       <p className="mt-8 text-sm text-muted-foreground">
         Not found. <a href="/" className="underline">Back to dashboard</a>
       </p>

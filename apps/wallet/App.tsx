@@ -227,6 +227,12 @@ export default function App() {
 
   return (
     <AppContext.Provider value={{ peridot }}>
+      <a
+        href="#wallet-main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-foreground focus:px-3 focus:py-2 focus:text-sm focus:text-background"
+      >
+        Skip to content
+      </a>
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.colors.background }]}>
           {popupRequest ? (
             session.authed ? (
@@ -268,7 +274,7 @@ export default function App() {
             side={isTabRoot ? <TabBar current={screen} go={goTab} /> : undefined}
             overlay={isTabRoot ? renderOverlay() : undefined}
           >
-            <View key={epoch} style={styles.base}>
+            <View key={epoch} style={styles.base} id="wallet-main">
               {ssoRequest && (
                 <LoginScreen
                   onLoggedIn={loginContext ? () => {} : session.handleLoggedIn}

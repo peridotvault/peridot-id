@@ -52,8 +52,8 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
   return (
     <View style={s.container}>
       <Text style={s.title}>Approve request</Text>
-      {req.phase === "waiting" && <Text style={s.hint}>Waiting for the app…</Text>}
-      {req.phase === "preparing" && <Text style={s.hint}>Loading verified details…</Text>}
+      {req.phase === "waiting" && <Text role="status" style={s.hint}>Waiting for the app…</Text>}
+      {req.phase === "preparing" && <Text role="status" style={s.hint}>Loading verified details…</Text>}
       {req.phase === "redirecting" && <Text style={s.hint}>Opening the payment page…</Text>}
       {req.phase === "done" && <Text style={s.hint}>Done — you can close this window.</Text>}
       {(req.phase === "review" || req.phase === "busy") && (
