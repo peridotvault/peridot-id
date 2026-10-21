@@ -45,6 +45,7 @@ export {
   type FiatLedgerView,
   type FiatTransferInput,
   type FiatTransferInquiryView,
+  type TestCreditView,
 } from "./fiat/fiat-client.js";
 export type { ActivationView, ActivationStatus } from "./wallet/wallet-client.js";
 export { authenticatePasskey, BrowserPasskeySigner, PasskeyHostedRequiredError, registerPasskey } from "@peridotvault/pid-core";
@@ -72,17 +73,48 @@ export { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
 /** Target environment. Auto-detected from `NODE_ENV` (see `detectEnv`). */
 export type PeridotEnv = "production" | "sandbox";
 
-/** API + popup hosts per environment. Chains/RPC come from the API registry, never here. */
+/** API + popup hosts per environment. Chains/RPC come from the API registry, never here.
+ *  Sandbox MVP (FR-4): canonical hosts are `*.peridot.id`. Legacy
+ *  `*.pid.peridotvault.com` hosts keep working for one release with a
+ *  deprecation warning (see `warnOnLegacyHost`) — then they are removed. */
 const PRESETS: Record<PeridotEnv, { baseUrl: string; popupBaseUrl: string }> = {
   production: {
-    baseUrl: "https://api.pid.peridotvault.com",
-    popupBaseUrl: "https://app.pid.peridotvault.com",
+    baseUrl: "https://api.peridot.id",
+    popupBaseUrl: "https://peridot.id",
   },
   sandbox: {
-    baseUrl: "https://api.sandbox.pid.peridotvault.com",
-    popupBaseUrl: "https://app.sandbox.pid.peridotvault.com",
+    baseUrl: "https://sandbox-api.peridot.id",
+    popupBaseUrl: "https://sandbox.peridot.id",
   },
 };
+
+/** Legacy hosts (pre-canonical). Accepted for one release, then removed. */
+export const LEGACY_HOSTS = new Set([
+  "https://api.pid.peridotvault.com",
+  "https://api.sandbox.pid.peridotvault.com",
+  "https://app.pid.peridotvault.com",
+  "https://app.sandbox.pid.peridotvault.com",
+]);
+
+/** Warn once per legacy host so existing builds can migrate before removal. */
+const warnedLegacyHosts = new Set<string>();
+export function warnOnLegacyHost(url: string | undefined): void {
+  if (!url || typeof console === "undefined" || typeof console.warn !== "function") return;
+  let origin = "";
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return;
+  }
+  if (LEGACY_HOSTS.has(origin) && !warnedLegacyHosts.has(origin)) {
+    warnedLegacyHosts.add(origin);
+    console.warn(
+      `[peridot] Deprecated host ${origin} — migrate to the canonical *.peridot.id hosts ` +
+        `(api.peridot.id / sandbox-api.peridot.id, peridot.id / sandbox.peridot.id). ` +
+        `Legacy hosts will be removed after one release.`,
+    );
+  }
+}
 
 /**
  * Explicit `env` wins; otherwise `NODE_ENV === "production"` → production and
@@ -676,6 +708,32 @@ class PeridotClient {
   }
 
   /**
+   * Sandbox MVP (FR-4): startup environment check against GET /v1/env.
+   * Compares the server-derived `env` with the SDK's configured env (from
+   * `Peridot({ env })` or `detectEnv()`). Resolves `ok:true` on match, or
+   * `ok:false` with both sides on mismatch so the caller can warn/abort
+   * before moving money ("never point a sandbox build at prod" footgun).
+   * Returns `ok:true, checked:false` when the endpoint is absent (pre-FR-1
+   * backend) — never throws for a missing route.
+   */
+  async checkEnv(expectedEnv?: PeridotEnv): Promise<
+    | { ok: true; env: string; checked: boolean }
+    | { ok: false; expected: string; actual: string }
+  > {
+    const expected = expectedEnv ?? detectEnv();
+    let actual: string;
+    try {
+      const res = await this.get<{ env: string }>("/v1/env");
+      if (!res.ok) return { ok: true, env: expected, checked: false };
+      actual = (res.data as { env: string }).env;
+    } catch {
+      return { ok: true, env: expected, checked: false };
+    }
+    if (actual !== expected) return { ok: false, expected, actual };
+    return { ok: true, env: actual, checked: true };
+  }
+
+  /**
    * Run one trust-critical action inside the PeridotID popup (handshake flow).
    * Pass `expectedPid` (the dapp's connected pid) so the popup approves as
    * that exact account: it auto-switches when the pid is signed in this
@@ -721,6 +779,8 @@ export function Peridot(options: PeridotOptions = {}): PeridotClient {
   // Caller-supplied baseUrl means "I know where the API is" (self-host/localhost) —
   // then the popup host is theirs to pass too; otherwise the env preset fills both.
   const popupBaseUrl = options.popupBaseUrl ?? (options.baseUrl ? undefined : preset.popupBaseUrl);
+  warnOnLegacyHost(options.baseUrl);
+  warnOnLegacyHost(options.popupBaseUrl);
   return new PeridotClient(
     options.baseUrl ?? preset.baseUrl,
     {

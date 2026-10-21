@@ -10,7 +10,12 @@ All endpoints are prefixed with `/v1`.
 | Environment | Base URL |
 |---|---|
 | Production | `https://api.peridot.id/v1` (canonical; `https://api.pid.peridotvault.com/v1` still serves — dual-serve) |
+| Sandbox | `https://sandbox-api.peridot.id/v1` (canonical; `https://api.sandbox.pid.peridotvault.com/v1` still serves — dual-serve). Separate deployment, not a path prefix — verify with `GET /v1/env`. |
 | Local development | `http://localhost:3301/v1` |
+
+Sandbox has a **faucet** for instant test money (`POST /v1/fiat/test-credit`,
+caps Rp50.000/call, Rp100.000/day) and a manual
+[promote-to-production checklist](/environments#promote-to-production-manual-checklist-for-mvp).
 
 ## Versioning
 

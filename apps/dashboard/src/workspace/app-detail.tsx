@@ -7,6 +7,25 @@ import { unwrap } from "./api";
 import type { AppFee, PidApp } from "./app-types";
 import { Card, DIVIDER, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "./ui";
 
+/** Sandbox MVP faucet (FR-3): visibility driven ONLY by GET /v1/env
+ *  (server-derived), never by a client env var. Contract shapes from
+ *  ANT-287 §3 FR-2 — implemented against the live endpoint; before the
+ *  Backend child lands this 404s and the card stays hidden/empty. */
+interface EnvInfo {
+  env: string;
+  dokuMode: string;
+  docs: string;
+}
+
+interface TestCreditView {
+  ok: boolean;
+  creditId: string;
+  amountMinor: number;
+  currency: string;
+  env: string;
+  dailyRemainingMinor: number;
+}
+
 const OPS: { key: string; label: string; hint: string }[] = [
   { key: "topup", label: "Top-up", hint: "Charged when a user funds through this app." },
   { key: "transaction", label: "Transaction", hint: "Charged on sends initiated through this app." },
@@ -57,6 +76,12 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   const [name, setName] = useState("");
   const [newOrigin, setNewOrigin] = useState("");
   const [revealed, setRevealed] = useState<string | null>(null);
+  // Sandbox faucet state — env comes from GET /v1/env only (never a client var).
+  const [envInfo, setEnvInfo] = useState<EnvInfo | null>(null);
+  const [faucetAmount, setFaucetAmount] = useState("50000");
+  const [faucetBusy, setFaucetBusy] = useState(false);
+  const [faucetError, setFaucetError] = useState<string | null>(null);
+  const [dailyRemaining, setDailyRemaining] = useState<number | null>(null);
 
   const flash = (m: string) => {
     setMsg(m);
@@ -78,6 +103,14 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         setBalance(bal.balanceIdr);
       } catch {
         setBalance(null);
+      }
+      // Sandbox affordance: server-derived env only. Production (or a backend
+      // without FR-1 yet) leaves envInfo null → no faucet card.
+      try {
+        const env = unwrap(await client.get<EnvInfo>("/v1/env"), "Env");
+        setEnvInfo(env);
+      } catch {
+        setEnvInfo(null);
       }
     } catch (e) {
       const m = e instanceof Error ? e.message : "Failed to load app";
@@ -161,6 +194,35 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
     }
   };
 
+  /** Sandbox faucet: instant test credit (FR-2 contract). Server-gated —
+   *  production returns 404 (route absent) and the card is never shown there. */
+  const requestFaucet = async () => {
+    const amountMinor = Number(faucetAmount.replace(/\D/g, "")) || 0;
+    if (amountMinor <= 0) {
+      setFaucetError("Enter an amount greater than 0.");
+      return;
+    }
+    setFaucetBusy(true);
+    setFaucetError(null);
+    try {
+      const res = unwrap(
+        await client.post<TestCreditView>("/v1/fiat/test-credit", { amountMinor }),
+        "Faucet request",
+      );
+      setDailyRemaining(res.dailyRemainingMinor);
+      flash(`Test credit +${fmtIdr(String(res.amountMinor))} (${res.creditId}).`);
+      await load();
+    } catch (e) {
+      const m = e instanceof Error ? e.message : "Faucet request failed.";
+      // Production oracle-safety: 404 means route absent (expected on prod).
+      setFaucetError(/404|not found/i.test(m) ? "Faucet is not available in this environment." : m);
+    } finally {
+      setFaucetBusy(false);
+    }
+  };
+
+  const isSandboxEnv = envInfo?.env === "sandbox";
+
   if (loading) {
     return (
       <section className="mt-8">
@@ -231,6 +293,44 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           <p className="mt-2 text-2xl font-semibold">{balance === null ? "—" : fmtIdr(balance)}</p>
           <p className={`mt-1 text-xs ${MUTED}`}>The app account&apos;s spendable fiat-ledger balance.</p>
         </Card>
+
+        {isSandboxEnv && (
+          <Card>
+            <p className={SECTION_LABEL}>Sandbox faucet — test credit</p>
+            <p className={`mt-1 text-xs ${MUTED}`}>
+              Instant test money for this sandbox workspace. No DOKU checkout, no real funds.
+              {dailyRemaining !== null
+                ? ` ${fmtIdr(String(dailyRemaining))} remaining today.`
+                : " Daily cap Rp100.000 per identity."}
+            </p>
+            {faucetError && <p className={`mt-2 text-xs ${ERROR}`}>{faucetError}</p>}
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <label htmlFor="faucet-amount" className="sr-only">
+                Faucet amount in IDR
+              </label>
+              <input
+                id="faucet-amount"
+                value={faucetAmount}
+                onChange={(e) => setFaucetAmount(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void requestFaucet();
+                }}
+                inputMode="numeric"
+                placeholder="50000"
+                className={`${FIELD} font-mono text-xs`}
+              />
+              <MiniButton
+                variant="solid"
+                size="sm"
+                onClick={() => void requestFaucet()}
+                disabled={faucetBusy}
+                className="self-start sm:self-end"
+              >
+                {faucetBusy ? "Minting…" : "Get test credit"}
+              </MiniButton>
+            </div>
+          </Card>
+        )}
 
         <Card>
           <p className={SECTION_LABEL}>Allowed origins</p>
