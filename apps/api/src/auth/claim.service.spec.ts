@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, GoneException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { ClaimService } from "./claim.service";
 
 const PROFILE = { id: "google-1", displayName: "New User", emails: [{ value: "new@example.com", verified: true }], photos: [{ value: "http://pic" }] };
@@ -13,12 +14,16 @@ function setup() {
     identity: {
       create: jest.fn(async (args: { data: { pid: string } }) => ({ ...args.data, status: "active" })),
       findUnique: jest.fn(async () => null),
+      findFirst: jest.fn(async () => null),
     },
     profile: { create: jest.fn(async (args: { data: unknown }) => args.data) },
     identityCredential: {
       findUnique: jest.fn(async () => null),
       findFirst: jest.fn(async () => null),
       create: jest.fn(async (args: { data: unknown }) => args.data),
+    },
+    bootstrapAdminLock: {
+      create: jest.fn(async (args: { data: { id: string; pid: string } }) => args.data),
     },
   };
   prisma.$transaction = jest.fn(async (fn: (tx: unknown) => unknown) => fn(prisma));
@@ -103,12 +108,24 @@ describe("ClaimService", () => {
     expect(security.log).toHaveBeenCalledWith("ifal@pid", "identity.claimed", { provider: "google" }, prisma);
   });
 
-  it("grants admin to a bootstrap PID from env", async () => {
+  it("grants admin to a bootstrap PID only when no admin exists yet (one-time)", async () => {
     const { service, prisma, config } = setup();
     config.get = (_k: string, d?: string) => (_k === "PID_BOOTSTRAP_ADMIN_PID" ? "ifal@pid, ops@pid" : (d ?? ""));
     prisma.claimTicket.findUnique.mockResolvedValue(liveTicket());
+    prisma.identity.findFirst.mockResolvedValue(null);
     await service.claim("ct_x", "IFAL");
     expect(prisma.identity.create).toHaveBeenCalledWith({ data: { pid: "ifal@pid", status: "active", role: "admin" } });
+  });
+
+  it("never escalates a bootstrap PID once an admin exists (re-login safe)", async () => {
+    const { service, prisma, config } = setup();
+    config.get = (_k: string, d?: string) => (_k === "PID_BOOTSTRAP_ADMIN_PID" ? "ifal@pid, ops@pid" : (d ?? ""));
+    prisma.claimTicket.findUnique.mockResolvedValue(liveTicket());
+    // An admin already exists (e.g. from the earlier bootstrap) — the same
+    // bootstrap PID claiming again (or re-logging in) stays a plain user.
+    prisma.identity.findFirst.mockResolvedValue({ pid: "ops@pid" });
+    await service.claim("ct_x", "IFAL");
+    expect(prisma.identity.create).toHaveBeenCalledWith({ data: { pid: "ifal@pid", status: "active", role: "user" } });
   });
 
   it("rejects an invalid handle", async () => {
@@ -135,7 +152,7 @@ describe("ClaimService", () => {
     await expect(service.claim("ct_x", "ifal")).rejects.toThrow("sign in again");
   });
 
-  it("rejects an already-linked credential or email", async () => {
+  it("rejects an already-linked credential or email (case-insensitive)", async () => {
     const { service, prisma } = setup();
     prisma.claimTicket.findUnique.mockResolvedValue(liveTicket());
     prisma.identityCredential.findUnique.mockResolvedValue({ id: "cred" });
@@ -144,6 +161,23 @@ describe("ClaimService", () => {
     prisma.identityCredential.findUnique.mockResolvedValue(null);
     prisma.identityCredential.findFirst.mockResolvedValue({ id: "cred-other" });
     await expect(service.claim("ct_x", "ifal")).rejects.toThrow("Email is already linked");
+    // Same guard as findIdentityByEmail: case-variant emails 409, never slip
+    // through to the global email index.
+    expect(prisma.identityCredential.findFirst).toHaveBeenCalledWith({
+      where: { email: { equals: "new@example.com", mode: "insensitive" } },
+      select: { id: true },
+    });
+  });
+
+  it("rejects a case-variant email owned by another account", async () => {
+    const { service, prisma } = setup();
+    prisma.claimTicket.findUnique.mockResolvedValue(liveTicket({ email: "NEW@Example.COM" }));
+    prisma.identityCredential.findFirst.mockResolvedValue({ id: "cred-other" });
+    await expect(service.claim("ct_x", "ifal")).rejects.toThrow("Email is already linked");
+    expect(prisma.identityCredential.findFirst).toHaveBeenCalledWith({
+      where: { email: { equals: "NEW@Example.COM", mode: "insensitive" } },
+      select: { id: true },
+    });
   });
 
   it("carries the SSO targets through to the caller", async () => {
@@ -154,6 +188,28 @@ describe("ClaimService", () => {
 
     const res = await service.claim("ct_x", "ifal");
     expect(res).toMatchObject({ pid: "ifal@pid", redirectTo: "https://live2dev.com/auth/callback", clientId: "pidapp_abc" });
+  });
+
+  it("maps a concurrent-claim unique violation to 409, never 500 (ANT-233 F3)", async () => {
+    const { service, prisma } = setup();
+    prisma.claimTicket.findUnique.mockResolvedValue(liveTicket());
+    prisma.identityCredential.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "test" }),
+    );
+    await expect(service.claim("ct_x", "ifal")).rejects.toThrow(ConflictException);
+    await expect(service.claim("ct_x", "ifal")).rejects.toThrow("just claimed");
+  });
+
+  it("loses the bootstrap race as a plain user when the lock is taken (ANT-233 F4)", async () => {
+    const { service, prisma, config } = setup();
+    config.get = (_k: string, d?: string) => (_k === "PID_BOOTSTRAP_ADMIN_PID" ? "ifal@pid" : (d ?? ""));
+    prisma.claimTicket.findUnique.mockResolvedValue(liveTicket());
+    prisma.identity.findFirst.mockResolvedValue(null);
+    prisma.bootstrapAdminLock.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "test" }),
+    );
+    await service.claim("ct_x", "IFAL");
+    expect(prisma.identity.create).toHaveBeenCalledWith({ data: { pid: "ifal@pid", status: "active", role: "user" } });
   });
 
   it("abandon consumes a live ticket and ignores the rest", async () => {

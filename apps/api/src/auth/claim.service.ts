@@ -8,6 +8,7 @@ import { BadRequestException, ConflictException, GoneException, Injectable } fro
 import { ConfigService } from "@nestjs/config";
 import { randomBytes } from "node:crypto";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
+import { isP2002 } from "../prisma/prisma-error";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import type { GoogleProfile } from "./auth.service";
@@ -37,6 +38,12 @@ export class ClaimService {
    * `ifal@pid`) are created with the `admin` role when claimed. Env-driven, never
    * hardcoded; an already-existing identity is never changed here (promote via
    * the documented SQL/`admin:promote` instead).
+   *
+   * ONE-TIME (ANT-227 item 2): the bootstrap grant applies only while NO admin
+   * exists yet — the first bootstrap claim creates the first admin, every later
+   * claim (even a bootstrap PID) is a plain user. Re-login can therefore never
+   * escalate. Remove the env var after bootstrap; the API logs a startup
+   * warning while it is set (see main.ts).
    */
   private isBootstrapAdmin(pid: string): boolean {
     const raw = this.config.get<string>("PID_BOOTSTRAP_ADMIN_PID", "") || "";
@@ -118,7 +125,13 @@ export class ClaimService {
     }
     const pid = toPid(normalized);
 
-    return this.prisma.$transaction(async (tx) => {
+    // Unique-race mapping (ANT-233 F3): the pre-checks above run under
+    // read-committed, so two concurrent claims (same pid, same credential,
+    // or case-variant email) can both pass them. The DB's unique indexes
+    // (PK, provider+providerUserId, lower(email)) make exactly one winner;
+    // the loser's P2002 surfaces here as 409, never 500.
+    try {
+      return await this.prisma.$transaction(async (tx) => {
       const ticket = await tx.claimTicket.findUnique({ where: { id: ticketId } });
       if (!ticket || ticket.consumedAt || ticket.expiresAt < new Date()) {
         throw new GoneException("This claim expired — sign in again to get a fresh one.");
@@ -133,11 +146,38 @@ export class ClaimService {
       });
       if (existing) throw new ConflictException("This login is already linked to an account — sign in instead.");
       if (ticket.email) {
-        const emailOwner = await tx.identityCredential.findFirst({ where: { email: ticket.email }, select: { id: true } });
+        // Case-insensitive (ANT-227 item 3): must match findIdentityByEmail or
+        // a case-variant email mints a second identity and breaks the global
+        // email index (409 here instead of a 500 there).
+        const emailOwner = await tx.identityCredential.findFirst({
+          where: { email: { equals: ticket.email, mode: "insensitive" } },
+          select: { id: true },
+        });
         if (emailOwner) throw new ConflictException("Email is already linked to another account");
       }
 
-      await tx.identity.create({ data: { pid, status: "active", role: this.isBootstrapAdmin(pid) ? "admin" : "user" } });
+      // Bootstrap is one-time (ANT-227 item 2): only when no admin exists yet.
+      // After the first admin, bootstrap PIDs claim as plain users — re-login
+      // (or a second claim) can never escalate.
+      // Singleton-lock serialization (ANT-233 F4): the admin check above runs
+      // under read-committed, so two concurrent bootstrap claims can both see
+      // "no admin" and both mint admins. The lock insert admits exactly one
+      // winner per transaction — the loser gets P2002 and claims as a user.
+      let role: "admin" | "user" = "user";
+      if (this.isBootstrapAdmin(pid)) {
+        const adminExists = await tx.identity.findFirst({ where: { role: "admin" }, select: { pid: true } });
+        if (!adminExists) {
+          try {
+            await tx.bootstrapAdminLock.create({ data: { id: "bootstrap-admin", pid } });
+            role = "admin";
+          } catch (err) {
+            if (!isP2002(err)) throw err;
+            role = "user";
+          }
+        }
+      }
+
+      await tx.identity.create({ data: { pid, status: "active", role } });
       await tx.profile.create({
         data: { pid, displayName: ticket.displayName, avatarUrl: ticket.avatarUrl },
       });
@@ -153,6 +193,10 @@ export class ClaimService {
       await tx.claimTicket.update({ where: { id: ticket.id }, data: { consumedAt: new Date() } });
       await this.security.log(pid, "identity.claimed", { provider: ticket.provider }, tx);
       return { pid, redirectTo: ticket.redirectTo, clientId: ticket.clientId ?? undefined, provider: ticket.provider };
-    });
+      });
+    } catch (err) {
+      if (isP2002(err)) throw new ConflictException("This login was just claimed — sign in instead.");
+      throw err;
+    }
   }
 }

@@ -1,11 +1,20 @@
 import {
   APP_TOKEN_TTL,
+  JWT_ACCESS_AUDIENCES,
+  JWT_AUD_APP,
+  JWT_AUD_REFRESH,
+  JWT_AUD_SESSION,
+  JWT_AUD_SSO,
+  JWT_ISSUER,
   PID_ACTIVATION_CONFIRM_ATTEMPTS,
   PID_EVM_POLL_MS,
   PID_FEE_POLICY_VERSION,
+  SSO_EXCHANGE_TOKEN_TTL,
   apiServesHttps,
+  parseTtlMs,
   resolveServiceUrls,
   serviceOrigins,
+  ttlSeconds,
   webauthnRpId,
 } from "./app-config";
 
@@ -79,5 +88,29 @@ describe("service-URL set (ANT-193: one set, everything derived)", () => {
   it("derives cookie-secure from the API protocol unless overridden", () => {
     expect(apiServesHttps(get({ API_URL: "https://api.pid.peridotvault.com" }))).toBe(true);
     expect(apiServesHttps(get({}))).toBe(false);
+  });
+});
+
+describe("TTL guards + JWT claims (ANT-227 items 1, 4, 7)", () => {
+  it("parses valid durations, rejects garbage/zero/negative (never NaN downstream)", () => {
+    expect(parseTtlMs("15m", "t")).toBe(15 * 60 * 1000);
+    expect(parseTtlMs("24h", "t")).toBe(24 * 60 * 60 * 1000);
+    expect(ttlSeconds("24h", "t")).toBe(86400);
+    // ms() returns undefined for garbage (no throw) — the guard must throw.
+    for (const bad of ["garbage", "", "0", "-5m", "0s"]) {
+      expect(() => parseTtlMs(bad, "t")).toThrow("invalid_ttl:t");
+    }
+  });
+
+  it("caps the SSO exchange bearer at 24h", () => {
+    expect(SSO_EXCHANGE_TOKEN_TTL).toBe("24h");
+    expect(ttlSeconds(SSO_EXCHANGE_TOKEN_TTL, "SSO_EXCHANGE_TOKEN_TTL")).toBeLessThanOrEqual(24 * 60 * 60);
+  });
+
+  it("names one issuer and a distinct audience per token class", () => {
+    expect(JWT_ISSUER).toBe("peridot-id");
+    expect(new Set([JWT_AUD_SESSION, JWT_AUD_REFRESH, JWT_AUD_APP, JWT_AUD_SSO]).size).toBe(4);
+    expect([...JWT_ACCESS_AUDIENCES]).toEqual([JWT_AUD_SESSION, JWT_AUD_APP, JWT_AUD_SSO]);
+    expect(JWT_ACCESS_AUDIENCES).not.toContain(JWT_AUD_REFRESH);
   });
 });

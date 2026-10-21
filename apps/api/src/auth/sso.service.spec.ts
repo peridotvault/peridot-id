@@ -3,7 +3,10 @@ import { PidAppsService } from "./apps.service";
 import { mockSecurity } from "../../test/factories";
 
 
-function setup(apps?: { findActive: (clientId: string) => Promise<Record<string, unknown> | null> }) {
+function setup(apps?: {
+  findActive: (clientId: string) => Promise<Record<string, unknown> | null>;
+  clientSecretValid?: (app: never, secret: string) => boolean;
+}) {
   const config = {
     get: jest.fn((key: string, def?: unknown) => {
       const values: Record<string, unknown> = {
@@ -90,8 +93,11 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
       ),
     },
   };
-  const pidApps = apps ?? {
+  const pidApps = {
     findActive: jest.fn(async () => ({ redirectUris: ["https://mygame.dev/callback"] })),
+    // Default mock: public client (no secret set) — always valid.
+    clientSecretValid: jest.fn(() => true),
+    ...apps,
   };
   const service = new SsoService(prisma as never, config as never, security as never, pidApps as never, jwt as never);
   return { service, rows, security };
@@ -129,6 +135,19 @@ describe("SsoService", () => {
     // RP backends need an app-scoped bearer for read APIs; TTL is seconds.
     expect(identity.accessToken).toBe("sso.jwt.token");
     expect(identity.expiresIn).toBeGreaterThan(0);
+  });
+
+  it("mints the exchange bearer with issuer + sso audience and a 24h TTL", async () => {
+    const { service } = setup();
+    const jwt = (service as unknown as { jwt: { signAsync: jest.Mock } }).jwt;
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    const identity = await service.consume(code, "https://live2dev.com/auth/callback");
+    expect(jwt.signAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: "pid_1", type: "access", scope: "read" }),
+      expect.objectContaining({ issuer: "peridot-id", audience: "pid-sso" }),
+    );
+    // 24h cliff (ANT-227 item 7: was 30d).
+    expect(identity.expiresIn).toBe(24 * 60 * 60);
   });
 
   it("rejects reusing the same code (single-use)", async () => {
@@ -277,8 +296,10 @@ describe("SsoService", () => {
     const withSecret = {
       ...DEV_APP,
       clientSecretHash: PidAppsService.hashSecret(secret),
+      clientSecretValid: (app: { clientSecretHash: string }, s: string) =>
+        PidAppsService.secretMatches(s, app.clientSecretHash),
     };
-    const { service } = setup({ findActive: async () => withSecret });
+    const { service } = setup({ findActive: async () => withSecret, clientSecretValid: withSecret.clientSecretValid });
     const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", secret)).resolves.toMatchObject({ pid: "pid_1" });
 
@@ -307,5 +328,19 @@ describe("SsoService", () => {
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc")).resolves.toMatchObject({
       pid: "pid_1",
     });
+  });
+
+  it("rejects an expired app secret at exchange (uniform error, code unconsumed)", async () => {
+    const expired = {
+      ...DEV_APP,
+      clientSecretHash: "abcdef",
+      clientSecretExpiresAt: new Date(Date.now() - 1000),
+      clientSecretValid: () => false,
+    };
+    const { service } = setup({ findActive: async () => expired, clientSecretValid: expired.clientSecretValid });
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
+    // Failed attempts don't consume the code.
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
   });
 });

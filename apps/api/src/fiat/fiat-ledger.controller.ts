@@ -32,7 +32,16 @@ export class FiatLedgerController {
     return this.ledger.journal(user.pid);
   }
 
-  /** Send step 1: inquiry only (moves no money). Phase-1 policy enforced. */
+  /**
+   * Send step 1: inquiry only (moves no money). Phase-1 policy enforced.
+   *
+   * INTENTIONAL app-token allowlist (ANT-233 F1-finding-1, decided explicitly):
+   * app backends initiate escrow releases through these routes — see
+   * docs/FIAT_LEDGER.md "Machine auth". The token is bound to the app owner's
+   * pid and spends only that owner's funds; stolen-secret blast radius is
+   * bounded by the 1h APP_TOKEN_TTL + (post-ANT-227) secret expiry. On-chain
+   * wallet writes stay user-session-only (UserTokenGuard).
+   */
   @Post("transfers/inquiry")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })

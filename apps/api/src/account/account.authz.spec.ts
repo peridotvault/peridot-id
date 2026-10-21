@@ -6,6 +6,7 @@ import { ThrottlerModule, ThrottlerStorage } from "@nestjs/throttler";
 import cookieParser from "cookie-parser";
 import request from "supertest";
 import { JwtStrategy } from "../auth/jwt.strategy";
+import { JWT_AUD_SESSION, JWT_ISSUER } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { ActivationService } from "./activation.service";
@@ -18,7 +19,7 @@ const SECRET = "authz-test-access-secret-0123456789abcdef";
 const PROGRAM_ID = "9LCZEdXdmLeEyU8Fik2721R28K4xWXTrVd76r4tczNZY";
 
 function token(sub: string, extra: Record<string, unknown> = {}) {
-  return new JwtService({}).signAsync({ sub, type: "access", ...extra }, { secret: SECRET });
+  return new JwtService({}).signAsync({ sub, type: "access", ...extra }, { secret: SECRET, issuer: JWT_ISSUER, audience: JWT_AUD_SESSION });
 }
 
 describe("Account authorization & abuse cases (routes)", () => {
@@ -136,6 +137,12 @@ describe("Account authorization & abuse cases (routes)", () => {
     expect(res.body).toHaveLength(1);
     expect(res.body[0].accountType).toBe("smart_account");
     expect(res.body[0]).not.toHaveProperty("pid");
+  });
+
+  it("rejects a machine (app) token on account writes (ANT-233 F1)", async () => {
+    state.identities.set("pid_a", "active");
+    const t = await token("pid_a", { app: "pidapp_x" });
+    await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${t}`).expect(403);
   });
 
   it("never returns another PID's wallet (isolation by construction — no ids in routes)", async () => {
