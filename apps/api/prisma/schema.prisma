@@ -345,6 +345,11 @@ model SsoCode {
   sessionId  String?
   redirectTo String
   clientId   String?
+  // PKCE S256 (ANT-284): public clients bind the code to a challenge at
+  // issue time; exchange must present the verifier. NULL = no PKCE (legacy
+  // confidential-client flow with redirect_uri + client_secret binding).
+  codeChallenge       String?
+  codeChallengeMethod String?
   consumedAt DateTime?
   expiresAt  DateTime
   createdAt  DateTime  @default(now())
@@ -707,6 +712,12 @@ model PidApp {
   // by 20261022_app_secret_expiry_backfill (ANT-233 F2); NULL now means
   // "no secret set" (public client), never "immortal secret".
   clientSecretExpiresAt DateTime?
+  // Previous-hash grace window (ANT-283): rotation moves the replaced hash
+  // here with a short overlap deadline (APP_CLIENT_SECRET_GRACE). Both hashes
+  // verify until the previous deadline passes, then it is ignored. NULL =
+  // no previous secret (never rotated, or grace already superseded).
+  prevClientSecretHash      String?
+  prevClientSecretExpiresAt DateTime?
   // Per-app callback endpoint + HMAC signing secret (set together). The
   // ledger posts signed events here (X-Pid-Signature). See docs/FIAT_LEDGER.md.
   webhookUrl            String?

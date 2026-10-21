@@ -452,6 +452,9 @@ paths:
                 clientSecret:
                   type: string
                   description: Required only when the bound app has a secret set (backend-only, never ship in frontend code)
+                codeVerifier:
+                  type: string
+                  description: PKCE verifier (RFC 7636); required iff the code was issued with a codeChallenge
             example:
               code: "mF8xQ2vT9nR4kL7pZ3wX6yA1bD5eF0gH"
               clientId: "pidapp_0123456789abcdef0123456789abcdef"
@@ -534,6 +537,11 @@ paths:
         existing secret can never be read back, only replaced. Afterwards, code
         exchange for this app requires the secret. Backend-only: never ship it in
         frontend code. Owners only.
+        Rotation keeps a 24h grace window: the replaced secret keeps verifying
+        until `graceExpiresAt`, so rolling deploys pick up the new value without
+        instant 401s. A second rotation supersedes the previous window.
+        Procedure: rotate → deploy the new secret everywhere → confirm no
+        traffic still uses the old value → grace expiry completes the cutover.
       security:
         - cookieAuth: []
       parameters:
@@ -558,6 +566,11 @@ paths:
                   prefix:
                     type: string
                     example: "pidsk_9f2c41"
+                  graceExpiresAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Previous secret stays valid until this time (24h grace); null on first issuance
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -774,6 +787,9 @@ paths:
                 clientId:
                   type: string
                   description: Binds the issued code to the app
+                codeChallenge:
+                  type: string
+                  description: PKCE S256 challenge (43-128 base64url chars); the exchange must present the matching verifier. Public clients only — confidential clients use their secret instead.
       responses:
         "200":
           description: The minted code

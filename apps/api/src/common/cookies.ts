@@ -139,7 +139,17 @@ export function clearAllAccountRefreshCookies(
  * touches the wallet, and vice versa. Distinct from the account cookies
  * (`pid_refresh__<hash>`, double underscore).
  */
-const SCOPE_RE = /^[a-z0-9_]{1,32}$/;
+/**
+ * App scope allowlist shape (ANT-284): lowercase alnum + underscore, 1-32
+ * chars, and — critically — never a leading underscore. The account-cookie
+ * namespace (`pid_refresh__<hash>`, double underscore, refresh-only) is
+ * excluded by the `scopeFromCookieName` leading-underscore guard below; this
+ * regex closes the mint side so no new scope can ever collide with it
+ * (`pid_refresh__x` is unreachable both ways). Regex-only by design: scopes
+ * are first-party cookie namespaces, not capabilities — the allowlist that
+ * matters (which origins may receive a code) lives in SsoService.
+ */
+const SCOPE_RE = /^[a-z0-9][a-z0-9_]{0,31}$/;
 
 /** Sanitize an app scope from a request header; null when absent/invalid. */
 export function normalizeScope(scope: string | string[] | undefined): string | null {

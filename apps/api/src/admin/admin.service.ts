@@ -129,14 +129,14 @@ export class AdminService {
       appId: id,
       clientId: app.clientId,
     });
-    const { webhookSecret: _s, clientSecretHash: _h, ...safe } = updated;
+    const { webhookSecret: _s, clientSecretHash: _h, prevClientSecretHash: _p, ...safe } = updated as typeof updated & { prevClientSecretHash?: unknown };
     return safe;
   }
   /** Admin lookup of any app by public client_id (secrets omitted). */
   async findAppByClientId(clientId: string) {
     const app = await this.prisma.pidApp.findUnique({ where: { clientId } });
     if (!app) throw new NotFoundException("App not found");
-    const { webhookSecret: _s, clientSecretHash: _h, ...safe } = app;
+    const { webhookSecret: _s, clientSecretHash: _h, prevClientSecretHash: _p, ...safe } = app as typeof app & { prevClientSecretHash?: unknown };
     return safe;
   }
 
@@ -151,7 +151,7 @@ export class AdminService {
       orderBy: { createdAt: "desc" },
     });
     return apps.map((app) => {
-      const { webhookSecret: _s, clientSecretHash: _h, ...safe } = app;
+      const { webhookSecret: _s, clientSecretHash: _h, prevClientSecretHash: _p, ...safe } = app as typeof app & { prevClientSecretHash?: unknown };
       return safe;
     });
   }
