@@ -108,6 +108,8 @@ export class FiatController {
   /**
    * DOKU notification inbox — PUBLIC (unsigned contract). Persist-first, then
    * apply only after server-side corroboration; always 200 after persist.
+   * Oversized bodies (>32kb service cap, >64kb route cap) are dropped before
+   * any DB write — real notifies are ~1-2kb.
    */
   @Post("webhook")
   @HttpCode(HttpStatus.OK)

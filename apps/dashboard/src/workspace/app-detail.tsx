@@ -36,6 +36,23 @@ function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;
 }
 
+/** Client-side mirror of the API bare-origin rule (app.dto.ts ORIGIN_PATTERN +
+ *  apps.service.ts normalizeOrigin): trim, strip trailing slashes, lowercase,
+ *  then require scheme + host + optional port with no path/query/fragment.
+ *  Returns the normalized origin, or null when invalid. */
+function normalizeOriginInput(value: string): string | null {
+  const trimmed = value.trim().replace(/\/+$/, "").toLowerCase();
+  if (!/^https?:\/\/[^/:?#]+(?::\d+)?$/.test(trimmed)) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (parsed.origin !== trimmed) return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
 async function copy(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
@@ -75,6 +92,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState("");
   const [newOrigin, setNewOrigin] = useState("");
+  const [originError, setOriginError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<string | null>(null);
   // Sandbox faucet state — env comes from GET /v1/env only (never a client var).
   const [envInfo, setEnvInfo] = useState<EnvInfo | null>(null);
@@ -141,22 +159,27 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   };
 
   const addOrigin = () => {
-    const origin = newOrigin.trim();
-    if (!origin || !app) return;
-    const normalized = origin.replace(/\/+$/, "");
+    const raw = newOrigin.trim();
+    if (!raw || !app) return;
+    const normalized = normalizeOriginInput(raw);
+    if (!normalized) {
+      setOriginError("Use a bare http(s) origin — scheme + host + optional port, no path. e.g. https://mygame.dev");
+      return;
+    }
+    setOriginError(null);
     if (app.allowedOrigins.includes(normalized)) {
       setNewOrigin("");
       return;
     }
-    void save({ allowedOrigins: [...app.allowedOrigins, origin] }, () => setNewOrigin(""));
+    void save({ allowedOrigins: [...app.allowedOrigins, normalized] }, () => setNewOrigin(""));
   };
 
   const rotateSecret = async () => {
-    if (!window.confirm("Generate a new backend secret? The current one stops working immediately.")) return;
+    if (!window.confirm("Generate a new backend secret? The previous secret keeps working for 24h (grace window) while you roll out the new one.")) return;
     setBusy(true);
     setError(null);
     try {
-      const res = unwrap(await client.post<{ secret: string; prefix: string }>(`/v1/apps/${appId}/secret`, {}), "Secret rotation");
+      const res = unwrap(await client.post<{ secret: string; prefix: string; graceExpiresAt: string | null }>(`/v1/apps/${appId}/secret`, {}), "Secret rotation");
       setRevealed(res.secret);
       await load();
     } catch {
@@ -265,13 +288,36 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           </h1>
         )}
         <div className="flex shrink-0 gap-2">
-          <MiniButton
-            onClick={() => (editingName ? void save({ name: name.trim() }, () => setEditingName(false)) : setEditingName(true))}
-            disabled={busy}
-            className="font-semibold"
-          >
-            {editingName ? "Save" : "Rename"}
-          </MiniButton>
+          {editingName ? (
+            <>
+              <MiniButton
+                onClick={() => {
+                  if (!name.trim()) {
+                    setError("Give the app a name first.");
+                    return;
+                  }
+                  void save({ name: name.trim() }, () => setEditingName(false));
+                }}
+                disabled={busy || !name.trim()}
+                className="font-semibold"
+              >
+                Save
+              </MiniButton>
+              <MiniButton
+                onClick={() => {
+                  setName(app.name);
+                  setEditingName(false);
+                }}
+                disabled={busy}
+              >
+                Cancel
+              </MiniButton>
+            </>
+          ) : (
+            <MiniButton onClick={() => setEditingName(true)} disabled={busy} className="font-semibold">
+              Rename
+            </MiniButton>
+          )}
           <MiniButton onClick={() => void save({ isActive: !app.isActive })} disabled={busy}>
             {app.isActive ? "Disable" : "Enable"}
           </MiniButton>
@@ -289,9 +335,12 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
 
       <div className="mt-6 grid gap-4">
         <Card>
-          <p className={SECTION_LABEL}>Escrow balance</p>
+          <p className={SECTION_LABEL}>Your fiat balance</p>
           <p className="mt-2 text-2xl font-semibold">{balance === null ? "—" : fmtIdr(balance)}</p>
-          <p className={`mt-1 text-xs ${MUTED}`}>The app account&apos;s spendable fiat-ledger balance.</p>
+          <p className={`mt-1 text-xs ${MUTED}`}>
+            Your own spendable fiat-ledger balance — user-scoped, so the same value shows on every app
+            page. Not per-app escrow.
+          </p>
         </Card>
 
         {isSandboxEnv && (
@@ -335,7 +384,8 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         <Card>
           <p className={SECTION_LABEL}>Allowed origins</p>
           <p className={`mt-1 text-xs ${MUTED}`}>
-            Login redirects and API calls are accepted from these websites.
+            Login redirects and API calls are accepted from these websites. Bare http(s) origin only —
+            scheme + host + optional port, no path. e.g. https://mygame.dev
           </p>
           {app.allowedOrigins.length > 0 ? (
             <ul className="mt-2 flex flex-col gap-1.5">
@@ -357,7 +407,10 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           <div className="mt-2 flex gap-2">
             <input
               value={newOrigin}
-              onChange={(e) => setNewOrigin(e.target.value)}
+              onChange={(e) => {
+                setNewOrigin(e.target.value);
+                if (originError) setOriginError(null);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") addOrigin();
               }}
@@ -369,6 +422,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
               Add
             </MiniButton>
           </div>
+          {originError && <p className={`mt-2 text-xs ${ERROR}`}>{originError}</p>}
         </Card>
 
         <Card>
@@ -379,6 +433,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
               <div className="mt-2 flex items-center gap-2">
                 <code className="break-all rounded bg-white px-2 py-1 font-mono text-xs dark:bg-black/50">{revealed}</code>
                 <CopyButton text={revealed} />
+                <MiniButton onClick={() => setRevealed(null)}>Dismiss</MiniButton>
               </div>
             </div>
           ) : (
@@ -406,8 +461,13 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           </p>
           <div className="mt-3 grid gap-2">
             {OPS.map((op) => {
-              const f = fees[op.key];
-              if (!f) return null;
+              const f: AppFee = fees[op.key] ?? {
+                operation: op.key,
+                percentBps: 0,
+                minIdr: "0",
+                maxIdr: "0",
+                enabled: false,
+              };
               return (
                 <div key={op.key} className={`pt-3 first:pt-0 first:border-0 ${DIVIDER}`}>
                   <div className="flex items-center justify-between gap-3">

@@ -612,6 +612,33 @@ describe("FiatSubAccountService", () => {
     );
   });
 
+  it("webhook drops oversized bodies before any DB write (ANT-271 size cap)", async () => {
+    const { service, prisma, ledger } = setup();
+    const big = JSON.stringify({ partnerReferenceNo: "FORGED", pad: "x".repeat(40 * 1024) });
+    expect(Buffer.byteLength(big, "utf8")).toBeGreaterThan(32 * 1024);
+    await expect(service.webhook("ext-big", big)).resolves.toEqual({ ok: false });
+    expect(prisma.fiatWebhookEvent.create).not.toHaveBeenCalled();
+    expect(prisma.fiatProviderTransaction.findUnique).not.toHaveBeenCalled();
+    expect(prisma.fiatProviderTransaction.upsert).not.toHaveBeenCalled();
+    expect(ledger.issueForDeposit).not.toHaveBeenCalled();
+  });
+
+  it("spoofed-notify flood persists as received without issuance (ANT-271)", async () => {
+    const { service, prisma, ledger } = setup();
+    prisma.fiatProviderTransaction.findUnique.mockResolvedValueOnce(null);
+    // Forged notify naming an unknown ref our account does not own.
+    await expect(
+      service.webhook("ext-spoof", JSON.stringify({ partnerReferenceNo: "SPOOF-1", toAccount: "9999999999", amount: { value: "500000.00", currency: "IDR" } })),
+    ).resolves.toEqual({ ok: true });
+    expect(prisma.fiatWebhookEvent.create).toHaveBeenCalledTimes(1);
+    expect(prisma.fiatProviderTransaction.upsert).not.toHaveBeenCalled();
+    expect(ledger.issueForDeposit).not.toHaveBeenCalled();
+    // Stays `received` for admin review — never marked applied.
+    expect(prisma.fiatWebhookEvent.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { externalId: "ext-spoof" } }),
+    );
+  });
+
   it("webhook records BRI VA deposits against the static VA number", async () => {
     const { service, prisma } = setup();
     prisma.fiatProviderTransaction.findUnique.mockResolvedValueOnce(null);
@@ -2075,5 +2102,193 @@ describe("FiatSubAccountService", () => {
     expect(candidate).toMatchObject({ providerRef: "DP1-CLAWBACK-1" });
     expect(created.filter((c: any) => c.kind === "points_clawback")).toHaveLength(1);
     expect(created[0]).toMatchObject({ amountIdr: 100000n, ledgerStatus: "review" });
+  });
+
+  it("ANT-272: FAILED→SUCCESS reorder resolves by corroboration, never by notify order", async () => {
+    const { service, prisma, sac, checkout } = setup({
+      DOKU_SYSTEM_POINT_ACCOUNT_NO: "9900000001",
+      DOKU_TREASURY_POINT_ACCOUNT_NO: "2299999999",
+      PID_UNIFIED_LEDGER_ACTIVE: "true",
+    });
+    const created = {
+      id: "d1", pid: "ifal@pid", kind: "deposit", providerRef: "DP1", providerStatus: "created",
+      amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, feePolicyVersion: 3, createdAt: new Date(),
+      ledgerStatus: "pending", settlementStatus: "pending",
+      counterparty: { channel: "checkout", feeQuote: "5000", netQuote: "100000", feePolicyVersion: 3 },
+      providerResponse: {},
+    };
+    // DOKU notify carries no sequence number: the mock always returns the
+    // open row regardless of notify arrival order — the safety under test is
+    // that every notify is corroborated server-side, never trusted.
+    (prisma.fiatProviderTransaction.findUnique as jest.Mock).mockImplementation(async (args: any) => {
+      if (args?.where?.providerRef) return created;
+      if (args?.where?.id) return { ...created, providerStatus: "success", providerPaymentStatus: "success" };
+      return null;
+    });
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    prisma.fiatProviderTransaction.create.mockImplementation(async (args: any) => ({ id: "leg", providerStatus: "created", createdAt: new Date(), ...args.data }));
+    prisma.fiatProviderTransaction.update.mockImplementation(async (args: any) => ({ ...created, ...args.data }));
+    (sac.txStatus as jest.Mock).mockResolvedValue({
+      partnerReferenceNo: "DP1", latestTransactionStatus: "00",
+      amount: { value: "105000.00", currency: "IDR" }, rawResponse: {},
+    });
+    // First notify declares FAILED but the order is still pending server-side.
+    (checkout.checkOrderStatus as jest.Mock)
+      .mockResolvedValueOnce({
+        paid: false, paidAmount: null, expired: false,
+        orderStatus: "ORDER_GENERATED", txStatus: "PENDING", rawResponse: {},
+      })
+      .mockResolvedValue(paidOrder(105000n, "DP1"));
+    await expect(service.webhook("ext-reorder-1", JSON.stringify({
+      partnerReferenceNo: "DP1", transaction: { status: "FAILED" },
+    }))).resolves.toEqual({ ok: true });
+    // Pending corroboration: the early FAILED writes no terminal state.
+    expect(prisma.fiatProviderTransaction.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "d1" } }),
+    );
+    expect(sac.transferPayment).not.toHaveBeenCalled();
+    // Reordered SUCCESS arrives; corroborated paid + exact amount → issues.
+    await expect(service.webhook("ext-reorder-2", JSON.stringify({
+      partnerReferenceNo: "DP1", transaction: { status: "SUCCESS" },
+    }))).resolves.toEqual({ ok: true });
+    await new Promise((r) => setTimeout(r, 150)); // fire-and-forget issuance lands
+    expect(prisma.fiatProviderTransaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "d1" }, data: expect.objectContaining({ providerPaymentStatus: "success" }) }),
+    );
+    expect(sac.transferPayment).toHaveBeenCalledWith(expect.objectContaining({
+      partnerReferenceNo: "DP1-PTS", type: "DOKU_NON_FIAT", amountIdr: 100000n, currency: "POINT",
+    }));
+  });
+
+  it("ANT-272: SUCCESS notify after expiry-cancel never revives or issues", async () => {
+    const { service, prisma, sac, checkout, ledger } = setup();
+    const mkrow = () => ({
+      id: "d1", pid: "ifal@pid", kind: "deposit", providerRef: "DP1", providerStatus: "created",
+      amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, createdAt: new Date(),
+      ledgerStatus: "pending", settlementStatus: "pending",
+      counterparty: { channel: "checkout", feeQuote: "5000", netQuote: "100000" },
+      providerResponse: {},
+    });
+    prisma.fiatProviderTransaction.findFirst.mockResolvedValue(mkrow());
+    (checkout.checkOrderStatus as jest.Mock).mockResolvedValue({
+      paid: false, paidAmount: null, expired: true,
+      orderStatus: "ORDER_EXPIRED", txStatus: "EXPIRED", rawResponse: {},
+    });
+    expect((await service.syncTx("ifal@pid", "d1")).providerStatus).toBe("cancelled");
+    expect(checkout.checkOrderStatus).toHaveBeenCalledTimes(1);
+    // Late SUCCESS-declared notify for the cancelled invoice: the row is
+    // terminal, so no corroboration runs and nothing is revived or issued.
+    prisma.fiatProviderTransaction.findUnique.mockResolvedValue({
+      ...mkrow(), providerStatus: "cancelled", providerPaymentStatus: "expired",
+    });
+    await expect(service.webhook("ext-late-success", JSON.stringify({
+      partnerReferenceNo: "DP1", transaction: { status: "SUCCESS" },
+    }))).resolves.toEqual({ ok: true });
+    expect(checkout.checkOrderStatus).toHaveBeenCalledTimes(1); // stale SUCCESS triggers zero DOKU calls
+    expect(prisma.fiatProviderTransaction.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ providerPaymentStatus: "success" }) }),
+    );
+    expect(sac.transferPayment).not.toHaveBeenCalled();
+    expect(sac.transferInquiry).not.toHaveBeenCalled();
+    expect(ledger.issueForDeposit).not.toHaveBeenCalled();
+  });
+
+  it("ANT-272: stale FAILED redelivery after clawback approval executes no second debit", async () => {
+    const { service, prisma, sac, checkout } = setup({
+      DOKU_SYSTEM_POINT_ACCOUNT_NO: "9900000001",
+      DOKU_TREASURY_POINT_ACCOUNT_NO: "2299999999",
+    });
+    // Mutable parent ledger: issued until the approval settles the clawback.
+    let parentLedger = "issued";
+    const issued = () => ({
+      id: "d1", pid: "ifal@pid", kind: "deposit", providerRef: "DP1", providerStatus: "success",
+      amountIdr: 105000n, feeIdr: 5000n, netIdr: 100000n, createdAt: new Date(),
+      ledgerStatus: parentLedger, ledgerRef: "DP1-PTS", settlementStatus: "pending",
+      counterparty: { channel: "checkout", feeQuote: "5000", netQuote: "100000" },
+      providerResponse: {},
+    });
+    const created: any[] = [];
+    prisma.fiatProviderTransaction.create.mockImplementation(async (args: any) => {
+      created.push(args.data);
+      return { id: `c${created.length}`, providerStatus: "created", createdAt: new Date(), ...args.data };
+    });
+    prisma.fiatProviderTransaction.update.mockImplementation(async (args: any) => ({
+      id: args?.where?.id ?? "x", kind: "points_clawback", providerRef: "DP1-CLAWBACK-1",
+      amountIdr: 100000n, feeIdr: null, netIdr: 100000n, createdAt: new Date(), ...args.data,
+    }));
+    (prisma.fiatProviderTransaction.findFirst as jest.Mock).mockImplementation(async (args: any) => {
+      if (args?.where?.kind === "deposit") return issued();
+      const found = created.find((c: any) => {
+        if (args?.where?.kind && c.kind !== args.where.kind) return false;
+        const parent = (c.counterparty as any)?.parentRef;
+        if (args?.where?.counterparty?.path?.[0] === "parentRef") return parent === args.where.counterparty.equals;
+        return true;
+      });
+      return found ?? null;
+    });
+    prisma.fiatProviderTransaction.findUnique.mockImplementation(async (args: any) => {
+      if (args?.where?.id === "c1") {
+        const c = created[0];
+        return c ? { id: "c1", ...c, ledgerStatus: "review", providerStatus: "created" } : null;
+      }
+      return issued();
+    });
+    prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
+    (checkout.checkOrderStatus as jest.Mock).mockResolvedValue({
+      paid: false, paidAmount: null, expired: false,
+      orderStatus: "ORDER_GENERATED", txStatus: "FAILED", rawResponse: {},
+    });
+    const failedBody = JSON.stringify({ partnerReferenceNo: "DP1", transaction: { status: "FAILED" } });
+    // Reversal signal → reviewable candidate, NO debit executed.
+    await expect(service.webhook("ext-ref", failedBody)).resolves.toEqual({ ok: true });
+    expect(sac.debit).not.toHaveBeenCalled();
+    expect(created.filter((c: any) => c.kind === "points_clawback")).toHaveLength(1);
+    // Admin approves → exactly one POINT debit under the candidate ref.
+    const view = await service.approveClawback("c1");
+    expect(view.providerRef).toBe("DP1-CLAWBACK-1");
+    expect(sac.debit).toHaveBeenCalledTimes(1);
+    // Parent fully recovered → terminal; a stale redelivery proposes nothing.
+    parentLedger = "clawed_back";
+    await expect(service.webhook("ext-ref-redelivery", failedBody)).resolves.toEqual({ ok: true });
+    expect(created.filter((c: any) => c.kind === "points_clawback")).toHaveLength(1);
+    expect(sac.debit).toHaveBeenCalledTimes(1);
+  });
+
+  it("ANT-272: forged-notify flood stays received with zero issuance", async () => {
+    const { service, prisma, sac, checkout, ledger } = setup();
+    prisma.fiatProviderTransaction.findUnique.mockResolvedValue(null);
+    prisma.fiatProviderAccount.findFirst.mockResolvedValue(null);
+    prisma.fiatProviderAccount.findMany.mockResolvedValue([{ ...ACTIVE }]);
+    const forged: Array<[string, string]> = [
+      // Unknown refs against an account we do not own.
+      ["ext-flood-1", JSON.stringify({ partnerReferenceNo: "SPOOF-1", toAccount: "9999999999", amount: { value: "500000.00", currency: "IDR" } })],
+      ["ext-flood-2", JSON.stringify({ partnerReferenceNo: "SPOOF-2", toAccount: "9999999999", amount: { value: "500000.00", currency: "IDR" }, transaction: { status: "SUCCESS" } })],
+      ["ext-flood-3", JSON.stringify({ partnerReferenceNo: "SPOOF-3", toAccount: "9999999999", amount: { value: "500000.00", currency: "IDR" }, transaction: { status: "FAILED" } })],
+      ["ext-flood-4", JSON.stringify({ partnerReferenceNo: "SPOOF-4", toAccount: "9999999998", amount: "100000", transaction: { status: "SUCCESS" } })],
+      // Garbage/negative/zero amounts against our own VA number.
+      ["ext-flood-5", JSON.stringify({ partnerReferenceNo: "SPOOF-5", toAccount: "888001140340010", amount: { value: "1e+21", currency: "IDR" } })],
+      ["ext-flood-6", JSON.stringify({ partnerReferenceNo: "SPOOF-6", toAccount: "888001140340010", amount: { value: "500,000", currency: "IDR" } })],
+      ["ext-flood-7", JSON.stringify({ partnerReferenceNo: "SPOOF-7", toAccount: "888001140340010", amount: { value: "-500000.00", currency: "IDR" } })],
+      ["ext-flood-8", JSON.stringify({ partnerReferenceNo: "SPOOF-8", toAccount: "888001140340010", amount: { value: "0.00", currency: "IDR" } })],
+      // No correlatable ref at all.
+      ["ext-flood-9", JSON.stringify({ eventType: "ping" })],
+      ["ext-flood-10", JSON.stringify({ transaction: { status: "SUCCESS" } })],
+      ["ext-flood-11", JSON.stringify({ partnerReferenceNo: "SPOOF-11", transaction: { status: "SUCCESS" } })],
+      ["ext-flood-12", JSON.stringify({ partnerReferenceNo: "SPOOF-12", toAccount: "9999999999", transaction: { status: "SUCCESS" } })],
+    ];
+    for (const [ext, body] of forged) {
+      await expect(service.webhook(ext, body)).resolves.toEqual({ ok: true });
+    }
+    // Persist-first: every forged event is stored for admin review...
+    expect(prisma.fiatWebhookEvent.create).toHaveBeenCalledTimes(forged.length);
+    // ...but none is ever applied, and nothing is ever issued.
+    expect(prisma.fiatWebhookEvent.update).not.toHaveBeenCalled();
+    expect(prisma.fiatProviderTransaction.upsert).not.toHaveBeenCalled();
+    expect(prisma.fiatProviderTransaction.create).not.toHaveBeenCalled();
+    expect(checkout.checkOrderStatus).not.toHaveBeenCalled();
+    expect(sac.txStatus).not.toHaveBeenCalled();
+    expect(sac.transferInquiry).not.toHaveBeenCalled();
+    expect(sac.transferPayment).not.toHaveBeenCalled();
+    expect(ledger.issueForDeposit).not.toHaveBeenCalled();
   });
 });
