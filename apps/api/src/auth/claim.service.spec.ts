@@ -1,6 +1,6 @@
-import { BadRequestException, ConflictException, GoneException } from "@nestjs/common";
+import { BadRequestException, ConflictException, GoneException, UnauthorizedException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { ClaimService } from "./claim.service";
+import { ClaimService, isUnverifiedEmailError, UNVERIFIED_EMAIL_CODE } from "./claim.service";
 
 const PROFILE = { id: "google-1", displayName: "New User", emails: [{ value: "new@example.com", verified: true }], photos: [{ value: "http://pic" }] };
 
@@ -62,14 +62,19 @@ describe("ClaimService", () => {
     );
   });
 
-  it("refuses to mint from an unverified Google email (M4)", async () => {
+  it("tags the unverified-email mint rejection with a stable code, matched by predicate only (F2)", async () => {
     const { service, prisma } = setup();
-    await expect(
-      service.mint({ id: "google-2", emails: [{ value: "unverified@example.com", verified: false }] }),
-    ).rejects.toThrow(BadRequestException);
-    await expect(
-      service.mint({ id: "google-3", emails: [{ value: "unverified@example.com", verified: false }] }),
-    ).rejects.toThrow(/not verified/);
+    const err = await service
+      .mint({ id: "google-2", emails: [{ value: "unverified@example.com", verified: false }] })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect((err as BadRequestException).getResponse()).toMatchObject({ code: UNVERIFIED_EMAIL_CODE });
+    expect(String((err as BadRequestException).message)).toMatch(/not verified/);
+    expect(isUnverifiedEmailError(err)).toBe(true);
+    // A future mint() 400 without the code must NOT be mislabeled email_unverified.
+    expect(isUnverifiedEmailError(new BadRequestException("Some new validation failure"))).toBe(false);
+    expect(isUnverifiedEmailError(new UnauthorizedException("nope"))).toBe(false);
+    expect(isUnverifiedEmailError(new Error("boom"))).toBe(false);
     expect(prisma.claimTicket.create).not.toHaveBeenCalled();
   });
 

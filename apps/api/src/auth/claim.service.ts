@@ -15,6 +15,23 @@ import type { GoogleProfile } from "./auth.service";
 
 const CLAIM_TTL_MS = 10 * 60 * 1000;
 
+/** Machine-readable code on the mint() 400 for an unverified Google email. */
+export const UNVERIFIED_EMAIL_CODE = "email_unverified";
+
+const UNVERIFIED_EMAIL_MESSAGE =
+  "Google account email is not verified — verify it with Google and sign in again.";
+
+/**
+ * True only for the verified-email-gate rejection from mint() (F2): matches
+ * the stable `code`, never the bare 400 status, so future mint() 400s are not
+ * mislabeled as `email_unverified` by the Google callback.
+ */
+export function isUnverifiedEmailError(err: unknown): boolean {
+  if (!(err instanceof BadRequestException)) return false;
+  const res = err.getResponse() as { code?: unknown } | string;
+  return typeof res === "object" && res !== null && res.code === UNVERIFIED_EMAIL_CODE;
+}
+
 export interface ClaimTicketView {
   email: string | null;
   displayName: string | null;
@@ -60,9 +77,7 @@ export class ClaimService {
     const firstEmail = profile.emails?.[0];
     const email = firstEmail?.value ?? null;
     if (!email || firstEmail?.verified !== true) {
-      throw new BadRequestException(
-        "Google account email is not verified — verify it with Google and sign in again.",
-      );
+      throw new BadRequestException({ code: UNVERIFIED_EMAIL_CODE, message: UNVERIFIED_EMAIL_MESSAGE });
     }
     return this.mintCredential(
       { provider: "google", providerUserId: profile.id, email },

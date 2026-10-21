@@ -1,7 +1,7 @@
 import { ServiceUnavailableException } from "@nestjs/common";
 import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { OAUTH_STATE_COOKIE } from "../common/cookies";
-import { verifyOAuthState } from "./oauth-state";
+import { oauthStateSecret, verifyOAuthState } from "./oauth-state";
 
 const OPTS = { clientID: "id", clientSecret: "secret", callbackURL: "http://localhost/cb" };
 
@@ -88,8 +88,9 @@ describe("GoogleGuard.getAuthenticateOptions (M3 signed state)", () => {
       expect.objectContaining({ httpOnly: true, path: "/v1/auth", maxAge: 10 * 60 * 1000 }),
     );
     const nonce = (res.cookie as jest.Mock).mock.calls[0][1] as string;
-    // The state verifies against the cookie nonce BEFORE any decoding.
-    expect(verifyOAuthState(options.state as string, nonce, "test-secret")).toEqual({
+    // The state verifies against the cookie nonce BEFORE any decoding — with
+    // the same derived key the guard signed with (F1: never the raw JWT secret).
+    expect(verifyOAuthState(options.state as string, nonce, oauthStateSecret(config.get))).toEqual({
       returnTo: "https://live2dev.com/auth/callback",
     });
   });
@@ -105,7 +106,7 @@ describe("GoogleGuard.getAuthenticateOptions (M3 signed state)", () => {
     const options = guard.getAuthenticateOptions(contextWith({ returnTo: appState }, res));
 
     const nonce = (res.cookie as jest.Mock).mock.calls[0][1] as string;
-    expect(verifyOAuthState(options.state as string, nonce, "test-secret")).toEqual({
+    expect(verifyOAuthState(options.state as string, nonce, oauthStateSecret(config.get))).toEqual({
       returnTo: "https://mygame.dev/callback",
       clientId: "pidapp_abc",
     });

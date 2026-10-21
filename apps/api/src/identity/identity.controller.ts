@@ -8,6 +8,7 @@ import {
   clearAllScopedAuthCookies,
   clearAuthCookies,
   clearClaimCookie,
+  clearOAuthStateCookie,
 } from "../common/cookies";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { UserTokenGuard } from "../common/user-token.guard";
@@ -53,12 +54,14 @@ export class IdentityController {
     await this.identityService.deleteAccount(user.pid);
     // The identity is gone: drop every session this browser holds, not just
     // the wallet's unscoped pair — app-scoped sessions, linked-account
-    // refresh cookies, and any pending claim ticket (M5). Each clear mirrors
-    // its set flags, otherwise the clear silently no-ops.
+    // refresh cookies, any pending claim ticket (M5), and the OAuth state
+    // nonce (F3: a stale pid_oauth_state must never survive the identity).
+    // Each clear mirrors its set flags, otherwise the clear silently no-ops.
     const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
     clearAuthCookies(res, this.config);
     clearAllScopedAuthCookies(res, this.config, cookies);
     clearAllAccountRefreshCookies(res, this.config, cookies);
     clearClaimCookie(res, this.config);
+    clearOAuthStateCookie(res, this.config);
   }
 }

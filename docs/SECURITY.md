@@ -106,6 +106,44 @@ credential approval for new passkeys, last-credential unlink/revoke guard.
 > On SVM the same holds for sessions: registration is owner-signed, gameplay needs
 > the session key the backend never holds — bounded by threat 19.
 
+## SOC runbook — `refresh.reuse_detected` (F4)
+
+A presented refresh token whose session row is already revoked means the token
+was replayed after rotation/logout: fail-closed, the whole device family is
+revoked and a `security_event` row is written with:
+
+- `deviceId`, `jti` — which device/token was replayed;
+- `revokedAgoMs` — replay latency since the rotation that revoked it;
+- `userAgent` — the replaying request's UA (compare with the device's
+  `userAgent` / `lastSeenAt` on the `device` row).
+
+Triage query (Postgres):
+
+```sql
+SELECT "createdAt", pid, metadata->>'deviceId' AS device,
+  (metadata->>'revokedAgoMs')::bigint AS revoked_ago_ms,
+  metadata->>'userAgent' AS replay_ua
+FROM security_event
+WHERE "eventType" = 'refresh.reuse_detected'
+  AND "createdAt" > now() - interval '1 hour'
+ORDER BY "createdAt" DESC;
+```
+
+Reading the result:
+
+- `revoked_ago_ms` < ~30s **and** `replay_ua` matches the device UA →
+  organic multi-tab race (two tabs rotated concurrently; loser replays).
+  No action; expected noise.
+- `revoked_ago_ms` large (minutes–hours) **or** UA never seen on the device
+  → theft-driven replay; the family nuke already contained it. Treat as a
+  compromise signal: check for further logins from the new UA/IP and consider
+  forcing step-up on the affected pid.
+
+Alerting (owner: DevOps/alerting): page/notify on rate, not on singles —
+e.g. >5 non-race (`revokedAgoMs` > 30s or UA-mismatched) events per 5 min
+globally, or >1 per device per hour. Raw singles include multi-tab races
+and would page noise. Alert wiring itself is tracked with the alerting owner.
+
 ## Verification
 
 API suite (`credential.*`, `intent.*`, `account.*`, `wallet.*`, `permissions.*`,

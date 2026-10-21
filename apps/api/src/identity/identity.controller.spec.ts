@@ -2,6 +2,7 @@ import { IdentityController } from "./identity.controller";
 import {
   ACCESS_COOKIE,
   CLAIM_COOKIE,
+  OAUTH_STATE_COOKIE,
   REFRESH_COOKIE,
   accountRefreshCookieName,
   scopeAccessCookie,
@@ -38,6 +39,7 @@ describe("IdentityController.deleteMe (M5)", () => {
         [scopeRefreshCookie("web")]: "sr",
         [accountCookie]: "ar",
         [CLAIM_COOKIE]: "ct_x",
+        [OAUTH_STATE_COOKIE]: "nonce",
       },
     } as never;
 
@@ -52,6 +54,8 @@ describe("IdentityController.deleteMe (M5)", () => {
       scopeRefreshCookie("web"),
       accountCookie,
       CLAIM_COOKIE,
+      // F3: the OAuth state nonce must not survive the identity.
+      OAUTH_STATE_COOKIE,
     ]) {
       expect(cleared).toContain(name);
     }
@@ -66,5 +70,8 @@ describe("IdentityController.deleteMe (M5)", () => {
     const cleared = (res.clearCookie as jest.Mock).mock.calls.map(([n]) => n);
     expect(cleared).toContain(ACCESS_COOKIE);
     expect(cleared).toContain(REFRESH_COOKIE);
+    // Unconditional sweep: nonce + claim clears fire even with no cookies present.
+    expect(cleared).toContain(OAUTH_STATE_COOKIE);
+    expect(cleared).toContain(CLAIM_COOKIE);
   });
 });

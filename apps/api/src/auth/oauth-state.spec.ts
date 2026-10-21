@@ -54,9 +54,22 @@ describe("oauth-state (M3)", () => {
     expect(verifyOAuthState(state, nonce, SECRET)).toBeNull();
   });
 
-  it("resolves the secret from the dedicated env, falling back to the JWT secret", () => {
-    expect(oauthStateSecret(get)).toBe(SECRET);
+  it("prefers the dedicated secret, otherwise derives an isolated key via HKDF (F1)", () => {
     expect(oauthStateSecret((k, d) => (k === "OAUTH_STATE_SECRET" ? "dedicated" : get(k, d)))).toBe("dedicated");
+    const derived = oauthStateSecret(get);
+    // Domain-separated from the JWT master: deterministic, but never the master itself.
+    expect(derived).toBe(oauthStateSecret(get));
+    expect(derived).not.toBe(SECRET);
+    expect(Buffer.from(derived, "base64url")).toHaveLength(32);
     expect(() => oauthStateSecret(() => "")).toThrow(/not configured/);
+  });
+
+  it("signs and verifies with the derived key (F1)", () => {
+    const derived = oauthStateSecret(get);
+    const nonce = newOAuthNonce();
+    const state = signOAuthState({ returnTo: "https://live2dev.com/" }, nonce, derived);
+    expect(verifyOAuthState(state, nonce, derived)).toEqual({ returnTo: "https://live2dev.com/" });
+    // The raw JWT secret must NOT verify states signed with the derived key.
+    expect(verifyOAuthState(state, nonce, SECRET)).toBeNull();
   });
 });

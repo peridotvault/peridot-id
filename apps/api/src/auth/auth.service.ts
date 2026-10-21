@@ -268,6 +268,12 @@ export class AuthService {
         await this.security.log(session.device.pid, "refresh.reuse_detected", {
           deviceId: session.deviceId,
           jti: payload.jti,
+          // F4 SOC triage: a replay seconds after rotation from the same UA is
+          // an organic multi-tab race; a replay long after rotation (or from a
+          // UA that never matches the device) is the theft-driven signal. Both
+          // fields make the alert query below able to tell them apart.
+          revokedAgoMs: Date.now() - session.revokedAt.getTime(),
+          userAgent: req.headers["user-agent"] ?? null,
         });
         throw new UnauthorizedException("Session compromised — sign in again.");
       }

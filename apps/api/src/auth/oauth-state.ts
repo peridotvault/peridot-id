@@ -12,7 +12,7 @@
 // Standard HMAC-SHA256 with a server-side secret (OAuth-state convention, not
 // a custom session scheme). Constant-time signature compare.
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 
 /** Time a signed state (and its nonce cookie) stays valid. */
 export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
@@ -87,14 +87,30 @@ export function verifyOAuthState(
 }
 
 /**
- * HMAC secret for OAuth state: a dedicated `OAUTH_STATE_SECRET` wins when set;
- * otherwise the JWT access secret (already required in every env) is reused.
+ * Domain constant for the derived OAuth-state HMAC key (F1). Changing this
+ * string invalidates all in-flight states (10-min TTL) — rotate deliberately.
+ */
+export const OAUTH_STATE_HKDF_INFO = "peridot-id/oauth-state/v1";
+
+/**
+ * HMAC secret for OAuth state (F1 key separation).
+ *
+ * A dedicated `OAUTH_STATE_SECRET` wins when set — provision it in deployed
+ * envs. Otherwise the key is derived from `JWT_ACCESS_SECRET` via HKDF-SHA256
+ * with a fixed domain constant, so the OAuth-state HMAC key is
+ * cryptographically isolated in the direction that matters: a leak of the
+ * derived key never forges JWTs and never reveals the master secret. (A
+ * master-secret leak still compromises both — as before — so provision the
+ * dedicated secret in deployed envs for full isolation.) Same inputs always
+ * derive the same key (no per-boot randomness — sign and verify agree across
+ * replicas and restarts).
+ *
  * Throws when neither exists — failing closed beats signing with an empty key.
  */
 export function oauthStateSecret(get: (key: string, def?: string) => unknown): string {
   const dedicated = get("OAUTH_STATE_SECRET", "") as string;
   if (dedicated) return dedicated;
-  const fallback = get("JWT_ACCESS_SECRET", "") as string;
-  if (!fallback) throw new Error("OAuth state secret is not configured (OAUTH_STATE_SECRET or JWT_ACCESS_SECRET)");
-  return fallback;
+  const master = get("JWT_ACCESS_SECRET", "") as string;
+  if (!master) throw new Error("OAuth state secret is not configured (OAUTH_STATE_SECRET or JWT_ACCESS_SECRET)");
+  return Buffer.from(hkdfSync("sha256", master, "", OAUTH_STATE_HKDF_INFO, 32)).toString("base64url");
 }

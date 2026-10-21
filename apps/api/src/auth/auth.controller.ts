@@ -11,7 +11,7 @@ import { AuthenticateStartResult, CredentialService } from "../credentials/crede
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { UserTokenGuard } from "../common/user-token.guard";
 import { AuthService } from "./auth.service";
-import { ClaimService } from "./claim.service";
+import { ClaimService, isUnverifiedEmailError } from "./claim.service";
 import { EmailStartDto, EmailVerifyDto } from "./email/dto/email.dto";
 import { EmailOtpService } from "./email/email-otp.service";
 import { GoogleGuard, isGoogleAuthError } from "./google.guard";
@@ -343,7 +343,10 @@ export class AuthController {
         });
         setClaimCookie(res, this.config, ticketId);
       } catch (err) {
-        if (err instanceof BadRequestException) {
+        // F2: only the verified-email-gate rejection maps to `email_unverified`
+        // (matched on its stable code, not the bare 400). Any other mint()
+        // failure propagates as its real error instead of a misleading label.
+        if (isUnverifiedEmailError(err)) {
           this.logger.warn("google callback: unverified email, no claim ticket minted");
           res.redirect(withErrorFlag(successUrl, "email_unverified"));
           return;
