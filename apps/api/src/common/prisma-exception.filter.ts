@@ -1,4 +1,5 @@
-import { ArgumentsHost, Catch, ExceptionFilter, HttpStatus, Logger } from "@nestjs/common";
+import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpServer, HttpStatus, Logger } from "@nestjs/common";
+import { BaseExceptionFilter } from "@nestjs/core";
 import { Prisma } from "@prisma/client";
 import { Response } from "express";
 
@@ -32,25 +33,40 @@ export class PrismaExceptionFilter implements ExceptionFilter {
 }
 
 /**
- * Last-resort 500 sanitizer (ANT-285(b)). Nest's default 500 body for an
- * unhandled Error is already `{ statusCode: 500, message: "Internal server
- * error" }`, but a thrown object with a custom message (or a library error
- * surfaced as 500) can leak internals. This catch-all guarantees the wire
- * body never carries more than the generic message while the real cause is
- * logged server-side with reconstruction context (method + url).
+ * Last-resort 500 sanitizer (ANT-285(b), fixed ANT-324). Nest's default 500
+ * body for an unhandled Error is already `{ statusCode: 500, message:
+ * "Internal server error" }`, but a thrown object with a custom message (or
+ * a library error surfaced as 500) can leak internals. This catch-all
+ * guarantees the wire body never carries more than the generic message while
+ * the real cause is logged server-side with reconstruction context
+ * (method + url).
+ *
+ * Non-500 HttpExceptions (401/403/404 from guards/pipes/services) carry
+ * deliberate, safe bodies and MUST be delegated to BaseExceptionFilter so
+ * Nest's built-in serializer writes them as JSON. Rethrowing (`throw
+ * exception`) from a filter registered via `useGlobalFilters` bypasses that
+ * serializer — the exception escapes to Express, which falls back to an HTML
+ * error page with a stack trace (ANT-300 FAIL). Delegation preserves the
+ * JSON body and status (Complete Mediation, Fail Securely, Secure Defaults).
  */
 @Catch()
-export class Sanitize500Filter implements ExceptionFilter {
+export class Sanitize500Filter extends BaseExceptionFilter {
   private readonly logger = new Logger(Sanitize500Filter.name);
+
+  // applicationRef is the Express adapter, passed explicitly at bootstrap
+  // (`new Sanitize500Filter(app.getHttpAdapter())`) because filters
+  // registered via `useGlobalFilters` are instantiated, not DI-resolved, so
+  // property injection of HttpAdapterHost never runs for them.
+  constructor(applicationRef?: HttpServer) {
+    super(applicationRef);
+  }
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const res = ctx.getResponse<Response>();
-    // HttpExceptions (4xx from guards/pipes/services) already carry safe,
-    // deliberate messages — rethrow so Nest's built-in serializer handles them.
-    if (exception !== null && typeof exception === "object" && "getStatus" in exception) {
-      const status = (exception as { getStatus: () => number }).getStatus();
-      if (status !== HttpStatus.INTERNAL_SERVER_ERROR) throw exception;
+    if (exception instanceof HttpException && exception.getStatus() !== HttpStatus.INTERNAL_SERVER_ERROR) {
+      super.catch(exception, host);
+      return;
     }
     const req = ctx.getRequest<{ method?: string; url?: string }>();
     const detail = exception instanceof Error ? exception.message.slice(0, 200) : String(exception).slice(0, 200);
