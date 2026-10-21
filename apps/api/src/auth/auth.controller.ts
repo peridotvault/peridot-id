@@ -9,6 +9,7 @@ import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator
 import { AuthenticateFinishDto } from "../credentials/dto/credential.dto";
 import { AuthenticateStartResult, CredentialService } from "../credentials/credential.service";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { CsrfOriginGuard } from "../common/csrf-origin.guard";
 import { UserTokenGuard } from "../common/user-token.guard";
 import { AuthService } from "./auth.service";
 import { ClaimService, isUnverifiedEmailError } from "./claim.service";
@@ -51,7 +52,7 @@ function withErrorFlag(successUrl: string, code: string): string {
 }
 
 @Controller("v1/auth")
-@UseGuards(ThrottlerGuard)
+@UseGuards(ThrottlerGuard, CsrfOriginGuard)
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 

@@ -1,7 +1,11 @@
-import { ExecutionContext, ForbiddenException, Injectable, Logger } from "@nestjs/common";
+import { ExecutionContext, ForbiddenException, Injectable, Logger, Optional } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { AuthGuard } from "@nestjs/passport";
 import { Request } from "express";
 import { ACCESS_COOKIE, normalizeScope, scopeAccessCookie } from "./cookies";
+import { extractRequestOrigin, getVerifiedAppOrigins, hasSessionCookie } from "./csrf-origin.guard";
+import { isOriginAllowed, staticOriginsFor } from "./cors";
+import { PrismaService } from "../prisma/prisma.service";
 
 /**
  * Session cookie selection: a client app sends `x-pid-scope: <app>` and gets its
@@ -36,8 +40,39 @@ const READ_SCOPE_WRITE_ALLOW = [/^\/v1\/fiat\/deposits\/[^/]+\/sync\/?$/];
 export class JwtAuthGuard extends AuthGuard("jwt") {
   private readonly logger = new Logger(JwtAuthGuard.name);
 
-  constructor() {
+  constructor(
+    @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly prisma?: PrismaService,
+  ) {
     super({});
+  }
+
+  /**
+   * CSRF Origin allowlist (ANT-367): state-changing requests carrying a
+   * session cookie must present an allowlisted Origin (else Referer origin).
+   * Same allowlist as credentialed CORS — staticOriginsFor() ∪ verified
+   * per-app origins (shared TTL cache, never N+1). Safe methods and
+   * cookieless (Bearer) flows pass through untouched. Missing/mismatched
+   * Origin on a cookie request fails closed with 403. Skipped only when the
+   * guard was constructed without DI config (unit tests calling
+   * `new JwtAuthGuard()` directly) — production always injects ConfigService.
+   */
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<Request>();
+    if (this.config && req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") {
+      const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
+      if (hasSessionCookie(cookies)) {
+        const origin = extractRequestOrigin(req);
+        const allowed =
+          !!origin &&
+          isOriginAllowed(origin, staticOriginsFor(this.config), await getVerifiedAppOrigins(this.prisma));
+        if (!allowed) {
+          this.logger.warn(`rejected cookie-authed ${req.method} ${req.path}: origin not allowlisted`);
+          throw new ForbiddenException("Origin not allowed for cookie-authenticated request");
+        }
+      }
+    }
+    return (await super.canActivate(context)) as boolean;
   }
 
   /**
