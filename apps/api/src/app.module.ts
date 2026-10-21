@@ -5,6 +5,7 @@ import { AccountModule } from "./account/account.module";
 import { AdminModule } from "./admin/admin.module";
 import { AuthModule } from "./auth/auth.module";
 import { CredentialModule } from "./credentials/credential.module";
+import { EnvModule } from "./env/env.module";
 import { FiatModule } from "./fiat/fiat.module";
 import { IdentityModule } from "./identity/identity.module";
 import { IntentModule } from "./intent/intent.module";
@@ -30,6 +31,7 @@ import { HealthModule } from "./health/health.module";
     AccountModule,
     AdminModule,
     CredentialModule,
+    EnvModule,
     FiatModule,
     IntentModule,
     PermissionsModule,

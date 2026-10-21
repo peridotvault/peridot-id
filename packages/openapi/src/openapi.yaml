@@ -49,6 +49,10 @@ tags:
       the smart account instead.
   - name: account
     description: PeridotID account — owns chain accounts (smart account PDA, legacy linked address)
+  - name: meta
+    description: |
+      Deployment metadata: self-describing environment endpoints (sandbox vs
+      production). Public, server-derived, never echoing client input.
   - name: fiat
     description: |
       The internal IDR fiat ledger: balances, statements, sends, and money-in.
@@ -883,6 +887,33 @@ paths:
           description: Session ended and cookies cleared
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /env:
+    get:
+      tags: [meta]
+      summary: Self-describing environment (sandbox vs production)
+      description: |
+        Public, unauthenticated. Every value is server-derived — any
+        client-supplied `?env=` / body value is ignored (never read). SDKs and
+        the dashboard call this at startup to verify they reached the intended
+        deployment (sandbox = `sandbox-api.peridot.id`, DOKU test mode, no real
+        money moves). Cacheable for 60s.
+      responses:
+        "200":
+          description: Server environment
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: "public, max-age=60"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvInfo"
+              example:
+                env: "sandbox"
+                dokuMode: "sandbox"
+                docs: "https://docs.peridot.id"
 
   /identity/me:
     get:
@@ -1793,6 +1824,59 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /fiat/test-credit:
+    post:
+      tags: [fiat]
+      summary: Sandbox faucet — mint test credit (sandbox only, 201)
+      description: |
+        Sandbox-only instant test money. Credits the caller's ledger through the
+        same `fiat_issue` path as corroborated DOKU deposits (identical
+        balance/webhook behavior) without touching DOKU — works even when DOKU
+        sandbox is down. Every mint is audited. Per-identity caps: Rp50.000 per
+        call, Rp100.000/day, 10 calls/day (proposed — CTO confirms). The route
+        is registered only when the server flag `PID_FAUCET_ENABLED` is exactly
+        `"true"` (fail-closed; unset/false ⇒ absent). On production the route
+        does not exist: 404 (not 401/403 — no oracle).
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountMinor]
+              properties:
+                amountMinor:
+                  type: integer
+                  minimum: 1
+                  maximum: 50000
+                  example: 50000
+      responses:
+        "201":
+          description: Test credit minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FaucetCredit"
+              example:
+                ok: true
+                creditId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                amountMinor: "50000"
+                currency: "IDR"
+                env: "sandbox"
+                dailyRemainingMinor: "50000"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Production (route absent) or unknown identity scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
   /fiat/ledger:
     get:
       tags: [fiat]
@@ -2482,6 +2566,23 @@ components:
           example:
             statusCode: 404
             message: "No Identity found"
+    Unprocessable:
+      description: Semantically invalid request (faucet amount/cap violations)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          examples:
+            invalidAmount:
+              value:
+                statusCode: 422
+                error: "faucet_invalid_amount"
+                perCallMaxMinor: "50000"
+            capExceeded:
+              value:
+                statusCode: 422
+                error: "faucet_cap_exceeded"
+                dailyRemainingMinor: "0"
     RateLimited:
       description: Too many requests
       content:
@@ -3219,6 +3320,50 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    EnvInfo:
+      type: object
+      required: [env, dokuMode, docs]
+      properties:
+        env:
+          type: string
+          enum: [sandbox, production]
+          description: Server-derived deployment environment (never echoes client input)
+        dokuMode:
+          type: string
+          enum: [sandbox, production]
+          description: DOKU rail mode for this deployment
+        docs:
+          type: string
+          format: uri
+          description: Canonical docs base URL
+      example:
+        env: "sandbox"
+        dokuMode: "sandbox"
+        docs: "https://docs.peridot.id"
+
+    FaucetCredit:
+      type: object
+      required: [ok, creditId, amountMinor, currency, env, dailyRemainingMinor]
+      properties:
+        ok:
+          type: boolean
+        creditId:
+          type: string
+          format: uuid
+          description: Ledger entryGroup of the minted faucet credit
+        amountMinor:
+          type: string
+          description: Minted amount, whole IDR (decimal string, same convention as FiatBalance.balanceIdr)
+        currency:
+          type: string
+          enum: [IDR]
+        env:
+          type: string
+          enum: [sandbox]
+        dailyRemainingMinor:
+          type: string
+          description: Faucet quota left for this identity today, whole IDR (decimal string)
 
     FiatBalance:
       type: object

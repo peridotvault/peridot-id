@@ -1,5 +1,5 @@
-import { createHmac } from "node:crypto";
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { createHmac, randomUUID } from "node:crypto";
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import {
@@ -289,6 +289,127 @@ export class FiatLedgerService {
   }
 
   // --- send/receive (generic primitive + phase-1 policy gate) ---
+
+  /**
+   * Sandbox faucet caps (ANT-287 §6, proposed values — CTO confirms via
+   * parent OQ-1; adjust here and in the openapi spec together).
+   */
+  static readonly FAUCET_PER_CALL_MAX_IDR = 50_000n;
+  static readonly FAUCET_DAILY_CAP_IDR = 100_000n;
+  static readonly FAUCET_DAILY_MAX_CALLS = 10;
+
+  /**
+   * Faucet gate flag (ANT-290 contract): true IFF `PID_FAUCET_ENABLED` is
+   * exactly `"true"`. Fail-closed — unset/"false"/anything-else ⇒ off.
+   * Never DOKU_MODE (defaults to sandbox ⇒ would fail open).
+   */
+  faucetEnabled(): boolean {
+    return this.config.get<string>("PID_FAUCET_ENABLED", "false") === "true";
+  }
+
+  /** Boundary check for faucet amounts: null/missing/zero/negative/over-max → 422 (never 400). */
+  private parseFaucetAmount(raw: unknown): bigint {
+    let v: bigint | null = null;
+    if (typeof raw === "number" && Number.isInteger(raw)) {
+      try {
+        v = BigInt(raw);
+      } catch {
+        v = null;
+      }
+    } else if (typeof raw === "string" && /^\d+$/.test(raw)) {
+      try {
+        v = BigInt(raw);
+      } catch {
+        v = null;
+      }
+    }
+    if (v === null || v <= 0n || v > FiatLedgerService.FAUCET_PER_CALL_MAX_IDR) {
+      throw new UnprocessableEntityException({
+        error: "faucet_invalid_amount",
+        perCallMaxMinor: FiatLedgerService.FAUCET_PER_CALL_MAX_IDR.toString(),
+      });
+    }
+    return v;
+  }
+
+  /**
+   * Mint sandbox test credit straight into the ledger (ANT-287 FR-2).
+   *
+   * Same `fiat_issue` leg shape as corroborated Checkout deposits, so
+   * balance/webhook behavior is identical — but no deposit row and no DOKU
+   * corroboration, so the faucet works when DOKU sandbox is down.
+   *
+   * Concurrency: the per-identity day-bucket count + sum and the insert run
+   * inside one transaction behind `lockAccounts` (per-pid `FOR UPDATE` on
+   * `identities`), so concurrent double-calls are serialized and can never
+   * jointly exceed the daily cap or call budget. Every mint is audited via
+   * `security.log` (`fiat.faucet_minted`).
+   */
+  async mintTestCredit(
+    pid: string,
+    amountMinor: unknown,
+  ): Promise<{ creditId: string; amountMinor: string; currency: "IDR"; env: "sandbox"; dailyRemainingMinor: string }> {
+    this.requireUsable();
+    if (!this.faucetEnabled()) throw new NotFoundException("Not found");
+    const amount = this.parseFaucetAmount(amountMinor);
+    const creditId = randomUUID();
+    const issueKey = `FAUCET-${creditId}`;
+    let remaining = 0n;
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockAccounts(tx as never, [pid]);
+      const dayStart = new Date();
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const todays = (await (tx as unknown as {
+        fiatLedgerEntry: {
+          findMany: (a: unknown) => Promise<Array<{ amountIdr: bigint }>>;
+        };
+      }).fiatLedgerEntry.findMany({
+        where: { pid, kind: "fiat_issue", source: "faucet", status: "posted", createdAt: { gte: dayStart } },
+        select: { amountIdr: true },
+      })) as Array<{ amountIdr: bigint }>;
+      let spent = 0n;
+      for (const r of todays) spent += r.amountIdr;
+      if (
+        todays.length >= FiatLedgerService.FAUCET_DAILY_MAX_CALLS ||
+        spent + amount > FiatLedgerService.FAUCET_DAILY_CAP_IDR
+      ) {
+        const left = FiatLedgerService.FAUCET_DAILY_CAP_IDR - spent;
+        throw new UnprocessableEntityException({
+          error: "faucet_cap_exceeded",
+          dailyRemainingMinor: (left > 0n ? left : 0n).toString(),
+        });
+      }
+      remaining = FiatLedgerService.FAUCET_DAILY_CAP_IDR - spent - amount;
+      await this.appendChained(tx as never, [
+        {
+          data: {
+            entryGroup: creditId,
+            kind: "fiat_issue",
+            pid,
+            amountIdr: amount,
+            direction: "in",
+            idempotencyKey: issueKey,
+            parentRef: null,
+            feePolicyVersion: null,
+            counterparty: json({ faucet: true, creditId }),
+            source: "faucet",
+          },
+        },
+      ]);
+    });
+    await this.security
+      .log(pid, "fiat.faucet_minted", { creditId, amountMinor: amount.toString() })
+      .catch((err) => {
+        this.logger.error(`AUDIT-SINK-FAILURE fiat.faucet_minted ${creditId} unaudited: ${String(err)?.slice(0, 200)}`);
+      });
+    return {
+      creditId,
+      amountMinor: amount.toString(),
+      currency: "IDR",
+      env: "sandbox",
+      dailyRemainingMinor: remaining.toString(),
+    };
+  }
 
   /**
    * Send inquiry (moves no money). GROSS-in: requested amount is gross;
