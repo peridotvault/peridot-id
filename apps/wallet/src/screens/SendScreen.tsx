@@ -3,6 +3,7 @@ import { Text, TextInput, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
+import { sendDestinationError } from "../feat/wallet/utils/solana-address";
 import { isNetworkSwitching } from "../shared/network-mode";
 import { useNetworkMode } from "../shared/hooks/useNetworkMode";
 
@@ -56,7 +57,12 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
         setError(asset === "SOL" ? "Enter an amount greater than 0." : "Token amounts must be whole raw units.");
         return;
       }
-      const res = await peridot.wallet.withdraw({ amount: lamports, asset, to });
+      const destError = sendDestinationError(to);
+      if (destError) {
+        setError(destError);
+        return;
+      }
+      const res = await peridot.wallet.withdraw({ amount: lamports, asset, to: to.trim() });
       const feeSol = Number(BigInt(res.networkFeeLamports) + BigInt(res.protocolFeeLamports)) / LAMPORTS_PER_SOL;
       if (res.status === "confirmed") {
         setResult(

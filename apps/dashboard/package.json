@@ -6,7 +6,8 @@
     "dev": "vite --port 3303 --host",
     "build": "tsc -b && vite build",
     "preview": "vite preview --port 3303",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "@peridotvault/pid-sdk-js": "workspace:*",
