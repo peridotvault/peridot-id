@@ -1,4 +1,5 @@
-import { HttpStatus } from "@nestjs/common";
+import { HttpStatus, InternalServerErrorException, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { BaseExceptionFilter } from "@nestjs/core";
 import { Prisma } from "@prisma/client";
 import { PrismaExceptionFilter, Sanitize500Filter } from "./prisma-exception.filter";
 
@@ -44,11 +45,33 @@ describe("PrismaExceptionFilter (ANT-285(b))", () => {
   });
 });
 
-describe("Sanitize500Filter (ANT-285(b))", () => {
-  it("rethrows non-500 HttpExceptions so Nest serializes them", () => {
-    const { host } = makeHost();
-    const err = { getStatus: () => 400 };
-    expect(() => new Sanitize500Filter().catch(err, host)).toThrow();
+describe("Sanitize500Filter (ANT-285(b), ANT-324)", () => {
+  it("delegates non-500 HttpExceptions to BaseExceptionFilter (preserves JSON, never rethrows)", () => {
+    // ANT-324 regression: rethrowing from a useGlobalFilters filter escapes
+    // Nest's serializer → Express renders HTML + stack (ANT-300 FAIL).
+    // Delegation via super.catch preserves the JSON body/status.
+    const { host, status, json } = makeHost();
+    const delegated = jest.spyOn(BaseExceptionFilter.prototype, "catch").mockImplementation(() => {});
+    try {
+      expect(() => new Sanitize500Filter().catch(new UnauthorizedException("bad token"), host)).not.toThrow();
+      expect(delegated).toHaveBeenCalledTimes(1);
+      // The filter itself must not write a sanitized 500 over the 401.
+      expect(status).not.toHaveBeenCalled();
+      expect(json).not.toHaveBeenCalled();
+      expect(() => new Sanitize500Filter().catch(new NotFoundException("no such app"), host)).not.toThrow();
+      expect(delegated).toHaveBeenCalledTimes(2);
+    } finally {
+      delegated.mockRestore();
+    }
+  });
+
+  it("sanitizes a 500 HttpException instead of leaking its message", () => {
+    const { host, status, json } = makeHost();
+    new Sanitize500Filter().catch(new InternalServerErrorException("s3cr3t-db-detail"), host);
+    expect(status).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
+    const body = json.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).toEqual({ statusCode: 500, message: "Internal server error" });
+    expect(JSON.stringify(body)).not.toContain("s3cr3t");
   });
 
   it("sanitizes an unhandled 500 Error without leaking its message", () => {

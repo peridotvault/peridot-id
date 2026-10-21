@@ -80,7 +80,10 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   // ANT-285(b): P2002→409 / P2025→404 globally; unhandled 500s sanitized.
-  app.useGlobalFilters(new PrismaExceptionFilter(), new Sanitize500Filter());
+  // ANT-324: Sanitize500Filter extends BaseExceptionFilter, which needs the
+  // HTTP adapter to serialize delegated non-500s as JSON (useGlobalFilters
+  // instantiates — no DI — so pass app.getHttpAdapter() explicitly).
+  app.useGlobalFilters(new PrismaExceptionFilter(), new Sanitize500Filter(app.getHttpAdapter()));
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle("PeridotID API")
