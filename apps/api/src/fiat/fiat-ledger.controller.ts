@@ -3,6 +3,7 @@ import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { SecurityEventService } from "../security/security-event.service";
 import { FiatLedgerService } from "./fiat-ledger.service";
 import { DispatchEventsDto, LedgerAdjustDto, LedgerFreezeDto, LedgerTransferInquiryDto } from "./dto/ledger.dto";
 
@@ -16,7 +17,10 @@ import { DispatchEventsDto, LedgerAdjustDto, LedgerFreezeDto, LedgerTransferInqu
 @Controller("v1/fiat")
 @UseGuards(ThrottlerGuard)
 export class FiatLedgerController {
-  constructor(private readonly ledger: FiatLedgerService) {}
+  constructor(
+    private readonly ledger: FiatLedgerService,
+    private readonly security: SecurityEventService,
+  ) {}
 
   /** Current internal-credit balance (replayed, source labelled). */
   @Get("balance")
@@ -46,8 +50,14 @@ export class FiatLedgerController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  inquiry(@CurrentUser() user: AuthenticatedUser, @Body() dto: LedgerTransferInquiryDto) {
-    return this.ledger.transferInquiry(user.pid, dto, dto.clientId);
+  async inquiry(@CurrentUser() user: AuthenticatedUser, @Body() dto: LedgerTransferInquiryDto) {
+    // ANT-286b: unscoped legacy machine tokens still work (back-compat) but
+    // emit a migration signal; the service emits fiat.transfer.app_token on
+    // every app-token use (SOC anomaly signal for a leaked pidsk_).
+    if (user.app && !user.scope) {
+      await this.security.log(user.pid, "fiat.transfer.legacy_app_token", { app: user.app, route: "POST /v1/fiat/transfers/inquiry" }).catch(() => undefined);
+    }
+    return this.ledger.transferInquiry(user.pid, dto, dto.clientId ?? user.app ?? null, { app: user.app, scope: user.scope });
   }
 
   /** Send step 2: posts all legs atomically. Idempotent on re-confirm. */
@@ -55,8 +65,11 @@ export class FiatLedgerController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
-  confirm(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    return this.ledger.transferConfirm(user.pid, id);
+  async confirm(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    if (user.app && !user.scope) {
+      await this.security.log(user.pid, "fiat.transfer.legacy_app_token", { app: user.app, route: "POST /v1/fiat/transfers/:id/confirm" }).catch(() => undefined);
+    }
+    return this.ledger.transferConfirm(user.pid, id, { app: user.app, scope: user.scope });
   }
 
   /** Cancel a created (not yet posted) intent. */

@@ -69,6 +69,8 @@ export class AuthController {
    * Machine token for an app's backend (client-credentials). Bound to the app
    * owner's pid; carries the app's clientId (fee context + non-admin). Send it
    * as `Authorization: Bearer <token>`. No browser session required.
+   * Optional `scope: "fiat:transfer"` mints the least-privilege escrow-release
+   * form (ANT-286b) — pass it through to the token's scope claim.
    */
   @Post("token")
   @HttpCode(HttpStatus.OK)
@@ -79,7 +81,7 @@ export class AuthController {
     if (!this.apps.clientSecretValid(app, dto.clientSecret ?? "")) {
       throw new UnauthorizedException("Invalid client");
     }
-    return this.authService.issueAppAccessToken(app.ownerPid, app.clientId);
+    return this.authService.issueAppAccessToken(app.ownerPid, app.clientId, dto.scope);
   }
 
   @Post("login")
@@ -203,7 +205,7 @@ export class AuthController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async exchange(@Body() dto: ExchangeDto) {
     try {
-      return await this.ssoService.consume(dto.code, dto.redirectUri, dto.clientId, dto.clientSecret);
+      return await this.ssoService.consume(dto.code, dto.redirectUri, dto.clientId, dto.clientSecret, dto.codeVerifier);
     } catch {
       throw new BadRequestException("Code is invalid, expired, or already used");
     }
@@ -232,7 +234,10 @@ export class AuthController {
     if (await this.ssoService.isRevoked(user.pid, resolved.redirectTo)) {
       throw new BadRequestException("App connection revoked — sign in again from the site to reconnect.");
     }
-    const pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, { clientId: resolved.clientId });
+    const pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, {
+      clientId: resolved.clientId,
+      ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+    });
     return { pidCode };
   }
 

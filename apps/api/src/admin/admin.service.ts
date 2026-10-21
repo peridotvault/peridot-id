@@ -1,8 +1,10 @@
 // Admin chain-registry management. Every write invalidates the registry cache
 // and emits a security event (who changed what). Deactivation (not delete)
 // keeps history and lets the wallet hide a chain instantly.
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { ChainRegistryService } from "../chain/chain-registry.service";
+import { encryptSecret } from "../common/secret-crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CreateChainDto, UpdateChainDto, UpsertContractDto } from "./admin.dto";
@@ -13,6 +15,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly chains: ChainRegistryService,
     private readonly security: SecurityEventService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   listChains() {
@@ -86,16 +89,20 @@ export class AdminService {
 
   /**
    * Set the EVM auto-deploy relayer key for a chain (write-only — the secret
-   * is never returned; see the presence flag). EVM chains only.
+   * is never returned; see the presence flag). EVM chains only. ANT-286a:
+   * the secret is envelope-encrypted (`enc:v1:`) before storage; a missing or
+   * malformed `PID_SECRETS_ENC_KEY` fails closed (never stores plaintext).
    */
   async setEvmRelayer(pid: string, chainId: string, secret: string) {
     const chain = await this.prisma.chain.findUnique({ where: { id: chainId } });
     if (!chain) throw new NotFoundException("Chain not found");
     if (chain.namespace !== "eip155") throw new ConflictException("EVM relayer keys apply to eip155 chains only");
+    const encKey = this.config?.get<string>("PID_SECRETS_ENC_KEY") ?? process.env.PID_SECRETS_ENC_KEY;
+    const stored = encryptSecret(secret, encKey);
     const row = await this.prisma.evmRelayerKey.upsert({
       where: { chainId },
-      update: { secret },
-      create: { chainId, secret },
+      update: { secret: stored },
+      create: { chainId, secret: stored },
     });
     await this.security.log(pid, "admin.evm_relayer.set", { chainId });
     return { chainId, hasSecret: true, updatedAt: row.updatedAt };

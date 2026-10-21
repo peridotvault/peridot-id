@@ -6,7 +6,8 @@
 // rows. Chains, RPC URLs, program/contract addresses, and the EVM relayer key
 // are dashboard-managed — never env (ANT-193 dropped every EVM_* variable).
 
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { EVM_CHAINS } from "@peridotvault/pid-core/dist/evm";
 import {
   MAX_CHAIN_REFERENCE_LENGTH,
@@ -20,6 +21,7 @@ import {
   UNKNOWN_CHAIN_CODE,
   solanaReferenceFor,
 } from "../common/chains";
+import { decryptSecret } from "../common/secret-crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface RegistryContract {
@@ -66,7 +68,10 @@ const DEFAULT_EVM_RPC_URL = "http://localhost:8545";
 export class ChainRegistryService {
   private cache: { at: number; chains: RegistryChain[] } | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly config?: ConfigService,
+  ) {}
 
   /** Drop the cache — called by every admin write. */
   invalidate(): void {
@@ -241,15 +246,26 @@ export class ChainRegistryService {
    * EVM relayer private key for a chain (dashboard-managed `evm_relayer_keys`
    * row, admin-only writes). Null when unset — callers fail over to the
    * operator forge-script flow. Never throws (missing table/row = unset) and
-   * never logs the secret. Flagged for ANT-195 security review.
+   * never logs the secret. ANT-286a: `enc:v1:` rows are decrypted
+   * server-side; legacy plaintext passes through (migration); an
+   * undecryptable-without-key envelope returns null (fail closed to the
+   * operator flow, never a ciphertext-as-key).
    */
   async relayerSecretFor(chainReference: string): Promise<string | null> {
     try {
       const chain = await this.chainByReference(chainReference);
       if (!chain) return null;
       const row = await this.prisma.evmRelayerKey.findUnique({ where: { chainId: chain.id } });
-      const secret = row?.secret;
-      return typeof secret === "string" && secret.length > 0 ? secret : null;
+      const stored = row?.secret;
+      if (typeof stored !== "string" || stored.length === 0) return null;
+      if (!stored.startsWith("enc:v1:")) return stored; // legacy plaintext — upgrade on next set
+      try {
+        const key = this.config?.get<string>("PID_SECRETS_ENC_KEY", "") ?? process.env.PID_SECRETS_ENC_KEY ?? "";
+        const dec = decryptSecret(stored, key || undefined);
+        return typeof dec === "string" && dec.length > 0 ? dec : null;
+      } catch {
+        return null;
+      }
     } catch {
       return null;
     }

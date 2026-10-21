@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { randomUUID } from "crypto";
@@ -92,11 +92,18 @@ export class AuthService {
    * bound to the app owner's pid + the app's clientId. Used to read the app's
    * escrow balance, initiate transfers, and manage app settings server-side —
    * no browser session. The token carries `app`, and AdminGuard rejects it.
+   * Optional `scope` narrows the token (ANT-286b: `fiat:transfer` for
+   * escrow-release least privilege); the scope claim round-trips through
+   * JwtStrategy into `AuthenticatedUser.scope`.
    */
-  async issueAppAccessToken(ownerPid: string, clientId: string): Promise<{ accessToken: string; expiresIn: string }> {
+  async issueAppAccessToken(ownerPid: string, clientId: string, scope?: string): Promise<{ accessToken: string; expiresIn: string }> {
+    // ANT-286b defense in depth (Tobias residual #4): the DTO regex is the
+    // first gate, but the service never mints a novel scope even if called
+    // directly or behind a pipe that skips validation.
+    if (scope !== undefined && scope !== "fiat:transfer") throw new BadRequestException("scope must be fiat:transfer");
     const ttl = APP_TOKEN_TTL;
     const accessToken = await this.jwt.signAsync(
-      { sub: ownerPid, type: "access", app: clientId },
+      { sub: ownerPid, type: "access", app: clientId, ...(scope ? { scope } : {}) },
       {
         secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
         expiresIn: ttl,

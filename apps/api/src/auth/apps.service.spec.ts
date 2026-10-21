@@ -1,6 +1,10 @@
+import { decryptSecret } from "../common/secret-crypto";
 import { normalizeOrigin, PidAppsService } from "./apps.service";
 
-function setup() {
+// ANT-286a test data key (clearly labeled fixture — never a real secret).
+const TEST_ENC_KEY = "ab".repeat(32);
+
+function setup(encKey: string | null = TEST_ENC_KEY) {
   const rows = new Map<string, Record<string, unknown>>();
   const prisma = {
     pidApp: {
@@ -24,7 +28,8 @@ function setup() {
       }),
     },
   };
-  return { prisma, service: new PidAppsService(prisma as never) };
+  const config = { get: (k: string, d?: string) => (k === "PID_SECRETS_ENC_KEY" ? (encKey ?? d ?? "") : (d ?? "")) };
+  return { prisma, service: new PidAppsService(prisma as never, config as never) };
 }
 
 describe("PidAppsService", () => {
@@ -154,6 +159,29 @@ describe("PidAppsService", () => {
     const { service } = setup();
     const app = await service.create("pid_owner", "My Game");
     await expect(service.rotateSecret("pid_stranger", app.id as string)).rejects.toThrow("App not found");
+  });
+
+  it("stores the webhook secret envelope-encrypted (ANT-286a)", async () => {
+    const { prisma, service } = setup();
+    const app = await service.create("pid_owner", "My Game");
+    const { url, secret } = await service.setWebhook("pid_owner", app.id as string, "https://mygame.dev/hook");
+    expect(secret).toMatch(/^pidwh_[0-9a-f]{48}$/);
+    expect(url).toBe("https://mygame.dev/hook");
+    const stored = (await prisma.pidApp.findUnique({ where: { clientId: (app as Record<string, unknown>).clientId as string } })) as Record<string, unknown>;
+    const storedSecret = stored.webhookSecret as string;
+    expect(storedSecret.startsWith("enc:v1:")).toBe(true);
+    expect(storedSecret).not.toContain(secret as string);
+    expect(decryptSecret(storedSecret, TEST_ENC_KEY)).toBe(secret);
+  });
+
+  it("fails closed on setWebhook without a usable data key (never stores plaintext)", async () => {
+    const { prisma, service } = setup(null);
+    const app = await service.create("pid_owner", "My Game");
+    await expect(service.setWebhook("pid_owner", app.id as string, "https://mygame.dev/hook")).rejects.toThrow(
+      "PID_SECRETS_ENC_KEY",
+    );
+    const stored = (await prisma.pidApp.findUnique({ where: { clientId: (app as Record<string, unknown>).clientId as string } })) as Record<string, unknown>;
+    expect(stored?.webhookSecret ?? null).toBeNull();
   });
 
   it("keeps the previous secret valid for the 24h grace window, then fails closed", async () => {

@@ -28,7 +28,16 @@ export class PermissionsService {
    * Validate a permission grant request against the on-chain scope rules
    * (mirrors `grantPermission` hygiene + `WHITEPAPER.md` §10 scope kinds) and
    * return the canonical permission id + owner challenge. Pure: no DB, no chain.
-   * Submission-time ownership (pid → account) is enforced by the relay path.
+   *
+   * Ownership (ANT-284): there is NO server-side EVM submission path — the
+   * returned `grantPayload` must be signed by the owner passkey and lands
+   * on-chain via the client. The signature IS the pid→account binding: `account`
+   * and `chainId` are part of the signed payload (`permissionId` binds both),
+   * so a grant validated for account A can never execute as account B, and a
+   * non-owner cannot produce a valid submission. Any future server relay MUST
+   * re-check (caller pid owns `account`) before forwarding — mirroring how the
+   * Solana relay paths scope every vault/credential lookup by the
+   * authenticated pid (`sponsored-withdraw.service.ts`, `rotate.service.ts`).
    */
   validateGrant(dto: GrantPermissionDto, nowSec = Math.floor(Date.now() / 1000)): ValidatedGrant {
     const { kind, target, selector, token, to } = dto;
