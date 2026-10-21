@@ -1846,10 +1846,10 @@ paths:
               example:
                 ok: true
                 creditId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
-                amountMinor: 50000
+                amountMinor: "50000"
                 currency: "IDR"
                 env: "sandbox"
-                dailyRemainingMinor: 50000
+                dailyRemainingMinor: "50000"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -3337,8 +3337,8 @@ components:
           format: uuid
           description: Ledger entryGroup of the minted faucet credit
         amountMinor:
-          type: integer
-          description: Minted amount, whole IDR
+          type: string
+          description: Minted amount, whole IDR (decimal string, same convention as FiatBalance.balanceIdr)
         currency:
           type: string
           enum: [IDR]
@@ -3346,8 +3346,8 @@ components:
           type: string
           enum: [sandbox]
         dailyRemainingMinor:
-          type: integer
-          description: Faucet quota left for this identity today, whole IDR
+          type: string
+          description: Faucet quota left for this identity today, whole IDR (decimal string)
 
     FiatBalance:
       type: object
