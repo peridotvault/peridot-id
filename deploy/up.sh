@@ -111,6 +111,15 @@ compose() {
 }
 
 echo "Deploying PeridotID [$ENV]..."
+# Faucet prod lock (ANT-290, board order 2026-10-21): strict abort for main
+# deploys that would enable the sandbox faucet. Logic lives in
+# deploy/faucet-preflight.sh (sourced — function only, so it stays unit
+# testable); this block runs for ENV=main only, test stack unaffected.
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/faucet-preflight.sh"
+if [ "$ENV" = "main" ]; then
+  faucet_preflight_main
+fi
 # Serial builds (small VPS): api + app are the proven set; dashboard
 # (ANT-118) joins the same loop — same pattern, independent image.
 # (docs left the loop in ANT-124: Mintlify-hosted, no VPS image to build.)
