@@ -189,9 +189,15 @@ export class SsoService {
   }
 
   /** Consume a code and return the identity payload for the relying party. */
-  async consume(code: string, clientId?: string, clientSecret?: string): Promise<SsoIdentity> {
+  async consume(code: string, redirectUri: string, clientId?: string, clientSecret?: string): Promise<SsoIdentity> {
     const row = await this.prisma.ssoCode.findUnique({ where: { code } });
     if (!row || row.consumedAt || row.expiresAt < new Date()) {
+      throw new Error("sso_code_invalid");
+    }
+    // OAuth-style redirect binding (M1): the RP must present the exact
+    // redirect_uri the code was issued for. Missing/mismatched yields the
+    // same uniform error as an unknown code — no oracle for code scanners.
+    if (!redirectUri || row.redirectTo !== redirectUri) {
       throw new Error("sso_code_invalid");
     }
     // Codes bound to an app only exchange with the same client_id — and with the
