@@ -30,7 +30,7 @@ export default function WorkspacePage() {
         <Card className="mt-8">
           <h2 className="text-lg font-semibold tracking-tight">Sign in to manage your apps</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>
-            Register <code>client_id</code>s, edit redirect URIs, and generate backend secrets.
+            Register <code>client_id</code>s, edit allowed origins, and generate backend secrets.
           </p>
           {error && <p className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">

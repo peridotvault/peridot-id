@@ -19,6 +19,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
 
   const load = useCallback(async () => {
     setApps(unwrap(await client.get<PidApp[]>("/v1/apps"), "Loading apps"));
+    setError(null);
   }, [client]);
 
   useEffect(() => {
@@ -70,7 +71,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
               <span className={`text-xs ${MUTED}`}>{app.isActive ? "Active" : "Disabled"} →</span>
             </Link>
           ))}
-          {apps.length === 0 && <p className={`text-sm ${MUTED}`}>No apps yet — register your first below.</p>}
+          {apps.length === 0 && !error && <p className={`text-sm ${MUTED}`}>No apps yet — register your first below.</p>}
         </div>
       )}
 
