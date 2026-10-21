@@ -104,7 +104,7 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
   };
   const security = { log: jest.fn(async () => undefined) };
   const service = new FiatLedgerService(prisma as never, configStub(store), checkoutStub(paidAmount), security as never);
-  return { service, prisma, created };
+  return { service, prisma, created, security };
 }
 
 describe("FiatLedgerService.issueForDeposit", () => {
@@ -610,7 +610,7 @@ describe("FiatLedgerService escrow fee operation", () => {
 
 describe("FiatLedgerService adminAdjust (ANT-254 fiat_adjust writer)", () => {
   function adjustSetup(balanceIn: bigint) {
-    const { service, prisma, created } = setup();
+    const { service, prisma, created, security } = setup();
     prisma.identity.findUnique.mockImplementation(async ({ where }: any) =>
       ["dev@pid", "rani@pid"].includes(where.pid) ? { pid: where.pid } : null,
     );
@@ -633,7 +633,7 @@ describe("FiatLedgerService adminAdjust (ANT-254 fiat_adjust writer)", () => {
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
     }));
-    return { service, prisma, created };
+    return { service, prisma, created, security };
   }
 
   it("posts a balanced out+in fiat_adjust pair", async () => {
@@ -668,6 +668,84 @@ describe("FiatLedgerService adminAdjust (ANT-254 fiat_adjust writer)", () => {
     await expect(service.adminAdjust("admin@pid", {
       fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "50000", reason: "overdraft correction case",
     })).rejects.toThrow("Insufficient");
+  });
+
+  it("rejects a garbage requestId at the boundary", async () => {
+    const { service } = adjustSetup(1_000_000n);
+    await expect(service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100", reason: "garbage key boundary",
+      requestId: "not a key!!",
+    })).rejects.toThrow("requestId must be");
+  });
+
+  it("keyed post writes deterministic idempotency keys", async () => {
+    const { service, created } = adjustSetup(1_000_000n);
+    const res = await service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100000", reason: "duplicate payout reversal",
+      requestId: "fix1",
+    });
+    expect(res.entryGroup).toBe("ADJ-fix1");
+    const keys = created.filter((r: any) => r.kind === "fiat_adjust").map((r: any) => r.idempotencyKey).sort();
+    expect(keys).toEqual(["ADJ-fix1-IN", "ADJ-fix1-OUT"]);
+  });
+
+  it("retried POST with the same requestId returns the original group (no second pair)", async () => {
+    const { service, prisma } = adjustSetup(1_000_000n);
+    prisma.fiatLedgerEntry.findUnique.mockResolvedValueOnce({
+      id: "j0", entryGroup: "ADJ-dup1", kind: "fiat_adjust", pid: "dev@pid",
+      counterpartyPid: "rani@pid", amountIdr: 100_000n, direction: "out", status: "posted",
+    });
+    const res = await service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100000", reason: "duplicate payout reversal",
+      requestId: "dup1",
+    });
+    expect(res.entryGroup).toBe("ADJ-dup1");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("same requestId with different amount → 409 (no silent overwrite)", async () => {
+    const ctx = adjustSetup(1_000_000n);
+    ctx.prisma.fiatLedgerEntry.findUnique.mockResolvedValueOnce({
+      id: "j0", entryGroup: "ADJ-dup1", kind: "fiat_adjust", pid: "dev@pid",
+      counterpartyPid: "rani@pid", amountIdr: 50_000n, direction: "out", status: "posted",
+    });
+    await expect(ctx.service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100000", reason: "duplicate payout reversal",
+      requestId: "dup1",
+    })).rejects.toThrow("different adjustment");
+  });
+
+  it("unique-race on a keyed retry returns the winner's group (no second pair)", async () => {
+    const { service, prisma, created } = setup();
+    prisma.identity.findUnique.mockImplementation(async ({ where }: any) =>
+      ["dev@pid", "rani@pid"].includes(where.pid) ? { pid: where.pid } : null,
+    );
+    prisma.fiatLedgerEntry.findUnique
+      .mockResolvedValueOnce(null) // pre-check: nothing posted yet
+      .mockResolvedValueOnce({ // race re-read: the concurrent POST won
+        id: "j0", entryGroup: "ADJ-race1", kind: "fiat_adjust", pid: "dev@pid",
+        counterpartyPid: "rani@pid", amountIdr: 100_000n, direction: "out", status: "posted",
+      });
+    prisma.$transaction.mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed on the constraint"), { code: "P2002" }));
+    const res = await service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100000", reason: "duplicate payout reversal",
+      requestId: "race1",
+    });
+    expect(res.entryGroup).toBe("ADJ-race1");
+    expect(created).toHaveLength(0);
+  });
+
+  it("alerts (logger.error) when the audit sink fails — money stays moved", async () => {
+    const { service, created, security } = adjustSetup(1_000_000n);
+    (security.log as jest.Mock).mockRejectedValueOnce(new Error("sink down"));
+    const errSpy = jest.spyOn((service as any).logger, "error").mockImplementation(() => undefined);
+    const res = await service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100000", reason: "duplicate payout reversal",
+    });
+    expect(res.entryGroup).toMatch(/^ADJ/);
+    expect(created.filter((r: any) => r.kind === "fiat_adjust")).toHaveLength(2);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("AUDIT-SINK-FAILURE fiat.adjust"));
+    errSpy.mockRestore();
   });
 });
 

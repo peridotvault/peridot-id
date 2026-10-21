@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
@@ -89,13 +89,22 @@ export class FiatLedgerController {
    * transfer corrections live here; ISSUANCE clawbacks stay on the
    * propose→approve clawback path (FiatSubAccountService) — issuance legs
    * have no counterparty identity to mirror against.
+   *
+   * Idempotent (ANT-264): pass `Idempotency-Key: <key>` (or `requestId` in
+   * the body; the header wins) — a retried POST returns the original
+   * entryGroup instead of posting a second pair.
    */
   @Post("admin/adjust")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, AdminGuard)
-  adjust(@CurrentUser() user: AuthenticatedUser, @Body() dto: LedgerAdjustDto) {
-    return this.ledger.adminAdjust(user.pid, dto);
+  adjust(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: LedgerAdjustDto,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    const requestId = (idempotencyKey ?? dto.requestId)?.trim() || undefined;
+    return this.ledger.adminAdjust(user.pid, { ...dto, requestId });
   }
 
   /** Admin: engage/clear the migration freeze (in-memory override, env is default). */

@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import {
@@ -282,7 +282,9 @@ export class FiatLedgerService {
       if (done?.status === "posted") return;
       throw err;
     }
-    await this.security.log(row.pid, "fiat.issued", { parentRef: row.providerRef, net: net.toString(), fee: fee.toString() }).catch(() => undefined);
+    await this.security.log(row.pid, "fiat.issued", { parentRef: row.providerRef, net: net.toString(), fee: fee.toString() }).catch((err) => {
+      this.logger.error(`AUDIT-SINK-FAILURE fiat.issued ${row.providerRef} unaudited: ${String(err)?.slice(0, 200)}`);
+    });
   }
 
   // --- send/receive (generic primitive + phase-1 policy gate) ---
@@ -327,7 +329,9 @@ export class FiatLedgerService {
         source: "transfer-inquiry",
       },
     });
-    await this.security.log(pid, "fiat.transfer_inquiry", { entryGroup, gross: gross.toString() }).catch(() => undefined);
+    await this.security.log(pid, "fiat.transfer_inquiry", { entryGroup, gross: gross.toString() }).catch((err) => {
+      this.logger.error(`AUDIT-SINK-FAILURE fiat.transfer_inquiry ${entryGroup} unaudited: ${String(err)?.slice(0, 200)}`);
+    });
     return {
       id: row.id, entryGroup, grossIdr: gross.toString(), feeIdr: totalFee.toString(),
       peridotFeeIdr: globalFee.toString(), peridotTaxIdr: peridotTaxIdr.toString(),
@@ -452,7 +456,9 @@ export class FiatLedgerService {
       if (reread?.status === "posted") return this.toTxView(reread as never);
       throw err instanceof Error ? err : new ServiceUnavailableException("Transfer failed — try again");
     }
-    await this.security.log(pid, "fiat.transfer", { entryGroup: intent.entryGroup, gross: gross.toString() }).catch(() => undefined);
+    await this.security.log(pid, "fiat.transfer", { entryGroup: intent.entryGroup, gross: gross.toString() }).catch((err) => {
+      this.logger.error(`AUDIT-SINK-FAILURE fiat.transfer ${intent.entryGroup} unaudited: ${String(err)?.slice(0, 200)}`);
+    });
     const done = await this.prisma.fiatLedgerEntry.findFirst({ where: { id, pid } });
     if (!done) throw new NotFoundException("Transfer not found");
     return this.toTxView(done as never);
@@ -489,6 +495,12 @@ export class FiatLedgerService {
    * Both legs are chained, idempotency-keyed (`<entryGroup>-OUT/-IN`), and
    * the sender balance is rechecked inside the identity-locked txn.
    *
+   * Idempotent on `requestId` (ANT-264: Tobias Finding 2): when supplied,
+   * the leg keys are deterministic (`ADJ-<requestId>-OUT/-IN`) and a retried
+   * call returns the original entryGroup. Same key with different
+   * fromPid/toPid/amount → 409 Conflict. Without a key each POST mints a
+   * fresh pair (caller must de-dupe; admin-only + 10/min throttle bound it).
+   *
    * Boundary: TRANSFER corrections live here. ISSUANCE clawbacks stay on the
    * propose→approve clawback path (FiatSubAccountService) — issuance legs
    * (`fiat_issue`/`fiat_fee`) credit the sender/treasury with no counterparty
@@ -496,7 +508,7 @@ export class FiatLedgerService {
    */
   async adminAdjust(
     adminPid: string,
-    input: { fromPid: string; toPid: string; amountIdr: string; reason: string },
+    input: { fromPid: string; toPid: string; amountIdr: string; reason: string; requestId?: string },
   ): Promise<{ entryGroup: string }> {
     this.requireUsable();
     const fromPid = input.fromPid.trim().toLowerCase();
@@ -506,11 +518,26 @@ export class FiatLedgerService {
     const reason = (input.reason ?? "").trim();
     if (reason.length < 8) throw new BadRequestException("reason is required (min 8 chars) — adjustments are audited");
     const amount = this.parseAmount(input.amountIdr);
+    const requestId = (input.requestId ?? "").trim() || null;
+    if (requestId !== null && !/^[A-Za-z0-9_-]{1,64}$/.test(requestId)) {
+      throw new BadRequestException("requestId must be 1-64 chars of [A-Za-z0-9_-]");
+    }
     for (const pid of [fromPid, toPid]) {
       const ident = await this.prisma.identity.findUnique({ where: { pid } }).catch(() => null);
       if (!ident) throw new NotFoundException(`Identity not found: ${pid}`);
     }
-    const entryGroup = buildInvoiceNumber("ADJ");
+    // Deterministic keys when the caller supplies requestId; random per-POST
+    // otherwise (legacy behavior, documented above).
+    const outKey = requestId !== null ? `ADJ-${requestId}-OUT` : null;
+    const inKey = requestId !== null ? `ADJ-${requestId}-IN` : null;
+    const entryGroup = requestId !== null ? `ADJ-${requestId}` : buildInvoiceNumber("ADJ");
+    if (outKey !== null) {
+      const prior = await this.prisma.fiatLedgerEntry.findUnique({ where: { idempotencyKey: outKey } }).catch(() => null);
+      if (prior && prior.status === "posted") {
+        this.assertAdjustMatches(prior as never, { fromPid, toPid, amount });
+        return { entryGroup: (prior as { entryGroup: string }).entryGroup };
+      }
+    }
     try {
       await this.prisma.$transaction(async (tx) => {
         await this.lockAccounts(tx as never, [fromPid, toPid]);
@@ -522,31 +549,61 @@ export class FiatLedgerService {
           {
             data: {
               entryGroup, kind: "fiat_adjust", pid: fromPid, counterpartyPid: toPid,
-              amountIdr: amount, direction: "out", idempotencyKey: `${entryGroup}-OUT`,
+              amountIdr: amount, direction: "out", idempotencyKey: outKey ?? `${entryGroup}-OUT`,
               parentRef: entryGroup,
-              counterparty: json({ parentRef: entryGroup, adjustFrom: fromPid, adjustTo: toPid, reason }),
+              counterparty: json({ parentRef: entryGroup, adjustFrom: fromPid, adjustTo: toPid, reason, ...(requestId !== null ? { requestId } : {}) }),
               source: "admin-adjust",
             },
           },
           {
             data: {
               entryGroup, kind: "fiat_adjust", pid: toPid, counterpartyPid: fromPid,
-              amountIdr: amount, direction: "in", idempotencyKey: `${entryGroup}-IN`,
+              amountIdr: amount, direction: "in", idempotencyKey: inKey ?? `${entryGroup}-IN`,
               parentRef: entryGroup,
-              counterparty: json({ parentRef: entryGroup, adjustFrom: fromPid, adjustTo: toPid, reason }),
+              counterparty: json({ parentRef: entryGroup, adjustFrom: fromPid, adjustTo: toPid, reason, ...(requestId !== null ? { requestId } : {}) }),
               source: "admin-adjust",
             },
           },
         ]);
       });
     } catch (err) {
-      if (err instanceof BadRequestException || err instanceof NotFoundException) throw err;
+      if (err instanceof BadRequestException || err instanceof NotFoundException || err instanceof ConflictException) throw err;
+      // Unique race on a keyed retry: the concurrent POST won — verify the
+      // posted row and return its group instead of a second pair.
+      if (outKey !== null && this.isUniqueViolation(err)) {
+        const won = await this.prisma.fiatLedgerEntry.findUnique({ where: { idempotencyKey: outKey } }).catch(() => null);
+        if (won && (won as { status: string }).status === "posted") {
+          this.assertAdjustMatches(won as never, { fromPid, toPid, amount });
+          return { entryGroup: (won as { entryGroup: string }).entryGroup };
+        }
+      }
       throw err instanceof Error ? err : new ServiceUnavailableException("Adjustment failed — try again");
     }
+    // Fail-open WITH alert (ANT-264: Tobias Finding 3): the money has moved
+    // at this point, so a throw would lie about the ledger state — but a
+    // silent swallow would leave money unaudited. The ERROR log is the alert
+    // signal for ops log monitoring (same convention as the BLOCKED line in
+    // issueForDepositInner). Never `.catch(() => undefined)` here.
     await this.security.log(adminPid, "fiat.adjust", {
       entryGroup, fromPid, toPid, amount: amount.toString(), reason: reason.slice(0, 160),
-    }).catch(() => undefined);
+    }).catch((err) => {
+      this.logger.error(`AUDIT-SINK-FAILURE fiat.adjust ${entryGroup} unaudited: ${String(err)?.slice(0, 200)}`);
+    });
     return { entryGroup };
+  }
+
+  /** Idempotent-retry guard: same requestId must mean the same movement. */
+  private assertAdjustMatches(
+    row: { pid: string; counterpartyPid: string | null; amountIdr: bigint; direction: string | null },
+    want: { fromPid: string; toPid: string; amount: bigint },
+  ): void {
+    if (row.pid !== want.fromPid || row.counterpartyPid !== want.toPid || row.amountIdr !== want.amount || row.direction !== "out") {
+      throw new ConflictException("requestId already used for a different adjustment — use a fresh key");
+    }
+  }
+
+  private isUniqueViolation(err: unknown): boolean {
+    return typeof err === "object" && err !== null && (err as { code?: string }).code === "P2002";
   }
 
   // --- reads (replay is the balance) ---

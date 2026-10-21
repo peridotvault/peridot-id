@@ -64,4 +64,16 @@ export class LedgerAdjustDto {
   @IsString()
   @MaxLength(512)
   reason!: string;
+
+  /**
+   * Client-supplied idempotency key (ANT-264: Tobias Finding 2). When set,
+   * a retried POST with the same key returns the original entryGroup instead
+   * of minting a second correction pair. Same key + different
+   * fromPid/toPid/amount → 409. The `Idempotency-Key` header carries the
+   * same value and wins over this field when both are present.
+   */
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{1,64}$/, { message: "requestId must be 1-64 chars of [A-Za-z0-9_-]" })
+  requestId?: string;
 }
