@@ -49,7 +49,9 @@ export class ClaimDto {
 
 /**
  * Client-credentials token for an app's backend (no browser). `clientSecret`
- * is required when the app has one set.
+ * is required when the app has one set. Optional `scope` narrows the token:
+ * only `fiat:transfer` is recognized — scoped tokens are the least-privilege
+ * form for escrow releases on `POST /v1/fiat/transfers/*`.
  */
 export class AppTokenDto {
   @IsString()
@@ -58,6 +60,11 @@ export class AppTokenDto {
   @IsOptional()
   @IsString()
   clientSecret?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^fiat:transfer$/, { message: "scope must be fiat:transfer" })
+  scope?: string;
 }
 
 /**

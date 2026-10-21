@@ -69,6 +69,8 @@ export class AuthController {
    * Machine token for an app's backend (client-credentials). Bound to the app
    * owner's pid; carries the app's clientId (fee context + non-admin). Send it
    * as `Authorization: Bearer <token>`. No browser session required.
+   * Optional `scope: "fiat:transfer"` mints the least-privilege escrow-release
+   * form (ANT-286b) — pass it through to the token's scope claim.
    */
   @Post("token")
   @HttpCode(HttpStatus.OK)
@@ -79,7 +81,7 @@ export class AuthController {
     if (!this.apps.clientSecretValid(app, dto.clientSecret ?? "")) {
       throw new UnauthorizedException("Invalid client");
     }
-    return this.authService.issueAppAccessToken(app.ownerPid, app.clientId);
+    return this.authService.issueAppAccessToken(app.ownerPid, app.clientId, dto.scope);
   }
 
   @Post("login")

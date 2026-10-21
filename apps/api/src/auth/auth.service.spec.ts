@@ -252,6 +252,13 @@ describe("AuthService", () => {
 
     const app = await service.issueAppAccessToken("owner@pid", "pidapp_x");
     expect(jwtPayload(app.accessToken)).toMatchObject({ iss: "peridot-id", aud: "pid-app", type: "access" });
+    expect(jwtPayload(app.accessToken)).not.toHaveProperty("scope");
+  });
+
+  it("embeds the fiat:transfer scope claim on scoped machine tokens (ANT-286b)", async () => {
+    const { service } = setup();
+    const scoped = await service.issueAppAccessToken("owner@pid", "pidapp_x", "fiat:transfer");
+    expect(jwtPayload(scoped.accessToken)).toMatchObject({ app: "pidapp_x", scope: "fiat:transfer" });
   });
 
   it("rejects a refresh token minted for another audience (cross-class confusion)", async () => {
