@@ -30,7 +30,7 @@ import {
   solanaAdapter,
   treasuryPubkey,
 } from "../common/solana-relay";
-import { PID_ACTIVATION_CONFIRM_INTERVAL_MS, PID_ACTIVATION_POLL_MS } from "../common/app-config";
+import { PID_ACTIVATION_CONFIRM_INTERVAL_MS, PID_ACTIVATION_CONFIRM_ATTEMPTS, PID_ACTIVATION_POLL_MS } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -57,8 +57,6 @@ export interface ActivationView {
   treasury: string;
   /** Fee-policy version the quote was computed under (client must sign this). */
   feePolicyVersion: number;
-  /** base64url sha256 of the WebAuthn RP ID (bound into the V3 activation payload). */
-  rpIdHash: string;
   /** Additive CAIP-2 echo of the active Solana chain (omitted when registry has none). */
   chain?: ChainEcho;
 }
@@ -93,21 +91,12 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private policyVersion(): number {
-    return configuredPolicyVersion(this.config);
+    return configuredPolicyVersion();
   }
 
   /** Activity label for the selected chain (default = current behavior). */
   private async networkLabel(selection?: SolanaSelection): Promise<string> {
     return this.chains.networkLabel(selection);
-  }
-
-  /** sha256 of the WebAuthn RP ID — stored on-chain and verified per assertion. */
-  private async rpIdHash(): Promise<Uint8Array> {
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(this.config.get<string>("WEBAUTHN_RP_ID", "localhost")),
-    );
-    return new Uint8Array(digest);
   }
 
   /** Lazy pid-solana module (keeps @solana/web3.js out of Jest's transform graph). */
@@ -163,8 +152,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private confirmAttempts(): number {
-    const n = Number(this.config.get<string>("PID_ACTIVATION_CONFIRM_ATTEMPTS", "15"));
-    return Number.isFinite(n) && n > 0 ? n : 15;
+    return PID_ACTIVATION_CONFIRM_ATTEMPTS;
   }
 
   private confirmIntervalMs(): number {
@@ -300,7 +288,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Activate a READY wallet (idempotent once ACTIVE). The claim is passkey-signed
-   *  by the client (V3 payload binds op-tag, account, authority, RP-ID hash,
+   *  by the client (V3 payload binds op-tag, account, authority,
    *  policy, expiry — no amounts) — the relayer only submits, so a stranger can
    *  neither squat the PDA nor divert funds or change the fee policy. */
   async activate(
@@ -386,7 +374,6 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       const signature = await adapter.activateV3(
         user.pid,
         coseToCompressedSecp256r1(Buffer.from(asserting.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
-        await this.rpIdHash(),
         quoted.version,
         networkFee,
         dto.expiry,
@@ -496,7 +483,6 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       chainTime: await adapter.chainTime().catch(() => 0),
       treasury: this.treasury().toBase58(),
       feePolicyVersion: quoted.version,
-      rpIdHash: Buffer.from(await this.rpIdHash()).toString("base64url"),
       ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }

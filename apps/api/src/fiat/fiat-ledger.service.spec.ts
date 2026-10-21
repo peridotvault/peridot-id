@@ -81,7 +81,10 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
         }),
         update: jest.fn(async (args: any) => ({ id: "j0", ...args.data })),
         updateMany: jest.fn(async () => ({ count: 1 })),
-        findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
+        findMany: jest.fn(async () => []),
+        // Default null: transferConfirm's in-txn recheck and cancelIntent's
+        // in-txn read see "no row" unless a test stages one (e.g. cross-pid
+        // must read NotFound, never a staged created row).
         findFirst: jest.fn(async () => null),
         findUnique: jest.fn(async () => ({ id: "intent1", status: "created" })),
       },
@@ -183,8 +186,9 @@ describe("FiatLedgerService transfers", () => {
           return r;
         }),
         update: jest.fn(async (args: any) => ({ ...args.data })),
-        findFirst: jest.fn(async () => null),
-        findUnique: jest.fn(async () => ({ id: "intent1", status: "created" })),
+        // First in-txn read is transferConfirm's cancel-vs-confirm recheck
+        // (created → proceeds); the head lookup in appendChained finds nothing.
+        findFirst: jest.fn(async (): Promise<any> => null).mockResolvedValueOnce({ id: "intent1", status: "created" }),
         findMany: jest.fn(async () => [
           { kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" },
         ]),
@@ -211,6 +215,18 @@ describe("FiatLedgerService transfers", () => {
     expect(kinds).toContain("fiat_fee:25000:posted");
   });
 
+  it("denies cross-pid confirm and cancel (no IDOR on intents)", async () => {
+    const { service, prisma } = setup();
+    // Intent belongs to dev@pid; attacker rani@pid must see NotFound, and
+    // nothing may be written.
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValue(null);
+    await expect(service.transferConfirm("rani@pid", "intent1")).rejects.toThrow("Transfer not found");
+    await expect(service.cancelIntent("rani@pid", "intent1")).rejects.toThrow("Transfer not found");
+    expect(prisma.fiatLedgerEntry.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: "intent1", pid: "rani@pid" }) }),
+    );
+  });
+
   it("rejects confirm on insufficient balance without posting", async () => {
     const { service, prisma, created } = setup();
     prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
@@ -223,8 +239,9 @@ describe("FiatLedgerService transfers", () => {
       fiatLedgerEntry: {
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(async () => ({ count: 1 })),
         findMany: jest.fn(async () => []),
-        findUnique: jest.fn(async () => ({ id: "intent1", status: "created" })),
+        findFirst: jest.fn(async () => ({ id: "intent1", status: "created" })),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
@@ -234,26 +251,139 @@ describe("FiatLedgerService transfers", () => {
     expect(created).toHaveLength(0);
   });
 
-  it("refuses to post an intent cancelled after the pre-txn check", async () => {
+  it("rejects confirm when the intent was cancelled mid-race (no legs posted)", async () => {
     const { service, prisma, created } = setup();
+    // Outer pre-read still sees created; the in-txn recheck sees cancelled.
     prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
-      id: "intent1", kind: "fiat_transfer_out", pid: "live2dev@pid", counterpartyPid: "s1@pid",
-      entryGroup: "CT-X", amountIdr: 100_000n, status: "created",
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      entryGroup: "CT-RACE", amountIdr: 100_000n, status: "created",
       feePolicyVersion: 3, counterparty: {}, createdAt: new Date(),
     });
-    // In-txn re-read sees the canceller's win.
     prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
       fiatLedgerEntry: {
         create: jest.fn(),
         update: jest.fn(),
-        findMany: jest.fn(async () => []),
-        findUnique: jest.fn(async () => ({ id: "intent1", status: "cancelled" })),
+        updateMany: jest.fn(async () => ({ count: 0 })),
+        findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
+        findFirst: jest.fn(async () => ({ id: "intent1", status: "cancelled" })),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
     }));
-    await expect(service.transferConfirm("live2dev@pid", "intent1")).rejects.toThrow("Transfer is closed");
+
+    await expect(service.transferConfirm("dev@pid", "intent1")).rejects.toThrow("Transfer is closed");
     expect(created).toHaveLength(0);
+  });
+
+  it("counts the guard the same way replay does (fee/tax legs do not debit the owner)", async () => {
+    const { service, prisma, created } = setup();
+    // Replay balance after a 475k-net deposit with a 25k fee leg is 475k.
+    // The old direction-only guard read 450k and wrongly rejected a 475k send.
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      entryGroup: "CT-FEE", amountIdr: 475_000n, status: "created",
+      feePolicyVersion: 3,
+      counterparty: { feeQuote: "25000", taxQuote: "0", netQuote: "450000" },
+      createdAt: new Date(),
+    });
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        create: jest.fn(async (args: any) => {
+          const r = { id: `j${created.length}`, createdAt: new Date(), ...args.data };
+          created.push(r);
+          return r;
+        }),
+        update: jest.fn(async (args: any) => ({ ...args.data })),
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        findFirst: jest.fn(async (): Promise<any> => null).mockResolvedValueOnce({ id: "intent1", status: "created" }),
+        findMany: jest.fn(async () => [
+          { kind: "fiat_issue", amountIdr: 475_000n, direction: "in" },
+          { kind: "fiat_fee", amountIdr: 25_000n, direction: "out" },
+        ]),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", entryGroup: "CT-FEE",
+      counterpartyPid: "rani@pid", amountIdr: 475_000n, status: "posted",
+      counterparty: { feeQuote: "25000", taxQuote: "0", netQuote: "450000" },
+      createdAt: new Date(),
+    });
+    const view = await service.transferConfirm("dev@pid", "intent1");
+    expect(view.status).toBe("posted");
+    expect(created.map((r: any) => `${r.kind}:${r.amountIdr}`)).toContain("fiat_transfer_in:450000");
+  });
+
+  it("cancel takes the identity lock and leaves a posted intent untouched", async () => {
+    const { service, prisma } = setup();
+    const posted = {
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", entryGroup: "CT-P",
+      counterpartyPid: "rani@pid", amountIdr: 10_000n, direction: "out",
+      status: "posted", createdAt: new Date(),
+    };
+    const txMocks: any = {};
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        findFirst: jest.fn(async () => posted),
+        updateMany: jest.fn(async () => {
+          txMocks.updated = true;
+          return { count: 0 };
+        }),
+      },
+      $queryRaw: jest.fn(async (...a: any[]) => {
+        txMocks.locked = true;
+        return [];
+      }),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    const view = await service.cancelIntent("dev@pid", "intent1");
+    expect(view.status).toBe("posted");
+    expect(txMocks.locked).toBe(true);
+    expect(txMocks.updated).toBeUndefined();
+  });
+
+  it("cancel claims a created intent with a guarded update", async () => {
+    const { service, prisma } = setup();
+    const row = (status: string) => ({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", entryGroup: "CT-C",
+      counterpartyPid: "rani@pid", amountIdr: 10_000n, direction: "out",
+      status, createdAt: new Date(),
+    });
+    let claimed: any = null;
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        findFirst: jest.fn(async () => row("created")).mockResolvedValueOnce(row("created")).mockResolvedValueOnce(row("cancelled")),
+        updateMany: jest.fn(async (args: any) => {
+          claimed = args;
+          return { count: 1 };
+        }),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    const view = await service.cancelIntent("dev@pid", "intent1");
+    expect(view.status).toBe("cancelled");
+    expect(claimed).toMatchObject({ where: { id: "intent1", status: "created" } });
+  });
+
+  it("balance and journal flag truncated replays instead of silently rounding", async () => {
+    const { service, prisma } = setup();
+    const big = Array.from({ length: 5000 }, (_, i) => ({
+      pid: "dev@pid", entryGroup: `G-${i % 10}`, kind: "fiat_issue",
+      idempotencyKey: `K-${i}`, amountIdr: 1n, direction: "in", status: "posted", replaySeq: BigInt(i),
+    }));
+    prisma.fiatLedgerEntry.findMany.mockResolvedValueOnce(big).mockResolvedValueOnce([]);
+    const b = await service.balance("dev@pid");
+    expect(b.truncated).toBe(true);
+    const small = [{
+      pid: "dev@pid", entryGroup: "G-1", kind: "fiat_issue",
+      idempotencyKey: "K-1", amountIdr: 100n, direction: "in", status: "posted", replaySeq: 1n,
+    }];
+    prisma.fiatLedgerEntry.findMany.mockResolvedValueOnce(small).mockResolvedValueOnce(small);
+    const b2 = await service.balance("dev@pid");
+    expect(b2.truncated).toBe(false);
+    expect(b2.balanceIdr).toBe("100");
   });
 });
 
@@ -332,6 +462,47 @@ describe("FiatLedgerService callbacks", () => {
     );
   });
 
+  it("signs with the secret of the app matching the event URL (not the first app)", async () => {
+    const { service, prisma } = setup();
+    prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
+      { id: "e3", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://b/hook", payload: { hello: "world" }, attempts: 0 },
+    ]);
+    // Owner holds two apps; the ownerPid-only lookup used to pick app A's
+    // secret for app B's URL. The service must resolve by (ownerPid, URL).
+    prisma.pidApp.findFirst.mockImplementationOnce(async (args: any) =>
+      args?.where?.webhookUrl === "https://b/hook" ? { webhookSecret: "secret-B" } : { webhookSecret: "secret-A" },
+    );
+    const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
+    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+
+    const res = await service.dispatchEvents({});
+    expect(res.sent).toBe(1);
+    expect(prisma.pidApp.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ ownerPid: "app@pid", webhookUrl: "https://b/hook" }) }),
+    );
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string>; body: string }];
+    const expected = "sha256=" + createHmac("sha256", "secret-B").update(init.body).digest("hex");
+    expect(init.headers["X-Pid-Signature"]).toBe(expected);
+  });
+
+  it("refuses unsigned dispatch when the target app/secret is gone", async () => {
+    const { service, prisma } = setup();
+    prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
+      { id: "e4", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://gone/hook", payload: {}, attempts: 0 },
+    ]);
+    prisma.pidApp.findFirst.mockResolvedValueOnce(null); // revoked/deleted app
+    const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
+    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+
+    const res = await service.dispatchEvents({});
+    expect(res.sent).toBe(0);
+    expect(res.failed).toBe(1);
+    expect(fetchMock).not.toHaveBeenCalled(); // never send with an empty-key HMAC
+    expect(prisma.fiatLedgerEvent.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "pending", attempts: 1 }) }),
+    );
+  });
+
   it("enqueues a callback when an app owns a transfer party", async () => {
     const { service, prisma } = setup();
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
@@ -346,8 +517,7 @@ describe("FiatLedgerService callbacks", () => {
       fiatLedgerEntry: {
         create: jest.fn(async (args: any) => ({ id: `j${Math.random()}`, createdAt: new Date(), ...args.data })),
         update: jest.fn(async (args: any) => ({ id: "intent1", ...args.data })),
-        findFirst: jest.fn(async () => null),
-        findUnique: jest.fn(async () => ({ id: "intent1", status: "created" })),
+        findFirst: jest.fn(async (): Promise<any> => null).mockResolvedValueOnce({ id: "intent1", status: "created" }),
         findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
       },
       // Atomic outbox: the confirm txn itself reads apps + writes events.
@@ -397,6 +567,24 @@ describe("FiatLedgerService callbacks", () => {
       counterpartyPid: "live2dev@pid", amountIdr: 500_000n, status: "posted",
       direction: "out", counterparty: {}, createdAt: new Date(),
     });
+    // Default tx mock has zero balance — stage funds for this confirm.
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        create: jest.fn(async (args: any) => ({ id: `j${Math.random()}`, createdAt: new Date(), ...args.data })),
+        update: jest.fn(async (args: any) => ({ id: "intent1", ...args.data })),
+        findFirst: jest.fn(async (): Promise<any> => null).mockResolvedValueOnce({ id: "intent1", status: "created" }),
+        findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
+      },
+      pidApp: {
+        findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+      },
+      fiatLedgerEvent: {
+        findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
+        create: (...args: any[]) => (prisma.fiatLedgerEvent.create as any)(...args),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
     await service.transferConfirm("dev@pid", "intent1");
     expect(prisma.fiatLedgerEvent.create).not.toHaveBeenCalled();
   });
@@ -483,33 +671,3 @@ describe("FiatLedgerService adminAdjust (ANT-254 fiat_adjust writer)", () => {
   });
 });
 
-describe("FiatLedgerService cancelIntent guarded claim (ANT-254)", () => {
-  it("cancels a created intent via a status-guarded claim", async () => {
-    const { service, prisma } = setup();
-    prisma.fiatLedgerEntry.findFirst
-      .mockResolvedValueOnce({
-        id: "i1", kind: "fiat_transfer_out", entryGroup: "CT-1", counterpartyPid: "rani@pid",
-        amountIdr: 100n, direction: "out", status: "created", createdAt: new Date(),
-      })
-      .mockResolvedValueOnce({
-        id: "i1", kind: "fiat_transfer_out", entryGroup: "CT-1", counterpartyPid: "rani@pid",
-        amountIdr: 100n, direction: "out", status: "cancelled", createdAt: new Date(),
-      });
-    const view = await service.cancelIntent("dev@pid", "i1");
-    expect(prisma.fiatLedgerEntry.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ id: "i1", status: "created" }) }),
-    );
-    expect(view.status).toBe("cancelled");
-  });
-
-  it("never overwrites a posted intent — returns it instead", async () => {
-    const { service, prisma } = setup();
-    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
-      id: "i1", kind: "fiat_transfer_out", entryGroup: "CT-1", counterpartyPid: "rani@pid",
-      amountIdr: 100n, direction: "out", status: "posted", createdAt: new Date(),
-    });
-    const view = await service.cancelIntent("dev@pid", "i1");
-    expect(prisma.fiatLedgerEntry.updateMany).not.toHaveBeenCalled();
-    expect(view.status).toBe("posted");
-  });
-});

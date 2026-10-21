@@ -29,6 +29,7 @@ import {
   MAX_TTL_SECS,
 } from "../common/solana-relay";
 import { coseToRawXy } from "../credentials/cose";
+import { PID_EVM_POLL_MS } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -66,7 +67,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    const intervalMs = Number(this.config.get<string>("PID_EVM_POLL_MS", "30000"));
+    const intervalMs = PID_EVM_POLL_MS;
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
     this.timer = setInterval(() => {
       void this.poll().catch((err) => this.logger.error(`evm poll error: ${(err as Error).message}`));
@@ -95,7 +96,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private policyVersion(): number {
-    return configuredPolicyVersion(this.config);
+    return configuredPolicyVersion();
   }
 
   /** Realtime network-cost estimate for the deploy (no margin — the protocol fee is separate). */
@@ -187,7 +188,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * True when the deployed proxy is initialized with the registered passkey
-   * authority and RP ID **and** canonically associated with our factory.
+   * authority **and** canonically associated with our factory.
    * Fail-closed: any error (no credential, bad RPC) is false.
    */
   private async deploymentMatches(
@@ -198,21 +199,18 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   ): Promise<boolean> {
     const authority = await requireActiveAuthority(this.prisma, pid);
     const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
-    const rpIdHash = await this.sha256Hex(this.config.get<string>("WEBAUTHN_RP_ID", "localhost"));
     const deployment = await this.chains.deploymentFor(chainReference);
     const v = buildViewCalldata();
-    const [init, ax, ay, rp, factory] = await Promise.all([
+    const [init, ax, ay, factory] = await Promise.all([
       rpc.call<string>("eth_call", [{ to: address, data: v.initialized }, "latest"]),
       rpc.call<string>("eth_call", [{ to: address, data: v.authorityX }, "latest"]),
       rpc.call<string>("eth_call", [{ to: address, data: v.authorityY }, "latest"]),
-      rpc.call<string>("eth_call", [{ to: address, data: v.rpIdHash }, "latest"]),
       rpc.call<string>("eth_call", [{ to: address, data: v.factory }, "latest"]),
     ]);
     return (
       BigInt(init) === 1n &&
       ax.toLowerCase() === `0x${toHex(new Uint8Array(x))}` &&
       ay.toLowerCase() === `0x${toHex(new Uint8Array(y))}` &&
-      rp.toLowerCase() === `0x${toHex(rpIdHash)}` &&
       !!deployment &&
       factory.toLowerCase() === `0x${"0".repeat(24)}${deployment.factory.slice(2).toLowerCase()}`
     );
@@ -254,7 +252,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   /**
    * Deploy the counterfactual via the Peridot relayer (V3 passkey-bound
    * `deployAndInit` with the registered passkey as authority). The user's
-   * assertion binds salt, authority, rpIdHash, policy, deadline,
+   * assertion binds salt, authority, policy, deadline,
    * chainId and factory (no amounts) — the relayer submits but authorizes
    * nothing. Idempotent once ACTIVE.
    */
@@ -280,10 +278,11 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
 
     const authority = await requireActiveAuthority(this.prisma, user.pid);
 
-    const secret = this.config.get<string>("EVM_RELAYER_SECRET");
+    // EVM relayer key is dashboard-managed (evm_relayer_keys table, admin-only) —
+    // never env. Unset = operator deploys via forge script, then this endpoint
+    // confirms ACTIVE. Never silently skip deployment.
+    const secret = await this.chains.relayerSecretFor(chainReference);
     if (!secret || !/^0x[0-9a-fA-F]{64}$/.test(secret)) {
-      // No relayer key: the operator deploys with the forge script, then this
-      // endpoint confirms ACTIVE. Never silently skip deployment.
       throw new ServiceUnavailableException(
         "EVM auto-deploy is not configured — deploy with contracts/evm (script/Deploy.s.sol) then retry.",
       );
@@ -316,12 +315,10 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "activating" } });
     try {
       const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
-      const rpIdHash = await this.sha256Hex(this.config.get<string>("WEBAUTHN_RP_ID", "localhost"));
       const data = adapter.buildDeployAndInitDataV3({
         salt: adapter.getSalt(user.pid),
         x: new Uint8Array(x),
         y: new Uint8Array(y),
-        rpIdHash,
         feePolicyVersion: version,
         deadline: dto.deadline,
         networkFee,
@@ -418,11 +415,6 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     });
     if (!row) throw new NotFoundException("Account not found");
     return row;
-  }
-
-  private async sha256Hex(s: string): Promise<Uint8Array> {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-    return new Uint8Array(digest);
   }
 
   /** Lazy viem import (keeps the ESM graph out of Jest unless a deploy runs). */

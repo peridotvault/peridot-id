@@ -322,14 +322,17 @@ export class PeridotAuth {
 
   /**
    * Exchange a one-time SSO pid_code for the identity (for cross-origin relying parties).
+   * `redirectUri` is REQUIRED and must exactly equal the redirect target the code
+   * was issued for (OAuth-style binding — the URL your app received the code on).
    * `clientSecret` is backend-only (never ship it in frontend code) and required only
    * when the bound app has a secret set.
    */
-  async exchange(code: string, clientId?: string, clientSecret?: string): Promise<ExchangeResult | ApiError> {
+  async exchange(code: string, redirectUri: string, clientId?: string, clientSecret?: string): Promise<ExchangeResult | ApiError> {
     const cid = this.appId(clientId);
     const secret = this.appSecret(clientSecret);
     const res = await this.client.post<ExchangeResult>("/v1/auth/exchange", {
       code,
+      redirectUri,
       ...(cid ? { clientId: cid } : {}),
       ...(secret ? { clientSecret: secret } : {}),
     });

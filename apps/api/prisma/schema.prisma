@@ -105,6 +105,11 @@ model IdentityCredential {
   identity       Identity  @relation(fields: [pid], references: [pid], onDelete: Cascade)
   provider       String
   providerUserId String
+  // Globally unique per non-null email (one email = one PID). Case-insensitive
+  // enforcement lives in a raw-SQL functional index (see migration
+  // 20261023_identity_credential_email_lower_uniq): UNIQUE lower(email) WHERE
+  // email IS NOT NULL — Prisma cannot express it here. Claim flow maps the
+  // P2002 violation to 409 (ANT-233 F3).
   email          String?
   linkedAt       DateTime  @default(now())
   lastLoginAt    DateTime?
@@ -221,7 +226,7 @@ model WalletFeePayer {
   status         IdentityStatus @default(active)
   createdAt      DateTime       @default(now())
 
-  @@index([chainAccountId])
+  @@unique([chainAccountId, address])
   @@map("wallet_fee_payers")
 }
 
@@ -385,6 +390,7 @@ model Chain {
 
   contracts ChainContract[]
   accounts  ChainAccount[]
+  evmRelayerKey EvmRelayerKey?
 
   @@unique([namespace, reference])
   @@map("chains")
@@ -404,6 +410,22 @@ model ChainContract {
 
   @@unique([chainId, type])
   @@map("chain_contracts")
+}
+
+// EVM auto-deploy relayer key per chain (replaces EVM_RELAYER_SECRET env,
+// ANT-193). One row per EVM chain at most; the secret is a 0x-prefixed 32-byte
+// hex secp256k1 private key. Writes are admin-only (AdminGuard) and reads stay
+// server-side — the key is NEVER exposed via any API response (only a
+// hasSecret presence flag). Flagged for ANT-195 security review.
+model EvmRelayerKey {
+  id        String   @id @default(uuid())
+  chainId   String   @unique
+  chain     Chain    @relation(fields: [chainId], references: [id], onDelete: Cascade)
+  secret    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("evm_relayer_keys")
 }
 
 // DOKU Sub-Account V2 mapping (1 PID → 1 Sub-Account). DOKU is the
@@ -674,11 +696,17 @@ model PidApp {
   // for movements in this app's context. The app's own stacked fee, DOKU
   // provider fees, and on-chain fees still apply. See docs/RP_SESSIONS.md.
   isVerified            Boolean   @default(false)
-  // Optional backend secret (confidential clients). SHA-256 hex, never plaintext.
+  // Optional backend secret (confidential clients). SHA-256 hex (peppered when
+  // PID_APP_SECRET_PEPPER is set — see PidAppsService), never plaintext.
   // When set, code exchange requires the matching secret.
   clientSecretHash      String?
   clientSecretPrefix    String?
   clientSecretCreatedAt DateTime?
+  // Rotation deadline: exchanges/token requests past this fail closed until
+  // the owner rotates (ANT-227 item 5). Pre-policy NULL rows were backfilled
+  // by 20261022_app_secret_expiry_backfill (ANT-233 F2); NULL now means
+  // "no secret set" (public client), never "immortal secret".
+  clientSecretExpiresAt DateTime?
   // Per-app callback endpoint + HMAC signing secret (set together). The
   // ledger posts signed events here (X-Pid-Signature). See docs/FIAT_LEDGER.md.
   webhookUrl            String?
@@ -730,4 +758,17 @@ model PaymentGatewayFeeRate {
   updatedAt  DateTime @updatedAt
 
   @@map("payment_gateway_fee_rates")
+}
+
+// Singleton lock serializing the first-admin bootstrap race (ANT-233 F4).
+// At most one row ever exists (PK on the fixed id 'bootstrap-admin', enforced
+// by CHECK). The winning bootstrap claim inserts it in the same transaction
+// that creates the admin identity; a concurrent loser gets P2002 and claims as
+// a plain user. Promoted admins (SQL/admin:promote) never touch this table.
+model BootstrapAdminLock {
+  id        String   @id
+  pid       String
+  createdAt DateTime @default(now())
+
+  @@map("bootstrap_admin_locks")
 }

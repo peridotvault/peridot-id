@@ -33,7 +33,7 @@ function authority(overrides: Partial<Record<string, unknown>> = {}) {
 
 function setup() {
   const config = {
-    get: jest.fn((key: string) => (key === "WEBAUTHN_RP_ID" ? "localhost" : key === "WEBAUTHN_ORIGINS" ? "http://localhost:3301" : undefined)),
+    get: jest.fn((key: string) => (key === "WEBAUTHN_RP_ID" ? "localhost" : undefined)),
   };
   const security = mockSecurity();
   const prisma = {

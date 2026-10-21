@@ -1,5 +1,10 @@
 import { ExecutionContext, Inject, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { AuthGuard } from "@nestjs/passport";
+import { Response } from "express";
+import { setOAuthStateCookie } from "../common/cookies";
+import { decodeState } from "./sso.service";
+import { newOAuthNonce, oauthStateSecret, signOAuthState } from "./oauth-state";
 import { GOOGLE_OAUTH_OPTIONS, GoogleOAuthOptions } from "./google.strategy";
 
 /** Marker for a failed OAuth callback — the controller redirects to retry UI. */
@@ -22,14 +27,17 @@ export class GoogleGuard extends AuthGuard("google") {
   private readonly logger = new Logger(GoogleGuard.name);
   private readonly configured: boolean;
 
-  constructor(@Inject(GOOGLE_OAUTH_OPTIONS) oauthOptions: GoogleOAuthOptions | null) {
+  constructor(
+    @Inject(GOOGLE_OAUTH_OPTIONS) oauthOptions: GoogleOAuthOptions | null,
+    private readonly config: ConfigService,
+  ) {
     super();
     this.configured = Boolean(oauthOptions);
   }
 
   canActivate(context: ExecutionContext) {
     if (!this.configured) {
-      throw new ServiceUnavailableException("Google OAuth is not configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET (and API_DOMAIN for the derived callback) in the env for this environment");
+      throw new ServiceUnavailableException("Google OAuth is not configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET (and API_URL for the derived callback) in the env for this environment");
     }
     return super.canActivate(context) as boolean;
   }
@@ -53,12 +61,25 @@ export class GoogleGuard extends AuthGuard("google") {
    * Thread the cross-domain success URL through the OAuth `state` param: when the
    * authorize URL carries `?returnTo=`, it round-trips as `state` and the callback
    * redirects back there with a one-time pid_code (see SsoService).
+   *
+   * M3: the return target is re-wrapped in a server-signed envelope carrying a
+   * fresh nonce, and the nonce is dropped in an HttpOnly cookie (10-min TTL).
+   * The callback verifies signature + nonce BEFORE trusting the state — an
+   * unsigned/foreign/tampered/replayed state never reaches `decodeState`.
    */
   getAuthenticateOptions(context: ExecutionContext): Record<string, unknown> {
     const req = context.switchToHttp().getRequest();
     const returnTo = typeof req?.query?.returnTo === "string" ? req.query.returnTo : undefined;
     const options: Record<string, unknown> = { prompt: "select_account" };
-    if (returnTo) options.state = returnTo;
+    if (!returnTo) return options;
+    // Unwrap the login-step envelope (plain returnTo or app-bound encoding),
+    // then re-wrap it signed + nonce-bound for the Google round-trip.
+    const { returnTo: target, clientId } = decodeState(returnTo);
+    const nonce = newOAuthNonce();
+    const res = context.switchToHttp().getResponse<Response>();
+    setOAuthStateCookie(res, this.config, nonce);
+    const secret = oauthStateSecret((key, def) => this.config.get(key, def));
+    options.state = signOAuthState({ returnTo: target, clientId }, nonce, secret);
     return options;
   }
 }

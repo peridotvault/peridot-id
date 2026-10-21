@@ -31,8 +31,8 @@ follow-up work, not silently missing.
 pnpm --filter @peridotvault/pid-wallet dev:web   # http://localhost:3302
 ```
 
-Point the SDK at a local API (`apps/api` on `:3300`) and ensure
-`WEBAUTHN_ORIGINS` includes `http://localhost:3302` for passkey flows.
+Point the SDK at a local API (`apps/api` on `:3300`) — passkey origins
+derive automatically from the wallet URL, nothing to configure.
 
 ## Login in dev (first-party contract)
 

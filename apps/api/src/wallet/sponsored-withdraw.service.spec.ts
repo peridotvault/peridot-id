@@ -10,7 +10,11 @@ const RELAYER = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
 const DEST = "DeSt1111111111111111111111111111111111111";
 
 class MockPublicKey {
-  constructor(public readonly addr: string) {}
+  constructor(public readonly addr: string) {
+    // Mirror the real constructor: reject non-base58 input so the service's
+    // 400-mapping (pubkeyOr400) is actually exercised by tests.
+    if (/[^1-9A-HJ-NP-Za-km-z]/.test(addr)) throw new Error("Invalid public key");
+  }
   toBase58(): string {
     return this.addr;
   }
@@ -165,6 +169,13 @@ describe("SponsoredWithdrawService", () => {
     prisma.authority.findFirst.mockResolvedValue(null);
     await expect(service.withdraw(IDENTITY_ID, base)).rejects.toThrow(BadRequestException);
     expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+  });
+
+  it("rejects a garbage SPL mint with 400 (never 500) before broadcasting", async () => {
+    const { service } = setup();
+    await expect(service.withdraw(IDENTITY_ID, { ...base, asset: "!!!not-a-mint" })).rejects.toThrow(BadRequestException);
+    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawTokenV3).not.toHaveBeenCalled();
   });
 
   it("routes token withdrawals through the token sponsor and requires an existing ATA", async () => {

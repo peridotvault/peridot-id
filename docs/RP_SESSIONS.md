@@ -28,7 +28,7 @@ const { pidCode } = await peridot.auth.loginPopup({ clientId: "pidapp_..." });
 ```ts
 // Backend (Express): exchange once, store server-side, set your own cookie.
 app.get("/auth/callback", async (req, res) => {
-  const identity = await peridot.auth.exchange(String(req.query.pid_code), "pidapp_...");
+  const identity = await peridot.auth.exchange(String(req.query.pid_code), "https://mygame.dev/callback", "pidapp_...");
   if ("statusCode" in identity) return res.status(401).send("exchange failed");
   // identity = { pid, profile: { displayName, avatarUrl }, credentials, accessToken, expiresIn }
   await store.save(sessionId(req), { pid: identity.pid, bearer: identity.accessToken });
@@ -37,7 +37,9 @@ app.get("/auth/callback", async (req, res) => {
 });
 ```
 
-`pid_code` is single-use, 5-minute, and bound to your `clientId`
+`pid_code` is single-use, 5-minute, bound to your `clientId`, and bound to the
+exact `redirectUri` it was issued for (pass the URL you received the code on —
+mismatch or omission is a 400).
 (+ `clientSecret` when set — confidential clients must send it).
 
 ## 2. Authenticated reads (your whole session story)
@@ -76,9 +78,10 @@ Auth is stateless; your app isn't. Keep one row per user keyed by `pid`
 
 1. **The bearer must stay server-side.** Anything in JS/localStorage is
    stealable via XSS. `httpOnly` cookie + server store, plus CSP. Non-negotiable.
-2. **30-day cliff, no refresh.** `SSO_EXCHANGE_TOKEN_TTL` (default `30d`) is
-   non-sliding and non-refreshable — day 31 the user re-clicks login (one-tap
-   consent if their PeridotID session is alive). Never log the bearer.
+2. **24-hour cliff, no refresh.** `SSO_EXCHANGE_TOKEN_TTL` (`24h`, ANT-227 —
+   was `30d`) is non-sliding and non-refreshable — past expiry the user
+   re-clicks login (one-tap consent if their PeridotID session is alive).
+   Never log the bearer.
 3. **No single-token revoke.** A leaked bearer stays valid until expiry unless
    the whole identity is deactivated. Scope contains the blast radius
    (reads only, no fund movement) — that is the mitigation, and the reason

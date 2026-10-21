@@ -15,7 +15,8 @@ import {
 import { Authority, AuthorityStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
-import { WEBAUTHN_RP_NAME } from "../common/app-config";
+import { WEBAUTHN_RP_NAME, resolveServiceUrls, serviceOrigins, webauthnRpId } from "../common/app-config";
+import { FIRST_PARTY_ORIGINS, parseEnvOrigins } from "../common/cors";
 import { coseToCompressedBase64url } from "./cose";
 
 const SECP256R1_ALG = -7; // ES256 = ECDSA P-256 (secp256r1) — owner passkey alg
@@ -91,16 +92,21 @@ export class CredentialService {
   ) {}
 
   private rpId(): string {
-    return this.config.get<string>("WEBAUTHN_RP_ID") ?? "localhost";
+    return webauthnRpId((key, def) => this.config.get(key, def));
   }
 
   private origins(): string[] {
-    // WEBAUTHN_ORIGINS wins when set; otherwise reuse the CORS allow-list
-    // (ANT-184 dedupe: one origin list to maintain per env). Final fallback
-    // is the local-dev default for tests without any env.
-    const raw =
-      this.config.get<string>("WEBAUTHN_ORIGINS") ?? this.config.get<string>("CORS_ORIGINS") ?? "http://localhost:3300,http://localhost:5173";
-    return raw.split(",").map((s) => s.trim()).filter(Boolean);
+    // Origins always derive from the ONE service-URL set ∪ the built-in
+    // first-party dual-serve set (ANT-193), plus CORS_ORIGINS as a compat
+    // fallback (service defaults are localhost, so tests without env work).
+    const get = (key: string, def?: string): unknown => this.config.get(key, def);
+    return [
+      ...new Set([
+        ...serviceOrigins(resolveServiceUrls(get)),
+        ...FIRST_PARTY_ORIGINS,
+        ...parseEnvOrigins(this.config.get<string>("CORS_ORIGINS")),
+      ]),
+    ];
   }
 
   private rpName(): string {

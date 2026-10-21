@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPi
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { AuthenticateFinishDto, RegisterFinishDto } from "./dto/credential.dto";
 import {
   AuthenticateStartResult,
@@ -24,7 +25,7 @@ export class CredentialController {
   @Post("register/start")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   registerStart(@CurrentUser() user: AuthenticatedUser): Promise<RegisterStartResult> {
     return this.credentialService.registerStart(user.pid);
   }
@@ -32,7 +33,7 @@ export class CredentialController {
   @Post("register/finish")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   registerFinish(@CurrentUser() user: AuthenticatedUser, @Body() dto: RegisterFinishDto): Promise<AuthorityView> {
     return this.credentialService.registerFinish(user.pid, {
       registrationId: dto.registrationId,
@@ -44,7 +45,7 @@ export class CredentialController {
   @Post("authenticate/start")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   authenticateStart(@CurrentUser() user: AuthenticatedUser): Promise<AuthenticateStartResult> {
     return this.credentialService.authenticateStart(user.pid);
   }
@@ -52,7 +53,7 @@ export class CredentialController {
   @Post("authenticate/finish")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   authenticateFinish(@CurrentUser() user: AuthenticatedUser, @Body() dto: AuthenticateFinishDto): Promise<{ ok: true }> {
     return this.credentialService.authenticateFinish(user.pid, {
       authenticationId: dto.authenticationId,
@@ -62,7 +63,7 @@ export class CredentialController {
 
   @Delete(":id")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   revoke(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string): Promise<AuthorityView> {
     return this.credentialService.revoke(user.pid, id);
   }

@@ -30,7 +30,8 @@ function compressedPub(pub) {
 }
 
 // Mock passkey signer: builds a WebAuthn-style assertion over the given challenge.
-// authenticatorData carries the RP-ID hash + UV flag, as the V3 program enforces.
+// authenticatorData carries an RP-ID hash + UV flag (realistic ceremony bytes;
+// the program no longer compares the RP hash — only the UV flag is enforced).
 function mockPasskeySigner(keypair) {
   return {
     async sign(challenge) {
@@ -59,8 +60,8 @@ async function main() {
   const dest = Keypair.generate();
   const signer = mockPasskeySigner(passkey);
 
-  // initialize (backend-paid, passkey-signed, V2 state with RP-ID hash, V3 challenge)
-  const initSig = await adapter.initialize(accountId, authorityComp, RP_ID_HASH, backend, signer);
+  // initialize (backend-paid, passkey-signed, domain-free state, V3 challenge)
+  const initSig = await adapter.initialize(accountId, authorityComp, backend, signer);
   await conn.confirmTransaction(initSig, "confirmed");
   assert.equal(await adapter.isInitialized(accountId), true, "initialized");
   console.log("init OK", initSig);

@@ -3,7 +3,6 @@ import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { randomUUID } from "crypto";
 import { Request, Response } from "express";
-import ms from "ms";
 import {
   accountRefreshCookieName,
   accountRefreshCookieNames,
@@ -16,9 +15,21 @@ import {
   setAuthCookies,
   setScopedAuthCookies,
 } from "../common/cookies";
-import { ACCESS_TOKEN_TTL, GOOGLE_FAMILY_MAX_AGE, PASSKEY_FAMILY_MAX_AGE, REFRESH_TOKEN_TTL } from "../common/app-config";
+import {
+  ACCESS_TOKEN_TTL,
+  APP_TOKEN_TTL,
+  GOOGLE_FAMILY_MAX_AGE,
+  JWT_AUD_APP,
+  JWT_AUD_REFRESH,
+  JWT_AUD_SESSION,
+  JWT_ISSUER,
+  PASSKEY_FAMILY_MAX_AGE,
+  REFRESH_TOKEN_TTL,
+  parseTtlMs,
+} from "../common/app-config";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
+import { SecurityEventService } from "../security/security-event.service";
 
 export interface AccessTokenPayload {
   sub: string;
@@ -27,12 +38,16 @@ export interface AccessTokenPayload {
   app?: string;
   /** "read" restricts the token to safe (GET) routes — e.g. the SSO exchange token. */
   scope?: string;
+  iss: string;
+  aud: string;
 }
 
 export interface RefreshTokenPayload {
   sub: string;
   jti: string;
   type: "refresh";
+  iss: string;
+  aud: string;
 }
 
 export interface GoogleProfile {
@@ -54,12 +69,14 @@ export interface GoogleProfile {
 // Family caps are hardcoded constants (ANT-184) — see common/app-config.ts.
 
 /**
- * Grace window for the multi-tab rotation race: two tabs refreshing with the
- * same token near-simultaneously must not log one of them out. The loser
- * follows the already-issued child (via the rotatedFrom link) instead of
- * throwing. No schema change — the link column already exists.
+ * Reuse detection is fail-closed (M2): replaying a revoked refresh token
+ * revokes the whole device family, logs a `refresh.reuse_detected` anomaly,
+ * and forces a fresh login. There is deliberately NO rotation-race grace on
+ * the mint path — a replayed token never yields new tokens. Read paths
+ * (session liveness checks, account listing) keep pure live-checks and were
+ * never granted a grace window either; the only grace is the stateless one —
+ * already-issued access tokens keep working for reads until their 15m expiry.
  */
-const ROTATION_GRACE_MS = 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -67,6 +84,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly security: SecurityEventService,
   ) {}
 
   /**
@@ -76,10 +94,15 @@ export class AuthService {
    * no browser session. The token carries `app`, and AdminGuard rejects it.
    */
   async issueAppAccessToken(ownerPid: string, clientId: string): Promise<{ accessToken: string; expiresIn: string }> {
-    const ttl = this.config.get<string>("APP_TOKEN_TTL", "1h");
+    const ttl = APP_TOKEN_TTL;
     const accessToken = await this.jwt.signAsync(
       { sub: ownerPid, type: "access", app: clientId },
-      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: ttl },
+      {
+        secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
+        expiresIn: ttl,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_APP,
+      },
     );
     return { accessToken, expiresIn: ttl };
   }
@@ -146,12 +169,22 @@ export class AuthService {
 
     const accessToken = await this.jwt.signAsync(
       { sub: pid, type: "access" },
-      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: accessTtl },
+      {
+        secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
+        expiresIn: accessTtl,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_SESSION,
+      },
     );
     const jti = randomUUID();
     const refreshToken = await this.jwt.signAsync(
       { sub: pid, jti, type: "refresh" },
-      { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"), expiresIn: refreshTtl },
+      {
+        secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
+        expiresIn: refreshTtl,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_REFRESH,
+      },
     );
 
     let deviceId: string;
@@ -168,7 +201,14 @@ export class AuthService {
     }
 
     await this.prisma.session.create({
-      data: { id: jti, deviceId, rotatedFrom: rotatedFrom ?? null, expiresAt: new Date(Date.now() + ms(refreshTtl)) },
+      data: {
+        id: jti,
+        deviceId,
+        rotatedFrom: rotatedFrom ?? null,
+        // Guarded parse (ANT-227 item 4): a typo'd TTL must throw here, never
+        // persist an Invalid-Date session row.
+        expiresAt: new Date(Date.now() + parseTtlMs(refreshTtl, "REFRESH_TOKEN_TTL")),
+      },
     });
 
     if (scope) {
@@ -189,6 +229,15 @@ export class AuthService {
     await this.issueSession(res, pid, userAgent, undefined, undefined, scope);
   }
 
+  /** Verify options every refresh-token check must use (secret + iss + aud). */
+  private refreshVerifyOptions(): { secret: string; issuer: string; audience: string } {
+    return {
+      secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
+      issuer: JWT_ISSUER,
+      audience: JWT_AUD_REFRESH,
+    };
+  }
+
   async rotateSession(req: Request, res: Response, scope: string | null = null): Promise<void> {
     const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
     const token = scope ? cookies?.[scopeRefreshCookie(scope)] : cookies?.[REFRESH_COOKIE];
@@ -196,7 +245,7 @@ export class AuthService {
 
     let payload: RefreshTokenPayload;
     try {
-      payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
+      payload = await this.jwt.verifyAsync(token, this.refreshVerifyOptions());
     } catch {
       throw new UnauthorizedException("Invalid refresh token");
     }
@@ -204,39 +253,43 @@ export class AuthService {
 
     const session = await this.prisma.session.findUnique({ where: { id: payload.jti }, include: { device: true } });
     if (!session || session.revokedAt || session.expiresAt <= new Date()) {
-      // Rotation race: this token was already rotated moments ago (another
-      // tab won). Follow the live child instead of logging the user out.
-      // Anything older than the grace window still fails closed.
-      const child = !session
-        ? null
-        : await this.prisma.session.findFirst({
-            where: {
-              rotatedFrom: payload.jti,
-              revokedAt: null,
-              expiresAt: { gt: new Date() },
-              createdAt: { gt: new Date(Date.now() - ROTATION_GRACE_MS) },
-            },
-            include: { device: true },
-          });
-      if (!child?.device) throw new UnauthorizedException("Refresh token revoked");
-      // Chain from the child: the family keeps a single live head, so the
-      // grace path never forks a second valid chain. (The winner passed the
-      // family-cap check <60s ago when it rotated, so no re-check here.)
-      await this.prisma.session.update({ where: { id: child.id }, data: { revokedAt: new Date() } });
-      await this.issueSession(res, payload.sub, req.headers["user-agent"], child.id, undefined, scope);
-      return;
+      // Fail-closed reuse detection (M2): a presented token whose session is
+      // already revoked means the token was replayed after rotation/logout —
+      // the classic stolen-refresh-token signal. Nuke the whole device family
+      // (all sessions on the compromised device), log the anomaly, and force
+      // a fresh login. No new tokens are minted on this path, ever.
+      // (Expired-but-never-revoked and unknown jtis are lifecycle noise, not
+      // theft signals: plain 401, no family revocation.)
+      if (session?.revokedAt && session.device) {
+        await this.prisma.session.updateMany({
+          where: { deviceId: session.deviceId },
+          data: { revokedAt: new Date() },
+        });
+        await this.security.log(session.device.pid, "refresh.reuse_detected", {
+          deviceId: session.deviceId,
+          jti: payload.jti,
+          // F4 SOC triage: a replay seconds after rotation from the same UA is
+          // an organic multi-tab race; a replay long after rotation (or from a
+          // UA that never matches the device) is the theft-driven signal. Both
+          // fields make the alert query below able to tell them apart.
+          revokedAgoMs: Date.now() - session.revokedAt.getTime(),
+          userAgent: req.headers["user-agent"] ?? null,
+        });
+        throw new UnauthorizedException("Session compromised — sign in again.");
+      }
+      throw new UnauthorizedException("Refresh token revoked");
     }
 
     // Absolute family cap: past it, only a fresh login (passkey-first UI)
     // starts a new family. Checked before revoking so a rejected rotation
     // never burns the still-TTL-valid token.
     const method = session.device.authMethod ?? "google";
-    // Unparseable env falls back to the default (NaN is falsy) — a typo must
-    // never silently disable the cap.
+    // Hardcoded constants, validated at import (ANT-227 item 4) — a typo
+    // breaks the build, it can never silently disable the cap.
     const cap =
       method === "passkey"
-        ? ms(PASSKEY_FAMILY_MAX_AGE)
-        : ms(GOOGLE_FAMILY_MAX_AGE);
+        ? parseTtlMs(PASSKEY_FAMILY_MAX_AGE, "PASSKEY_FAMILY_MAX_AGE")
+        : parseTtlMs(GOOGLE_FAMILY_MAX_AGE, "GOOGLE_FAMILY_MAX_AGE");
     if (Date.now() - session.device.createdAt.getTime() > cap) {
       throw new UnauthorizedException({
         code: "step_up_required",
@@ -254,7 +307,7 @@ export class AuthService {
     const token = scope ? cookies?.[scopeRefreshCookie(scope)] : cookies?.[REFRESH_COOKIE];
     if (token) {
       try {
-        const payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
+        const payload = await this.jwt.verifyAsync(token, this.refreshVerifyOptions());
         await this.prisma.session.updateMany({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
         // Signing out the active identity also drops it from the account list.
         if (!scope) clearAccountRefreshCookie(res, this.config, payload.sub);
@@ -269,9 +322,7 @@ export class AuthService {
   /** Decode a refresh JWT to its identity + session jti (null if invalid). */
   private async verifyRefresh(token: string): Promise<{ pid: string; jti: string } | null> {
     try {
-      const payload = await this.jwt.verifyAsync<RefreshTokenPayload>(token, {
-        secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
-      });
+      const payload = await this.jwt.verifyAsync<RefreshTokenPayload>(token, this.refreshVerifyOptions());
       if (payload.type !== "refresh") return null;
       return { pid: payload.sub, jti: payload.jti };
     } catch {
@@ -329,7 +380,12 @@ export class AuthService {
     }
     const accessToken = await this.jwt.signAsync(
       { sub: pid, type: "access" },
-      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: ACCESS_TOKEN_TTL },
+      {
+        secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
+        expiresIn: ACCESS_TOKEN_TTL,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_SESSION,
+      },
     );
     setActiveAuthCookies(res, this.config, accessToken, token);
   }
@@ -351,7 +407,7 @@ export class AuthService {
   async currentSessionJti(token: string | undefined): Promise<string | null> {
     if (!token) return null;
     try {
-      const payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
+      const payload = await this.jwt.verifyAsync(token, this.refreshVerifyOptions());
       return payload.type === "refresh" ? payload.jti : null;
     } catch {
       return null;

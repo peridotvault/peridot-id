@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPi
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { PidAppsService } from "./apps.service";
 import { CreatePidAppDto, SetAppFeeDto, SetWebhookDto, UpdatePidAppDto } from "./dto/app.dto";
 
@@ -14,6 +15,7 @@ export class PidAppsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreatePidAppDto) {
     return this.apps.create(user.pid, dto.name, dto.allowedOrigins ?? []);
   }
@@ -36,6 +38,7 @@ export class PidAppsController {
   @Patch(":id")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id", ParseUUIDPipe) id: string,
@@ -51,6 +54,7 @@ export class PidAppsController {
   @Post(":id/secret")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   rotateSecret(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.apps.rotateSecret(user.pid, id);
   }
@@ -59,6 +63,7 @@ export class PidAppsController {
   @Post(":id/webhook")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   setWebhook(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string, @Body() dto: SetWebhookDto) {
     return this.apps.setWebhook(user.pid, id, dto.url);
   }
@@ -67,6 +72,7 @@ export class PidAppsController {
   @Delete(":id/webhook")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   clearWebhook(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.apps.setWebhook(user.pid, id, null);
   }
@@ -82,6 +88,7 @@ export class PidAppsController {
   @Put(":id/fees/:operation")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   setFee(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id", ParseUUIDPipe) id: string,

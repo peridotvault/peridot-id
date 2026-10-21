@@ -2,8 +2,10 @@
 // can register an app and get a public client_id; PeridotID only returns pid_codes to
 // the app's registered redirect URIs. CORS origins are derived from those URIs.
 
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { APP_CLIENT_SECRET_MAX_AGE, parseTtlMs } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 
 /**
@@ -21,10 +23,24 @@ export function normalizeOrigin(value: string): string {
 
 @Injectable()
 export class PidAppsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly config?: ConfigService,
+  ) {}
 
   /** Never expose secret material in API responses (hash or plaintext). */
   private static readonly PUBLIC_OMIT = { webhookSecret: true, clientSecretHash: true } as const;
+
+  /**
+   * Server pepper for client-secret hashes (ANT-227 item 5). Optional env
+   * `PID_APP_SECRET_PEPPER`: when set, hashes are `sha256(pepper:secret)` so
+   * a read-only DB leak alone can't be brute-forced offline. Pre-pepper
+   * `sha256(secret)` rows keep verifying (legacy path) until rotated — rotate
+   * to upgrade a hash to the peppered form.
+   */
+  private pepper(): string {
+    return this.config?.get<string>("PID_APP_SECRET_PEPPER", "") ?? "";
+  }
 
   async create(ownerPid: string, name: string, allowedOrigins: string[] = []) {
     const clientId = `pidapp_${randomBytes(16).toString("hex")}`;
@@ -67,19 +83,36 @@ export class PidAppsService {
   }
 
   /** SHA-256 hex of a plaintext secret (what's stored — never the secret itself). */
-  static hashSecret(secret: string): string {
-    return createHash("sha256").update(secret, "utf8").digest("hex");
+  static hashSecret(secret: string, pepper = ""): string {
+    const input = pepper ? `${pepper}:${secret}` : secret;
+    return createHash("sha256").update(input, "utf8").digest("hex");
   }
 
   /** Constant-time comparison against a stored hash (both always 32 bytes). */
-  static secretMatches(secret: string, hashHex: string): boolean {
+  static secretMatches(secret: string, hashHex: string, pepper = ""): boolean {
     try {
-      const a = Buffer.from(PidAppsService.hashSecret(secret), "hex");
+      const a = Buffer.from(PidAppsService.hashSecret(secret, pepper), "hex");
       const b = Buffer.from(hashHex, "hex");
       return a.length === b.length && timingSafeEqual(a, b);
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Full confidential-client check: hash match (peppered, legacy fallback)
+   * AND not past `clientSecretExpiresAt`. No secret set = public client,
+   * always valid. Callers must map false to a uniform error (no oracle).
+   */
+  clientSecretValid(
+    app: { clientSecretHash: string | null; clientSecretExpiresAt?: Date | null },
+    secret: string,
+  ): boolean {
+    if (!app.clientSecretHash) return true;
+    if (app.clientSecretExpiresAt && app.clientSecretExpiresAt <= new Date()) return false;
+    const pepper = this.pepper();
+    if (pepper && PidAppsService.secretMatches(secret, app.clientSecretHash, pepper)) return true;
+    return PidAppsService.secretMatches(secret, app.clientSecretHash);
   }
 
   /** Ownership strictly from the token — never a client-supplied identity. */
@@ -92,6 +125,8 @@ export class PidAppsService {
   /**
    * Generate (or rotate) an app's backend secret. Returns the plaintext ONCE — it is
    * never stored or shown again. Show `prefix` afterwards for identification.
+   * The secret expires after APP_CLIENT_SECRET_MAX_AGE (365d); exchanges past
+   * expiry fail closed until the owner rotates (uniform error, no oracle).
    */
   async rotateSecret(ownerPid: string, id: string): Promise<{ secret: string; prefix: string }> {
     await this.ownedApp(ownerPid, id);
@@ -100,9 +135,10 @@ export class PidAppsService {
     await this.prisma.pidApp.update({
       where: { id },
       data: {
-        clientSecretHash: PidAppsService.hashSecret(secret),
+        clientSecretHash: PidAppsService.hashSecret(secret, this.pepper()),
         clientSecretPrefix: prefix,
         clientSecretCreatedAt: new Date(),
+        clientSecretExpiresAt: new Date(Date.now() + parseTtlMs(APP_CLIENT_SECRET_MAX_AGE, "APP_CLIENT_SECRET_MAX_AGE")),
       },
     });
     return { secret, prefix };

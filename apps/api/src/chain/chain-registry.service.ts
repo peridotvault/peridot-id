@@ -1,11 +1,12 @@
 // Chain registry — admin-managed chains + typed contracts (DB first, code fallback).
 //
 // Reads never throw for missing tables/rows: an empty registry (fresh local dev,
-// old unit-test doubles) falls back to the compiled-in chain list + env, so EVM
-// stays off until a factory is configured exactly like before.
+// old unit-test doubles) falls back to the compiled-in chain list with NO
+// contracts, so EVM stays off until an admin registers factory/implementation
+// rows. Chains, RPC URLs, program/contract addresses, and the EVM relayer key
+// are dashboard-managed — never env (ANT-193 dropped every EVM_* variable).
 
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { EVM_CHAINS } from "@peridotvault/pid-core/dist/evm";
 import {
   MAX_CHAIN_REFERENCE_LENGTH,
@@ -58,14 +59,14 @@ export interface SolanaMainnetAvailability {
 
 const CACHE_TTL_MS = 30_000;
 
+/** Local-dev EVM default when no registry row carries an RPC URL. */
+const DEFAULT_EVM_RPC_URL = "http://localhost:8545";
+
 @Injectable()
 export class ChainRegistryService {
   private cache: { at: number; chains: RegistryChain[] } | null = null;
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /** Drop the cache — called by every admin write. */
   invalidate(): void {
@@ -223,19 +224,35 @@ export class ChainRegistryService {
     return failClosed(`Chain reference "${ref}" is not served by this API version`);
   }
 
-  /** RPC URL for a reference (row URL, else shared env fallback). */
+  /** RPC URL for a reference (registry row URL, else the local-dev default). */
   async rpcUrlForReference(chainReference: string): Promise<string> {
     const chain = await this.chainByReference(chainReference);
     if (chain) return this.rpcUrlFor(chain);
-    return this.safeGet(`EVM_RPC_URL_${chainReference}`) ?? this.safeGet("EVM_RPC_URL") ?? "http://localhost:8545";
+    return DEFAULT_EVM_RPC_URL;
   }
 
-  /** First configured RPC URL, else the shared env fallback. */
+  /** First configured RPC URL, else the local-dev default. */
   rpcUrlFor(chain: Pick<RegistryChain, "rpcUrls" | "reference">): string {
     if (chain.rpcUrls.length > 0) return chain.rpcUrls[0];
-    return (
-      this.safeGet(`EVM_RPC_URL_${chain.reference}`) ?? this.safeGet("EVM_RPC_URL") ?? "http://localhost:8545"
-    );
+    return DEFAULT_EVM_RPC_URL;
+  }
+
+  /**
+   * EVM relayer private key for a chain (dashboard-managed `evm_relayer_keys`
+   * row, admin-only writes). Null when unset — callers fail over to the
+   * operator forge-script flow. Never throws (missing table/row = unset) and
+   * never logs the secret. Flagged for ANT-195 security review.
+   */
+  async relayerSecretFor(chainReference: string): Promise<string | null> {
+    try {
+      const chain = await this.chainByReference(chainReference);
+      if (!chain) return null;
+      const row = await this.prisma.evmRelayerKey.findUnique({ where: { chainId: chain.id } });
+      const secret = row?.secret;
+      return typeof secret === "string" && secret.length > 0 ? secret : null;
+    } catch {
+      return null;
+    }
   }
 
   private async readRegistry(): Promise<RegistryChain[]> {
@@ -260,26 +277,9 @@ export class ChainRegistryService {
     }));
   }
 
-  /** Compiled-in list + env contracts (pre-registry behavior). */
+  /** Compiled-in chain list with no contracts (EVM off until admin registers rows). */
   private codeFallback(): RegistryChain[] {
-    // getOrThrow-in-try: prod env throws when unset, while old test doubles
-    // return garbage for every key — either way only valid addresses enable EVM.
-    let factory: string | undefined;
-    let implementation: string | undefined;
-    try {
-      factory = this.config.getOrThrow<string>("EVM_FACTORY_ADDRESS");
-      implementation = this.config.getOrThrow<string>("EVM_IMPLEMENTATION_ADDRESS");
-    } catch {
-      factory = this.safeGet("EVM_FACTORY_ADDRESS");
-      implementation = this.safeGet("EVM_IMPLEMENTATION_ADDRESS");
-    }
-    if (!isEvmAddressLike(factory) || !isEvmAddressLike(implementation)) {
-      factory = undefined;
-      implementation = undefined;
-    }
-    const refs = this.safeGet("EVM_CHAIN_REFERENCES");
-    const allow = refs ? new Set(refs.split(",").map((s) => s.trim()).filter(Boolean)) : null;
-    return EVM_CHAINS.filter((c) => !allow || allow.has(c.chainReference)).map((c, i) => ({
+    return EVM_CHAINS.map((c) => ({
       id: `code:${c.chainReference}`,
       namespace: c.namespace,
       reference: c.chainReference,
@@ -290,25 +290,7 @@ export class ChainRegistryService {
       explorerUrl: null,
       logoUrl: null,
       isTestnet: true,
-      contracts:
-        factory && implementation
-          ? [
-              { type: "factory", address: factory, versionLabel: "v1" },
-              { type: "account_implementation", address: implementation, versionLabel: "v1" },
-            ]
-          : [],
+      contracts: [],
     }));
   }
-
-  private safeGet(key: string): string | undefined {
-    try {
-      return this.config.get<string>(key);
-    } catch {
-      return undefined;
-    }
-  }
-}
-
-function isEvmAddressLike(v: string | undefined): v is string {
-  return typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v);
 }

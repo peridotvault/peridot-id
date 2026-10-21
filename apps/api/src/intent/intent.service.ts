@@ -3,6 +3,7 @@ import { Intent, IntentStatus, Transaction, TransactionStatus } from "@prisma/cl
 import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { isP2002 } from "../prisma/prisma-error";
 import { SecurityEventService } from "../security/security-event.service";
 
 const INTENT_TTL_MS = 5 * 60 * 1000; // PRD_v4 §22: intent expiration
@@ -216,6 +217,11 @@ export class IntentService {
         txHash: input.txHash,
         status: "submitted" as TransactionStatus,
       },
+    }).catch((err: unknown) => {
+      // Cross-intent same-signature replay: the txHash UNIQUE index is the
+      // backstop (ANT-254) — map the P2002 to a 400, never a 500.
+      if (isP2002(err)) throw new BadRequestException("signature already recorded");
+      throw err;
     });
     await this.prisma.intent.update({ where: { id: intent.id }, data: { status: "executed" as IntentStatus } });
 
@@ -261,6 +267,10 @@ export class IntentService {
         txHash: input.txHash ?? null,
         status: "submitted" as TransactionStatus,
       },
+    }).catch((err: unknown) => {
+      // Same backstop as recordTransaction (ANT-254): duplicate signature → 400.
+      if (isP2002(err)) throw new BadRequestException("signature already recorded");
+      throw err;
     });
     await this.security.log(pid, "activity.recorded", { txId: tx.id, type: input.type });
     return toTxView(tx);

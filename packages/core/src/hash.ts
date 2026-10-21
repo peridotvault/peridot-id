@@ -184,26 +184,24 @@ export async function buildWithdrawTokenPayloadV2(
   ]);
 }
 
-/** V2 INITIALIZE payload (also binds the RP-ID hash). */
+/** V2 INITIALIZE payload (domain-free: op-tag ‖ account ‖ authority). */
 export async function buildInitializePayloadV2(
   accountId32: Uint8Array,
   authorityCompressed: Uint8Array,
-  rpIdHash32: Uint8Array,
 ): Promise<Uint8Array> {
-  return buildAuthorizationPayloadV2(OP.initialize, [accountId32, authorityCompressed, rpIdHash32]);
+  return buildAuthorizationPayloadV2(OP.initialize, [accountId32, authorityCompressed]);
 }
 
-/** V2 ACTIVATE payload (also binds the RP-ID hash and the fee cap). */
+/** V2 ACTIVATE payload (binds the fee cap; domain-free). */
 export async function buildActivatePayloadV2(
   accountId32: Uint8Array,
   authorityCompressed: Uint8Array,
-  rpIdHash32: Uint8Array,
   maxFeeLamports: bigint,
   feePolicyVersion: number,
   expiry: number,
 ): Promise<Uint8Array> {
   return buildAuthorizationPayloadV2(OP.activate, [
-    accountId32, authorityCompressed, rpIdHash32, u64le(maxFeeLamports),
+    accountId32, authorityCompressed, u64le(maxFeeLamports),
     u16le(feePolicyVersion), i64le(expiry),
   ]);
 }
@@ -276,25 +274,23 @@ export async function buildWithdrawTokenPayloadV3(
   ]);
 }
 
-/** V3 INITIALIZE payload (also binds the RP-ID hash). */
+/** V3 INITIALIZE payload (domain-free: op-tag ‖ account ‖ authority). */
 export async function buildInitializePayloadV3(
   accountId32: Uint8Array,
   authorityCompressed: Uint8Array,
-  rpIdHash32: Uint8Array,
 ): Promise<Uint8Array> {
-  return buildAuthorizationPayloadV3(OP.initialize, [accountId32, authorityCompressed, rpIdHash32]);
+  return buildAuthorizationPayloadV3(OP.initialize, [accountId32, authorityCompressed]);
 }
 
-/** V3 ACTIVATE payload (also binds the RP-ID hash and the fee policy). */
+/** V3 ACTIVATE payload (binds the fee policy; domain-free). */
 export async function buildActivatePayloadV3(
   accountId32: Uint8Array,
   authorityCompressed: Uint8Array,
-  rpIdHash32: Uint8Array,
   feePolicyVersion: number,
   expiry: number,
 ): Promise<Uint8Array> {
   return buildAuthorizationPayloadV3(OP.activate, [
-    accountId32, authorityCompressed, rpIdHash32,
+    accountId32, authorityCompressed,
     u16le(feePolicyVersion), i64le(expiry),
   ]);
 }

@@ -4,7 +4,7 @@
 //! controlling authority is a secp256r1 (P-256) WebAuthn passkey (owner authority):
 //! the SDK places a Secp256r1 precompile instruction immediately after this
 //! program's instruction and the program verifies it via the Instructions sysvar
-//! (`auth.rs::verify_secp256r1_v2`), enforcing stored-authority match, RP-ID hash,
+//! (`auth.rs::verify_secp256r1_v2`), enforcing stored-authority match,
 //! user-verification flag, exact `authenticatorData ‖ sha256(clientDataJSON)`
 //! message binding, and equality of the WebAuthn challenge with the V2
 //! domain-separated authorization payload recomputed from instruction args.
@@ -13,8 +13,8 @@
 //! payload starts with `DOMAIN_V2 ‖ op-tag ‖ account_id`, the user authorizes an
 //! absolute `max_fee` (never an exact fee), and reimbursement splits base →
 //! relayer (fee payer) and markup → canonical treasury per the signed
-//! fee-policy version. State is versioned (v1 80B legacy-readable, v2 112B with
-//! RP-ID hash); rotation never moves the PDA.
+//! fee-policy version. State is a single 80-byte layout (ANT-197 domain-free:
+//! no `rp_id_hash` stored or verified on any path); rotation never moves the PDA.
 
 #![no_std]
 #![allow(unexpected_cfgs)]
@@ -41,7 +41,17 @@ use pinocchio::{error::ProgramError, program_entrypoint, AccountView, Address, P
 
 use instructions::{Instruction, InstructionData};
 
-pinocchio::address::declare_id!("CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT");
+/// Program ID, baked at build time by `build.rs` from `PID_PROGRAM_ID`
+/// (ANT-211: replaces the hardcoded `declare_id!`; default local/devnet
+/// `CiwLJ…`, testnet builds set `D6TpM7…`). Same shape as `declare_id!`
+/// (`ID`, `id()`, `check_id`) so existing `crate::ID` users keep working.
+/// PDA derivation itself uses the runtime `program_id` (`state::verify_pda`),
+/// so gate and derivation agree within one binary; same-address rebuilds
+/// (e.g. testnet upgrades) preserve existing accounts.
+pub mod program_id {
+    include!(concat!(env!("OUT_DIR"), "/program_id.rs"));
+}
+pub use program_id::{check_id, id, ID};
 
 program_entrypoint!(process_instruction);
 pinocchio::default_allocator!();
@@ -181,6 +191,45 @@ mod ant16_ordering_tests {
             "record_seen(",
             "let mut snapshots",
         );
+    }
+}
+
+/// ANT-211 regression: the program ID is build-configurable (`PID_PROGRAM_ID`
+/// consumed by `build.rs`, default local/devnet `CiwLJ…`), not hardcoded.
+/// These tests are env-agnostic — they pin the *binding*, not the value — so
+/// they pass identically for default and testnet (`D6TpM7…`) builds.
+#[cfg(test)]
+mod ant211_program_id_tests {
+    use super::{check_id, id, process_instruction, ID};
+    use pinocchio::error::ProgramError;
+
+    #[test]
+    fn built_id_is_self_consistent() {
+        // Same shape `declare_id!` used to provide: `ID`, `id()`, `check_id`.
+        assert!(check_id(&ID));
+        assert!(check_id(&id()));
+        assert_eq!(id(), ID);
+    }
+
+    #[test]
+    fn entrypoint_rejects_foreign_program_id() {
+        // Any `program_id` other than the baked `ID` fails closed before any
+        // account or instruction-data access.
+        let mut raw = *ID.as_array();
+        raw[0] ^= 0xff;
+        let foreign = pinocchio::Address::new_from_array(raw);
+        assert_ne!(foreign, ID);
+        let err = process_instruction(&foreign, &[], &[0u8]).unwrap_err();
+        assert_eq!(err, ProgramError::IncorrectProgramId);
+    }
+
+    #[test]
+    fn entrypoint_accepts_built_id_past_gate() {
+        // With the baked `ID`, the gate passes and execution reaches argument
+        // parsing (empty data → `InvalidInstructionData`, not `IncorrectProgramId`).
+        // Proves a clean-source build executes under whatever ID it was built with.
+        let err = process_instruction(&ID, &[], &[]).unwrap_err();
+        assert_eq!(err, ProgramError::InvalidInstructionData);
     }
 }
 

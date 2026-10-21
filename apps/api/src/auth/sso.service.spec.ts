@@ -3,7 +3,10 @@ import { PidAppsService } from "./apps.service";
 import { mockSecurity } from "../../test/factories";
 
 
-function setup(apps?: { findActive: (clientId: string) => Promise<Record<string, unknown> | null> }) {
+function setup(apps?: {
+  findActive: (clientId: string) => Promise<Record<string, unknown> | null>;
+  clientSecretValid?: (app: never, secret: string) => boolean;
+}) {
   const config = {
     get: jest.fn((key: string, def?: unknown) => {
       const values: Record<string, unknown> = {
@@ -90,8 +93,11 @@ function setup(apps?: { findActive: (clientId: string) => Promise<Record<string,
       ),
     },
   };
-  const pidApps = apps ?? {
+  const pidApps = {
     findActive: jest.fn(async () => ({ redirectUris: ["https://mygame.dev/callback"] })),
+    // Default mock: public client (no secret set) — always valid.
+    clientSecretValid: jest.fn(() => true),
+    ...apps,
   };
   const service = new SsoService(prisma as never, config as never, security as never, pidApps as never, jwt as never);
   return { service, rows, security };
@@ -109,12 +115,20 @@ describe("SsoService", () => {
     expect(service.isAllowedReturnTo(undefined)).toBe(false);
   });
 
+  it("always allows the first-party service URLs (ANT-193: no per-env maintenance)", () => {
+    const { service } = setup();
+    expect(service.allowlist()).toEqual(
+      expect.arrayContaining(["http://localhost:3300", "http://localhost:3302", "https://live2dev.com"]),
+    );
+    expect(service.isAllowedReturnTo("http://localhost:3302/welcome")).toBe(true);
+  });
+
   it("issues a single-use code and consumes it into an identity payload", async () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
     expect(code).toMatch(/^[A-Za-z0-9_-]{20,}$/);
 
-    const identity = await service.consume(code);
+    const identity = await service.consume(code, "https://live2dev.com/auth/callback");
     expect(identity.pid).toBe("pid_1");
     expect(identity.profile.displayName).toBe("Peridot");
     expect(identity.credentials[0].email).toBe("a@b.com");
@@ -123,16 +137,29 @@ describe("SsoService", () => {
     expect(identity.expiresIn).toBeGreaterThan(0);
   });
 
+  it("mints the exchange bearer with issuer + sso audience and a 24h TTL", async () => {
+    const { service } = setup();
+    const jwt = (service as unknown as { jwt: { signAsync: jest.Mock } }).jwt;
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    const identity = await service.consume(code, "https://live2dev.com/auth/callback");
+    expect(jwt.signAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: "pid_1", type: "access", scope: "read" }),
+      expect.objectContaining({ issuer: "peridot-id", audience: "pid-sso" }),
+    );
+    // 24h cliff (ANT-227 item 7: was 30d).
+    expect(identity.expiresIn).toBe(24 * 60 * 60);
+  });
+
   it("rejects reusing the same code (single-use)", async () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
-    await service.consume(code);
-    await expect(service.consume(code)).rejects.toThrow("sso_code_invalid");
+    await service.consume(code, "https://live2dev.com/auth/callback");
+    await expect(service.consume(code, "https://live2dev.com/auth/callback")).rejects.toThrow("sso_code_invalid");
   });
 
   it("rejects an unknown or expired code", async () => {
     const { service } = setup();
-    await expect(service.consume("missing-code-000000000000")).rejects.toThrow("sso_code_invalid");
+    await expect(service.consume("missing-code-000000000000", "https://live2dev.com/auth/callback")).rejects.toThrow("sso_code_invalid");
   });
 
   it("round-trips returnTo (+ clientId) through the opaque Google state", () => {
@@ -200,17 +227,17 @@ describe("SsoService", () => {
   it("binds issued codes to the app: exchange requires the same client_id", async () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await expect(service.consume(code, "pidapp_abc")).resolves.toMatchObject({ pid: "pid_1" });
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc")).resolves.toMatchObject({ pid: "pid_1" });
 
     const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await expect(service.consume(code2, "pidapp_other")).rejects.toThrow("sso_code_invalid");
-    await expect(service.consume(code2)).rejects.toThrow("sso_code_invalid");
+    await expect(service.consume(code2, "https://mygame.dev/callback", "pidapp_other")).rejects.toThrow("sso_code_invalid");
+    await expect(service.consume(code2, "https://mygame.dev/callback")).rejects.toThrow("sso_code_invalid");
   });
 
   it("records an app grant when a code is exchanged", async () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
-    await service.consume(code);
+    await service.consume(code, "https://live2dev.com/auth/callback");
     await expect(service.listGrants("pid_1")).resolves.toMatchObject([
       { origin: "https://live2dev.com", clientId: null, name: null },
     ]);
@@ -220,7 +247,7 @@ describe("SsoService", () => {
   it("revoking hides the grant and flags the origin (authorize stays blocked)", async () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
-    await service.consume(code);
+    await service.consume(code, "https://live2dev.com/auth/callback");
     const [grant] = await service.listGrants("pid_1");
     await service.revokeGrant("pid_1", grant.id as string);
     await expect(service.listGrants("pid_1")).resolves.toEqual([]);
@@ -232,7 +259,7 @@ describe("SsoService", () => {
   it("revoke is identity-scoped and idempotent", async () => {
     const { service } = setup();
     const code = await service.issue("pid_2", "https://live2dev.com/auth/callback");
-    await service.consume(code);
+    await service.consume(code, "https://live2dev.com/auth/callback");
     const [grant] = await service.listGrants("pid_2");
     // another identity's revoke call touches nothing and never throws
     await service.revokeGrant("pid_1", grant.id as string);
@@ -244,11 +271,11 @@ describe("SsoService", () => {
   it("a fresh full login heals a revoked grant (explicit re-consent)", async () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
-    await service.consume(code);
+    await service.consume(code, "https://live2dev.com/auth/callback");
     const [grant] = await service.listGrants("pid_1");
     await service.revokeGrant("pid_1", grant.id as string);
     const code2 = await service.issue("pid_1", "https://live2dev.com/auth/callback");
-    await service.consume(code2);
+    await service.consume(code2, "https://live2dev.com/auth/callback");
     await expect(service.listGrants("pid_1")).resolves.toHaveLength(1);
     await expect(service.isRevoked("pid_1", "https://live2dev.com/")).resolves.toBe(false);
   });
@@ -258,7 +285,7 @@ describe("SsoService", () => {
       findActive: async (id) => (id === "pidapp_abc" ? { ...DEV_APP, name: "My Game" } : null),
     });
     const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await service.consume(code, "pidapp_abc");
+    await service.consume(code, "https://mygame.dev/callback", "pidapp_abc");
     await expect(service.listGrants("pid_1")).resolves.toMatchObject([
       { origin: "https://mygame.dev", clientId: "pidapp_abc", name: "My Game" },
     ]);
@@ -269,14 +296,51 @@ describe("SsoService", () => {
     const withSecret = {
       ...DEV_APP,
       clientSecretHash: PidAppsService.hashSecret(secret),
+      clientSecretValid: (app: { clientSecretHash: string }, s: string) =>
+        PidAppsService.secretMatches(s, app.clientSecretHash),
     };
-    const { service } = setup({ findActive: async () => withSecret });
+    const { service } = setup({ findActive: async () => withSecret, clientSecretValid: withSecret.clientSecretValid });
     const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await expect(service.consume(code, "pidapp_abc", secret)).resolves.toMatchObject({ pid: "pid_1" });
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", secret)).resolves.toMatchObject({ pid: "pid_1" });
 
     const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await expect(service.consume(code2, "pidapp_abc", "wrong-secret")).rejects.toThrow("sso_code_invalid");
+    await expect(service.consume(code2, "https://mygame.dev/callback", "pidapp_abc", "wrong-secret")).rejects.toThrow("sso_code_invalid");
     // failed attempts don't consume the code — missing secret also rejected, same error
-    await expect(service.consume(code2, "pidapp_abc")).rejects.toThrow("sso_code_invalid");
+    await expect(service.consume(code2, "https://mygame.dev/callback", "pidapp_abc")).rejects.toThrow("sso_code_invalid");
+  });
+
+  it("requires the exact redirect_uri the code was issued for (M1)", async () => {
+    const { service } = setup();
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    // Wrong redirect target: same uniform error, no oracle.
+    await expect(service.consume(code, "https://evil.com/auth/callback")).rejects.toThrow("sso_code_invalid");
+    // Missing redirect target: same uniform error.
+    await expect(service.consume(code, "")).rejects.toThrow("sso_code_invalid");
+    // Exact match still exchanges.
+    await expect(service.consume(code, "https://live2dev.com/auth/callback")).resolves.toMatchObject({ pid: "pid_1" });
+  });
+
+  it("rejects redirect_uri drift even on app-bound codes (M1)", async () => {
+    const { service } = setup();
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    // Right client, wrong path on the same origin: still rejected (exact match, not origin match).
+    await expect(service.consume(code, "https://mygame.dev/other", "pidapp_abc")).rejects.toThrow("sso_code_invalid");
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc")).resolves.toMatchObject({
+      pid: "pid_1",
+    });
+  });
+
+  it("rejects an expired app secret at exchange (uniform error, code unconsumed)", async () => {
+    const expired = {
+      ...DEV_APP,
+      clientSecretHash: "abcdef",
+      clientSecretExpiresAt: new Date(Date.now() - 1000),
+      clientSecretValid: () => false,
+    };
+    const { service } = setup({ findActive: async () => expired, clientSecretValid: expired.clientSecretValid });
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
+    // Failed attempts don't consume the code.
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
   });
 });

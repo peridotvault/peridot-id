@@ -1,4 +1,4 @@
-import { APP_ORIGINS_TTL_MS, FIRST_PARTY_ORIGINS, isOriginAllowed, parseEnvOrigins } from "./cors";
+import { APP_ORIGINS_TTL_MS, FIRST_PARTY_ORIGINS, isOriginAllowed, parseEnvOrigins, staticOriginsFor } from "./cors";
 
 describe("CORS origin policy", () => {
   const env = ["https://app.pid.peridotvault.com", "http://localhost:3000"];
@@ -72,5 +72,44 @@ describe("CORS origin policy", () => {
     // Lookalikes still rejected (exact match, no suffix games).
     expect(live("https://peridot.id.evil.com")).toBe(false);
     expect(live("https://evilperidot.id")).toBe(false);
+  });
+
+  it("derives the static allow-list from the service-URL set (ANT-193)", () => {
+    const config = {
+      get: jest.fn((key: string, def?: unknown) => {
+        const values: Record<string, unknown> = {
+          API_URL: "https://api.pid.peridotvault.com",
+          WALLET_URL: "https://app.pid.peridotvault.com",
+          DASHBOARD_URL: "https://dashboard.peridot.id",
+          DOCS_URL: "https://docs.peridot.id",
+        };
+        return values[key] ?? def;
+      }),
+    } as never;
+    const origins = staticOriginsFor(config);
+    // Service URLs are all allowed (API + wallet + dashboard + docs).
+    for (const o of [
+      "https://api.pid.peridotvault.com",
+      "https://app.pid.peridotvault.com",
+      "https://dashboard.peridot.id",
+      "https://docs.peridot.id",
+    ]) {
+      expect(isOriginAllowed(o, origins, [])).toBe(true);
+    }
+    // Built-in dual-serve backstop still applies with no env maintenance.
+    expect(isOriginAllowed("https://sandbox.peridot.id", origins, [])).toBe(true);
+    expect(isOriginAllowed("https://evil.com", origins, [])).toBe(false);
+  });
+
+  it("keeps CORS_ORIGINS additive for one-off edges (never required)", () => {
+    const config = {
+      get: jest.fn((key: string, def?: unknown) => {
+        const values: Record<string, unknown> = { CORS_ORIGINS: "http://localhost:3302" };
+        return values[key] ?? def;
+      }),
+    } as never;
+    const origins = staticOriginsFor(config);
+    expect(isOriginAllowed("http://localhost:3302", origins, [])).toBe(true);
+    expect(isOriginAllowed("http://localhost:3300", origins, [])).toBe(true); // default API_URL
   });
 });

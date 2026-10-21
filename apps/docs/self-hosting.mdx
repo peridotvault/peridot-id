@@ -29,7 +29,7 @@ All configuration is loaded from `.env` in the API package. Copy
 | `COOKIE_SAMESITE` | no | `lax` (default) or `none` (cross-site clients, requires `COOKIE_SECURE=true`) |
 | `CLIENT_SUCCESS_URL` | no | Where users land after Google sign-in |
 | `CORS_ORIGINS` | no | Comma-separated extra client origins allowed by CORS |
-| `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGINS` | yes | Passkey relying-party config |
+| `WEBAUTHN_RP_ID` | no | Optional pin; defaults to the wallet host (only pin for passkey continuity across domain rotations) |
 | `CLIENT_REDIRECT_ALLOWLIST` | no | Comma-separated origins allowed for cross-origin SSO |
 | `ACCESS_TOKEN_TTL` | no | Access token lifetime (default `15m`) |
 | `REFRESH_TOKEN_TTL` | no | Refresh token lifetime (default `30d`) |

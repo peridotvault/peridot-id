@@ -17,25 +17,27 @@ contract PeridotAccountTest is Test {
     bytes32 constant SALT = bytes32(uint256(7));
 
     PeridotFactory factory;
-    bytes32 rpIdHash;
+    // Neutral 32-byte authenticator prefix for fixtures. The contract never
+    // compares these bytes (ANT-197 domain-free); any prefix verifies.
+    bytes32 authPrefix;
     // Attested network cost. Must fit the on-chain sanity bound
     // (≤ 2× measured gas × tx.gasprice); the V3 payload does not bind it,
     // so each test could attest its own value — one realistic constant suffices.
     uint256 constant NETWORK_FEE = 0.002 ether;
     uint16 constant POLICY = 1;
 
-    // Activation vector (salt, GX/GY, rpIdHash, POLICY/deadline, factory, chainid).
-    bytes32 constant VEC_ACT_R = 0x09e5b78b9ce736236dfb152bb32f32ca6e14e41b6830725f9f1f6a9a7a2f8232;
-    bytes32 constant VEC_ACT_S = 0x5d9b60bf78ee752a6ee2d3891af58c94d23183b8e26398b11680cfe1a4313161;
+    // Activation vector (salt, GX/GY, POLICY/deadline, factory, chainid).
+    bytes32 constant VEC_ACT_R = 0xe833d5ba603d6a180091a10e6cc56ae051abce1624970cbe8bf278d8e6858636;
+    bytes32 constant VEC_ACT_S = 0x6a961eb397aa853a23248b4af0d4d84c3d103a4451959793117939d73bf69a30;
     // Execute vector (to=0x1234, value=0.5 ether, empty data, deadline, nonce 0).
-    bytes32 constant VEC_EXE_R = 0x5bfd97516f58cccf3710623ce36f7081ab3545692d7f673e01220f4de0639a72;
-    bytes32 constant VEC_EXE_S = 0x3f711468348e9df6db6a76a7b321009f992ff03de9ef6f8d0f2e7e4ce97cf5d3;
+    bytes32 constant VEC_EXE_R = 0x00e4f93de906b9066f94e4edb6a437bbe3adad21ee8133a8177f2dae711cc123;
+    bytes32 constant VEC_EXE_S = 0x3a5d1b18a3b9e091fcd1a0b991b75bdb1ba083bd6378937c900593ab4f313879;
     // Rotation vector (newX/Y below, deadline, nonce 0).
-    bytes32 constant VEC_ROT_R = 0xba4bfc292216e14a0af3bbb85f072f2aab0810de168288ea72178188c04ae48a;
-    bytes32 constant VEC_ROT_S = 0x3d59d520d4d7a608f289f98bd09335900bd027fcbc3c091aab7fcaeee45971c4;
+    bytes32 constant VEC_ROT_R = 0x4b0bc5779368043f23921bd925fcee708c8359f43a1dbec4c2db38d73875e280;
+    bytes32 constant VEC_ROT_S = 0x62e0d1785c6b74d90c4c841fd1f32ef983a807a9f5f7dd099b74ad3b4d7d02a6;
     // Legacy V2-shaped payload vector (must be REJECTED by V3 verifiers).
-    bytes32 constant VEC_LEGACY_R = 0xa6aacb48707ffdc17ade2af491365c9286592a3fa68021321049764b497c072c;
-    bytes32 constant VEC_LEGACY_S = 0x6dc9cb362a31adffb7ac9bc00bd4e462da068c31771f9bace2ff3f7ff01f556a;
+    bytes32 constant VEC_LEGACY_R = 0xe254c4dfa85b6e7e7c076b114de8391d8e678b32fb24d76dc967bc505f921ffd;
+    bytes32 constant VEC_LEGACY_S = 0x36c4db26f3e76662ef53105eb4673ef568b6d4831663cb2d4e9eed6ed22decdd;
     bool constant VEC_READY = true;
 
     bytes constant DOMAIN_V3 = "PID|EVM|SMART_ACCOUNT|v3";
@@ -52,21 +54,21 @@ contract PeridotAccountTest is Test {
     function setUp() public {
         vm.warp(1_000_000);
         vm.txGasPrice(10 gwei);
-        rpIdHash = sha256("localhost");
+        authPrefix = sha256("test-rp");
         address[] memory admins = new address[](1);
         admins[0] = address(this);
         factory = new PeridotFactory(address(new PeridotAccount()), address(this), admins);
     }
 
     function _authData() internal view returns (bytes memory) {
-        return bytes.concat(rpIdHash, bytes1(0x05), bytes4(uint32(1)));
+        return bytes.concat(authPrefix, bytes1(0x05), bytes4(uint32(1)));
     }
 
     function _clientData(bytes32 challenge) internal pure returns (bytes memory) {
         return bytes.concat(
             '{"type":"webauthn.get","challenge":"',
             bytes(b64url(abi.encodePacked(challenge))),
-            '","origin":"http://localhost:8081"}'
+            '","origin":"test.invalid"}'
         );
     }
 
@@ -78,7 +80,6 @@ contract PeridotAccountTest is Test {
                 SALT,
                 GX,
                 GY,
-                rpIdHash,
                 POLICY,
                 DEADLINE,
                 block.chainid,
@@ -127,7 +128,7 @@ contract PeridotAccountTest is Test {
         address predicted = factory.predict(SALT);
         vm.deal(predicted, NETWORK_FEE + _protocolFee(NETWORK_FEE));
         return PeridotAccount(payable(factory.deployAndInit(
-            SALT, GX, GY, rpIdHash, POLICY, DEADLINE, NETWORK_FEE,
+            SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
             _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
         )));
     }
@@ -201,7 +202,7 @@ contract PeridotAccountTest is Test {
         address predicted = factory.predict(SALT);
         vm.deal(predicted, NETWORK_FEE + _protocolFee(NETWORK_FEE));
         address account = factory.deployAndInit(
-            SALT, GX, GY, rpIdHash, POLICY, DEADLINE, NETWORK_FEE,
+            SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
             _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
         );
         assertEq(account, predicted);
@@ -216,7 +217,6 @@ contract PeridotAccountTest is Test {
         assertTrue(account.initialized());
         assertEq(account.authorityX(), GX);
         assertEq(account.authorityY(), GY);
-        assertEq(account.rpIdHash(), rpIdHash);
         assertEq(account.factory(), address(factory));
         assertEq(account.nonce(), 0);
         assertEq(address(factory).balance, factoryBefore + protocolFee);
@@ -231,7 +231,7 @@ contract PeridotAccountTest is Test {
         vm.deal(predicted, NETWORK_FEE + _protocolFee(NETWORK_FEE));
         vm.expectRevert(PeridotFactory.InitFailed.selector);
         factory.deployAndInit(
-            SALT, NEW_X, NEW_Y, rpIdHash, POLICY, DEADLINE, NETWORK_FEE,
+            SALT, NEW_X, NEW_Y, POLICY, DEADLINE, NETWORK_FEE,
             _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
         );
     }
@@ -246,19 +246,18 @@ contract PeridotAccountTest is Test {
         address predicted = factory.predict(SALT);
         vm.expectRevert(PeridotFactory.InitFailed.selector);
         factory.deployAndInit(
-            SALT, GX, GY, rpIdHash, POLICY, DEADLINE, NETWORK_FEE,
+            SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
             _authData(), _clientData(_actPayload()), bytes32(uint256(1)), bytes32(uint256(2))
         );
         assertEq(predicted.code.length, 0);
         vm.deal(predicted, NETWORK_FEE + _protocolFee(NETWORK_FEE));
         address account = factory.deployAndInit(
-            SALT, GX, GY, rpIdHash, POLICY, DEADLINE, NETWORK_FEE,
+            SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
             _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
         );
         assertEq(account, predicted);
         assertEq(PeridotAccount(payable(account)).authorityX(), GX);
         assertEq(PeridotAccount(payable(account)).authorityY(), GY);
-        assertEq(PeridotAccount(payable(account)).rpIdHash(), rpIdHash);
         assertTrue(PeridotAccount(payable(account)).initialized());
     }
 
@@ -270,7 +269,7 @@ contract PeridotAccountTest is Test {
         vm.deal(predicted, 100 ether + _protocolFee(100 ether));
         vm.expectRevert(PeridotFactory.GasAnomaly.selector);
         factory.deployAndInit(
-            SALT, GX, GY, rpIdHash, POLICY, DEADLINE, 100 ether,
+            SALT, GX, GY, POLICY, DEADLINE, 100 ether,
             _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
         );
     }
@@ -281,7 +280,7 @@ contract PeridotAccountTest is Test {
         vm.deal(predicted, NETWORK_FEE);
         vm.expectRevert(PeridotFactory.InitFailed.selector);
         factory.deployAndInit(
-            SALT, GX, GY, rpIdHash, 2, DEADLINE, NETWORK_FEE,
+            SALT, GX, GY, 2, DEADLINE, NETWORK_FEE,
             _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
         );
     }
@@ -290,7 +289,7 @@ contract PeridotAccountTest is Test {
         vm.expectRevert(PeridotFactory.Unauthorized.selector);
         vm.prank(address(0xdead));
         factory.deployAndInit(
-            SALT, GX, GY, rpIdHash, POLICY, DEADLINE, NETWORK_FEE,
+            SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
             _authData(), _clientData(_actPayload()), bytes32(0), bytes32(0)
         );
     }
@@ -302,7 +301,7 @@ contract PeridotAccountTest is Test {
         // reachable via the factory, so a direct call must always revert.
         vm.expectRevert();
         account.initialize(
-            SALT, GX, GY, rpIdHash, POLICY, DEADLINE, NETWORK_FEE,
+            SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
             address(factory), address(this),
             _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
         );
@@ -411,21 +410,38 @@ contract PeridotAccountTest is Test {
         );
     }
 
-    function test_ExecuteRejectsWrongRpId() public {
+    function test_ExecuteAcceptsForeignPrefix() public {
         if (!VEC_READY) return;
+        // ANT-197 domain-free: a signature over an authenticatorData with a
+        // foreign 32-byte prefix verifies — no RP comparison remains on-chain.
+        // Signed at runtime with privkey 1 (generator key) via vm.signP256.
         PeridotAccount account = _deployV3();
-        bytes memory evilAuth = bytes.concat(sha256("evil.example"), bytes1(0x05), bytes4(uint32(1)));
-        vm.expectRevert(PeridotAccount.Unauthorized.selector);
+        bytes memory foreignAuth = bytes.concat(sha256("other-rp"), bytes1(0x05), bytes4(uint32(1)));
+        bytes32 payload = _exePayload(address(account), 0);
+        bytes memory client = _clientData(payload);
+        bytes32 h = sha256(bytes.concat(foreignAuth, sha256(client)));
+        (bytes32 r, bytes32 s) = _signLowS(1, h);
+        vm.deal(address(account), EXE_VALUE + NETWORK_FEE + _protocolFee(NETWORK_FEE));
         account.execute(
-            address(0x1234), 0, "", DEADLINE, POLICY, 0,
-            evilAuth, _clientData(_exePayload(address(account), 0)), VEC_EXE_R, VEC_EXE_S
+            address(0x1234), EXE_VALUE, "", DEADLINE, POLICY, NETWORK_FEE,
+            foreignAuth, client, r, s
         );
+        assertEq(account.nonce(), 1);
+    }
+
+    // ---- runtime P-256 signing helper (deterministic RFC-6979 via vm.signP256) ----
+
+    uint256 constant P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
+
+    function _signLowS(uint256 privKey, bytes32 digest) internal returns (bytes32 r, bytes32 s) {
+        (r, s) = vm.signP256(privKey, digest);
+        if (uint256(s) > P256_N / 2) s = bytes32(P256_N - uint256(s));
     }
 
     function test_ExecuteRejectsNoUserVerification() public {
         if (!VEC_READY) return;
         PeridotAccount account = _deployV3();
-        bytes memory noUv = bytes.concat(rpIdHash, bytes1(0x01), bytes4(uint32(1)));
+        bytes memory noUv = bytes.concat(authPrefix, bytes1(0x01), bytes4(uint32(1)));
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
         account.execute(
             address(0x1234), 0, "", DEADLINE, POLICY, 0,
@@ -468,8 +484,7 @@ contract PeridotAccountTest is Test {
         assertEq(account.authorityX(), NEW_X);
         assertEq(account.authorityY(), NEW_Y);
         assertEq(account.nonce(), 1);
-        // rpIdHash is rotation-invariant.
-        assertEq(account.rpIdHash(), rpIdHash);
+        // No domain state exists post-ANT-197: rotation touches keys + nonce only.
     }
 
     function test_UpdateAuthorityRejectsBadChallenge() public {

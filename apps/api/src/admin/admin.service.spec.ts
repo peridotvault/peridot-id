@@ -17,6 +17,10 @@ function setup() {
     chainContract: {
       upsert: jest.fn(async (args: { create: Record<string, unknown> }) => ({ id: "cc-1", ...args.create })),
     },
+    evmRelayerKey: {
+      upsert: jest.fn(async (args: { create: Record<string, unknown> }) => ({ ...args.create, updatedAt: new Date(0) })),
+      deleteMany: jest.fn(async () => ({ count: 1 })),
+    },
     identity: { findUnique: jest.fn(async () => ({ role: "admin", status: "active" })) },
     pidApp: {
       findUnique: jest.fn(async (): Promise<any> => null),
@@ -149,5 +153,35 @@ describe("AdminService", () => {
     await expect(guard.canActivate(ctx("pid_user"))).rejects.toThrow(ForbiddenException);
     prisma.identity.findUnique.mockResolvedValue({ role: "admin", status: "active" });
     await expect(guard.canActivate(ctx(IDENTITY))).resolves.toBe(true);
+  });
+
+  it("sets the EVM relayer key write-only (secret never returned, event logged)", async () => {
+    const { service, prisma, security } = setup();
+    prisma.chain.findUnique.mockResolvedValue({ id: "chain-97", namespace: "eip155", reference: "97" });
+    const secret = "0x" + "22".repeat(32);
+    const res = await service.setEvmRelayer(IDENTITY, "chain-97", secret);
+    expect(prisma.evmRelayerKey.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { chainId: "chain-97" }, create: { chainId: "chain-97", secret } }),
+    );
+    expect(res).toEqual({ chainId: "chain-97", hasSecret: true, updatedAt: expect.any(Date) });
+    expect(JSON.stringify(res)).not.toContain("22".repeat(8));
+    expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.evm_relayer.set", { chainId: "chain-97" });
+    expect(security.log).not.toHaveBeenCalledWith(IDENTITY, "admin.evm_relayer.set", expect.objectContaining({ secret }));
+  });
+
+  it("rejects the EVM relayer key for missing chains and non-EVM chains", async () => {
+    const { service, prisma } = setup();
+    prisma.chain.findUnique.mockResolvedValue(null);
+    await expect(service.setEvmRelayer(IDENTITY, "nope", "0x" + "22".repeat(32))).rejects.toThrow(NotFoundException);
+    prisma.chain.findUnique.mockResolvedValue({ id: "chain-sol", namespace: "solana", reference: "devnet" });
+    await expect(service.setEvmRelayer(IDENTITY, "chain-sol", "0x" + "22".repeat(32))).rejects.toThrow(ConflictException);
+  });
+
+  it("deletes the EVM relayer key and logs the event", async () => {
+    const { service, prisma, security } = setup();
+    prisma.chain.findUnique.mockResolvedValue({ id: "chain-97", namespace: "eip155", reference: "97" });
+    await expect(service.deleteEvmRelayer(IDENTITY, "chain-97")).resolves.toEqual({ ok: true });
+    expect(prisma.evmRelayerKey.deleteMany).toHaveBeenCalledWith({ where: { chainId: "chain-97" } });
+    expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.evm_relayer.deleted", { chainId: "chain-97" });
   });
 });
