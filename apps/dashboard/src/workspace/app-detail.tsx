@@ -53,27 +53,31 @@ function normalizeOriginInput(value: string): string | null {
   }
 }
 
-async function copy(text: string): Promise<void> {
+async function copy(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch {
-    // clipboard unavailable — ignore
+    // clipboard unavailable or denied — caller surfaces the failure.
+    return false;
   }
 }
 
 function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
+  const [state, setState] = useState<"idle" | "done" | "failed">("idle");
   return (
     <MiniButton
       onClick={() => {
-        void copy(text).then(() => {
-          setDone(true);
-          setTimeout(() => setDone(false), 1500);
+        void copy(text).then((ok) => {
+          // ANT-333: only claim success when the clipboard write succeeded.
+          setState(ok ? "done" : "failed");
+          setTimeout(() => setState("idle"), 1500);
         });
       }}
+      title={state === "failed" ? "Copy failed — your browser blocked clipboard access" : undefined}
       className="font-mono"
     >
-      {done ? "Copied" : "Copy"}
+      {state === "done" ? "Copied" : state === "failed" ? "Copy failed" : "Copy"}
     </MiniButton>
   );
 }

@@ -22,16 +22,34 @@ export function SettingsScreen({ goPasskeys, goSessions, goConnected, onDone }: 
   const [credentials, setCredentials] = useState<IdentityCredential[]>([]);
   const [sessions, setSessions] = useState<unknown[]>([]);
   const [currency, setCurrencyState] = useState<Currency>(getCurrency);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    // ANT-333: surface fetch failures instead of silently swallowing them —
+    // the rows below show whatever loaded, plus a retryable error banner.
+    setLoadError(null);
+    const wrap = async <T,>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> => {
+      try {
+        return { ok: true, value: await p };
+      } catch {
+        return { ok: false };
+      }
+    };
     const [pk, creds, sess] = await Promise.all([
-      peridot.passkey.list().catch(() => []),
-      peridot.identity.credentials().catch(() => []),
-      peridot.auth.sessions().catch(() => []),
+      wrap(peridot.passkey.list()),
+      wrap(peridot.identity.credentials()),
+      wrap(peridot.auth.sessions()),
     ]);
-    setPasskeys(Array.isArray(pk) ? (pk as Authority[]) : []);
-    setCredentials(Array.isArray(creds) ? (creds as IdentityCredential[]) : []);
-    setSessions(Array.isArray(sess) ? (sess as unknown[]) : []);
+    setPasskeys(pk.ok && Array.isArray(pk.value) ? (pk.value as Authority[]) : []);
+    setCredentials(creds.ok && Array.isArray(creds.value) ? (creds.value as IdentityCredential[]) : []);
+    setSessions(sess.ok && Array.isArray(sess.value) ? (sess.value as unknown[]) : []);
+    const failed: string[] = [];
+    if (!pk.ok) failed.push("passkeys");
+    if (!creds.ok) failed.push("credentials");
+    if (!sess.ok) failed.push("sessions");
+    if (failed.length > 0) {
+      setLoadError(`Couldn't load ${failed.join(", ")} — showing what's available. Retry to refresh.`);
+    }
   }, [peridot]);
 
   useEffect(() => {
@@ -61,6 +79,19 @@ export function SettingsScreen({ goPasskeys, goSessions, goConnected, onDone }: 
       <BackButton onPress={onDone} />
 
       <Text style={s.title}>Settings</Text>
+
+      {loadError && (
+        <View style={{ flexDirection: "row" }} className="items-center gap-3 border border-danger bg-surface p-3.5">
+          <Text style={s.error} className="flex-1">
+            {loadError}
+          </Text>
+          <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Retry loading settings">
+            <View className="border border-border px-2.5 py-1.5">
+              <Text className="font-sans text-[13px] font-medium text-foreground">Retry</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <Text className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Security</Text>
       <Row icon={KeyRound} label="Passkeys" value={`${passkeys.length} active`} onPress={goPasskeys} />

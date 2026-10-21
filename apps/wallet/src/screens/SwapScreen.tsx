@@ -12,7 +12,8 @@ export function SwapScreen({ onDone }: { onDone: () => void }) {
   const [amount, setAmount] = useState("");
 
   const swap = async () => {
-    // ponytail: swap is a stub — no DEX/quote backend exists yet.
+    // ponytail: swap is a stub — no DEX/quote backend exists yet. The CTA
+    // below stays disabled until a real quote path lands.
   };
 
   return (
@@ -35,13 +36,21 @@ export function SwapScreen({ onDone }: { onDone: () => void }) {
         </View>
 
         <Text style={s.label}>You receive</Text>
-        <Text className="font-mono text-[18px] font-semibold text-foreground">≈ {amount || "0.0"}</Text>
+        <Text className="font-sans text-[13px] text-muted-foreground">
+          No quote yet — swaps aren&apos;t available in this build, so no estimate is shown.
+        </Text>
         <Text style={s.label}>To asset</Text>
         <TextInput style={s.input} value={to} onChangeText={setTo} autoCapitalize="none" />
       </View>
 
-      <TouchableOpacity onPress={swap}>
-        <View className="w-full items-center border border-border bg-surface p-3.5">
+      <TouchableOpacity
+        onPress={swap}
+        disabled
+        accessibilityRole="button"
+        accessibilityState={{ disabled: true }}
+        accessibilityLabel="Swap (unavailable — coming soon)"
+      >
+        <View className="w-full items-center border border-border bg-surface p-3.5 opacity-60">
           <Text className="font-sans text-[13px] font-medium text-muted-foreground">Swap coming soon</Text>
         </View>
       </TouchableOpacity>
