@@ -75,7 +75,12 @@ jobs:
         with:
           host: ${{ secrets.SANDBOX_VPS_HOST }}
           username: ${{ secrets.SANDBOX_VPS_USER }}
-          key: ${{ secrets.SANDBOX_VPS_SSH_KEY }}
+          # ANT-385 (board decision fa6cd23b 2026-10-21): password auth
+          # restored — SANDBOX_VPS_SSH_KEY was never provisioned after the
+          # ANT-347 key-auth switch, breaking every test deploy at SSH
+          # connect. Follow-up: re-harden to key-auth once a deploy keypair
+          # is installed on the sandbox VPS.
+          password: ${{ secrets.SANDBOX_VPS_PASSWORD }}
           command_timeout: 60m
           script: |
             # Dedicated sandbox host + clone. Uses deploy/.env.test
