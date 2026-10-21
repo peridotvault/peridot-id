@@ -155,4 +155,49 @@ describe("PidAppsService", () => {
     const app = await service.create("pid_owner", "My Game");
     await expect(service.rotateSecret("pid_stranger", app.id as string)).rejects.toThrow("App not found");
   });
+
+  it("keeps the previous secret valid for the 24h grace window, then fails closed", async () => {
+    const { prisma, service } = setup();
+    const app = await service.create("pid_owner", "My Game");
+    const first = await service.rotateSecret("pid_owner", app.id as string);
+    // First issuance: no previous secret, so no grace deadline.
+    expect(first.graceExpiresAt).toBeNull();
+    const afterFirst = (await prisma.pidApp.findUnique({
+      where: { clientId: app.clientId as string },
+    })) as Record<string, unknown>;
+    expect(afterFirst.prevClientSecretHash).toBeNull();
+
+    const second = await service.rotateSecret("pid_owner", app.id as string);
+    expect(second.graceExpiresAt).toBeInstanceOf(Date);
+    const stored = (await prisma.pidApp.findUnique({
+      where: { clientId: app.clientId as string },
+    })) as unknown as Parameters<typeof service.clientSecretValid>[0];
+    // New secret valid; previous secret still valid inside the grace window.
+    expect(service.clientSecretValid(stored, second.secret)).toBe(true);
+    expect(service.clientSecretValid(stored, first.secret)).toBe(true);
+    expect(service.clientSecretValid(stored, "wrong")).toBe(false);
+
+    // Expired grace: previous secret stops verifying, current keeps working.
+    const expired = {
+      ...stored,
+      prevClientSecretExpiresAt: new Date(Date.now() - 1000),
+    };
+    expect(service.clientSecretValid(expired, first.secret)).toBe(false);
+    expect(service.clientSecretValid(expired, second.secret)).toBe(true);
+  });
+
+  it("supersedes the previous grace window on a second rotation", async () => {
+    const { prisma, service } = setup();
+    const app = await service.create("pid_owner", "My Game");
+    const first = await service.rotateSecret("pid_owner", app.id as string);
+    const second = await service.rotateSecret("pid_owner", app.id as string);
+    const third = await service.rotateSecret("pid_owner", app.id as string);
+    const stored = (await prisma.pidApp.findUnique({
+      where: { clientId: app.clientId as string },
+    })) as unknown as Parameters<typeof service.clientSecretValid>[0];
+    // Only the current + immediately-previous secrets verify; the oldest is dropped.
+    expect(service.clientSecretValid(stored, third.secret)).toBe(true);
+    expect(service.clientSecretValid(stored, second.secret)).toBe(true);
+    expect(service.clientSecretValid(stored, first.secret)).toBe(false);
+  });
 });

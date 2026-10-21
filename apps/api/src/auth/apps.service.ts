@@ -5,7 +5,7 @@
 import { BadRequestException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { APP_CLIENT_SECRET_MAX_AGE, parseTtlMs } from "../common/app-config";
+import { APP_CLIENT_SECRET_GRACE, APP_CLIENT_SECRET_MAX_AGE, parseTtlMs } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 
 /**
@@ -29,7 +29,11 @@ export class PidAppsService {
   ) {}
 
   /** Never expose secret material in API responses (hash or plaintext). */
-  private static readonly PUBLIC_OMIT = { webhookSecret: true, clientSecretHash: true } as const;
+  private static readonly PUBLIC_OMIT = {
+    webhookSecret: true,
+    clientSecretHash: true,
+    prevClientSecretHash: true,
+  } as const;
 
   /**
    * Server pepper for client-secret hashes (ANT-227 item 5). Optional env
@@ -57,7 +61,7 @@ export class PidAppsService {
   /** One owned app (404 for anyone else — never leak another owner's app). */
   async get(ownerPid: string, id: string) {
     const app = await this.ownedApp(ownerPid, id);
-    const { webhookSecret: _s, clientSecretHash: _h, ...safe } = app;
+    const { webhookSecret: _s, clientSecretHash: _h, prevClientSecretHash: _p, ...safe } = app;
     return safe;
   }
 
@@ -103,16 +107,34 @@ export class PidAppsService {
    * Full confidential-client check: hash match (peppered, legacy fallback)
    * AND not past `clientSecretExpiresAt`. No secret set = public client,
    * always valid. Callers must map false to a uniform error (no oracle).
+   * The previous hash (ANT-283 rotation grace) also verifies while its own
+   * overlap deadline is in the future.
    */
   clientSecretValid(
-    app: { clientSecretHash: string | null; clientSecretExpiresAt?: Date | null },
+    app: {
+      clientSecretHash: string | null;
+      clientSecretExpiresAt?: Date | null;
+      prevClientSecretHash?: string | null;
+      prevClientSecretExpiresAt?: Date | null;
+    },
     secret: string,
   ): boolean {
     if (!app.clientSecretHash) return true;
     if (app.clientSecretExpiresAt && app.clientSecretExpiresAt <= new Date()) return false;
     const pepper = this.pepper();
     if (pepper && PidAppsService.secretMatches(secret, app.clientSecretHash, pepper)) return true;
-    return PidAppsService.secretMatches(secret, app.clientSecretHash);
+    if (PidAppsService.secretMatches(secret, app.clientSecretHash)) return true;
+    // Previous-secret grace: same peppered + legacy fallback, gated by its
+    // own short deadline. An expired or missing previous hash never verifies.
+    if (
+      app.prevClientSecretHash &&
+      app.prevClientSecretExpiresAt &&
+      app.prevClientSecretExpiresAt > new Date()
+    ) {
+      if (pepper && PidAppsService.secretMatches(secret, app.prevClientSecretHash, pepper)) return true;
+      if (PidAppsService.secretMatches(secret, app.prevClientSecretHash)) return true;
+    }
+    return false;
   }
 
   /** Ownership strictly from the token — never a client-supplied identity. */
@@ -127,21 +149,34 @@ export class PidAppsService {
    * never stored or shown again. Show `prefix` afterwards for identification.
    * The secret expires after APP_CLIENT_SECRET_MAX_AGE (365d); exchanges past
    * expiry fail closed until the owner rotates (uniform error, no oracle).
+   * Rotation keeps a grace window (ANT-283): the replaced hash moves to
+   * `prevClientSecretHash` and keeps verifying for APP_CLIENT_SECRET_GRACE
+   * (24h), so concurrent deploys pick up the new secret without instant 401s.
+   * A second rotation supersedes the previous grace window.
    */
-  async rotateSecret(ownerPid: string, id: string): Promise<{ secret: string; prefix: string }> {
-    await this.ownedApp(ownerPid, id);
+  async rotateSecret(
+    ownerPid: string,
+    id: string,
+  ): Promise<{ secret: string; prefix: string; graceExpiresAt: Date | null }> {
+    const app = await this.ownedApp(ownerPid, id);
     const secret = `pidsk_${randomBytes(24).toString("hex")}`;
     const prefix = secret.slice(0, 12);
+    const hadPrevious = !!(app as { clientSecretHash?: string | null }).clientSecretHash;
+    const graceExpiresAt = hadPrevious
+      ? new Date(Date.now() + parseTtlMs(APP_CLIENT_SECRET_GRACE, "APP_CLIENT_SECRET_GRACE"))
+      : null;
     await this.prisma.pidApp.update({
       where: { id },
       data: {
+        prevClientSecretHash: (app as { clientSecretHash?: string | null }).clientSecretHash ?? null,
+        prevClientSecretExpiresAt: graceExpiresAt,
         clientSecretHash: PidAppsService.hashSecret(secret, this.pepper()),
         clientSecretPrefix: prefix,
         clientSecretCreatedAt: new Date(),
         clientSecretExpiresAt: new Date(Date.now() + parseTtlMs(APP_CLIENT_SECRET_MAX_AGE, "APP_CLIENT_SECRET_MAX_AGE")),
       },
     });
-    return { secret, prefix };
+    return { secret, prefix, graceExpiresAt };
   }
 
   /**
