@@ -162,6 +162,10 @@ ledger writes):
 - Production: `PID_FAUCET_ENABLED=false`, set explicitly in
   `deploy/.env.main.example` + Infisical main env. Verify after every deploy
   touching fiat: `POST /v1/fiat/test-credit` on prod ⇒ 404.
+- **Prod lock (board order 2026-10-21):** `deploy/up.sh main` refuses to
+  deploy when the rendered config shows any value but `false`
+  (`deploy/faucet-preflight.sh`; CI-enforced repo contract). Even a mistaken
+  `true` in the main env aborts the deploy before any container builds.
 - Caps (proposed, CTO confirms via ANT-287 OQ-1): per-call max Rp50.000,
   Rp100.000 + 10 calls/identity/day, backend-hardcoded.
 - Abuse alert: `deploy/alerts/faucet-abuse-check.sh` — cron it (sandbox

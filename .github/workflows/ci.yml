@@ -146,6 +146,32 @@ jobs:
             exit 1
           fi
 
+      - name: Faucet prod lock guard
+        run: |
+          # ANT-290 (board order 2026-10-21): the sandbox faucet is strictly
+          # sandbox-only — NEVER on main. Four repo-contract assertions:
+          # 1. compose default is fail-closed (:-false}).
+          if ! rg -q 'PID_FAUCET_ENABLED: \$\{PID_FAUCET_ENABLED:-false\}' deploy/compose.yaml; then
+            echo "::error::compose PID_FAUCET_ENABLED default must stay fail-closed (:-false})"
+            exit 1
+          fi
+          # 2. main example pins it off explicitly (not just the default).
+          if ! rg -q '^PID_FAUCET_ENABLED=false$' deploy/.env.main.example; then
+            echo "::error::.env.main.example must pin PID_FAUCET_ENABLED=false explicitly"
+            exit 1
+          fi
+          # 3. up.sh sources the preflight lib and calls it for main deploys.
+          if ! rg -q 'faucet_preflight_main' deploy/up.sh || ! test -f deploy/faucet-preflight.sh; then
+            echo "::error::up.sh main-deploy faucet preflight missing"
+            exit 1
+          fi
+          # 4. test example keeps it on (sandbox needs the faucet).
+          if ! rg -q '^PID_FAUCET_ENABLED=true$' deploy/.env.test.example; then
+            echo "::error::.env.test.example must keep PID_FAUCET_ENABLED=true"
+            exit 1
+          fi
+          echo "faucet prod lock: all assertions held"
+
       - name: Fiat popup approval guard
         run: |
           # Every third-party fiat write ceremony must exist on BOTH sides:
