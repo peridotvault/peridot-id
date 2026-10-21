@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ScrollView, Text, TextInput, View } from "../shared/primitives";
 import type { FiatTransferInquiryView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
@@ -41,6 +41,13 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
+
+  // ANT-341 FR1: move focus to the error on failed submit (SR + keyboard).
+  // Form and review phases render different error nodes; one is mounted.
+  useEffect(() => {
+    if (!error) return;
+    (document.getElementById("fiat-transfer-error") ?? document.getElementById("fiat-transfer-error-review"))?.focus?.();
+  }, [error]);
 
   const prepare = async () => {
     setBusy(true);
@@ -141,7 +148,7 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
           <Row label="Service fee" value={fmtIdr(inquiry.feeIdr)} />
           <Row label="Total debited" value={fmtIdr(inquiry.grossIdr)} />
         </View>
-        {error && <Text style={s.error}>{error}</Text>}
+        {error && <Text role="alert" tabIndex={-1} id="fiat-transfer-error-review" style={s.error}>{error}</Text>}
         <UIButton title={busy ? "Sending…" : "Confirm & send"} onPress={confirm} disabled={busy || gated || frozen} variant="primary" />
         <UIButton title="Back" onPress={cancel} disabled={busy} />
       </ScrollView>
@@ -162,14 +169,20 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
         </View>
       )}
       {frozen && !gated && <Text style={s.hint}>Network is switching — transfers pause until balances reload.</Text>}
-      <Text style={s.label}>Recipient PID</Text>
-      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid" />
-      <Text style={s.label}>Amount (IDR)</Text>
-      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000" />
-      <Text style={s.label}>Note (optional)</Text>
-      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for" />
+      <label htmlFor="fiat-to">
+        <Text style={s.label}>Recipient PID</Text>
+      </label>
+      <TextInput id="fiat-to" aria-label="Recipient PID" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid" />
+      <label htmlFor="fiat-amount">
+        <Text style={s.label}>Amount (IDR)</Text>
+      </label>
+      <TextInput id="fiat-amount" aria-label="Amount (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000" />
+      <label htmlFor="fiat-note">
+        <Text style={s.label}>Note (optional)</Text>
+      </label>
+      <TextInput id="fiat-note" aria-label="Note (optional)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for" />
       <Text style={s.hint}>Recipient must have a PeridotID account.</Text>
-      {error && <Text style={s.error}>{error}</Text>}
+      {error && <Text role="alert" tabIndex={-1} id="fiat-transfer-error" style={s.error}>{error}</Text>}
       <UIButton title={busy ? "Checking…" : "Continue"} onPress={prepare} disabled={busy || gated || frozen || !to || !amount} variant="primary" />
     </ScrollView>
   );

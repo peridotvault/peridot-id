@@ -129,7 +129,8 @@ export const styles = StyleSheet.create({
     backgroundColor: c.surface,
     borderRadius: 0,
     padding: 12,
-    fontSize: 15,
+    // 16px floor: prevents iOS Safari auto-zoom on focus (ANT-341 FR2).
+    fontSize: 16,
     fontFamily: f.sans,
     color: c.foreground,
   },

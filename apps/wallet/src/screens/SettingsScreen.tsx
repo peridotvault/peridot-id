@@ -82,7 +82,7 @@ export function SettingsScreen({ goPasskeys, goSessions, goConnected, onDone }: 
 
       {loadError && (
         <View style={{ flexDirection: "row" }} className="items-center gap-3 border border-danger bg-surface p-3.5">
-          <Text style={s.error} className="flex-1">
+          <Text role="alert" style={s.error} className="flex-1">
             {loadError}
           </Text>
           <TouchableOpacity onPress={load} accessibilityRole="button" accessibilityLabel="Retry loading settings">
@@ -174,7 +174,7 @@ function Row({
   onPress: () => void;
 }) {
   return (
-    <TouchableOpacity onPress={onPress}>
+    <TouchableOpacity onPress={onPress} accessibilityLabel={label}>
       <View style={{ flexDirection: "row" }} className="w-full items-center gap-3 border border-border bg-surface p-3.5">
         <View className="flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
           <Icon size={18} className="text-foreground" />

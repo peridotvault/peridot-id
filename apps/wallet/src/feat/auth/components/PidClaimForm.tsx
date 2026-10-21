@@ -47,10 +47,12 @@ export function PidClaimForm({
             <Text className="font-sans text-sm text-muted-foreground">Continuing as {displayName ?? email}</Text>
           )}
         </View>
-        {error && <Text style={s.error}>{error}</Text>}
+        {error && <Text role="alert" style={s.error}>{error}</Text>}
         <View className="w-full max-w-[343px] gap-3">
           <View className="relative flex-1 justify-center">
             <TextInput
+                id="pid-claim-handle"
+                aria-label="Choose your handle"
               style={[s.input, { paddingRight: 64 }]}
               className="[--placeholder:var(--color-muted-foreground)] outline-none"
               value={handle}
@@ -63,9 +65,9 @@ export function PidClaimForm({
             <Text pointerEvents="none" className="absolute right-3 font-sans text-[15px] text-muted-foreground">@pid</Text>
           </View>
           {handleStatus === "free" && <Text className="font-sans text-xs text-success">✓ {handle.trim().toLowerCase()}@pid is available</Text>}
-          {handleStatus === "taken" && <Text style={s.error}>Taken — try another handle.</Text>}
+          {handleStatus === "taken" && <Text role="alert" style={s.error}>Taken — try another handle.</Text>}
           {handleStatus === "invalid" && handle.length > 0 && (
-            <Text style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</Text>
+            <Text role="alert" style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</Text>
           )}
           <Pressable
             style={{ flexDirection: "row" }}

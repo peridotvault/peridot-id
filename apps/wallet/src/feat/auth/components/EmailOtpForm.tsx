@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Pressable, Text, TextInput, View } from "../../../shared/primitives";
 import { styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
@@ -29,6 +30,10 @@ export function EmailOtpForm({
   onVerify: () => void;
   onBack: () => void;
 }) {
+  // ANT-341 FR1: move focus to the error on failed submit (SR + keyboard).
+  useEffect(() => {
+    if (error) document.getElementById("login-otp-error")?.focus?.();
+  }, [error]);
   return (
     <View className="flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
@@ -40,10 +45,12 @@ export function EmailOtpForm({
               {step === "email" ? "We'll send you a 6-digit code." : `Code sent to ${email}`}
             </Text>
           </View>
-          {error && <Text style={s.error}>{error}</Text>}
+          {error && <Text role="alert" tabIndex={-1} id="login-otp-error" style={s.error}>{error}</Text>}
           <View className="w-full max-w-[343px] gap-3">
             {step === "email" ? (
               <TextInput
+                id="login-email"
+                aria-label="Email address"
                 style={s.input}
                 className="[--placeholder:var(--color-muted-foreground)] outline-none"
                 value={email}
@@ -57,6 +64,8 @@ export function EmailOtpForm({
               />
             ) : (
               <TextInput
+                id="login-otp-code"
+                aria-label="6-digit verification code"
                 style={s.input}
                 className="text-center text-xl tracking-[8px] [--placeholder:var(--color-muted-foreground)] outline-none"
                 value={code}

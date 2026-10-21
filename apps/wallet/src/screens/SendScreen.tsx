@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Text, TextInput, View } from "../shared/primitives";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
@@ -28,6 +28,11 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // ANT-341 FR1: move focus to the error on failed submit (SR + keyboard).
+  useEffect(() => {
+    if (error) document.getElementById("send-error")?.focus?.();
+  }, [error]);
 
   // The SDK expects raw lamports / token units. SOL entries are entered in SOL and
   // converted here; token entries must be whole raw units.
@@ -134,8 +139,8 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
         autoCapitalize="none"
       />
       <Text style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</Text>
-      {error && <Text style={s.error}>{error}</Text>}
-      {result && <Text selectable style={s.mono}>{result}</Text>}
+      {error && <Text role="alert" tabIndex={-1} id="send-error" style={s.error}>{error}</Text>}
+      {result && <Text role="status" selectable style={s.mono}>{result}</Text>}
       {net.switching && <Text style={s.hint}>Network is switching — sending is paused until balances reload.</Text>}
       <UIButton title={busy ? "Sending…" : "Send"} onPress={send} disabled={busy || net.switching || !to || !amount} variant="primary" />
       <UIButton title="Back" onPress={goBack} />
