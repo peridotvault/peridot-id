@@ -25,6 +25,15 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
       .finally(() => setLoading(false));
   }, [load]);
 
+  // Inline retry next to the error: without this the only recovery is a full
+  // page reload. Same load path as the initial fetch.
+  const retry = useCallback(() => {
+    setLoading(true);
+    load()
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load chains"))
+      .finally(() => setLoading(false));
+  }, [load]);
+
   return (
     <section className="mt-8">
       <PageHeader
@@ -32,9 +41,16 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
         title="Chains"
         description="Control which chains the wallet renders and activation uses."
       />
-      {error && <p role="alert" className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
+      {error && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
+          <MiniButton size="sm" onClick={retry}>
+            Retry
+          </MiniButton>
+        </div>
+      )}
       {loading ? (
-        <p className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
+        <p role="status" className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
       ) : chains.length === 0 ? (
         // ANT-341 FR7: explicit empty state (never a bare grid with just "+ Add chain").
         <div className="mt-4">
@@ -131,7 +147,7 @@ function ChainCard({
           Edit
         </MiniButton>
         <MiniButton size="sm" onClick={() => openContracts(chain.id)}>
-          Contracts →
+          Contracts <span aria-hidden="true">→</span>
         </MiniButton>
       </div>
     </Card>

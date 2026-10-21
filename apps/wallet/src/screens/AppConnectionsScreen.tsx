@@ -5,7 +5,6 @@ import type { SsoGrant } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { BackButton } from "../shared/components/BackButton";
-import { UIButton } from "../shared/components/UIButton";
 
 function hostOf(origin: string): string {
   try {
@@ -82,9 +81,9 @@ export function AppConnectionsScreen({ onDone }: { onDone: () => void }) {
                 <Link2 size={16} className="text-foreground" />
               </View>
               <View className="flex-1 gap-0.5">
-                <Text className="font-sans text-[15px] font-semibold text-foreground">
+                <Text className="font-sans text-[15px] font-semibold text-foreground" accessibilityLabel={`${label}${g.isVerified ? ", verified" : ""}`}>
                   {label}
-                  {g.isVerified ? " ✓" : ""}
+                  {g.isVerified && <Text aria-hidden="true"> ✓</Text>}
                 </Text>
                 {g.name && <Text className="font-sans text-xs text-muted-foreground">{host}</Text>}
                 <Text className="font-sans text-xs text-muted-foreground">Connected {fmtDate(g.firstSeenAt)}</Text>
@@ -99,8 +98,6 @@ export function AppConnectionsScreen({ onDone }: { onDone: () => void }) {
       })}
 
       {grants.length === 0 && <Text style={s.hint}>No connected sites yet.</Text>}
-
-      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }

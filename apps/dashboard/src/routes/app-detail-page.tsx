@@ -14,15 +14,15 @@ export default function AppDetailPage() {
 
   if (status === "checking") {
     return (
-      <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
-        <p className={`mt-8 text-sm ${MUTED}`}>Checking session…</p>
+      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+        <p role="status" className={`mt-8 text-sm ${MUTED}`}>Checking session…</p>
       </main>
     );
   }
   // ANT-341 FR5: anonymous visitors get a sign-in CTA (no dead-ends).
   if (status === "anonymous") {
     return (
-      <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <PageHeader eyebrow="Developer" title="App detail" />
         <Card className="mt-8">
           <h2 className="text-lg font-semibold tracking-tight">Sign in to manage this app</h2>
@@ -46,7 +46,7 @@ export default function AppDetailPage() {
   // ANT-341 FR7: empty app id is validated client-side — never "" → API 404 path.
   if (!appId) {
     return (
-      <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <p className={`mt-8 text-sm ${MUTED}`}>
           Missing app id. <Link to="/" className="underline">Back to workspace</Link>
         </p>
@@ -55,7 +55,7 @@ export default function AppDetailPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl px-5 pb-16 pt-8 sm:px-8">
+    <main id="main-content" className="mx-auto w-full max-w-7xl px-5 pb-16 pt-8 sm:px-8">
       <AppDetail key={appId} client={client} appId={appId} />
     </main>
   );

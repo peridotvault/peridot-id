@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ScrollView, Text } from "../shared/primitives";
+import { UIButton } from "../shared/components/UIButton";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
@@ -40,7 +41,8 @@ export function ActivityScreen({
       <ActivityHeader tab={tab} onTabChange={setTab} onRefresh={feed.reload} busy={feed.busy} />
 
       {feed.error && <Text role="alert" style={s.error}>{feed.error}</Text>}
-      {feed.busy && <Text style={s.hint}>Loading…</Text>}
+      {feed.error && <UIButton title="Retry" onPress={feed.reload} />}
+      {feed.busy && <Text role="status" style={s.hint}>Loading…</Text>}
 
       {tab !== "idr" && visible.length === 0 && !feed.busy && (
         <Text style={s.hint}>No activity yet — send, receive, or activate your account to get started.</Text>

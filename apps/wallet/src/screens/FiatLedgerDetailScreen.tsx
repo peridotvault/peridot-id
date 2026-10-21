@@ -32,7 +32,7 @@ export function FiatLedgerDetailScreen({ item: initial, onDone }: { item: FiatLe
   const { tx } = item;
   const incoming = tx.direction === "in";
   const posted = tx.status === "posted";
-  const sign = posted ? (incoming ? "+" : "−") : "";
+  const sign = posted ? (incoming ? "+" : "-") : "";
   const amount = tx.amountIdr;
   const cancellable = tx.status === "created" && tx.kind === "fiat_transfer_out";
 

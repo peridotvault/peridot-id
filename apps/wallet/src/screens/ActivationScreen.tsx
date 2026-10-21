@@ -39,8 +39,6 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
             Solana activation is available in Testnet Mode. Switch testnet ON to activate your on-chain account.
           </Text>
         </View>
-
-        <UIButton title="Back" onPress={onDone} />
       </ScrollView>
     );
   }
@@ -117,8 +115,6 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
       )}
 
       {gate.error && <Text className="font-sans text-xs text-muted-foreground">Activation failures deduct nothing — your deposit stays in place. Retry if the message suggests so.</Text>}
-
-      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }

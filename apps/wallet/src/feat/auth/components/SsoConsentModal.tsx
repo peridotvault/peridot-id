@@ -38,7 +38,7 @@ export function SsoConsentModal({
         </Pressable>
         <Text className="text-center font-serif text-[28px] tracking-[-0.3px] text-foreground">PeridotID</Text>
         <Text className="text-center font-sans text-sm font-medium text-foreground">Allow {origin} to sign in with your PeridotID?</Text>
-        {verified ? <Text className="text-center font-sans text-xs text-success">✓ Verified partner — 0% PeridotID fee</Text> : null}
+        {verified ? <Text className="text-center font-sans text-xs text-success"><Text aria-hidden="true">✓ </Text>Verified partner — 0% PeridotID fee</Text> : null}
         <Text className="text-center font-sans text-xs text-muted-foreground">
           Signed in as {sessionLabel}. The app receives your ID, display name and email — never your passkeys.
         </Text>

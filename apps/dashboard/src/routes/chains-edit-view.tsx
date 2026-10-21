@@ -7,7 +7,7 @@ import { unwrap } from "../workspace/api";
 import { EditChainForm } from "../workspace/edit-chain-form";
 import { PageHeader } from "../workspace/page-header";
 import { useWorkspace } from "../workspace/workspace-provider";
-import { Card, ERROR, MUTED } from "../workspace/ui";
+import { Card, ERROR, MUTED, MiniButton } from "../workspace/ui";
 
 export function EditChainView() {
   const { client, status, isAdmin } = useWorkspace();
@@ -33,17 +33,27 @@ export function EditChainView() {
     }
   }, [load, status, isAdmin, id]);
 
+  // Inline retry next to the error: without this the only recovery is a full
+  // page reload. Same load path as the initial fetch.
+  const retry = useCallback(() => {
+    if (!isAdmin || !id) return;
+    setLoading(true);
+    load()
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load chain"))
+      .finally(() => setLoading(false));
+  }, [load, isAdmin, id]);
+
   if (status === "checking") {
     return (
-      <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
-        <p className={`mt-8 text-sm ${MUTED}`}>Checking session…</p>
+      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+        <p role="status" className={`mt-8 text-sm ${MUTED}`}>Checking session…</p>
       </main>
     );
   }
 
   if (!isAdmin) {
     return (
-      <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <p className={`text-sm ${MUTED}`}>
           Admin only. <Link to="/" className="underline">Back to workspace</Link>
         </p>
@@ -52,7 +62,7 @@ export function EditChainView() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl px-5 pb-16 pt-8 sm:px-8">
+    <main id="main-content" className="mx-auto w-full max-w-7xl px-5 pb-16 pt-8 sm:px-8">
       <PageHeader
         eyebrow="Chain registry"
         title="Edit chain"
@@ -60,9 +70,14 @@ export function EditChainView() {
       />
       <div className="mt-4">
         {loading ? (
-          <p className={`text-sm ${MUTED}`}>Loading…</p>
+          <p role="status" className={`text-sm ${MUTED}`}>Loading…</p>
         ) : error ? (
-          <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
+            <MiniButton size="sm" onClick={retry}>
+              Retry
+            </MiniButton>
+          </div>
         ) : !id || !chain ? (
           <p className={`text-sm ${MUTED}`}>
             Chain not found. <Link to="/chains" className="underline">Back to chains</Link>

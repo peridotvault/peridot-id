@@ -50,8 +50,8 @@ export function EditProfileScreen({ onDone }: { onDone: () => void }) {
       {profile?.avatarUrl ? (
         <Image source={{ uri: profile.avatarUrl }} className="h-16 w-16 self-center rounded-full border border-border" />
       ) : (
-        <View className="h-16 w-16 items-center justify-center self-center rounded-full border border-border bg-surface">
-          <Text className="font-serif text-[28px] text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
+        <View className="h-16 w-16 items-center justify-center self-center rounded-full border border-border bg-surface" aria-label="No profile photo">
+          <Text aria-hidden="true" className="font-serif text-[28px] text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</Text>
         </View>
       )}
 

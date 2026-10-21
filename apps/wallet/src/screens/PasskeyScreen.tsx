@@ -85,7 +85,7 @@ export function PasskeyScreen({ onDone }: { onDone: () => void }) {
               <Text className="font-sans text-xs text-muted-foreground">Added {fmtDate(a.createdAt)}</Text>
               <Text className="font-sans text-xs text-muted-foreground">Last used {fmtDate(a.lastUsedAt)}</Text>
               {a.credentialId && (
-                <Text className="font-mono text-xs text-muted-foreground" numberOfLines={1}>
+                <Text className="font-mono text-xs text-muted-foreground" numberOfLines={1} title={`ID ${a.credentialId}`}>
                   ID {a.credentialId}
                 </Text>
               )}

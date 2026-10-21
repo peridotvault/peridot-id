@@ -9,7 +9,7 @@ import { AsciiRidges } from "./AsciiRidges";
 // first paint never waits on font files).
 export function LoadingScreen({ fontsReady = true }: { fontsReady?: boolean }) {
   return (
-    <View className="flex-1">
+    <View role="status" aria-label="Loading" className="flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
       <View className="flex-1 items-center justify-center">
         <Text className={fontsReady ? "font-serif text-[40px] tracking-[-0.4px] text-foreground" : "font-[serif] text-[40px] tracking-normal text-foreground"}>PeridotID</Text>

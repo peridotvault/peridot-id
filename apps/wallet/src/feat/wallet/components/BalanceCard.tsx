@@ -50,10 +50,18 @@ export function BalanceCard({
           <>
             <View className="gap-1.5">
               <Text className="font-sans text-[13px] text-muted-foreground">PeridotID</Text>
-              <Text className="font-serif text-[38px] text-foreground">
+              <Text
+                className="font-serif text-[38px] text-foreground"
+                role={busy && balanceIdr === null ? "status" : undefined}
+                accessibilityLabel={busy && balanceIdr === null ? "Loading total balance" : undefined}
+              >
                 {busy && balanceIdr === null ? "…" : formatTotal(totalValue, currency)}
               </Text>
-              <Text className="text-left font-mono text-sm font-medium text-foreground">
+              <Text
+                className="text-left font-mono text-sm font-medium text-foreground"
+                role={balanceIdr === null && busy ? "status" : undefined}
+                accessibilityLabel={balanceIdr === null && busy ? "Loading IDR balance" : undefined}
+              >
                 {balanceIdr === null ? (busy ? "…" : "—") : formatIdrWhole(balanceIdr, "IDR", rates)}
               </Text>
             </View>
