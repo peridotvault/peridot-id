@@ -57,6 +57,8 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   const [name, setName] = useState("");
   const [newOrigin, setNewOrigin] = useState("");
   const [revealed, setRevealed] = useState<string | null>(null);
+  const [newWebhookUrl, setNewWebhookUrl] = useState("");
+  const [revealedWebhook, setRevealedWebhook] = useState<string | null>(null);
 
   const flash = (m: string) => {
     setMsg(m);
@@ -128,6 +130,46 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
       await load();
     } catch {
       setError("Secret rotation failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Set (or replace) the ledger-callback endpoint. The signing secret is
+   *  returned ONCE — shown with copy + dismiss, never fetched again. */
+  const saveWebhook = async () => {
+    const url = newWebhookUrl.trim();
+    if (!url || !app) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = unwrap(
+        await client.post<{ url: string; secret: string }>(`/v1/apps/${appId}/webhook`, { url }),
+        "Save webhook",
+      );
+      setApp({ ...app, webhookUrl: res.url });
+      setRevealedWebhook(res.secret);
+      setNewWebhookUrl("");
+      flash("Webhook saved. Copy the signing secret now.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save webhook failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Remove the ledger-callback endpoint (and its signing secret). */
+  const clearWebhook = async () => {
+    if (!window.confirm("Remove this webhook endpoint? PeridotID will stop signing callbacks to it.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      unwrap(await client.delete<{ url: string | null }>(`/v1/apps/${appId}/webhook`), "Remove webhook");
+      if (app) setApp({ ...app, webhookUrl: null });
+      setRevealedWebhook(null);
+      flash("Webhook removed.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Remove webhook failed.");
     } finally {
       setBusy(false);
     }
@@ -296,6 +338,64 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
               </MiniButton>
             </div>
           )}
+        </Card>
+
+        <Card>
+          <p className={SECTION_LABEL}>Webhook endpoint</p>
+          <p className={`mt-1 text-xs ${MUTED}`}>
+            PeridotID POSTs signed ledger events here (e.g. <code className="font-mono">fiat.transfer.posted</code> when
+            funds land on this app&apos;s escrow account). Every callback carries{" "}
+            <code className="font-mono">X-Pid-Signature: sha256=&lt;hex&gt;</code> over the raw body.
+          </p>
+          {revealedWebhook ? (
+            <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
+              <p className="text-xs font-semibold">Copy it now — it will never be shown again.</p>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <code className="min-w-0 flex-1 break-all rounded bg-white px-2 py-1 font-mono text-xs dark:bg-black/50">
+                  {revealedWebhook}
+                </code>
+                <div className="flex shrink-0 gap-2">
+                  <CopyButton text={revealedWebhook} />
+                  <MiniButton onClick={() => setRevealedWebhook(null)}>Dismiss</MiniButton>
+                </div>
+              </div>
+            </div>
+          ) : app.webhookUrl ? (
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-muted px-3 py-1.5">
+              <code className="min-w-0 flex-1 break-all font-mono text-xs">{app.webhookUrl}</code>
+              <MiniButton onClick={() => void clearWebhook()} disabled={busy}>
+                Remove
+              </MiniButton>
+            </div>
+          ) : (
+            <p className={`mt-2 text-xs ${MUTED}`}>No webhook — ledger events will not be pushed to this app.</p>
+          )}
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <label htmlFor="webhook-url" className="sr-only">
+              Webhook endpoint URL
+            </label>
+            <input
+              id="webhook-url"
+              value={newWebhookUrl}
+              onChange={(e) => setNewWebhookUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void saveWebhook();
+              }}
+              placeholder="https://mygame.dev/peridot/webhook"
+              inputMode="url"
+              className={`${FIELD} font-mono text-xs`}
+            />
+            <MiniButton
+              variant="solid"
+              size="sm"
+              onClick={() => void saveWebhook()}
+              disabled={busy || !newWebhookUrl.trim()}
+              className="self-start sm:self-end"
+            >
+              {app.webhookUrl ? "Replace" : "Set endpoint"}
+            </MiniButton>
+          </div>
+          <p className={`mt-1 text-xs ${MUTED}`}>https required (http allowed only for localhost). Setting a new URL rotates the signing secret.</p>
         </Card>
 
         <Card>
