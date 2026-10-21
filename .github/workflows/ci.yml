@@ -235,7 +235,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Trivy filesystem + config scan
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true
         with:
           scan-type: fs
@@ -243,6 +243,8 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: HIGH,CRITICAL
+          # Explicit non-blocking: findings must never flip the job red.
+          exit-code: '0'
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v4
         continue-on-error: true
