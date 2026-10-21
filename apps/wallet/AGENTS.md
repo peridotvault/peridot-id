@@ -66,6 +66,13 @@ for f in auth wallet fiat activity identity; do
 done
 ```
 
+## Execute gate (unknown-target disclosure)
+
+- Every `peridot.wallet.execute` call site must route through
+  `assertExecuteGateAllows(action, payload, { unknownAcknowledged })`
+  (`feat/auth/utils/knownPrograms.ts`) BEFORE any passkey ceremony.
+  New direct `execute` calls without the gate are a spec violation.
+
 ## Done (Phase 1)
 
 - `feat/wallet/hooks/useActivationGate.ts` — single activation gate

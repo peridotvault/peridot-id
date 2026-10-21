@@ -3,13 +3,14 @@
 // validated postMessage handshake — never trust the URL alone. On approve, the
 // action runs here on the PeridotID origin with this session + passkey (the
 // trusted DOM), and the result is posted back to the opener's origin.
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Text, View } from "../shared/primitives";
 import type { PopupParams } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { UIButton } from "../shared/components/UIButton";
 import { isFiatAction, runAction } from "../feat/auth/utils/popupAction";
+import { assertExecuteGateAllows } from "../feat/auth/utils/knownPrograms";
 import { usePopupRequest, type PopupAuthReason } from "../feat/auth/hooks/usePopupRequest";
 import { useFiatPrepare } from "../feat/fiat/hooks/useFiatPrepare";
 import { PopupReview } from "../feat/auth/components/PopupReview";
@@ -18,11 +19,18 @@ import { FiatQuoteBreakdown } from "../feat/fiat/components/FiatQuoteBreakdown";
 export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?: (reason?: PopupAuthReason) => void }) {
   const { peridot } = usePeridot();
   const fiat = useFiatPrepare(peridot);
+  // Unknown-target acknowledgement (ANT-262): owned here so BOTH the review UI
+  // (checkbox gating) and the approve path (pre-ceremony enforcement) read the
+  // same value. Reset whenever a new request arrives.
+  const [acknowledged, setAcknowledged] = useState(false);
 
   const execute = useCallback(async (action: string, payload: unknown) => {
     if (isFiatAction(action)) return fiat.execute(action);
+    // First-party/direct execute path: same gate as the popup (spec FR5).
+    // Throws before any passkey ceremony when acknowledgement is missing.
+    assertExecuteGateAllows(action, payload, { unknownAcknowledged: acknowledged });
     return { result: await runAction(peridot, action, payload), checkoutUrl: null };
-  }, [peridot, fiat.execute]);
+  }, [peridot, fiat.execute, acknowledged]);
 
   const req = usePopupRequest(peridot, popup, {
     prepare: fiat.prepare,
@@ -30,6 +38,16 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
     cancelFiat: fiat.cancelInquiry,
     onNeedAuth,
   });
+
+  // A new request payload re-enters review with acknowledgement cleared, so a
+  // previous tick can never carry over to a different call.
+  useEffect(() => {
+    setAcknowledged(false);
+  }, [req.action, req.summary]);
+
+  const onApprove = useCallback(() => {
+    void req.approve({ unknownAcknowledged: acknowledged });
+  }, [req.approve, acknowledged]);
 
   return (
     <View style={s.container}>
@@ -54,10 +72,13 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
             summary={req.action === "fiat-checkout" ? (fiat.checkoutSummary ?? req.summary) : req.summary}
             origin={popup.origin}
             busy={req.phase === "busy"}
-            onApprove={req.approve}
+            onApprove={onApprove}
             onDeny={req.deny}
             approvingPid={req.approvingPid}
             switched={req.switched}
+            gate={req.gate}
+            acknowledged={acknowledged}
+            onAcknowledgedChange={setAcknowledged}
           />
         </>
       )}
