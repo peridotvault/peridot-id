@@ -173,6 +173,8 @@ paths:
               example:
                 available: true
                 pid: "ifal@pid"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/RateLimited"
 

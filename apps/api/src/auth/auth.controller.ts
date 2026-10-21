@@ -12,6 +12,7 @@ import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { CsrfOriginGuard } from "../common/csrf-origin.guard";
 import { UserTokenGuard } from "../common/user-token.guard";
 import { AuthService } from "./auth.service";
+import { isPidHandle, normalizePidHandle } from "../common/pid";
 import { ClaimService, isUnverifiedEmailError } from "./claim.service";
 import { EmailStartDto, EmailVerifyDto } from "./email/dto/email.dto";
 import { EmailOtpService } from "./email/email-otp.service";
@@ -106,8 +107,16 @@ export class AuthController {
   @Get("pid/available")
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async pidAvailable(@Req() req: Request): Promise<{ available: boolean; pid: string | null }> {
-    const handle = typeof req.query.handle === "string" ? req.query.handle : "";
-    return this.authService.isPidAvailable(handle);
+    // Spec marks `handle` required with `^[a-z0-9_]{3,20}$`: a missing or
+    // malformed handle is a 400 (not a 200 `available:false`, which would read
+    // as "taken"). Same message/shape as ClaimDto validation. The service
+    // stays lenient (returns false) as defense-in-depth; the boundary owns 400.
+    const raw = typeof req.query.handle === "string" ? req.query.handle : "";
+    const normalized = normalizePidHandle(raw);
+    if (!isPidHandle(normalized)) {
+      throw new BadRequestException("handle must be 3-20 chars: lowercase letters, numbers, underscore");
+    }
+    return this.authService.isPidAvailable(normalized);
   }
 
   /**
