@@ -24,6 +24,14 @@ import { CHECKOUT_CLIENT } from "./checkout-client.token";
 import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
 
 const PROVIDER = "doku-sub-account";
+/**
+ * Max inbound webhook body accepted for persistence (ANT-271). Real DOKU
+ * notify payloads are ~1-2kb of JSON; anything larger is a forged/DB-fill
+ * attempt, not a legitimate notify. Route-level body-parser cap (64kb in
+ * main.ts) is the outer bound; this is the tighter per-event budget enforced
+ * before any DB write. Measured in UTF-8 bytes, not chars.
+ */
+export const MAX_WEBHOOK_BODY_BYTES = 32 * 1024;
 const IDR_ACCOUNT = "DOKU_MERCHANT_IDR";
 const PENDING_ACCOUNT = "DOKU_MERCHANT_PENDING_IDR";
 /** Unified Ledger spendable account (non-cash, 1:1 IDR peg). */
@@ -2698,6 +2706,10 @@ export class FiatSubAccountService {
    */
   async webhook(externalId: string | undefined, rawBody: string): Promise<{ ok: boolean }> {
     if (!externalId) return { ok: false };
+    // ANT-271: size cap before parse/persist — oversized forged payloads are
+    // dropped without a DB write (DB-fill via large bodies). Route-level
+    // 120 req/min throttle bounds rate, not per-request size.
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_WEBHOOK_BODY_BYTES) return { ok: false };
     let body: Record<string, any>;
     try {
       body = JSON.parse(rawBody) as Record<string, any>;
