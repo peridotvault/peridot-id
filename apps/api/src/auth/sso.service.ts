@@ -6,11 +6,10 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import ms from "ms";
 import { randomBytes } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
-import { SSO_EXCHANGE_TOKEN_TTL, resolveServiceUrls, serviceOrigins } from "../common/app-config";
+import { SSO_EXCHANGE_TOKEN_TTL, resolveServiceUrls, serviceOrigins, JWT_AUD_SSO, JWT_ISSUER, ttlSeconds } from "../common/app-config";
 import { PidAppsService } from "./apps.service";
 
 const CODE_TTL_MS = 5 * 60 * 1000;
@@ -194,13 +193,14 @@ export class SsoService {
     if (!row || row.consumedAt || row.expiresAt < new Date()) {
       throw new Error("sso_code_invalid");
     }
-    // Codes bound to an app only exchange with the same client_id — and with the
-    // app's secret when one is set (confidential clients). Uniform error, no oracle.
+    // Codes bound to an app only exchange with the same client_id — and with a
+    // valid (unexpired) secret when one is set (confidential clients).
+    // Uniform error, no oracle.
     if (row.clientId) {
       if (row.clientId !== clientId) throw new Error("sso_code_invalid");
       const app = await this.apps.findActive(row.clientId);
       if (!app) throw new Error("sso_code_invalid");
-      if (app.clientSecretHash && !PidAppsService.secretMatches(clientSecret ?? "", app.clientSecretHash)) {
+      if (!this.apps.clientSecretValid(app, clientSecret ?? "")) {
         throw new Error("sso_code_invalid");
       }
     }
@@ -239,7 +239,12 @@ export class SsoService {
     const accessToken = await this.jwt.signAsync(
       // scope:"read" — the RP backend may only GET (balance/ledger), never write.
       { sub: row.pid, type: "access", scope: "read", ...(row.clientId ? { app: row.clientId } : {}) },
-      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: ttl },
+      {
+        secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
+        expiresIn: ttl,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_SSO,
+      },
     );
 
     return {
@@ -248,7 +253,8 @@ export class SsoService {
       profile: { displayName: profile?.displayName ?? null, avatarUrl: profile?.avatarUrl ?? null },
       credentials,
       accessToken,
-      expiresIn: Math.floor(ms(ttl) / 1000),
+      // Guarded parse (ANT-227 item 4): throws on typo'd TTL, never NaN.
+      expiresIn: ttlSeconds(ttl, "SSO_EXCHANGE_TOKEN_TTL"),
     };
   }
 

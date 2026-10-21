@@ -6,6 +6,7 @@ import { ThrottlerModule, ThrottlerStorage } from "@nestjs/throttler";
 import cookieParser from "cookie-parser";
 import request from "supertest";
 import { JwtStrategy } from "../auth/jwt.strategy";
+import { JWT_AUD_SESSION, JWT_ISSUER } from "../common/app-config";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -40,7 +41,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
   let state: { identities: Map<string, string>; wallets: Map<string, WalletRow> };
 
   const token = (sub: string, extra: Record<string, unknown> = {}) =>
-    new JwtService({}).signAsync({ sub, type: "access", ...extra }, { secret: SECRET });
+    new JwtService({}).signAsync({ sub, type: "access", ...extra }, { secret: SECRET, issuer: JWT_ISSUER, audience: JWT_AUD_SESSION });
 
   beforeAll(async () => {
     state = { identities: new Map(), wallets: new Map() };

@@ -74,7 +74,7 @@ export class AuthController {
   async appToken(@Body() dto: AppTokenDto) {
     const app = await this.apps.findActive(dto.clientId);
     if (!app) throw new UnauthorizedException("Invalid client");
-    if (app.clientSecretHash && !PidAppsService.secretMatches(dto.clientSecret ?? "", app.clientSecretHash)) {
+    if (!this.apps.clientSecretValid(app, dto.clientSecret ?? "")) {
       throw new UnauthorizedException("Invalid client");
     }
     return this.authService.issueAppAccessToken(app.ownerPid, app.clientId);

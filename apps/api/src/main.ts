@@ -4,6 +4,7 @@ import { NestFactory } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
+import { Logger } from "@nestjs/common";
 import { AppModule } from "./app.module";
 import { APP_ORIGINS_TTL_MS, isOriginAllowed, staticOriginsFor } from "./common/cors";
 import { PrismaService } from "./prisma/prisma.service";
@@ -11,6 +12,17 @@ import { PrismaService } from "./prisma/prisma.service";
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
   const config = app.get(ConfigService);
+  const logger = new Logger("Bootstrap");
+
+  // ANT-227 item 2: the bootstrap-admin env is one-time. While set, the first
+  // matching claim mints an admin — remove it right after bootstrap so a
+  // leaked/stale value can never matter again.
+  if ((config.get<string>("PID_BOOTSTRAP_ADMIN_PID", "") ?? "").trim()) {
+    logger.warn(
+      "PID_BOOTSTRAP_ADMIN_PID is set: the first matching claim mints an admin. " +
+        "Remove this variable immediately after bootstrap.",
+    );
+  }
 
   app.use(cookieParser());
   // DOKU signs the exact raw bytes — keep them for the notify route (req.rawBody).

@@ -37,6 +37,12 @@ export class ClaimService {
    * `ifal@pid`) are created with the `admin` role when claimed. Env-driven, never
    * hardcoded; an already-existing identity is never changed here (promote via
    * the documented SQL/`admin:promote` instead).
+   *
+   * ONE-TIME (ANT-227 item 2): the bootstrap grant applies only while NO admin
+   * exists yet — the first bootstrap claim creates the first admin, every later
+   * claim (even a bootstrap PID) is a plain user. Re-login can therefore never
+   * escalate. Remove the env var after bootstrap; the API logs a startup
+   * warning while it is set (see main.ts).
    */
   private isBootstrapAdmin(pid: string): boolean {
     const raw = this.config.get<string>("PID_BOOTSTRAP_ADMIN_PID", "") || "";
@@ -121,11 +127,26 @@ export class ClaimService {
       });
       if (existing) throw new ConflictException("This login is already linked to an account — sign in instead.");
       if (ticket.email) {
-        const emailOwner = await tx.identityCredential.findFirst({ where: { email: ticket.email }, select: { id: true } });
+        // Case-insensitive (ANT-227 item 3): must match findIdentityByEmail or
+        // a case-variant email mints a second identity and breaks the global
+        // email index (409 here instead of a 500 there).
+        const emailOwner = await tx.identityCredential.findFirst({
+          where: { email: { equals: ticket.email, mode: "insensitive" } },
+          select: { id: true },
+        });
         if (emailOwner) throw new ConflictException("Email is already linked to another account");
       }
 
-      await tx.identity.create({ data: { pid, status: "active", role: this.isBootstrapAdmin(pid) ? "admin" : "user" } });
+      // Bootstrap is one-time (ANT-227 item 2): only when no admin exists yet.
+      // After the first admin, bootstrap PIDs claim as plain users — re-login
+      // (or a second claim) can never escalate.
+      let role: "admin" | "user" = "user";
+      if (this.isBootstrapAdmin(pid)) {
+        const adminExists = await tx.identity.findFirst({ where: { role: "admin" }, select: { pid: true } });
+        role = adminExists ? "user" : "admin";
+      }
+
+      await tx.identity.create({ data: { pid, status: "active", role } });
       await tx.profile.create({
         data: { pid, displayName: ticket.displayName, avatarUrl: ticket.avatarUrl },
       });

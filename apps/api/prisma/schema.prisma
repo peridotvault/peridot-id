@@ -680,11 +680,15 @@ model PidApp {
   // for movements in this app's context. The app's own stacked fee, DOKU
   // provider fees, and on-chain fees still apply. See docs/RP_SESSIONS.md.
   isVerified            Boolean   @default(false)
-  // Optional backend secret (confidential clients). SHA-256 hex, never plaintext.
+  // Optional backend secret (confidential clients). SHA-256 hex (peppered when
+  // PID_APP_SECRET_PEPPER is set — see PidAppsService), never plaintext.
   // When set, code exchange requires the matching secret.
   clientSecretHash      String?
   clientSecretPrefix    String?
   clientSecretCreatedAt DateTime?
+  // Rotation deadline: exchanges/token requests past this fail closed until
+  // the owner rotates (ANT-227 item 5). Null = pre-policy secret, no deadline.
+  clientSecretExpiresAt DateTime?
   // Per-app callback endpoint + HMAC signing secret (set together). The
   // ledger posts signed events here (X-Pid-Signature). See docs/FIAT_LEDGER.md.
   webhookUrl            String?

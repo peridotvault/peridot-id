@@ -232,6 +232,27 @@ describe("AuthService", () => {
     expect(names).toEqual(["pid_access", "pid_refresh", accountRefreshCookieName("identity-1")]);
   });
 
+  it("mints issuer + per-class audience on session tokens (ANT-227 item 1)", async () => {
+    const { service, res } = setup();
+    const tokens = await service.issueSession(res as never, "identity-1", "test-agent");
+    expect(jwtPayload(tokens.accessToken)).toMatchObject({ iss: "peridot-id", aud: "pid-session", type: "access" });
+    expect(jwtPayload(tokens.refreshToken)).toMatchObject({ iss: "peridot-id", aud: "pid-refresh", type: "refresh" });
+
+    const app = await service.issueAppAccessToken("owner@pid", "pidapp_x");
+    expect(jwtPayload(app.accessToken)).toMatchObject({ iss: "peridot-id", aud: "pid-app", type: "access" });
+  });
+
+  it("rejects a refresh token minted for another audience (cross-class confusion)", async () => {
+    const { service, res } = setup();
+    const jwt = new JwtService({});
+    // Right secret, right subject — but the session audience, not the refresh one.
+    const confused = await jwt.signAsync(
+      { sub: "victim", jti: "does-not-exist", type: "refresh" },
+      { secret: "refresh-secret-test", expiresIn: "30d", issuer: "peridot-id", audience: "pid-session" },
+    );
+    await expect(service.rotateSession(reqWithToken(confused), res as never)).rejects.toThrow(UnauthorizedException);
+  });
+
   it("rotateSession revokes the old token and issues a new one", async () => {
     const { service, prisma, res } = setup();
     const first = await service.issueSession(res as never, "identity-1", "test-agent");

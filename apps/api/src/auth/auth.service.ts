@@ -3,7 +3,6 @@ import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { randomUUID } from "crypto";
 import { Request, Response } from "express";
-import ms from "ms";
 import {
   accountRefreshCookieName,
   accountRefreshCookieNames,
@@ -16,7 +15,18 @@ import {
   setAuthCookies,
   setScopedAuthCookies,
 } from "../common/cookies";
-import { ACCESS_TOKEN_TTL, APP_TOKEN_TTL, GOOGLE_FAMILY_MAX_AGE, PASSKEY_FAMILY_MAX_AGE, REFRESH_TOKEN_TTL } from "../common/app-config";
+import {
+  ACCESS_TOKEN_TTL,
+  APP_TOKEN_TTL,
+  GOOGLE_FAMILY_MAX_AGE,
+  JWT_AUD_APP,
+  JWT_AUD_REFRESH,
+  JWT_AUD_SESSION,
+  JWT_ISSUER,
+  PASSKEY_FAMILY_MAX_AGE,
+  REFRESH_TOKEN_TTL,
+  parseTtlMs,
+} from "../common/app-config";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -27,12 +37,16 @@ export interface AccessTokenPayload {
   app?: string;
   /** "read" restricts the token to safe (GET) routes — e.g. the SSO exchange token. */
   scope?: string;
+  iss: string;
+  aud: string;
 }
 
 export interface RefreshTokenPayload {
   sub: string;
   jti: string;
   type: "refresh";
+  iss: string;
+  aud: string;
 }
 
 export interface GoogleProfile {
@@ -79,7 +93,12 @@ export class AuthService {
     const ttl = APP_TOKEN_TTL;
     const accessToken = await this.jwt.signAsync(
       { sub: ownerPid, type: "access", app: clientId },
-      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: ttl },
+      {
+        secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
+        expiresIn: ttl,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_APP,
+      },
     );
     return { accessToken, expiresIn: ttl };
   }
@@ -146,12 +165,22 @@ export class AuthService {
 
     const accessToken = await this.jwt.signAsync(
       { sub: pid, type: "access" },
-      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: accessTtl },
+      {
+        secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
+        expiresIn: accessTtl,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_SESSION,
+      },
     );
     const jti = randomUUID();
     const refreshToken = await this.jwt.signAsync(
       { sub: pid, jti, type: "refresh" },
-      { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"), expiresIn: refreshTtl },
+      {
+        secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
+        expiresIn: refreshTtl,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_REFRESH,
+      },
     );
 
     let deviceId: string;
@@ -168,7 +197,14 @@ export class AuthService {
     }
 
     await this.prisma.session.create({
-      data: { id: jti, deviceId, rotatedFrom: rotatedFrom ?? null, expiresAt: new Date(Date.now() + ms(refreshTtl)) },
+      data: {
+        id: jti,
+        deviceId,
+        rotatedFrom: rotatedFrom ?? null,
+        // Guarded parse (ANT-227 item 4): a typo'd TTL must throw here, never
+        // persist an Invalid-Date session row.
+        expiresAt: new Date(Date.now() + parseTtlMs(refreshTtl, "REFRESH_TOKEN_TTL")),
+      },
     });
 
     if (scope) {
@@ -189,6 +225,15 @@ export class AuthService {
     await this.issueSession(res, pid, userAgent, undefined, undefined, scope);
   }
 
+  /** Verify options every refresh-token check must use (secret + iss + aud). */
+  private refreshVerifyOptions(): { secret: string; issuer: string; audience: string } {
+    return {
+      secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
+      issuer: JWT_ISSUER,
+      audience: JWT_AUD_REFRESH,
+    };
+  }
+
   async rotateSession(req: Request, res: Response, scope: string | null = null): Promise<void> {
     const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
     const token = scope ? cookies?.[scopeRefreshCookie(scope)] : cookies?.[REFRESH_COOKIE];
@@ -196,7 +241,7 @@ export class AuthService {
 
     let payload: RefreshTokenPayload;
     try {
-      payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
+      payload = await this.jwt.verifyAsync(token, this.refreshVerifyOptions());
     } catch {
       throw new UnauthorizedException("Invalid refresh token");
     }
@@ -231,12 +276,12 @@ export class AuthService {
     // starts a new family. Checked before revoking so a rejected rotation
     // never burns the still-TTL-valid token.
     const method = session.device.authMethod ?? "google";
-    // Unparseable env falls back to the default (NaN is falsy) — a typo must
-    // never silently disable the cap.
+    // Hardcoded constants, validated at import (ANT-227 item 4) — a typo
+    // breaks the build, it can never silently disable the cap.
     const cap =
       method === "passkey"
-        ? ms(PASSKEY_FAMILY_MAX_AGE)
-        : ms(GOOGLE_FAMILY_MAX_AGE);
+        ? parseTtlMs(PASSKEY_FAMILY_MAX_AGE, "PASSKEY_FAMILY_MAX_AGE")
+        : parseTtlMs(GOOGLE_FAMILY_MAX_AGE, "GOOGLE_FAMILY_MAX_AGE");
     if (Date.now() - session.device.createdAt.getTime() > cap) {
       throw new UnauthorizedException({
         code: "step_up_required",
@@ -254,7 +299,7 @@ export class AuthService {
     const token = scope ? cookies?.[scopeRefreshCookie(scope)] : cookies?.[REFRESH_COOKIE];
     if (token) {
       try {
-        const payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
+        const payload = await this.jwt.verifyAsync(token, this.refreshVerifyOptions());
         await this.prisma.session.updateMany({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
         // Signing out the active identity also drops it from the account list.
         if (!scope) clearAccountRefreshCookie(res, this.config, payload.sub);
@@ -269,9 +314,7 @@ export class AuthService {
   /** Decode a refresh JWT to its identity + session jti (null if invalid). */
   private async verifyRefresh(token: string): Promise<{ pid: string; jti: string } | null> {
     try {
-      const payload = await this.jwt.verifyAsync<RefreshTokenPayload>(token, {
-        secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
-      });
+      const payload = await this.jwt.verifyAsync<RefreshTokenPayload>(token, this.refreshVerifyOptions());
       if (payload.type !== "refresh") return null;
       return { pid: payload.sub, jti: payload.jti };
     } catch {
@@ -329,7 +372,12 @@ export class AuthService {
     }
     const accessToken = await this.jwt.signAsync(
       { sub: pid, type: "access" },
-      { secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"), expiresIn: ACCESS_TOKEN_TTL },
+      {
+        secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
+        expiresIn: ACCESS_TOKEN_TTL,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_SESSION,
+      },
     );
     setActiveAuthCookies(res, this.config, accessToken, token);
   }
@@ -351,7 +399,7 @@ export class AuthService {
   async currentSessionJti(token: string | undefined): Promise<string | null> {
     if (!token) return null;
     try {
-      const payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET") });
+      const payload = await this.jwt.verifyAsync(token, this.refreshVerifyOptions());
       return payload.type === "refresh" ? payload.jti : null;
     } catch {
       return null;
