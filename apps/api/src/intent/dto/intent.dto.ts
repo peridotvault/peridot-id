@@ -24,7 +24,11 @@ export class CreateIntentDto {
   @IsEnum(["WITHDRAW_SOL", "WITHDRAW_TOKEN"])
   type!: "WITHDRAW_SOL" | "WITHDRAW_TOKEN";
 
+  // ANT-344 L4: without @ValidateNested + @Type the IntentPayloadDto rules
+  // (amount digits, base58 destination/mint) never ran — any object passed.
   @IsObject()
+  @ValidateNested()
+  @Type(() => IntentPayloadDto)
   payload!: IntentPayloadDto;
 }
 

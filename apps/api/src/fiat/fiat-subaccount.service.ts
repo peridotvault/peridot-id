@@ -20,6 +20,7 @@ import { FiatLedgerService } from "./fiat-ledger.service";
 import { PaymentFeeService } from "./payment-fee.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
+import { pidLogRef } from "../common/redact";
 import { CHECKOUT_CLIENT } from "./checkout-client.token";
 import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
 
@@ -278,7 +279,7 @@ export class FiatSubAccountService {
     const existing = await this.prisma.fiatProviderAccount.findUnique({ where: { pid_provider: { pid, provider: PROVIDER } } });
     if (existing?.profileId) return this.toAccountView(existing);
     if (existing && !existing.profileId) {
-      this.logger.warn(`re-registering ${pid} over status=${existing.accountStatus} (possible orphan at DOKU if the original call landed)`);
+      this.logger.warn(`re-registering ${pidLogRef(pid)} over status=${existing.accountStatus} (possible orphan at DOKU if the original call landed)`);
     }
     const registerRef = buildInvoiceNumber("SA");
     const rowId = existing?.id;
@@ -338,7 +339,7 @@ export class FiatSubAccountService {
       // profileId, accountStatus='active' WHERE pid=…), after which balance()
       // fills in the accounts cache.
       if (/already exists/i.test(raw)) {
-        this.logger.error(`DOKU register orphan for ${pid}: ${raw}`);
+        this.logger.error(`DOKU register orphan for ${pidLogRef(pid)}: ${raw}`);
         throw new ConflictException("This email already owns a DOKU sub-account — ops must link the existing profileId before retrying");
       }
       throw this.mapError(err, "sub-account registration");
@@ -1608,6 +1609,12 @@ export class FiatSubAccountService {
       where: { kind: "deposit", providerRef: ((row.counterparty ?? {}) as Record<string, any>).parentRef ?? "" },
     });
     if (!parent) throw new NotFoundException("Parent deposit not found");
+    // ANT-344 L2: the candidate must debit the SAME identity that was issued
+    // to — a row whose pid drifted from its parent is data corruption, never
+    // an approval. Fail closed instead of clawing back the wrong account.
+    if (row.pid !== parent.pid) {
+      throw new ConflictException("Clawback candidate pid does not match parent deposit");
+    }
     return this.withPidLocks([parent.pid], () => this.executeClawbackRow({ ...row, counterparty: row.counterparty ?? {} }));
   }
 
@@ -2404,7 +2411,7 @@ export class FiatSubAccountService {
       alerts.push(`INVARIANT-1 journal replay ${replayedPid} != live DOKU ${livePoints}`);
     }
     for (const e of replayed.errors) alerts.push(`INVARIANT-1 replay error: ${e}`);
-    for (const a of alerts) this.logger.warn(`backing ${pid}: ${a}`);
+    for (const a of alerts) this.logger.warn(`backing ${pidLogRef(pid)}: ${a}`);
     return {
       livePointsIdr: livePoints.toString(), replayedIdr: replayedPid.toString(),
       treasuryCreditedIdr: replayed.treasury.toString(),
