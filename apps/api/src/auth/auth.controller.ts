@@ -9,6 +9,7 @@ import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator
 import { AuthenticateFinishDto } from "../credentials/dto/credential.dto";
 import { AuthenticateStartResult, CredentialService } from "../credentials/credential.service";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { AuthService } from "./auth.service";
 import { ClaimService } from "./claim.service";
 import { EmailStartDto, EmailVerifyDto } from "./email/dto/email.dto";
@@ -215,7 +216,7 @@ export class AuthController {
    */
   @Post("authorize")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async authorize(
     @CurrentUser() user: AuthenticatedUser,
@@ -280,7 +281,7 @@ export class AuthController {
 
   @Delete("grants/:id")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async revokeGrant(
     @CurrentUser() user: AuthenticatedUser,
@@ -404,7 +405,7 @@ export class AuthController {
    */
   @Post("session/scope")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async grantScope(
     @Req() req: Request,
@@ -430,7 +431,7 @@ export class AuthController {
 
   @Delete("sessions/revoke-others")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async revokeOtherSessions(
     @Req() req: Request,
@@ -444,7 +445,7 @@ export class AuthController {
 
   @Delete("sessions/:id")
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async revokeSession(
     @CurrentUser() user: AuthenticatedUser,

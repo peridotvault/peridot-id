@@ -5,6 +5,7 @@ import { Response } from "express";
 import { CurrentUser, AuthenticatedUser } from "../common/current-user.decorator";
 import { clearAuthCookies } from "../common/cookies";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { IdentityService } from "./identity.service";
 
 @Controller("v1/identity")
@@ -28,7 +29,7 @@ export class IdentityController {
 
   @Delete("credentials/:id")
   @HttpCode(HttpStatus.NO_CONTENT)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async unlinkCredential(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id", ParseUUIDPipe) id: string,
@@ -38,7 +39,7 @@ export class IdentityController {
 
   @Delete("me")
   @HttpCode(HttpStatus.NO_CONTENT)
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   async deleteMe(
     @CurrentUser() user: AuthenticatedUser,
     @Res({ passthrough: true }) res: Response,
