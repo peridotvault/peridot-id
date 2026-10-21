@@ -102,7 +102,19 @@ export function ActivationScreen({ onDone, goPasskey }: { onDone: () => void; go
         <UIButton title="Create a passkey first" onPress={goPasskey} disabled={gate.busy} variant="primary" />
       ) : gate.ready ? (
         <UIButton title={gate.busy ? "Activating…" : "Activate Account"} onPress={gate.activate} disabled={gate.busy} variant="primary" />
-      ) : null}
+      ) : (
+        // ANT-333: hasPasskey but not ready yet (status still loading or
+        // deposit unfunded) — never render a dead gap. The CTA stays
+        // disabled and the hint says what is being waited on.
+        <>
+          <UIButton title="Activate Account" disabled variant="primary" />
+          <Text className="font-sans text-xs text-muted-foreground">
+            {gate.activation
+              ? "Waiting for enough SOL in the deposit address — activation unlocks automatically once funded."
+              : "Checking activation status…"}
+          </Text>
+        </>
+      )}
 
       {gate.error && <Text className="font-sans text-xs text-muted-foreground">Activation failures deduct nothing — your deposit stays in place. Retry if the message suggests so.</Text>}
 

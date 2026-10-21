@@ -8,6 +8,15 @@ import { useNetworkMode } from "../shared/hooks/useNetworkMode";
 
 const LAMPORTS_PER_SOL = 1e9;
 
+/** Map API failures to user-facing copy (mirrors FiatTransferScreen). */
+function friendly(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/503|disabled|frozen|unavailable/i.test(msg)) {
+    return "Sends are temporarily unavailable. Try again later.";
+  }
+  return msg;
+}
+
 export function SendScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
   // Block signing while a network switch propagates (ANT-15 req 3) — the
@@ -69,27 +78,67 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
         }
       }
     } catch (e) {
-      setError(String(e));
+      // ANT-333: friendly server-error mapping instead of a raw dump.
+      setError(friendly(e));
     } finally {
       setBusy(false);
     }
   };
 
+  // ANT-333: confirm before abandoning an in-flight send.
+  const goBack = () => {
+    if (busy && !window.confirm("A send is in progress. Go back anyway?")) return;
+    onDone();
+  };
+
   return (
     <View style={s.container}>
       <Text style={s.title}>Send</Text>
-      <Text style={s.label}>Destination (Solana address)</Text>
-      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="Recipient address" />
-      <Text style={s.label}>Amount ({asset === "SOL" ? "SOL" : "raw units"})</Text>
-      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={asset === "SOL" ? "0.5" : "0"} />
-      <Text style={s.label}>Asset (SOL or mint address)</Text>
-      <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={asset} onChangeText={setAsset} autoCapitalize="none" />
+      {/* ANT-333: labels explicitly associated with their inputs. */}
+      <label htmlFor="send-to">
+        <Text style={s.label}>Destination (Solana address)</Text>
+      </label>
+      <TextInput
+        id="send-to"
+        aria-label="Destination (Solana address)"
+        style={s.input}
+        className="[--placeholder:var(--color-muted-foreground)]"
+        value={to}
+        onChangeText={setTo}
+        autoCapitalize="none"
+        placeholder="Recipient address"
+      />
+      <label htmlFor="send-amount">
+        <Text style={s.label}>Amount ({asset === "SOL" ? "SOL" : "raw units"})</Text>
+      </label>
+      <TextInput
+        id="send-amount"
+        aria-label={`Amount (${asset === "SOL" ? "SOL" : "raw units"})`}
+        style={s.input}
+        className="[--placeholder:var(--color-muted-foreground)]"
+        value={amount}
+        onChangeText={setAmount}
+        keyboardType="decimal-pad"
+        placeholder={asset === "SOL" ? "0.5" : "0"}
+      />
+      <label htmlFor="send-asset">
+        <Text style={s.label}>Asset (SOL or mint address)</Text>
+      </label>
+      <TextInput
+        id="send-asset"
+        aria-label="Asset (SOL or mint address)"
+        style={s.input}
+        className="[--placeholder:var(--color-muted-foreground)]"
+        value={asset}
+        onChangeText={setAsset}
+        autoCapitalize="none"
+      />
       <Text style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</Text>
       {error && <Text style={s.error}>{error}</Text>}
       {result && <Text selectable style={s.mono}>{result}</Text>}
       {net.switching && <Text style={s.hint}>Network is switching — sending is paused until balances reload.</Text>}
       <UIButton title={busy ? "Sending…" : "Send"} onPress={send} disabled={busy || net.switching || !to || !amount} variant="primary" />
-      <UIButton title="Back" onPress={onDone} />
+      <UIButton title="Back" onPress={goBack} />
     </View>
   );
 }
