@@ -16,9 +16,9 @@ import { TestCreditDto } from "./dto/faucet.dto";
  * call is made, so the faucet works even when DOKU sandbox is down.
  *
  * PRODUCTION MUST 404 (route absent, not 403 — no oracle). This holds at
- * two layers: `FiatModule` does not register this controller at all when
- * the server env flag is production, and the handler re-checks at runtime
- * in case the flag changed after boot.
+ * two layers: `FiatModule` does not register this controller at all unless
+ * `PID_FAUCET_ENABLED` is exactly `"true"`, and the handler re-checks the
+ * same flag at runtime in case the env changed after boot.
  */
 @Controller("v1/fiat")
 @UseGuards(ThrottlerGuard)
