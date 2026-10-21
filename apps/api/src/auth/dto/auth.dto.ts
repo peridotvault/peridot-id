@@ -34,6 +34,14 @@ export class ExchangeDto {
   @IsOptional()
   @IsString()
   clientSecret?: string;
+
+  /**
+   * PKCE verifier (ANT-284): required at exchange iff the code was issued
+   * with an S256 challenge (public clients). RFC 7636 §4.1 charset.
+   */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_~.-]{43,128}$/, { message: "Invalid code_verifier" })
+  codeVerifier?: string;
 }
 
 /**
@@ -71,6 +79,15 @@ export class AuthorizeDto {
   @IsOptional()
   @IsString()
   clientId?: string;
+
+  /**
+   * PKCE S256 challenge (ANT-284): public clients bind the minted pid_code
+   * at authorize time; the verifier is presented at exchange. 43-128
+   * base64url chars; only S256 is accepted server-side.
+   */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_-]{43,128}$/, { message: "Invalid code_challenge" })
+  codeChallenge?: string;
 }
 
 /** Wallet account switcher: pick or forget one linked identity. */
@@ -81,6 +98,6 @@ export class SwitchAccountDto {
 
 /** Mint an independent session for a first-party client app (its own cookies). */
 export class GrantScopeDto {
-  @Matches(/^[a-z0-9_]{1,32}$/, { message: "scope must be 1-32 chars: lowercase letters, numbers, underscore" })
+  @Matches(/^[a-z0-9][a-z0-9_]{0,31}$/, { message: "scope must be 1-32 chars: lowercase letters, numbers, underscore, no leading underscore" })
   scope!: string;
 }
