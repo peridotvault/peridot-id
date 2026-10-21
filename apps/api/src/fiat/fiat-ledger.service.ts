@@ -62,8 +62,13 @@ export interface FiatLedgerEntryView {
  * Generic infra only: account/identity, balance/credit, send/receive,
  * immutable journal. No campaign/developer/streamer/deal concepts here.
  *
- * Phase-1 policy (`escrow-only`): every send must have an allowlisted app PID
- * on one side. user→user is rejected. Withdrawal/cash-out does not exist.
+ * Recipient policy (ANT-254: stated, not enforced): Phase-1 intends
+ * escrow-only sends (an allowlisted app PID on one side, user→user
+ * rejected), but transferInquiry/transferConfirm currently accept ANY active
+ * PeridotID recipient — no allowlist check exists in this service. The
+ * docstring on transferInquiry carries the same warning. Enforcing the
+ * allowlist (PID_FIAT_LEDGER_APP_ALLOWLIST) is an open policy gap for the
+ * product owner, not something this change silently introduces.
  */
 @Injectable()
 export class FiatLedgerService {
@@ -286,7 +291,9 @@ export class FiatLedgerService {
    * Send inquiry (moves no money). GROSS-in: requested amount is gross;
    * fee quote + net computed under the active policy and pinned by
    * feePolicyVersion. Creates the intent row (`created`) the confirm step
-   * posts atomically. Any PeridotID identity can be a recipient.
+   * posts atomically. Any active PeridotID identity can be a recipient —
+   * NO allowlist is enforced here (see the class doc: Phase-1 escrow-only
+   * is a stated policy with no check; user→user sends succeed today).
    */
   async transferInquiry(
     pid: string,
@@ -358,6 +365,14 @@ export class FiatLedgerService {
     try {
       await this.prisma.$transaction(async (tx) => {
         await this.lockAccounts(tx as never, [pid, beneficiaryPid]);
+        // Close the cancel-vs-confirm race: cancelIntent's guarded claim is
+        // the arbiter the other way (a posted intent can never be cancelled),
+        // this re-read is the arbiter this way — a cancelled intent never
+        // posts legs even if cancel landed after the pre-txn status check.
+        const fresh = await tx.fiatLedgerEntry.findUnique({ where: { id: intent.id } });
+        if (!fresh || (fresh as { status: string }).status !== "created") {
+          throw new BadRequestException("Transfer is closed — start a new inquiry");
+        }
         const senderBalance = await this.postedBalanceTx(tx as never, pid);
         if (senderBalance < gross) {
           throw new BadRequestException("Insufficient internal credit");
@@ -422,6 +437,14 @@ export class FiatLedgerService {
               }]
             : []),
         ]);
+        // Atomic outbox (ANT-254): the callback rows commit in the SAME
+        // transaction as the legs. A retried confirm can never fork a second
+        // callback (`idempotencyKey` = entryGroup:targetPid); dispatchEvents
+        // remains the async relay with HMAC + retries.
+        await this.enqueueTransferEventsTx(tx as never, {
+          entryGroup: intent.entryGroup, fromPid: pid, toPid: beneficiaryPid,
+          grossIdr: gross, feeIdr: fee + tax + appFee, netIdr: net,
+        });
       });
     } catch (err) {
       if (err instanceof BadRequestException) throw err;
@@ -431,21 +454,100 @@ export class FiatLedgerService {
       throw err instanceof Error ? err : new ServiceUnavailableException("Transfer failed — try again");
     }
     await this.security.log(pid, "fiat.transfer", { entryGroup: intent.entryGroup, gross: gross.toString() }).catch(() => undefined);
-    // Third-party callbacks (escrow apps): notify on the committed movement.
-    await this.enqueueTransferEvents({ entryGroup: intent.entryGroup, fromPid: pid, toPid: beneficiaryPid, grossIdr: gross, feeIdr: fee + tax + appFee, netIdr: net });
     const done = await this.prisma.fiatLedgerEntry.findFirst({ where: { id, pid } });
     if (!done) throw new NotFoundException("Transfer not found");
     return this.toTxView(done as never);
   }
 
-  /** Cancel a created (not yet posted) intent. Posted intents are immutable. */
+  /** Cancel a created (not yet posted) intent. Posted intents are immutable.
+   * Guarded claim (ANT-254): the update only fires on `created`, so a
+   * concurrent transferConfirm that already posted wins — cancel can never
+   * overwrite a posted intent back to cancelled, and confirm's in-txn fresh
+   * read rejects a cancelled intent. No lock needed; the row is the arbiter.
+   */
   async cancelIntent(pid: string, id: string): Promise<FiatLedgerEntryView> {
     const row = await this.prisma.fiatLedgerEntry.findFirst({ where: { id, pid } });
     if (!row) throw new NotFoundException("Transfer not found");
     if (row.status !== "created") return this.toTxView(row as never);
-    return this.toTxView((await this.prisma.fiatLedgerEntry.update({
-      where: { id: row.id }, data: { status: "cancelled" },
-    })) as never);
+    // Guarded claim: a concurrent confirm that posted between the read above
+    // and here makes count === 0 and we return the posted row instead of
+    // overwriting it back to cancelled.
+    await this.prisma.fiatLedgerEntry.updateMany({
+      where: { id: row.id, status: "created" },
+      data: { status: "cancelled" },
+    });
+    const final = await this.prisma.fiatLedgerEntry.findFirst({ where: { id: row.id, pid } });
+    if (!final) throw new NotFoundException("Transfer not found");
+    return this.toTxView(final as never);
+  }
+
+  // --- corrections (reversal/adjustment writer) ---
+
+  /**
+   * Admin correction: post a balanced fiat_adjust pair (debit fromPid, credit
+   * toPid, same amount, one entryGroup) atomically through the chained
+   * writer — the kind replay already folds (ANT-254 gap: no writer existed).
+   * Both legs are chained, idempotency-keyed (`<entryGroup>-OUT/-IN`), and
+   * the sender balance is rechecked inside the identity-locked txn.
+   *
+   * Boundary: TRANSFER corrections live here. ISSUANCE clawbacks stay on the
+   * propose→approve clawback path (FiatSubAccountService) — issuance legs
+   * (`fiat_issue`/`fiat_fee`) credit the sender/treasury with no counterparty
+   * identity to mirror against, so a pair-adjust cannot express them.
+   */
+  async adminAdjust(
+    adminPid: string,
+    input: { fromPid: string; toPid: string; amountIdr: string; reason: string },
+  ): Promise<{ entryGroup: string }> {
+    this.requireUsable();
+    const fromPid = input.fromPid.trim().toLowerCase();
+    const toPid = input.toPid.trim().toLowerCase();
+    if (!fromPid || !toPid) throw new BadRequestException("fromPid and toPid are required");
+    if (fromPid === toPid) throw new BadRequestException("fromPid and toPid must differ");
+    const reason = (input.reason ?? "").trim();
+    if (reason.length < 8) throw new BadRequestException("reason is required (min 8 chars) — adjustments are audited");
+    const amount = this.parseAmount(input.amountIdr);
+    for (const pid of [fromPid, toPid]) {
+      const ident = await this.prisma.identity.findUnique({ where: { pid } }).catch(() => null);
+      if (!ident) throw new NotFoundException(`Identity not found: ${pid}`);
+    }
+    const entryGroup = buildInvoiceNumber("ADJ");
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await this.lockAccounts(tx as never, [fromPid, toPid]);
+        const senderBalance = await this.postedBalanceTx(tx as never, fromPid);
+        if (senderBalance < amount) {
+          throw new BadRequestException("Insufficient internal credit");
+        }
+        await this.appendChained(tx as never, [
+          {
+            data: {
+              entryGroup, kind: "fiat_adjust", pid: fromPid, counterpartyPid: toPid,
+              amountIdr: amount, direction: "out", idempotencyKey: `${entryGroup}-OUT`,
+              parentRef: entryGroup,
+              counterparty: json({ parentRef: entryGroup, adjustFrom: fromPid, adjustTo: toPid, reason }),
+              source: "admin-adjust",
+            },
+          },
+          {
+            data: {
+              entryGroup, kind: "fiat_adjust", pid: toPid, counterpartyPid: fromPid,
+              amountIdr: amount, direction: "in", idempotencyKey: `${entryGroup}-IN`,
+              parentRef: entryGroup,
+              counterparty: json({ parentRef: entryGroup, adjustFrom: fromPid, adjustTo: toPid, reason }),
+              source: "admin-adjust",
+            },
+          },
+        ]);
+      });
+    } catch (err) {
+      if (err instanceof BadRequestException || err instanceof NotFoundException) throw err;
+      throw err instanceof Error ? err : new ServiceUnavailableException("Adjustment failed — try again");
+    }
+    await this.security.log(adminPid, "fiat.adjust", {
+      entryGroup, fromPid, toPid, amount: amount.toString(), reason: reason.slice(0, 160),
+    }).catch(() => undefined);
+    return { entryGroup };
   }
 
   // --- reads (replay is the balance) ---
@@ -488,7 +590,14 @@ export class FiatLedgerService {
     };
   }
 
-  /** Immutable journal export + replay verdict for one PID. */
+  /**
+   * Immutable journal export + replay verdict for one PID. NOTE (ANT-254):
+   * treasury/tax here are PARTIAL — folded from this PID's entryGroups only,
+   * not platform totals (a group slices by participation, so most fee/tax
+   * legs belonging to other groups are absent). The global source of truth
+   * is adminReplay; the scope flags below say so on the wire so no consumer
+   * mistakes these for platform totals.
+   */
   async journal(pid: string) {
     const { mine: rows, replayed } = await this.replayForPid(pid);
     return {
@@ -496,6 +605,7 @@ export class FiatLedgerService {
       balanceIdr: (replayed.balances.get(pid) ?? 0n).toString(),
       treasuryCreditedIdr: replayed.treasury.toString(),
       taxCreditedIdr: replayed.tax.toString(),
+      treasuryScope: "partial: this pid's groups only — platform totals at admin/replay",
       inFlight: replayed.inFlight,
       errors: replayed.errors,
       rows: rows.map((r) => ({
@@ -611,7 +721,14 @@ export class FiatLedgerService {
     return { headHash: last?.hash ?? GENESIS_HASH, hashSeq: last?.hashSeq?.toString() ?? null };
   }
 
-  /** One-time/repair: chain posted rows that predate the chain (replaySeq order). */
+  /**
+   * One-time/repair: chain posted rows that predate the chain (replaySeq order).
+   * ANT-254 P2 note: yes, this UPDATEs posted rows — deliberately and narrowly.
+   * It only fills NULL hash fields (posted-but-unchained rows) and never
+   * rewrites an existing hash/prevHash/hashSeq, so chained history is
+   * append-only in effect. Admin-guarded + throttled at the controller;
+   * verifyLedger reports `postedUnchained` so the need is visible before use.
+   */
   async backfillChain(): Promise<{ chained: number }> {
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${FiatLedgerService.CHAIN_LOCK}::bigint)`);
@@ -641,27 +758,46 @@ export class FiatLedgerService {
 
   /**
    * Enqueue signed callbacks for a posted transfer to every party that owns an
-   * active PidApp with a webhook URL (e.g. Live2Dev's escrow account). Written
-   * after the ledger commits; delivered by dispatchEvents.
+   * active PidApp with a webhook URL (e.g. Live2Dev's escrow account). MUST be
+   * called inside the ledger write transaction (atomic outbox) — never
+   * post-commit. A callback row without its legs (or legs without callbacks)
+   * is unrepresentable: both commit or neither does.
    */
-  private async enqueueTransferEvents(e: { entryGroup: string; fromPid: string; toPid: string; grossIdr: bigint; feeIdr: bigint; netIdr: bigint }): Promise<void> {
-    try {
-      const apps = await this.prisma.pidApp.findMany({
-        where: { ownerPid: { in: [e.fromPid, e.toPid] }, isActive: true, webhookUrl: { not: null } },
-        select: { ownerPid: true, webhookUrl: true },
-      });
-      if (apps.length === 0) return;
-      const payload = {
-        event: "fiat.transfer.posted", entryGroup: e.entryGroup,
-        from: e.fromPid, to: e.toPid,
-        grossIdr: e.grossIdr.toString(), feeIdr: e.feeIdr.toString(), netIdr: e.netIdr.toString(),
-        at: new Date().toISOString(),
+  private async enqueueTransferEventsTx(
+    tx: {
+      pidApp: {
+        findMany: (a: unknown) => Promise<Array<{ ownerPid: string; webhookUrl: string | null }>>;
       };
-      await Promise.all(apps.map((a) => this.prisma.fiatLedgerEvent.create({
-        data: { eventType: "fiat.transfer.posted", targetPid: a.ownerPid, targetUrl: a.webhookUrl as string, payload: json(payload) },
-      })));
-    } catch (err) {
-      this.logger.warn(`enqueue callbacks failed for ${e.entryGroup}: ${String(err)?.slice(0, 160)}`);
+      fiatLedgerEvent: {
+        findFirst: (a: unknown) => Promise<{ id: string } | null>;
+        create: (a: unknown) => Promise<unknown>;
+      };
+    },
+    e: { entryGroup: string; fromPid: string; toPid: string; grossIdr: bigint; feeIdr: bigint; netIdr: bigint },
+  ): Promise<void> {
+    const apps = await tx.pidApp.findMany({
+      where: { ownerPid: { in: [e.fromPid, e.toPid] }, isActive: true, webhookUrl: { not: null } },
+      select: { ownerPid: true, webhookUrl: true },
+    });
+    if (apps.length === 0) return;
+    const payload = {
+      event: "fiat.transfer.posted", entryGroup: e.entryGroup,
+      from: e.fromPid, to: e.toPid,
+      grossIdr: e.grossIdr.toString(), feeIdr: e.feeIdr.toString(), netIdr: e.netIdr.toString(),
+      at: new Date().toISOString(),
+    };
+    for (const a of apps) {
+      if (!a.webhookUrl) continue;
+      // Retried confirms converge: the first commit wins, later ones skip.
+      const idempotencyKey = `${e.entryGroup}:${a.ownerPid}`;
+      const existing = await tx.fiatLedgerEvent.findFirst({ where: { idempotencyKey } });
+      if (existing) continue;
+      await tx.fiatLedgerEvent.create({
+        data: {
+          eventType: "fiat.transfer.posted", targetPid: a.ownerPid, targetUrl: a.webhookUrl,
+          payload: json(payload), idempotencyKey,
+        },
+      });
     }
   }
 

@@ -56,6 +56,7 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
         return r;
       }),
       update: jest.fn(async (args: any) => ({ id: "j0", ...args.data })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
     fiatFeePolicy: {
       findFirst: jest.fn(async () => ({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0, active: true })),
@@ -66,6 +67,7 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
     pidAppFee: { findUnique: jest.fn(async () => null) },
     fiatLedgerEvent: {
       create: jest.fn(async (args: any) => ({ id: "e1", ...args.data })),
+      findFirst: jest.fn(async () => null),
       findMany: jest.fn(async () => []),
       update: jest.fn(async (args: any) => ({ id: "e1", ...args.data })),
       count: jest.fn(async () => 0),
@@ -78,8 +80,20 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
           return r;
         }),
         update: jest.fn(async (args: any) => ({ id: "j0", ...args.data })),
-        findMany: jest.fn(async () => []),
+        updateMany: jest.fn(async () => ({ count: 1 })),
+        findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
         findFirst: jest.fn(async () => null),
+        findUnique: jest.fn(async () => ({ id: "intent1", status: "created" })),
+      },
+      // In-txn delegates share the outer mocks so per-test overrides
+      // (pidApp.findMany, fiatLedgerEvent.findFirst) apply inside the
+      // atomic outbox path.
+      pidApp: {
+        findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+      },
+      fiatLedgerEvent: {
+        findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
+        create: (...args: any[]) => (prisma.fiatLedgerEvent.create as any)(...args),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
@@ -170,9 +184,17 @@ describe("FiatLedgerService transfers", () => {
         }),
         update: jest.fn(async (args: any) => ({ ...args.data })),
         findFirst: jest.fn(async () => null),
+        findUnique: jest.fn(async () => ({ id: "intent1", status: "created" })),
         findMany: jest.fn(async () => [
           { kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" },
         ]),
+      },
+      pidApp: {
+        findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+      },
+      fiatLedgerEvent: {
+        findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
+        create: (...args: any[]) => (prisma.fiatLedgerEvent.create as any)(...args),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
@@ -202,12 +224,35 @@ describe("FiatLedgerService transfers", () => {
         create: jest.fn(),
         update: jest.fn(),
         findMany: jest.fn(async () => []),
+        findUnique: jest.fn(async () => ({ id: "intent1", status: "created" })),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
     }));
     // transferConfirm rethrows BadRequestException from inside the txn.
     await expect(service.transferConfirm("live2dev@pid", "intent1")).rejects.toThrow("Insufficient");
+    expect(created).toHaveLength(0);
+  });
+
+  it("refuses to post an intent cancelled after the pre-txn check", async () => {
+    const { service, prisma, created } = setup();
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", pid: "live2dev@pid", counterpartyPid: "s1@pid",
+      entryGroup: "CT-X", amountIdr: 100_000n, status: "created",
+      feePolicyVersion: 3, counterparty: {}, createdAt: new Date(),
+    });
+    // In-txn re-read sees the canceller's win.
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        create: jest.fn(),
+        update: jest.fn(),
+        findMany: jest.fn(async () => []),
+        findUnique: jest.fn(async () => ({ id: "intent1", status: "cancelled" })),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    await expect(service.transferConfirm("live2dev@pid", "intent1")).rejects.toThrow("Transfer is closed");
     expect(created).toHaveLength(0);
   });
 });
@@ -302,7 +347,16 @@ describe("FiatLedgerService callbacks", () => {
         create: jest.fn(async (args: any) => ({ id: `j${Math.random()}`, createdAt: new Date(), ...args.data })),
         update: jest.fn(async (args: any) => ({ id: "intent1", ...args.data })),
         findFirst: jest.fn(async () => null),
+        findUnique: jest.fn(async () => ({ id: "intent1", status: "created" })),
         findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
+      },
+      // Atomic outbox: the confirm txn itself reads apps + writes events.
+      pidApp: {
+        findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+      },
+      fiatLedgerEvent: {
+        findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
+        create: (...args: any[]) => (prisma.fiatLedgerEvent.create as any)(...args),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
@@ -313,9 +367,38 @@ describe("FiatLedgerService callbacks", () => {
       direction: "out", counterparty: {}, createdAt: new Date(),
     });
     await service.transferConfirm("dev@pid", "intent1");
+    // Written inside the same txn as the legs (no post-commit second write).
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.fiatLedgerEvent.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ eventType: "fiat.transfer.posted", targetPid: "live2dev@pid" }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "fiat.transfer.posted",
+          targetPid: "live2dev@pid",
+          idempotencyKey: `${inq.entryGroup}:live2dev@pid`,
+        }),
+      }),
     );
+  });
+
+  it("skips a duplicate outbox enqueue on retried confirm", async () => {
+    const { service, prisma } = setup();
+    prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
+    prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", webhookUrl: "https://x/hook" }]);
+    // A previous confirm already enqueued this movement's callback.
+    prisma.fiatLedgerEvent.findFirst.mockResolvedValueOnce({ id: "e0" });
+    const inq = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" });
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "live2dev@pid",
+      entryGroup: inq.entryGroup, amountIdr: 500_000n, status: "created",
+      feePolicyVersion: 3, counterparty: {}, createdAt: new Date(),
+    });
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", entryGroup: inq.entryGroup,
+      counterpartyPid: "live2dev@pid", amountIdr: 500_000n, status: "posted",
+      direction: "out", counterparty: {}, createdAt: new Date(),
+    });
+    await service.transferConfirm("dev@pid", "intent1");
+    expect(prisma.fiatLedgerEvent.create).not.toHaveBeenCalled();
   });
 });
 
@@ -334,5 +417,99 @@ describe("FiatLedgerService escrow fee operation", () => {
     const publicApp = await service.quoteFees("pidapp_x", "escrow", 100_000n);
     expect(publicApp.globalFee).toBeGreaterThan(0n);
     expect(publicApp.appFee).toBe(0n);
+  });
+});
+
+describe("FiatLedgerService adminAdjust (ANT-254 fiat_adjust writer)", () => {
+  function adjustSetup(balanceIn: bigint) {
+    const { service, prisma, created } = setup();
+    prisma.identity.findUnique.mockImplementation(async ({ where }: any) =>
+      ["dev@pid", "rani@pid"].includes(where.pid) ? { pid: where.pid } : null,
+    );
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        create: jest.fn(async (args: any) => {
+          const r = { id: `j${created.length}`, createdAt: new Date(), ...args.data };
+          created.push(r);
+          return r;
+        }),
+        update: jest.fn(async (args: any) => ({ ...args.data })),
+        findFirst: jest.fn(async () => null),
+        findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: balanceIn, direction: "in" }]),
+      },
+      pidApp: { findMany: jest.fn(async () => []) },
+      fiatLedgerEvent: {
+        findFirst: jest.fn(async () => null),
+        create: jest.fn(async (args: any) => ({ id: "e1", ...args.data })),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    return { service, prisma, created };
+  }
+
+  it("posts a balanced out+in fiat_adjust pair", async () => {
+    const { service, created } = adjustSetup(1_000_000n);
+    const res = await service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100000", reason: "duplicate payout reversal",
+    });
+    expect(res.entryGroup).toMatch(/^ADJ/);
+    const legs = created.filter((r: any) => r.kind === "fiat_adjust");
+    expect(legs).toHaveLength(2);
+    const out = legs.find((r: any) => r.direction === "out");
+    const inn = legs.find((r: any) => r.direction === "in");
+    expect(out.pid).toBe("dev@pid");
+    expect(out.amountIdr).toBe(100_000n);
+    expect(inn.pid).toBe("rani@pid");
+    expect(inn.amountIdr).toBe(100_000n);
+    expect(out.entryGroup).toBe(inn.entryGroup);
+    expect(out.status).toBe("posted");
+  });
+
+  it("rejects self-adjust, short reason, unknown identity, and insufficient balance", async () => {
+    const { service } = adjustSetup(10_000n);
+    await expect(service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "dev@pid", amountIdr: "100", reason: "self reversal reason",
+    })).rejects.toThrow("must differ");
+    await expect(service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100", reason: "short",
+    })).rejects.toThrow("reason is required");
+    await expect(service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "ghost@pid", amountIdr: "100", reason: "unknown recipient case",
+    })).rejects.toThrow("Identity not found");
+    await expect(service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "50000", reason: "overdraft correction case",
+    })).rejects.toThrow("Insufficient");
+  });
+});
+
+describe("FiatLedgerService cancelIntent guarded claim (ANT-254)", () => {
+  it("cancels a created intent via a status-guarded claim", async () => {
+    const { service, prisma } = setup();
+    prisma.fiatLedgerEntry.findFirst
+      .mockResolvedValueOnce({
+        id: "i1", kind: "fiat_transfer_out", entryGroup: "CT-1", counterpartyPid: "rani@pid",
+        amountIdr: 100n, direction: "out", status: "created", createdAt: new Date(),
+      })
+      .mockResolvedValueOnce({
+        id: "i1", kind: "fiat_transfer_out", entryGroup: "CT-1", counterpartyPid: "rani@pid",
+        amountIdr: 100n, direction: "out", status: "cancelled", createdAt: new Date(),
+      });
+    const view = await service.cancelIntent("dev@pid", "i1");
+    expect(prisma.fiatLedgerEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: "i1", status: "created" }) }),
+    );
+    expect(view.status).toBe("cancelled");
+  });
+
+  it("never overwrites a posted intent — returns it instead", async () => {
+    const { service, prisma } = setup();
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "i1", kind: "fiat_transfer_out", entryGroup: "CT-1", counterpartyPid: "rani@pid",
+      amountIdr: 100n, direction: "out", status: "posted", createdAt: new Date(),
+    });
+    const view = await service.cancelIntent("dev@pid", "i1");
+    expect(prisma.fiatLedgerEntry.updateMany).not.toHaveBeenCalled();
+    expect(view.status).toBe("posted");
   });
 });
