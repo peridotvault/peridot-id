@@ -56,6 +56,7 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
         return r;
       }),
       update: jest.fn(async (args: any) => ({ id: "j0", ...args.data })),
+      updateMany: jest.fn(async () => ({ count: 1 })),
     },
     fiatFeePolicy: {
       findFirst: jest.fn(async () => ({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0, active: true })),
@@ -66,6 +67,7 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
     pidAppFee: { findUnique: jest.fn(async () => null) },
     fiatLedgerEvent: {
       create: jest.fn(async (args: any) => ({ id: "e1", ...args.data })),
+      findFirst: jest.fn(async () => null),
       findMany: jest.fn(async () => []),
       update: jest.fn(async (args: any) => ({ id: "e1", ...args.data })),
       count: jest.fn(async () => 0),
@@ -84,6 +86,17 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
         // in-txn read see "no row" unless a test stages one (e.g. cross-pid
         // must read NotFound, never a staged created row).
         findFirst: jest.fn(async () => null),
+        findUnique: jest.fn(async () => ({ id: "intent1", status: "created" })),
+      },
+      // In-txn delegates share the outer mocks so per-test overrides
+      // (pidApp.findMany, fiatLedgerEvent.findFirst) apply inside the
+      // atomic outbox path.
+      pidApp: {
+        findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+      },
+      fiatLedgerEvent: {
+        findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
+        create: (...args: any[]) => (prisma.fiatLedgerEvent.create as any)(...args),
       },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
@@ -180,6 +193,13 @@ describe("FiatLedgerService transfers", () => {
           { kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" },
         ]),
       },
+      pidApp: {
+        findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+      },
+      fiatLedgerEvent: {
+        findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
+        create: (...args: any[]) => (prisma.fiatLedgerEvent.create as any)(...args),
+      },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
     }));
@@ -250,6 +270,7 @@ describe("FiatLedgerService transfers", () => {
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
     }));
+
     await expect(service.transferConfirm("dev@pid", "intent1")).rejects.toThrow("Transfer is closed");
     expect(created).toHaveLength(0);
   });
@@ -499,6 +520,14 @@ describe("FiatLedgerService callbacks", () => {
         findFirst: jest.fn(async (): Promise<any> => null).mockResolvedValueOnce({ id: "intent1", status: "created" }),
         findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
       },
+      // Atomic outbox: the confirm txn itself reads apps + writes events.
+      pidApp: {
+        findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+      },
+      fiatLedgerEvent: {
+        findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
+        create: (...args: any[]) => (prisma.fiatLedgerEvent.create as any)(...args),
+      },
       $queryRaw: jest.fn(async () => []),
       $executeRaw: jest.fn(async () => 1),
     }));
@@ -508,9 +537,56 @@ describe("FiatLedgerService callbacks", () => {
       direction: "out", counterparty: {}, createdAt: new Date(),
     });
     await service.transferConfirm("dev@pid", "intent1");
+    // Written inside the same txn as the legs (no post-commit second write).
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.fiatLedgerEvent.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ eventType: "fiat.transfer.posted", targetPid: "live2dev@pid" }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "fiat.transfer.posted",
+          targetPid: "live2dev@pid",
+          idempotencyKey: `${inq.entryGroup}:live2dev@pid`,
+        }),
+      }),
     );
+  });
+
+  it("skips a duplicate outbox enqueue on retried confirm", async () => {
+    const { service, prisma } = setup();
+    prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
+    prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", webhookUrl: "https://x/hook" }]);
+    // A previous confirm already enqueued this movement's callback.
+    prisma.fiatLedgerEvent.findFirst.mockResolvedValueOnce({ id: "e0" });
+    const inq = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" });
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "live2dev@pid",
+      entryGroup: inq.entryGroup, amountIdr: 500_000n, status: "created",
+      feePolicyVersion: 3, counterparty: {}, createdAt: new Date(),
+    });
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
+      id: "intent1", kind: "fiat_transfer_out", entryGroup: inq.entryGroup,
+      counterpartyPid: "live2dev@pid", amountIdr: 500_000n, status: "posted",
+      direction: "out", counterparty: {}, createdAt: new Date(),
+    });
+    // Default tx mock has zero balance — stage funds for this confirm.
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        create: jest.fn(async (args: any) => ({ id: `j${Math.random()}`, createdAt: new Date(), ...args.data })),
+        update: jest.fn(async (args: any) => ({ id: "intent1", ...args.data })),
+        findFirst: jest.fn(async (): Promise<any> => null).mockResolvedValueOnce({ id: "intent1", status: "created" }),
+        findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: 1_000_000n, direction: "in" }]),
+      },
+      pidApp: {
+        findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+      },
+      fiatLedgerEvent: {
+        findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
+        create: (...args: any[]) => (prisma.fiatLedgerEvent.create as any)(...args),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    await service.transferConfirm("dev@pid", "intent1");
+    expect(prisma.fiatLedgerEvent.create).not.toHaveBeenCalled();
   });
 });
 
@@ -531,3 +607,67 @@ describe("FiatLedgerService escrow fee operation", () => {
     expect(publicApp.appFee).toBe(0n);
   });
 });
+
+describe("FiatLedgerService adminAdjust (ANT-254 fiat_adjust writer)", () => {
+  function adjustSetup(balanceIn: bigint) {
+    const { service, prisma, created } = setup();
+    prisma.identity.findUnique.mockImplementation(async ({ where }: any) =>
+      ["dev@pid", "rani@pid"].includes(where.pid) ? { pid: where.pid } : null,
+    );
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      fiatLedgerEntry: {
+        create: jest.fn(async (args: any) => {
+          const r = { id: `j${created.length}`, createdAt: new Date(), ...args.data };
+          created.push(r);
+          return r;
+        }),
+        update: jest.fn(async (args: any) => ({ ...args.data })),
+        findFirst: jest.fn(async () => null),
+        findMany: jest.fn(async () => [{ kind: "fiat_issue", amountIdr: balanceIn, direction: "in" }]),
+      },
+      pidApp: { findMany: jest.fn(async () => []) },
+      fiatLedgerEvent: {
+        findFirst: jest.fn(async () => null),
+        create: jest.fn(async (args: any) => ({ id: "e1", ...args.data })),
+      },
+      $queryRaw: jest.fn(async () => []),
+      $executeRaw: jest.fn(async () => 1),
+    }));
+    return { service, prisma, created };
+  }
+
+  it("posts a balanced out+in fiat_adjust pair", async () => {
+    const { service, created } = adjustSetup(1_000_000n);
+    const res = await service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100000", reason: "duplicate payout reversal",
+    });
+    expect(res.entryGroup).toMatch(/^ADJ/);
+    const legs = created.filter((r: any) => r.kind === "fiat_adjust");
+    expect(legs).toHaveLength(2);
+    const out = legs.find((r: any) => r.direction === "out");
+    const inn = legs.find((r: any) => r.direction === "in");
+    expect(out.pid).toBe("dev@pid");
+    expect(out.amountIdr).toBe(100_000n);
+    expect(inn.pid).toBe("rani@pid");
+    expect(inn.amountIdr).toBe(100_000n);
+    expect(out.entryGroup).toBe(inn.entryGroup);
+    expect(out.status).toBe("posted");
+  });
+
+  it("rejects self-adjust, short reason, unknown identity, and insufficient balance", async () => {
+    const { service } = adjustSetup(10_000n);
+    await expect(service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "dev@pid", amountIdr: "100", reason: "self reversal reason",
+    })).rejects.toThrow("must differ");
+    await expect(service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "100", reason: "short",
+    })).rejects.toThrow("reason is required");
+    await expect(service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "ghost@pid", amountIdr: "100", reason: "unknown recipient case",
+    })).rejects.toThrow("Identity not found");
+    await expect(service.adminAdjust("admin@pid", {
+      fromPid: "dev@pid", toPid: "rani@pid", amountIdr: "50000", reason: "overdraft correction case",
+    })).rejects.toThrow("Insufficient");
+  });
+});
+

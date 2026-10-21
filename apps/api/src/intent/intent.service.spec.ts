@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { IntentService } from "./intent.service";
 import { mockSecurity, minimalChainsStub } from "../../test/factories";
 
@@ -134,6 +135,37 @@ describe("IntentService", () => {
     expect(view.txHash).toBe("sig1");
     expect(prisma.intent.update).toHaveBeenCalledWith({ where: { id: "intent-1" }, data: { status: "executed" } });
     expect(security.log).toHaveBeenCalledWith("pid_01HASH", "intent.executed", expect.any(Object));
+  });
+
+  it("maps a cross-intent signature replay (P2002 on txHash) to 400, not 500", async () => {
+    const { service, prisma } = setup();
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
+    prisma.intent.findFirst.mockResolvedValue(intentRow());
+    prisma.transaction.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "test",
+      }),
+    );
+
+    await expect(service.recordTransaction("pid_01HASH", { intentId: "intent-1", txHash: "sig1" })).rejects.toThrow(
+      "signature already recorded",
+    );
+  });
+
+  it("maps a duplicate activity signature (P2002 on txHash) to 400, not 500", async () => {
+    const { service, prisma } = setup();
+    prisma.chainAccount.findFirst.mockResolvedValue(smartRow());
+    prisma.transaction.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+        code: "P2002",
+        clientVersion: "test",
+      }),
+    );
+
+    await expect(
+      service.recordActivity("pid_01HASH", { type: "DEPOSIT", amount: "1000000", asset: "SOL", direction: "in", txHash: "sig2" }),
+    ).rejects.toThrow("signature already recorded");
   });
 
   it("rejects replaying an already-executed intent", async () => {

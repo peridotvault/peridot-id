@@ -712,7 +712,9 @@ export class FiatSubAccountService {
    * as a second POINT P2P to Treasury under `{ref}-PTFEE` (journal row
    * `points_fee`). Writes the recipient mirror row (`points_credit`, keyed
    * by DOKU's referenceNo) so the journal reconstructs ownership without
-   * trusting any sub-account's location. Serialized per sender+recipient;
+   * trusting any sub-account's location. Serialized per sender+recipient by
+   * the in-process lock, and cross-instance by the DB guarded claim in
+   * transferConfirmInner (created→processing, exactly one winner);
    * a failed fee leg never fails the user transfer; the sweep completes it.
    * All snapshotted under the inquiry's policy version.
    */
@@ -730,6 +732,29 @@ export class FiatSubAccountService {
     if (row.kind !== "transfer_internal") throw new BadRequestException("Not a transfer row");
     if (row.providerStatus === "processing" || row.providerStatus === "settled") return this.toTxView(row);
     if (row.providerStatus !== "created") throw new BadRequestException("Transfer is closed — start a new inquiry");
+    // DB-level claim (ANT-254): withPidLocks is in-process only, so two
+    // instances can both pass the created check above. The guarded claim
+    // makes the row the cross-instance arbiter — exactly one confirmer flips
+    // created→processing; the loser re-reads (winner's processing/settled
+    // row, or closed). This claim deliberately does NOT hold a DB transaction
+    // across the DOKU provider calls below (pool-hostile); DOKU's
+    // partnerReferenceNo stays the money arbiter (every retry reuses the same
+    // ref) and the recipient mirror upsert on providerRef @unique keeps the
+    // journal single. Crash window (claim → provider call) leaves
+    // processing + confirmClaim with no referenceNo — retryTransfer treats
+    // exactly that shape as retryable, so nothing strands.
+    const claimed = await this.prisma.fiatProviderTransaction.updateMany({
+      where: { id: row.id, providerStatus: "created" },
+      data: {
+        providerStatus: "processing",
+        providerResponse: json({ ...((row.providerResponse ?? {}) as Record<string, any>), confirmClaim: new Date().toISOString() }),
+      },
+    }).catch(() => null);
+    if (!claimed || claimed.count === 0) {
+      const cur = await this.prisma.fiatProviderTransaction.findFirst({ where: { id, pid } }).catch(() => null);
+      if (cur && (cur.providerStatus === "processing" || cur.providerStatus === "settled")) return this.toTxView(cur);
+      throw new BadRequestException("Transfer is closed — start a new inquiry");
+    }
     const fromAccount = await this.pointAccountFor(pid, "Sender");
     const cp = (row.counterparty ?? {}) as Record<string, any>;
     const r = (row.providerResponse ?? {}) as Record<string, any>;
@@ -740,7 +765,7 @@ export class FiatSubAccountService {
     if (input.expectedName && r.beneficiaryAccountName && input.expectedName !== String(r.beneficiaryAccountName)) {
       throw new BadRequestException("Holder name changed since inquiry — start a new inquiry");
     }
-    const policy = await this.feePolicyByVersion(Number(cp.feePolicyVersion ?? 0));
+    const policy = await this.feePolicyByVersion(this.parseFeeVersion(cp.feePolicyVersion));
     const gross = row.amountIdr;
     const fee = calcServiceFee(gross, policy);
     const net = gross - fee;
@@ -960,10 +985,20 @@ export class FiatSubAccountService {
   }
 
   private async retryTransferInner(pid: string, id: string): Promise<SubTxView> {
-    const row = await this.prisma.fiatProviderTransaction.findFirst({ where: { id, pid } });
+    let row = await this.prisma.fiatProviderTransaction.findFirst({ where: { id, pid } });
     if (!row) throw new NotFoundException("Transfer not found");
     // Payout kinds are deferred — legacy rows are display-only, never re-executed.
     if (row.kind !== "transfer_internal") return this.toTxView(row);
+    const resp = (row.providerResponse ?? {}) as Record<string, any>;
+    // Crashed-claim recovery (ANT-254): processing + our claim marker with no
+    // referenceNo means the winner died before any DOKU movement — release
+    // back to created and run the normal inquiry path below. A genuinely
+    // submitted row always carries referenceNo (inquiry answer or shortcut),
+    // so this shape can never clobber live money.
+    if (row.providerStatus === "processing" && resp.confirmClaim && resp.referenceNo === undefined) {
+      const { confirmClaim: _dropped, ...rest } = resp;
+      row = await this.markTx(row.id, "created", rest);
+    }
     if (row.providerStatus !== "failed" && !((row.providerResponse as Record<string, any> | null)?.referenceNo === undefined && row.providerStatus === "created")) {
       return this.toTxView(row);
     }
@@ -1571,6 +1606,20 @@ export class FiatSubAccountService {
   private async executeClawbackRow(clawRow: {
     id: string; pid: string; kind: string; providerRef: string; amountIdr: bigint; counterparty: unknown;
   }): Promise<SubTxView> {
+    // DB-level claim (ANT-254, same posture as transferConfirmInner):
+    // approveClawback's review+created check is racy across instances, so the
+    // executor claims created→processing first. Exactly one approver debits;
+    // the loser returns the winner's row. DOKU partnerReferenceNo stays the
+    // money arbiter (same ref on every path).
+    const claimed = await this.prisma.fiatProviderTransaction.updateMany({
+      where: { id: clawRow.id, kind: "points_clawback", providerStatus: "created" },
+      data: { providerStatus: "processing" },
+    }).catch(() => null);
+    if (!claimed || claimed.count === 0) {
+      const cur = await this.prisma.fiatProviderTransaction.findUnique({ where: { id: clawRow.id } }).catch(() => null);
+      if (!cur) throw new NotFoundException("Clawback candidate not found");
+      return this.toTxView({ ...cur, feeIdr: null, netIdr: cur.amountIdr });
+    }
     const cp = (clawRow.counterparty ?? {}) as Record<string, any>;
     const parent = await this.prisma.fiatProviderTransaction.findFirst({
       where: { kind: "deposit", providerRef: typeof cp.parentRef === "string" ? cp.parentRef : "" },
@@ -2964,6 +3013,21 @@ export class FiatSubAccountService {
     }
     if (gross <= 0n) throw new BadRequestException("Amount must be positive");
     return gross;
+  }
+
+  /**
+   * Snapshot-pinned fee-policy version (ANT-254: replaces a bare Number()).
+   * Counterparty JSON is attacker-influenced history — a float, negative, or
+   * NaN version must fall back to the active policy (version 0), never throw
+   * and never query by garbage.
+   */
+  private parseFeeVersion(raw: unknown): number {
+    if (typeof raw === "number" && Number.isSafeInteger(raw) && raw > 0) return raw;
+    if (typeof raw === "string" && /^\d+$/.test(raw)) {
+      const v = Number(raw);
+      if (Number.isSafeInteger(v) && v > 0) return v;
+    }
+    return 0;
   }
 
   /**

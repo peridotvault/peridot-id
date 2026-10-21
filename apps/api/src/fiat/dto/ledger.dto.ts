@@ -47,3 +47,21 @@ export class DispatchEventsDto {
   @Max(100)
   take?: number;
 }
+
+export class LedgerAdjustDto {
+  /** Debited identity (must exist; balance rechecked inside the txn). */
+  @Matches(PID_REGEX, { message: "fromPid must be a PID like name@pid" })
+  fromPid!: string;
+
+  /** Credited identity (must exist; distinct from fromPid). */
+  @Matches(PID_REGEX, { message: "toPid must be a PID like name@pid" })
+  toPid!: string;
+
+  @Matches(/^\d+$/, { message: "Amount must be whole IDR (positive integer)" })
+  amountIdr!: string;
+
+  /** Audited reason (min 8 chars) — adjustments are immutable once posted. */
+  @IsString()
+  @MaxLength(512)
+  reason!: string;
+}

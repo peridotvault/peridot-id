@@ -4,7 +4,7 @@ import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { FiatLedgerService } from "./fiat-ledger.service";
-import { DispatchEventsDto, LedgerFreezeDto, LedgerTransferInquiryDto } from "./dto/ledger.dto";
+import { DispatchEventsDto, LedgerAdjustDto, LedgerFreezeDto, LedgerTransferInquiryDto } from "./dto/ledger.dto";
 
 /**
  * Fiat ledger routes — the spendable balance, statement and send/receive.
@@ -80,6 +80,22 @@ export class FiatLedgerController {
   @UseGuards(JwtAuthGuard, AdminGuard)
   journal(@Param("pid") pid: string) {
     return this.ledger.journal(pid);
+  }
+
+  /**
+   * Admin: post a signed correction (reversal/adjustment) between two real
+   * identities. Writes a balanced fiat_adjust pair (out + in, same amount, one
+   * entryGroup) atomically through the chained writer. Boundary (ANT-254):
+   * transfer corrections live here; ISSUANCE clawbacks stay on the
+   * propose→approve clawback path (FiatSubAccountService) — issuance legs
+   * have no counterparty identity to mirror against.
+   */
+  @Post("admin/adjust")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  adjust(@CurrentUser() user: AuthenticatedUser, @Body() dto: LedgerAdjustDto) {
+    return this.ledger.adminAdjust(user.pid, dto);
   }
 
   /** Admin: engage/clear the migration freeze (in-memory override, env is default). */
