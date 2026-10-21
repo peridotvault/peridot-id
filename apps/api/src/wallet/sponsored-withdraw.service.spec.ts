@@ -291,7 +291,7 @@ describe("SponsoredWithdrawService", () => {
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
       "execute.submitted",
-      expect.objectContaining({ networkFee: "10000", protocolFee: "5000" }),
+      expect.objectContaining({ networkFee: "10000", protocolFee: "5000", dataLen: 9, metaCount: 2 }),
     );
   });
 

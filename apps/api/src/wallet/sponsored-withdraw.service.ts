@@ -463,8 +463,11 @@ export class SponsoredWithdrawService {
     const protocolFee = protocolFeeOf(networkFee, bps);
     const totalFee = networkFee + protocolFee;
 
-    // The generic call moves no SOL itself (inner programs debit their own
-    // accounts); the wallet must cover the fee split, the program backstops the rest.
+    // The generic call executes with full PDA authority: inner programs CAN debit
+    // PDA-owned lamports/ATAs via the PDA-signer CPI; only the fee split is
+    // balance-checked pre-broadcast. Safety rests on the passkey-signed call_hash
+    // (program-verified, see contracts/svm/smart-account/src/instructions/execute.rs:162-172)
+    // + user intent.
     const smartSol = BigInt(await adapter.getBalanceOf(chain.address));
     if (smartSol < totalFee) {
       throw new BadRequestException(`Insufficient SOL for fee — need ${totalFee} lamports, have ${smartSol}`);
@@ -511,6 +514,8 @@ export class SponsoredWithdrawService {
       networkFee: networkFee.toString(),
       protocolFee: protocolFee.toString(),
       feePolicyVersion: version,
+      dataLen: decoded.data.length,
+      metaCount: decoded.metas.length,
     });
     await this.reconcile(pid, adapter, signature, networkFee, protocolFee, version, "execute").catch((err) =>
       this.logger.warn(`execute reconcile failed for ${signature}: ${(err as Error).message}`),
