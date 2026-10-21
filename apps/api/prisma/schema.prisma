@@ -258,7 +258,11 @@ model Transaction {
   counterparty   String?
   chain          String
   network        String
-  txHash         String?
+  // Globally unique when set (chain signatures are unique ids). NULLs are
+  // exempt (Postgres allows multiple NULLs in a UNIQUE index) — intents that
+  // never reach a chain keep NULL. Enforced at the DB level (ANT-254); the
+  // recordTransaction replay check is the UX-friendly 400 on top.
+  txHash         String?         @unique
   status         TransactionStatus @default(prepared)
   createdAt      DateTime          @default(now())
   confirmedAt    DateTime?
@@ -490,9 +494,12 @@ model FiatProviderTransaction {
    * DOKU ledger operation for this movement, if any (Unified Ledger).
    * partnerReferenceNo of the DOKU_NON_FIAT top-up / POINT P2P / POINT
    * debit — the idempotency key at DOKU. Null when no ledger movement
-   * was (or will be) issued for this row.
+   * was (or will be) issued for this row. Unique when set (DB-level,
+   * ANT-254): one ledger movement = one row. NULLs are exempt (Postgres
+   * allows multiple NULLs in a UNIQUE index). Pre-deploy check on shared
+   * DBs: SELECT "ledgerRef", COUNT(*) ... HAVING COUNT(*) > 1 must be empty.
    */
-  ledgerRef             String?
+  ledgerRef             String?   @unique
   /**
    * Ledger credit status, tracked SEPARATELY from payment status:
    * pending | issued | failed | blocked | clawed_back.
@@ -626,11 +633,15 @@ model FiatLedgerEntry {
 }
 
 // Outbox for third-party callbacks (Live2Dev escrow etc.). Written in the same
-// transaction as the ledger movement; delivered asynchronously with HMAC and
-// retries by the admin dispatch endpoint. See docs/FIAT_LEDGER.md.
+// transaction as the ledger movement (atomic outbox, ANT-254); delivered
+// asynchronously with HMAC and retries by the admin dispatch endpoint.
+// See docs/FIAT_LEDGER.md. `idempotencyKey` dedups the enqueue
+// (`<entryGroup>:<targetPid>`): a retried confirm can never fork a second
+// callback for the same movement. NULL only on pre-ANT-254 rows.
 model FiatLedgerEvent {
   id            String    @id @default(uuid())
   eventType     String
+  idempotencyKey String?  @unique
   /** Owner PID of the target PidApp (the escrow/recipient app). */
   targetPid     String
   targetUrl     String
