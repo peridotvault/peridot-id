@@ -9,6 +9,7 @@ import {
   DEFAULT_FEE_POLICY,
   type DokuCheckoutClient,
 } from "@peridotvault/pid-payments";
+import { decryptSecret } from "../common/secret-crypto";
 import { replayFiatLedger } from "./fiat-ledger-replay";
 import { GENESIS_HASH, entryHash, verifyChain as verifyLedgerChain, type ChainableEntry } from "./fiat-ledger-hash";
 import { PrismaService } from "../prisma/prisma.service";
@@ -301,6 +302,7 @@ export class FiatLedgerService {
     pid: string,
     input: { amountIdr: string; beneficiaryPid: string; remark?: string; operation?: FeeOperation },
     appClientId?: string | null,
+    auth?: { app?: string; scope?: string },
   ) {
     this.requireUsable();
     const gross = this.parseAmount(input.amountIdr);
@@ -332,6 +334,12 @@ export class FiatLedgerService {
     await this.security.log(pid, "fiat.transfer_inquiry", { entryGroup, gross: gross.toString() }).catch((err) => {
       this.logger.error(`AUDIT-SINK-FAILURE fiat.transfer_inquiry ${entryGroup} unaudited: ${String(err)?.slice(0, 200)}`);
     });
+    // ANT-286b SOC signal: machine-token use on money paths (leaked pidsk_ detection).
+    if (auth?.app) {
+      await this.security.log(pid, "fiat.transfer.app_token", { app: auth.app, scope: auth.scope ?? null, entryGroup, phase: "inquiry" }).catch((err) => {
+        this.logger.error(`AUDIT-SINK-FAILURE fiat.transfer.app_token ${entryGroup} unaudited: ${String(err)?.slice(0, 200)}`);
+      });
+    }
     return {
       id: row.id, entryGroup, grossIdr: gross.toString(), feeIdr: totalFee.toString(),
       peridotFeeIdr: globalFee.toString(), peridotTaxIdr: peridotTaxIdr.toString(),
@@ -345,7 +353,7 @@ export class FiatLedgerService {
    * posted intent returns the view. Balance is rechecked inside the txn —
    * no double-spend.
    */
-  async transferConfirm(pid: string, id: string): Promise<FiatLedgerEntryView> {
+  async transferConfirm(pid: string, id: string, auth?: { app?: string; scope?: string }): Promise<FiatLedgerEntryView> {
     this.requireUsable();
     const intent = await this.prisma.fiatLedgerEntry.findFirst({ where: { id, pid } });
     if (!intent) throw new NotFoundException("Transfer not found");
@@ -459,6 +467,12 @@ export class FiatLedgerService {
     await this.security.log(pid, "fiat.transfer", { entryGroup: intent.entryGroup, gross: gross.toString() }).catch((err) => {
       this.logger.error(`AUDIT-SINK-FAILURE fiat.transfer ${intent.entryGroup} unaudited: ${String(err)?.slice(0, 200)}`);
     });
+    // ANT-286b SOC signal: machine-token use on money paths (leaked pidsk_ detection).
+    if (auth?.app) {
+      await this.security.log(pid, "fiat.transfer.app_token", { app: auth.app, scope: auth.scope ?? null, entryGroup: intent.entryGroup, phase: "confirm" }).catch((err) => {
+        this.logger.error(`AUDIT-SINK-FAILURE fiat.transfer.app_token ${intent.entryGroup} unaudited: ${String(err)?.slice(0, 200)}`);
+      });
+    }
     const done = await this.prisma.fiatLedgerEntry.findFirst({ where: { id, pid } });
     if (!done) throw new NotFoundException("Transfer not found");
     return this.toTxView(done as never);
@@ -878,7 +892,9 @@ export class FiatLedgerService {
       // Resolve the secret for the exact app this event targets (owner + URL),
       // not just the first active app under the owner. A missing/inactive app
       // or secret is fail-closed: never dispatch with an empty-key HMAC —
-      // record and retry with backoff like any delivery failure.
+      // record and retry with backoff like any delivery failure. ANT-286a:
+      // the stored value is an `enc:v1:` envelope — decrypt server-side with
+      // PID_SECRETS_ENC_KEY; missing/undecryptable = failNoSecret.
       const app = await this.prisma.pidApp.findFirst({
         where: { ownerPid: ev.targetPid, webhookUrl: ev.targetUrl, isActive: true },
         select: { webhookSecret: true },
@@ -893,12 +909,19 @@ export class FiatLedgerService {
         });
         failed++;
       };
-      if (!app?.webhookSecret) {
-        await failNoSecret("webhook app missing, inactive, or secret unset — refusing unsigned dispatch");
+      let rawSecret: string | null = null;
+      try {
+        const key = this.config.get<string>("PID_SECRETS_ENC_KEY", "") || undefined;
+        rawSecret = decryptSecret(app?.webhookSecret ?? null, key);
+      } catch {
+        rawSecret = null;
+      }
+      if (!rawSecret) {
+        await failNoSecret("webhook app missing, inactive, or secret undecryptable — refusing unsigned dispatch");
         continue;
       }
       const body = JSON.stringify(ev.payload);
-      const sig = "sha256=" + createHmac("sha256", app.webhookSecret).update(body).digest("hex");
+      const sig = "sha256=" + createHmac("sha256", rawSecret).update(body).digest("hex");
       try {
         const res = await fetch(ev.targetUrl, {
           method: "POST",

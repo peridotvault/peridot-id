@@ -6,6 +6,7 @@ import { BadRequestException, Injectable, NotFoundException, Optional } from "@n
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { APP_CLIENT_SECRET_MAX_AGE, parseTtlMs } from "../common/app-config";
+import { encryptSecret } from "../common/secret-crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
 /**
@@ -150,14 +151,13 @@ export class PidAppsService {
    * (`X-Pid-Signature: sha256=<hex>`). https required (localhost excepted for
    * dev). Clearing removes both URL and secret.
    *
-   * Storage note (ANT-254 P2 — justified, not changed): the secret is stored
-   * reversibly (plaintext column) because dispatch must HMAC-sign with the raw
-   * value — a one-way hash cannot sign. Mitigations in place, verified:
-   * server-side reads only (secret selected solely in the dispatch path),
-   * never returned by any API (PUBLIC_OMIT + admin read-model both strip it;
-   * only this setter returns it, once), owner-scoped writes (ownedApp), and
-   * rotation on every set. Moving to envelope encryption (KMS) is the
-   * follow-up if the threat model ever requires it — flagged for Tobias.
+   * Storage (ANT-286a): the secret is envelope-encrypted with AES-256-GCM
+   * (`PID_SECRETS_ENC_KEY`) into an `enc:v1:` same-column envelope before
+   * storage. `encryptSecret` throws when the key is missing/malformed, so a
+   * write without a usable key fails closed — plaintext is never persisted.
+   * Dispatch decrypts server-side (fiat-ledger.service); legacy plaintext
+   * rows keep reading until rotated. The setter still returns the plaintext
+   * ONCE; it is never returned again (PUBLIC_OMIT strips it everywhere else).
    */
   async setWebhook(ownerPid: string, id: string, url: string | null): Promise<{ url: string | null; secret: string | null }> {
     await this.ownedApp(ownerPid, id);
@@ -177,7 +177,10 @@ export class PidAppsService {
     }
     const secret = `pidwh_${randomBytes(24).toString("hex")}`;
     const target = parsed.toString();
-    await this.prisma.pidApp.update({ where: { id }, data: { webhookUrl: target, webhookSecret: secret } });
+    // ANT-286a: fail closed without a usable data key — never store plaintext.
+    const encKey = this.config?.get<string>("PID_SECRETS_ENC_KEY") ?? process.env.PID_SECRETS_ENC_KEY;
+    const stored = encryptSecret(secret, encKey);
+    await this.prisma.pidApp.update({ where: { id }, data: { webhookUrl: target, webhookSecret: stored } });
     return { url: target, secret };
   }
 
