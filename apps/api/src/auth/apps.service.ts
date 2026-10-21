@@ -113,6 +113,15 @@ export class PidAppsService {
    * signing secret returned ONCE; PeridotID signs every callback body with it
    * (`X-Pid-Signature: sha256=<hex>`). https required (localhost excepted for
    * dev). Clearing removes both URL and secret.
+   *
+   * Storage note (ANT-254 P2 — justified, not changed): the secret is stored
+   * reversibly (plaintext column) because dispatch must HMAC-sign with the raw
+   * value — a one-way hash cannot sign. Mitigations in place, verified:
+   * server-side reads only (secret selected solely in the dispatch path),
+   * never returned by any API (PUBLIC_OMIT + admin read-model both strip it;
+   * only this setter returns it, once), owner-scoped writes (ownedApp), and
+   * rotation on every set. Moving to envelope encryption (KMS) is the
+   * follow-up if the threat model ever requires it — flagged for Tobias.
    */
   async setWebhook(ownerPid: string, id: string, url: string | null): Promise<{ url: string | null; secret: string | null }> {
     await this.ownedApp(ownerPid, id);
