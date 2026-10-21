@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   awaitPopupRequest,
   postPopupReady,
@@ -8,6 +8,7 @@ import {
 } from "@peridotvault/pid-sdk-js";
 import type { AccountView } from "@peridotvault/pid-types";
 import { isFiatAction, isSessionError, isStepUpError, signInHint, summarize } from "../utils/popupAction";
+import { assertExecuteGateAllows, getExecuteGate } from "../utils/knownPrograms";
 
 export type PopupPhase = "waiting" | "preparing" | "review" | "busy" | "redirecting" | "done" | "failed";
 
@@ -169,8 +170,7 @@ export function usePopupRequest(
     };
   }, [popup.origin, popup.expectedPid, tryRefreshOnce]);
 
-  const deny = useCallback(async (error = "access_denied") => {
-    // Best-effort cleanup of server state created during prepare. The checkout
+  const deny = useCallback(async (error = "access_denied") => {    // Best-effort cleanup of server state created during prepare. The checkout
     // quote moves no money (no row), so only a transfer inquiry needs cancelling.
     optsRef.current.cancelFiat();
     // Leave the wallet on the account we found (see restoreRef).
@@ -187,7 +187,15 @@ export function usePopupRequest(
     setPhase("done");
   }, [popup.origin]);
 
-  const approve = useCallback(async () => {
+  const approve = useCallback(async (opts?: { unknownAcknowledged?: boolean }) => {
+    // Unknown-target / malformed execute gate: enforced BEFORE any passkey
+    // ceremony or /v1/wallet/execute call (AC7). Deny is unaffected.
+    try {
+      assertExecuteGateAllows(action, payload, { unknownAcknowledged: opts?.unknownAcknowledged });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
     setPhase("busy");
     setError(null);
     const run = () => optsRef.current.execute(action, payload);
@@ -263,5 +271,9 @@ export function usePopupRequest(
     }
   }, [popup.origin, action, payload, tryRefreshOnce]);
 
-  return { phase, action, summary, error, approve, deny, approvingPid, expectedPid, switched };
+  // Execute disclosure gate, derived purely from action+payload (no network).
+  // Recomputed each render so the review screen and approve() agree.
+  const gate = useMemo(() => getExecuteGate(action, payload), [action, payload]);
+
+  return { phase, action, summary, error, approve, deny, approvingPid, expectedPid, switched, gate };
 }
