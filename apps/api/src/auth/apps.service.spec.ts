@@ -103,6 +103,53 @@ describe("PidAppsService", () => {
     expect(PidAppsService.secretMatches("wrong", stored?.clientSecretHash as string)).toBe(false);
   });
 
+  it("stamps a 365d expiry on rotation; expired secrets fail closed", async () => {
+    const { prisma, service } = setup();
+    const app = await service.create("pid_owner", "My Game");
+    const before = Date.now();
+    const { secret } = await service.rotateSecret("pid_owner", app.id as string);
+    const stored = (await prisma.pidApp.findUnique({ where: { clientId: app.clientId as string } })) as Record<
+      string,
+      unknown
+    >;
+    const expiresAt = stored.clientSecretExpiresAt as Date;
+    expect(expiresAt).toBeInstanceOf(Date);
+    expect(expiresAt.getTime()).toBeGreaterThan(before + 364 * 24 * 60 * 60 * 1000);
+    expect(expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 366 * 24 * 60 * 60 * 1000);
+
+    // Fresh secret valid; wrong secret and expired deadline rejected.
+    expect(service.clientSecretValid(stored as never, secret)).toBe(true);
+    expect(service.clientSecretValid(stored as never, "wrong")).toBe(false);
+    expect(
+      service.clientSecretValid(
+        { clientSecretHash: stored.clientSecretHash as string, clientSecretExpiresAt: new Date(Date.now() - 1000) },
+        secret,
+      ),
+    ).toBe(false);
+    // Public clients (no secret set) stay valid without a secret.
+    expect(service.clientSecretValid({ clientSecretHash: null }, "")).toBe(true);
+  });
+
+  it("peppers hashes when PID_APP_SECRET_PEPPER is set, keeps legacy rows verifying", async () => {
+    const { prisma } = setup();
+    const pepperedConfig = { get: (k: string, d?: string) => (k === "PID_APP_SECRET_PEPPER" ? "pepper-1" : (d ?? "")) };
+    const peppered = new PidAppsService(prisma as never, pepperedConfig as never);
+    const app = await peppered.create("pid_owner", "My Game");
+    const { secret } = await peppered.rotateSecret("pid_owner", (app as Record<string, unknown>).id as string);
+    const stored = (await prisma.pidApp.findUnique({
+      where: { clientId: (app as Record<string, unknown>).clientId as string },
+    })) as Record<string, unknown>;
+    // Peppered hash differs from the legacy unsalted hash …
+    expect(stored.clientSecretHash).toBe(PidAppsService.hashSecret(secret, "pepper-1"));
+    expect(stored.clientSecretHash).not.toBe(PidAppsService.hashSecret(secret));
+    // … verifies with the pepper …
+    expect(peppered.clientSecretValid(stored as never, secret)).toBe(true);
+    expect(peppered.clientSecretValid(stored as never, "wrong")).toBe(false);
+    // … and pre-pepper legacy rows (no pepper in hash) keep verifying until rotated.
+    const legacy = { clientSecretHash: PidAppsService.hashSecret(secret), clientSecretExpiresAt: null };
+    expect(peppered.clientSecretValid(legacy, secret)).toBe(true);
+  });
+
   it("only lets owners rotate their app secret", async () => {
     const { service } = setup();
     const app = await service.create("pid_owner", "My Game");

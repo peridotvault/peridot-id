@@ -1,4 +1,4 @@
-import { ValidationPipe } from "@nestjs/common";
+import { Logger, ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
@@ -12,6 +12,17 @@ import { PrismaService } from "./prisma/prisma.service";
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
   const config = app.get(ConfigService);
+  const logger = new Logger("Bootstrap");
+
+  // ANT-227 item 2: the bootstrap-admin env is one-time. While set, the first
+  // matching claim mints an admin — remove it right after bootstrap so a
+  // leaked/stale value can never matter again.
+  if ((config.get<string>("PID_BOOTSTRAP_ADMIN_PID", "") ?? "").trim()) {
+    logger.warn(
+      "PID_BOOTSTRAP_ADMIN_PID is set: the first matching claim mints an admin. " +
+        "Remove this variable immediately after bootstrap.",
+    );
+  }
 
   app.use(cookieParser());
   // Secure transport headers (ANT-228). HSTS only in production: emitting it

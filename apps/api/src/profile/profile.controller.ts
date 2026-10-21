@@ -2,6 +2,7 @@ import { Body, Controller, Get, Patch, UseGuards } from "@nestjs/common";
 import { Profile } from "@prisma/client";
 import { CurrentUser, AuthenticatedUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { UserTokenGuard } from "../common/user-token.guard";
 import { UpdateProfileDto } from "./dto/update-profile.dto";
 import { ProfileService } from "./profile.service";
 
@@ -16,7 +17,7 @@ export class ProfileController {
   }
 
   @Patch()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   update(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateProfileDto): Promise<Profile> {
     return this.profileService.update(user.pid, dto);
   }

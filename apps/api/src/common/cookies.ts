@@ -1,8 +1,7 @@
 import { Response } from "express";
 import { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
-import ms from "ms";
-import { ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, apiServesHttps } from "./app-config";
+import { ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL, apiServesHttps, parseTtlMs } from "./app-config";
 
 export const ACCESS_COOKIE = "pid_access";
 export const REFRESH_COOKIE = "pid_refresh";
@@ -91,8 +90,8 @@ const ACCESS_PATH = "/";
 
 export function setAuthCookies(res: Response, config: ConfigService, access: string, refresh: string, pid?: string): void {
   const opts = baseOpts(config);
-  res.cookie(ACCESS_COOKIE, access, { ...opts, path: ACCESS_PATH, maxAge: ms(ACCESS_TOKEN_TTL) });
-  res.cookie(REFRESH_COOKIE, refresh, { ...opts, path: REFRESH_PATH, maxAge: ms(REFRESH_TOKEN_TTL) });
+  res.cookie(ACCESS_COOKIE, access, { ...opts, path: ACCESS_PATH, maxAge: parseTtlMs(ACCESS_TOKEN_TTL, "ACCESS_TOKEN_TTL") });
+  res.cookie(REFRESH_COOKIE, refresh, { ...opts, path: REFRESH_PATH, maxAge: parseTtlMs(REFRESH_TOKEN_TTL, "REFRESH_TOKEN_TTL") });
   // Remember this identity so the wallet can switch back to it without a re-login.
   if (pid) setAccountRefreshCookie(res, config, pid, refresh);
 }
@@ -100,8 +99,8 @@ export function setAuthCookies(res: Response, config: ConfigService, access: str
 /** Rotate only the active identity's cookies (used when switching accounts). */
 export function setActiveAuthCookies(res: Response, config: ConfigService, access: string, refresh: string): void {
   const opts = baseOpts(config);
-  res.cookie(ACCESS_COOKIE, access, { ...opts, path: ACCESS_PATH, maxAge: ms(ACCESS_TOKEN_TTL) });
-  res.cookie(REFRESH_COOKIE, refresh, { ...opts, path: REFRESH_PATH, maxAge: ms(REFRESH_TOKEN_TTL) });
+  res.cookie(ACCESS_COOKIE, access, { ...opts, path: ACCESS_PATH, maxAge: parseTtlMs(ACCESS_TOKEN_TTL, "ACCESS_TOKEN_TTL") });
+  res.cookie(REFRESH_COOKIE, refresh, { ...opts, path: REFRESH_PATH, maxAge: parseTtlMs(REFRESH_TOKEN_TTL, "REFRESH_TOKEN_TTL") });
 }
 
 export function setAccountRefreshCookie(res: Response, config: ConfigService, pid: string, refresh: string): void {
@@ -109,7 +108,7 @@ export function setAccountRefreshCookie(res: Response, config: ConfigService, pi
   res.cookie(accountRefreshCookieName(pid), refresh, {
     ...opts,
     path: REFRESH_PATH,
-    maxAge: ms(REFRESH_TOKEN_TTL),
+    maxAge: parseTtlMs(REFRESH_TOKEN_TTL, "REFRESH_TOKEN_TTL"),
   });
 }
 
@@ -158,8 +157,8 @@ export function scopeRefreshCookie(scope: string): string {
 
 export function setScopedAuthCookies(res: Response, config: ConfigService, scope: string, access: string, refresh: string): void {
   const opts = baseOpts(config);
-  res.cookie(scopeAccessCookie(scope), access, { ...opts, path: ACCESS_PATH, maxAge: ms(ACCESS_TOKEN_TTL) });
-  res.cookie(scopeRefreshCookie(scope), refresh, { ...opts, path: REFRESH_PATH, maxAge: ms(REFRESH_TOKEN_TTL) });
+  res.cookie(scopeAccessCookie(scope), access, { ...opts, path: ACCESS_PATH, maxAge: parseTtlMs(ACCESS_TOKEN_TTL, "ACCESS_TOKEN_TTL") });
+  res.cookie(scopeRefreshCookie(scope), refresh, { ...opts, path: REFRESH_PATH, maxAge: parseTtlMs(REFRESH_TOKEN_TTL, "REFRESH_TOKEN_TTL") });
 }
 
 export function clearScopedAuthCookies(res: Response, config: ConfigService, scope: string): void {

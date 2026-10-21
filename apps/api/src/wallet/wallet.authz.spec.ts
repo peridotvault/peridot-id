@@ -6,6 +6,7 @@ import { ThrottlerModule, ThrottlerStorage } from "@nestjs/throttler";
 import cookieParser from "cookie-parser";
 import request from "supertest";
 import { JwtStrategy } from "../auth/jwt.strategy";
+import { JWT_AUD_REFRESH, JWT_AUD_SESSION, JWT_ISSUER } from "../common/app-config";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -40,7 +41,7 @@ describe("Wallet authorization & abuse cases (routes)", () => {
   let state: { identities: Map<string, string>; wallets: Map<string, WalletRow> };
 
   const token = (sub: string, extra: Record<string, unknown> = {}) =>
-    new JwtService({}).signAsync({ sub, type: "access", ...extra }, { secret: SECRET });
+    new JwtService({}).signAsync({ sub, type: "access", ...extra }, { secret: SECRET, issuer: JWT_ISSUER, audience: JWT_AUD_SESSION });
 
   beforeAll(async () => {
     state = { identities: new Map(), wallets: new Map() };
@@ -163,7 +164,12 @@ describe("Wallet authorization & abuse cases (routes)", () => {
 
   it("rejects a refresh-typed token on wallet routes", async () => {
     state.identities.set("pid_a", "active");
-    const t = await new JwtService({}).signAsync({ sub: "pid_a", type: "refresh" }, { secret: SECRET });
+    // Fully-formed claims (iss + refresh aud): exercises the validate()
+    // belt-and-braces type check, not just the passport-jwt aud layer.
+    const t = await new JwtService({}).signAsync(
+      { sub: "pid_a", type: "refresh" },
+      { secret: SECRET, issuer: JWT_ISSUER, audience: JWT_AUD_REFRESH },
+    );
     await request(app.getHttpServer()).get("/v1/wallet/me").set("Cookie", `pid_access=${t}`).expect(401);
   });
 
@@ -236,6 +242,16 @@ describe("Wallet authorization & abuse cases (routes)", () => {
     expect(res.body.address).toBe("addr-new");
     expect(res.body).not.toHaveProperty("pid");
     expect(state.wallets.get("pid_a")?.address).toBe("addr-new");
+  });
+
+  it("rejects a machine (app) token on user-wallet writes (ANT-233 F1)", async () => {
+    state.identities.set("pid_a", "active");
+    const t = await token("pid_a", { app: "pidapp_x" });
+    await request(app.getHttpServer())
+      .post("/v1/wallet")
+      .set("Cookie", `pid_access=${t}`)
+      .send({ address: "addr-new" })
+      .expect(403);
   });
 
   it("returns the existing wallet on a duplicate create (no replay beyond cardinality)", async () => {
