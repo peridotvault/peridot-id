@@ -91,8 +91,6 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
       ))}
 
       {sessions.length === 0 && <Text style={s.hint}>No active sessions.</Text>}
-
-      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }

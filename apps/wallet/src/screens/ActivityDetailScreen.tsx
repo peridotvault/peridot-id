@@ -10,7 +10,7 @@ const LAMPORTS_PER_SOL = 1e9;
 function fmtAmount(t: WalletTransaction): string {
   if (t.amount == null) return "—";
   const value = Number(t.amount) / (t.asset === "SOL" ? LAMPORTS_PER_SOL : 1e6);
-  const sign = t.direction === "in" ? "+" : t.direction === "out" ? "−" : "";
+  const sign = t.direction === "in" ? "+" : t.direction === "out" ? "-" : "";
   return `${sign}${value.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${t.asset === "SOL" ? "SOL" : t.asset}`;
 }
 
@@ -60,7 +60,6 @@ export function ActivityDetailScreen({ tx, onDone }: { tx: WalletTransaction; on
           variant="primary"
         />
       )}
-      <UIButton title="Back" onPress={onDone} />
     </ScrollView>
   );
 }
