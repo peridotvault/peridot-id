@@ -42,8 +42,12 @@ jobs:
           key: ${{ secrets.PROD_VPS_SSH_KEY }}
           command_timeout: 60m
           script: |
+            # ANT-347 M4: fetch over SSH with the VPS read-only deploy key.
+            # Never embed GH_PAT in the remote URL or expand secrets inline —
+            # both leak into CI logs / process tables. Rotate GH_PAT now that
+            # it is no longer used by deploys.
             cd /opt/apps/peridot-id/peridot-id
-            git fetch "https://x-access-token:${{ secrets.GH_PAT }}@github.com/peridotvault/peridot-id.git" main
+            git fetch git@github.com:peridotvault/peridot-id.git main
             git reset --hard FETCH_HEAD
             git checkout -B main FETCH_HEAD
             # Disk guard: a full disk kills the image export mid-build (seen on
@@ -71,13 +75,15 @@ jobs:
         with:
           host: ${{ secrets.SANDBOX_VPS_HOST }}
           username: ${{ secrets.SANDBOX_VPS_USER }}
-          password: ${{ secrets.SANDBOX_VPS_PASSWORD }}
+          key: ${{ secrets.SANDBOX_VPS_SSH_KEY }}
           command_timeout: 60m
           script: |
             # Dedicated sandbox host + clone. Uses deploy/.env.test
             # (DOKU sandbox — no real money ever moves here).
+            # ANT-347 M4/M5: SSH fetch via VPS read-only deploy key (no GH_PAT
+            # in URL); key auth only — SANDBOX_VPS_PASSWORD removed.
             cd /opt/apps/peridot-id/peridot-id-test
-            git fetch "https://x-access-token:${{ secrets.GH_PAT }}@github.com/peridotvault/peridot-id.git" test
+            git fetch git@github.com:peridotvault/peridot-id.git test
             git reset --hard FETCH_HEAD
             git checkout -B test FETCH_HEAD
             # Disk guard: a full disk kills the image export mid-build (seen on

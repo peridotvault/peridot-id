@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, test]
   pull_request:
 
 jobs:
@@ -222,3 +222,29 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  trivy:
+    # ANT-347 LOW-1: image + filesystem vuln scan. Non-blocking (continue-
+    # on-error + exit-code 1 only after SARIF upload path stays) so a new
+    # upstream CVE cannot freeze merges; findings stay visible in the job log
+    # and Security tab. Blast radius: this job only.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trivy filesystem + config scan
+        uses: aquasecurity/trivy-action@0.33.1
+        continue-on-error: true
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: trivy-results.sarif

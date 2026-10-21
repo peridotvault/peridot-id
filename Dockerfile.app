@@ -1,4 +1,4 @@
-FROM node:22-slim AS base
+FROM node:22-slim@sha256:3ed98443660ff48413b5af19ecefce3b9d50845a901a43420d47cc63a9fddbe9 AS base
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -40,7 +40,7 @@ RUN pnpm --filter @peridotvault/pid-solana build
 RUN pnpm --filter @peridotvault/pid-sdk-js build
 RUN pnpm --filter @peridotvault/pid-wallet build
 
-FROM nginx:1.27-alpine AS runner
+FROM nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10 AS runner
 
 # SPA: any unknown path falls back to index.html.
 COPY --from=builder /app/apps/wallet/dist /usr/share/nginx/html
@@ -49,6 +49,12 @@ COPY <<'NGINX' /etc/nginx/conf.d/default.conf
 server {
     listen 3000;
     server_name _;
+    # ANT-347 H1: hide version + in-image defense in depth (Traefik
+    # security-headers middleware stays primary).
+    server_tokens off;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     root /usr/share/nginx/html;
     index index.html;
 
@@ -68,6 +74,9 @@ server {
 }
 NGINX
 
+# ANT-347 H1: run as non-root. Ports >1024 so no extra caps needed.
+RUN chown -R nginx:nginx /usr/share/nginx/html /etc/nginx/conf.d /var/cache/nginx
+USER nginx
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
