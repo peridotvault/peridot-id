@@ -1,6 +1,6 @@
 {
   "name": "@peridotvault/pid-react-embed",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Embed the PeridotID wallet UI in any React app (Vite, Next, …). The wallet renders in an iframe; sign-in and every trust-critical action open the PeridotID popup.",
   "license": "MIT",
   "main": "./dist/cjs/index.js",

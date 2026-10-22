@@ -2,7 +2,7 @@
 // Run: pnpm --filter @peridotvault/pid-sdk-js test
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectEnv, Peridot } from "../dist/esm/index.js";
+import { detectEnv, Peridot, resolvePeridotUrls } from "../dist/esm/index.js";
 
 function withNodeEnv(value, fn) {
   const saved = process.env.NODE_ENV;
@@ -36,6 +36,11 @@ test("Peridot presets: env picks the canonical hosts; custom baseUrl drops the p
   });
   // Caller brings the API origin → caller brings the popup host (first-party inline).
   assert.equal(Peridot({ baseUrl: "http://localhost:3301" }).popupBaseUrl, undefined);
+});
+
+test("resolvePeridotUrls: same table the client uses (for server-to-server backends)", () => {
+  assert.deepEqual(resolvePeridotUrls("production"), { baseUrl: "https://api.peridot.id", popupBaseUrl: "https://peridot.id" });
+  assert.deepEqual(resolvePeridotUrls("sandbox"), { baseUrl: "https://sandbox-api.peridot.id", popupBaseUrl: "https://sandbox.peridot.id" });
 });
 
 test("Peridot presets: canonical API hosts (AC-D3)", () => {

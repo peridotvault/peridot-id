@@ -105,6 +105,15 @@ export function detectEnv(override?: PeridotEnv): PeridotEnv {
   return nodeEnv === "production" ? "production" : "sandbox";
 }
 
+/**
+ * Canonical API + popup hosts for an environment — the same table `Peridot()`
+ * uses internally. For backends that talk to PeridotID server-to-server
+ * (no browser SDK): `resolvePeridotUrls("sandbox").baseUrl`.
+ */
+export function resolvePeridotUrls(env?: PeridotEnv): { baseUrl: string; popupBaseUrl: string } {
+  return PRESETS[detectEnv(env)];
+}
+
 export interface PeridotOptions {
   /** Registered app id (`pidapp_…`). Applied to login, exchange, and fiat calls. */
   clientId?: string;
