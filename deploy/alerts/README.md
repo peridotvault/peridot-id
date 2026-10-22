@@ -1,5 +1,38 @@
 # Deploy alerts (all SELECT-only, cron wrappers, secrets via env)
 
+## Alert: `xp-leveling` (ANT-445, Tobias F5/F7 monitoring requirements)
+
+## What it watches
+
+XP & leveling operability: award volume + single-app concentration,
+unreviewed `xp_suspicious_activities` feed (incl. `xp.self_grant` tripwire),
+per-app 24h awards vs `xp_quotas.dailyCap`, ledger↔state reconciliation
+drift, level-distribution skew, and the throttle/429 probe
+(`xp.throttled`/`xp.rate_limited`/`throttle.exceeded` — forward-compatible,
+reads 0 rows until M3 intake emits; OK by construction until then).
+
+Thresholds (starting points, env-tunable via `XP_*` vars — tune, don't
+hardcode business caps): Q1 > 500 awards/15m; Q2 top app > 80% of 1h awards
+(min 50); Q3 > 20 unreviewed/h; Q3b ANY unreviewed `xp.self_grant`/24h;
+Q4 ANY app over dailyCap/24h (CRITICAL); Q5 ANY ledger↔state drift
+(CRITICAL); Q6 one level > 95% of users (min 100); Q7 > 50 throttles/15m.
+
+## Files
+
+- `xp-leveling-detected.sql` — the canonical alert queries (SELECT-only).
+- `xp-leveling-check.sh` — cron wrapper: runs all queries, prints
+  `OK:`/`ALERT:`, exits 0/2 (3 = config/query failure). Optional
+  `ALERT_WEBHOOK_URL` POSTs the message as `{"text": ...}`.
+- `xp-leveling-runbook.md` — triage order + intake kill-switch procedure
+  (who flips, expected effect, how to confirm). Every alert links it.
+
+## Enable
+
+Installed automatically: `deploy/alerts/install.sh` adds the 5-min cron line
+(scoped per stack via `run-with-infisical.sh`; rollback = remove the cron
+line). Rejected/duplicate/retry intake reason-code counts extend the Q-series
+once M3 intake ships structured codes (Tyler ANT-441).
+
 ## Alert: `refresh.reuse_detected` (ANT-246, signal from ANT-241 F4)
 
 ## What it watches
