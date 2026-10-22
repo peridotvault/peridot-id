@@ -74,9 +74,8 @@ export { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
 export type PeridotEnv = "production" | "sandbox";
 
 /** API + popup hosts per environment. Chains/RPC come from the API registry, never here.
- *  Sandbox MVP (FR-4): canonical hosts are `*.peridot.id`. Legacy
- *  `*.pid.peridotvault.com` hosts keep working for one release with a
- *  deprecation warning (see `warnOnLegacyHost`) — then they are removed. */
+ *  ANT-400 hard cutover: canonical hosts are `*.peridot.id` only.
+ *  Legacy hosts are removed. */
 const PRESETS: Record<PeridotEnv, { baseUrl: string; popupBaseUrl: string }> = {
   production: {
     baseUrl: "https://api.peridot.id",
@@ -88,32 +87,12 @@ const PRESETS: Record<PeridotEnv, { baseUrl: string; popupBaseUrl: string }> = {
   },
 };
 
-/** Legacy hosts (pre-canonical). Accepted for one release, then removed. */
-export const LEGACY_HOSTS = new Set([
-  "https://api.pid.peridotvault.com",
-  "https://api.sandbox.pid.peridotvault.com",
-  "https://app.pid.peridotvault.com",
-  "https://app.sandbox.pid.peridotvault.com",
-]);
+/** Legacy hosts (pre-canonical). Removed in ANT-400 — kept as an empty set for import compat. */
+export const LEGACY_HOSTS = new Set<string>([]);
 
-/** Warn once per legacy host so existing builds can migrate before removal. */
-const warnedLegacyHosts = new Set<string>();
-export function warnOnLegacyHost(url: string | undefined): void {
-  if (!url || typeof console === "undefined" || typeof console.warn !== "function") return;
-  let origin = "";
-  try {
-    origin = new URL(url).origin;
-  } catch {
-    return;
-  }
-  if (LEGACY_HOSTS.has(origin) && !warnedLegacyHosts.has(origin)) {
-    warnedLegacyHosts.add(origin);
-    console.warn(
-      `[peridot] Deprecated host ${origin} — migrate to the canonical *.peridot.id hosts ` +
-        `(api.peridot.id / sandbox-api.peridot.id, peridot.id / sandbox.peridot.id). ` +
-        `Legacy hosts will be removed after one release.`,
-    );
-  }
+/** No-op since ANT-400 (legacy hosts removed). Kept for import compat. */
+export function warnOnLegacyHost(_url: string | undefined): void {
+  return;
 }
 
 /**

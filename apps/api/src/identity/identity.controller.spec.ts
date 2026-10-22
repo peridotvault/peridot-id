@@ -15,9 +15,9 @@ function setup() {
     get: jest.fn((key: string, def?: string) => {
       const values: Record<string, string> = {
         COOKIE_SECURE: "true",
-        COOKIE_DOMAIN: "pid.peridotvault.com",
+        COOKIE_DOMAIN: "peridot.id",
         COOKIE_SAMESITE: "lax",
-        API_URL: "https://api.pid.peridotvault.com",
+        API_URL: "https://api.peridot.id",
       };
       return values[key] ?? def ?? "";
     }),

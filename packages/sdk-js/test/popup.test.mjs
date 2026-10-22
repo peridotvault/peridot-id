@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const POPUP_ORIGIN = "https://app.pid.peridotvault.com";
+const POPUP_ORIGIN = "https://peridot.id";
 const DAPP_ORIGIN = "https://dapp.example";
 
 function popupMock() {
