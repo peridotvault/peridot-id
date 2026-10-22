@@ -6,7 +6,7 @@ import { prodApiUrlError } from "../vite.check.ts";
 
 describe("prodApiUrlError", () => {
   it("passes https in production and anything unset", () => {
-    assert.equal(prodApiUrlError("https://api.pid.peridotvault.com", "production"), null);
+    assert.equal(prodApiUrlError("https://api.peridot.id", "production"), null);
     assert.equal(prodApiUrlError(undefined, "production"), null);
   });
 

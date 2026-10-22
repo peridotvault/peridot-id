@@ -101,8 +101,8 @@ pnpm dev                      # API on http://localhost:3301, docs on http://loc
   In Mintlify: connect the `peridot-id` repo, set the docs path to
   `apps/docs`, and attach the single custom domain `docs.peridot.id` (no sandbox docs host)
   via CNAME at Hostinger. The legacy
-  Fumadocs site (`apps/docs`) keeps serving the old `pid.peridotvault.com/docs*`
-  paths until cutover; at cutover it lands a redirect old-docs → the Mintlify host.
+  Fumadocs site (`apps/docs`) no longer serves `pid.peridotvault.com/docs*`
+  (old domains are gone at cutover); it lands a redirect old-docs → the Mintlify host.
 
 4. Attach your custom domains and point DNS at Vercel.
 
