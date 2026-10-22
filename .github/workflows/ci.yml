@@ -119,9 +119,16 @@ jobs:
             echo "::error::apps/wallet must not use the popup/hosted flow — see apps/wallet README"
             exit 1
           fi
-          # Canonical prod host is api.pid.peridotvault.com (Vercel peridot-id hosts retired).
-          if rg -n 'peridot-id\.peridotvault\.com' --glob '!node_modules/**' .; then
-            echo "::error::retired peridot-id.peridotvault.com host referenced"
+          # Canonical hosts are peridot.id only (ANT-400 hard cutover): any
+          # retired-host remnant in INFRA-OWNED surfaces fails the build.
+          # Scoped to deploy + image + pipeline files on purpose — app source and
+          # docs are Tyler/Thomas turf (their tickets), and the SDK keeps a
+          # runtime warning-set for the retired hosts. Sole infra exception: the
+          # documented EMAIL_FROM sender note in deploy/README.md (Brevo-verified
+          # sender; migration is a human-gated follow-up — see README).
+          # NOTE: patterns use [.] so this guard never matches its own lines.
+          if rg -n 'peridotvault[.]com' deploy/ Dockerfile.app Dockerfile.dashboard Dockerfile.api docker-compose.yml .github/workflows/ci.yml | rg -v 'no-reply@peridotvault[.]com'; then
+            echo "::error::retired-host remnant in infra surface — ANT-400 hard cutover is peridot.id only"
             exit 1
           fi
 
