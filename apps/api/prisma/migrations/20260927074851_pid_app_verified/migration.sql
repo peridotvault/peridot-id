@@ -1,11 +1,11 @@
 -- DropIndex
-DROP INDEX "fiat_ledger_entries_replaySeq_idx";
+DROP INDEX IF EXISTS "fiat_ledger_entries_replaySeq_idx";
 
 -- DropIndex
-DROP INDEX "fiat_provider_transactions_entryGroup_idx";
+DROP INDEX IF EXISTS "fiat_provider_transactions_entryGroup_idx";
 
 -- DropIndex
-DROP INDEX "fiat_provider_transactions_replaySeq_idx";
+DROP INDEX IF EXISTS "fiat_provider_transactions_replaySeq_idx";
 
 -- AlterTable
 ALTER TABLE "fiat_fee_policies" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMP(3);
