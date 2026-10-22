@@ -15,8 +15,11 @@ import {
   UpdateTaskDto,
   UpsertQuotaDto,
   ReverseXpDto,
+  RollbackPolicyDto,
+  RunBackfillDto,
 } from "./experience-admin.dto";
 import { ExperienceAdminService } from "./experience-admin.service";
+import { PolicyBackfillService } from "./policy-backfill.service";
 
 /**
  * ANT-89 M2 — admin experience API (dashboard-backed).
@@ -30,7 +33,10 @@ import { ExperienceAdminService } from "./experience-admin.service";
 @Controller("v1/admin/experience")
 @UseGuards(JwtAuthGuard, AdminGuard)
 export class ExperienceAdminController {
-  constructor(private readonly xpAdmin: ExperienceAdminService) {}
+  constructor(
+    private readonly xpAdmin: ExperienceAdminService,
+    private readonly backfill: PolicyBackfillService,
+  ) {}
 
   // -- policy versions (R4 flow up to activation) --------------------------
 
@@ -70,6 +76,36 @@ export class ExperienceAdminController {
     @Body() dto: ActivatePolicyDto,
   ) {
     return this.xpAdmin.activatePolicy(user.pid, id, dto);
+  }
+
+  // -- policy migration execution (R4, M3 release-gated) ----------------------
+
+  @Get("policies/:id/backfill/plan")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  planBackfill(@Param("id", ParseUUIDPipe) id: string) {
+    return this.backfill.planBackfill(id);
+  }
+
+  @Post("policies/:id/backfill/run")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  runBackfill(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: RunBackfillDto,
+  ) {
+    return this.backfill.runBackfill(user.pid, id, dto);
+  }
+
+  @Post("policies/rollback")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  rollbackPolicy(@CurrentUser() user: AuthenticatedUser, @Body() dto: RollbackPolicyDto) {
+    return this.backfill.rollbackDraft(user.pid, dto.version);
+  }
+
+  @Get("backfill/verify")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  verifyBackfill() {
+    return this.backfill.verifyBackfill();
   }
 
   // -- tasks CRUD + lifecycle (F8 activation refusal) -----------------------

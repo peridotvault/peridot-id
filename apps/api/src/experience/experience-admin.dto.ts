@@ -335,3 +335,26 @@ export class ReviewSuspiciousDto {
   @IsOptional()
   note?: string;
 }
+
+/** R4 backfill execution page (M3-gated; planning stays read-only). */
+export class RunBackfillDto {
+  @IsString()
+  @MaxLength(128)
+  @IsOptional()
+  cursor?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(5000)
+  @IsOptional()
+  batchSize?: number;
+}
+
+/** R4 rollback preparation: copy a prior version into a fresh draft. */
+export class RollbackPolicyDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  version!: number;
+}
