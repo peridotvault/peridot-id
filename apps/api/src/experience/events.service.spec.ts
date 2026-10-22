@@ -58,6 +58,13 @@ interface FakeTables {
    */
   revokeAfterFirstAppRead: boolean;
   appReads: number;
+  /**
+   * S1 test hook (task half): when true, the task row reads active ONCE
+   * (pre-lock findMany) then disabled — emulates an admin disabling the
+   * task mid-flight between predicate read and post-lock re-verification.
+   */
+  disableTaskAfterFirstTaskRead: boolean;
+  taskReads: number;
 }
 
 const completionKey = (appId: string, eventId: string) => JSON.stringify([appId, eventId]);
@@ -151,11 +158,18 @@ function fakePrisma(tables: FakeTables) {
     xpTask: {
       findMany: async ({ where }: { where: { key: string; status: string } }) => {
         await tick();
+        tables.taskReads++;
         return [...tables.tasks.values()].filter((t) => t.key === where.key && t.status === where.status);
       },
       findUnique: async ({ where }: { where: { id: string } }) => {
         await tick();
-        return tables.tasks.get(where.id) ?? null;
+        const row = tables.tasks.get(where.id) ?? null;
+        // S1 hook: pre-lock read sees the active task; the post-lock
+        // re-verification (findUnique by id) sees the admin disable.
+        if (row && tables.disableTaskAfterFirstTaskRead && ++tables.taskReads > 1) {
+          return { ...row, status: "disabled" };
+        }
+        return row;
       },
     },
     identity: {
@@ -320,7 +334,7 @@ function taskRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<string, unknown>; gate?: boolean; revokeAfterFirstRead?: boolean } = {}) {
+function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<string, unknown>; gate?: boolean; revokeAfterFirstRead?: boolean; disableTaskAfterFirstRead?: boolean } = {}) {
   const tables: FakeTables = {
     apps: new Map([[APP.id, { ...APP, ...(opts.app ?? {}) }]]),
     tasks: new Map(),
@@ -335,6 +349,8 @@ function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<stri
     suspicious: [],
     revokeAfterFirstAppRead: opts.revokeAfterFirstRead ?? false,
     appReads: 0,
+    disableTaskAfterFirstTaskRead: opts.disableTaskAfterFirstRead ?? false,
+    taskReads: 0,
   };
   for (const t of opts.tasks ?? [taskRow()]) tables.tasks.set(String(t.id), t);
   const prisma = fakePrisma(tables);
@@ -437,6 +453,21 @@ describe("EventsService pipeline", () => {
     expect(
       tables.suspicious.some(
         (s) => s.signal === "xp.intake.permission_denied" && (s.detail as { recheck?: boolean }).recheck === true,
+      ),
+    ).toBe(true);
+  });
+
+  it("task disabled mid-flight still blocks THIS award (S1 post-lock task recheck)", async () => {
+    // Pre-lock resolution sees the active task; the admin disable lands
+    // before the post-lock re-verification → zero awards, and the feed
+    // marks the recheck as the blocker.
+    const { service, tables } = setup({ disableTaskAfterFirstRead: true });
+    const r = await service.submitEvent(dtoFor(), { ...AUTHED });
+    expect(r).toMatchObject({ status: "rejected", reason: "no_active_task" });
+    expect(tables.entries).toHaveLength(0);
+    expect(
+      tables.suspicious.some(
+        (s) => s.signal === "xp.intake.checker_drift" && (s.detail as { recheck?: boolean }).recheck === true,
       ),
     ).toBe(true);
   });
