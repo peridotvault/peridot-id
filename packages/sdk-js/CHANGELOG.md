@@ -1,5 +1,22 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.9.0
+
+- **Canonical hosts `*.peridot.id` (ANT-400 hard cutover).** Presets are now
+  `https://api.peridot.id` / `https://sandbox-api.peridot.id` (popup
+  `https://peridot.id` / `https://sandbox.peridot.id`). Legacy
+  `*.pid.peridotvault.com` hosts are removed — update stored URLs. Breaking
+  for anyone still pointing at the old hosts.
+- **Domain-free on-chain activation (ANT-201).** V3 init/activate payload
+  builders no longer carry `rpIdHash` (matches the V3 contracts); frozen
+  V1/V2 builders are untouched.
+- **Sandbox MVP env (ANT-291).** Env switch, demo link, faucet, canonical
+  hosts; `checkEnv()` startup guard against GET /v1/env.
+- **M1 exchange binds `redirectUri` exactly (ANT-226)** — must equal the
+  redirect target the code was issued for.
+- Wallet chain echo + submit chain (ANT-42); devnet e2e mock returns the
+  real smart-account PDA.
+
 ## 1.8.0
 
 - **Popup approval binds to the dapp's account.** `popupRequest()` and every

@@ -1,6 +1,6 @@
 {
   "name": "@peridotvault/pid-evm",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "PeridotID EVM adapter — CREATE2 counterfactual addresses and passkey-account calldata on top of pid-core. No web3.js, no viem; plain JSON-RPC.",
   "license": "MIT",
   "main": "dist/index.js",
