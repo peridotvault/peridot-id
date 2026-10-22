@@ -49,14 +49,14 @@ settings) with no browser session, exchange the client credentials for a
 short-lived bearer token:
 
 ```bash
-curl -X POST https://api.pid.peridotvault.com/v1/auth/token \
+curl -X POST https://api.peridot.id/v1/auth/token \
   -H 'Content-Type: application/json' \
   -d '{"clientId":"pidapp_...","clientSecret":"pidsk_..."}'
 # → { "accessToken": "eyJ...", "expiresIn": "1h" }
 ```
 
 ```ts
-const r = await fetch('https://api.pid.peridotvault.com/v1/fiat/balance', {
+const r = await fetch('https://api.peridot.id/v1/fiat/balance', {
   headers: { Authorization: `Bearer ${accessToken}` },
 });
 // { balanceIdr: "900000", source: "fiat-ledger", ... }
@@ -86,7 +86,7 @@ Set a fee (owner-only) — `percentBps` is basis points (`10` = 0.1%); `minIdr` 
 `maxIdr` clamp the fee (`0` = unbounded):
 
 ```bash
-curl -X PUT https://api.pid.peridotvault.com/v1/apps/<id>/fees/topup \
+curl -X PUT https://api.peridot.id/v1/apps/<id>/fees/topup \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"percentBps":200,"minIdr":"0","maxIdr":"10000","enabled":true}'
 ```

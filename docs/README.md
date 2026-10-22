@@ -11,8 +11,8 @@ user deploys it manually to `docs.peridot.id`) and renders the
 canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 
 - Docs (Mintlify): `https://docs.peridot.id` (old `https://pid.peridotvault.com/docs*`
-  keeps serving until the cutover redirect lands)
-- API (VPS): `https://api.pid.peridotvault.com/v1`
+  redirects to the Mintlify host at cutover)
+- API (VPS): `https://api.peridot.id/v1`
 - Preview locally: `cd apps/docs && mint dev` → `http://localhost:3000`
 - API also serves the raw spec at `GET /v1/openapi.yaml`
 

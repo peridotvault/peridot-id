@@ -63,11 +63,11 @@ popup.
 
 By default the wallet host sends no `frame-ancestors` allowance for
 third-party sites. To enable embeds, the wallet host's security headers
-(Traefik `security-headers@file` middleware on `app.pid.peridotvault.com`) must
+(Traefik `security-headers@file` middleware on `peridot.id`) must
 set:
 
 ```
-Content-Security-Policy: frame-ancestors <your-origin> https://app.pid.peridotvault.com
+Content-Security-Policy: frame-ancestors <your-origin> https://peridot.id
 ```
 
 List only the origins of apps that registered for embedding. Without this, the

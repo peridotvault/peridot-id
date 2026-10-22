@@ -39,8 +39,8 @@ wallet popup for the first-party session.
 
 | Var | Dev default | Prod |
 |---|---|---|
-| `VITE_API_URL` | `http://localhost:3300` | `https://api.pid.peridotvault.com` |
-| `VITE_POPUP_URL` (wallet popup host) | `http://localhost:3302` | `https://app.pid.peridotvault.com` (sandbox: `https://app.sandbox.pid.peridotvault.com`) |
+| `VITE_API_URL` | `http://localhost:3300` | `https://api.peridot.id` |
+| `VITE_POPUP_URL` (wallet popup host) | `http://localhost:3302` | `https://peridot.id` (sandbox: `https://sandbox.peridot.id`) |
 | `VITE_PID_ENV` | unset (derived → `sandbox`) | `production` |
 | `VITE_PID_CLIENT_ID` | unset (loopback needs none) | optional client_id for the `/demo` sample dapp |
 | `VITE_OTHER_WORKSPACE_URL` (env-switch link) | unset | opposite-env dashboard URL |

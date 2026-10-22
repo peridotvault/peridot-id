@@ -33,14 +33,13 @@ apps/docs/
   `packages/openapi/src/openapi.yaml` (no schema change — origins only, if any,
   and those belong to the canonical spec first). Re-sync with:
   `cp packages/openapi/src/openapi.yaml apps/docs/openapi.yaml`.
-- Old hosts are documented as still-serving (dual-serve) wherever a new
-  canonical `peridot.id` host is named. Code samples keep working as-is
-  because the old API hosts stay live.
+- Old `*.peridotvault.com` hosts are gone (hard cutover) — they are not
+  documented and code samples use only the canonical `peridot.id` hosts.
 
-## The cutover (not yet — old docs still serve)
+## The cutover (done — old domains are gone)
 
-Until cutover, `apps/docs` (Fumadocs) keeps serving
-`pid.peridotvault.com/docs*` untouched. At cutover, land a redirect on the
+At cutover, `apps/docs` (Fumadocs) stopped serving
+`pid.peridotvault.com/docs*`. It lands a redirect on the
 old docs service mapping `/docs/*` → the Mintlify host (strip the prefix):
 
 | Old (serves today) | New (Mintlify, after user deploy) |
@@ -52,8 +51,7 @@ old docs service mapping `/docs/*` → the Mintlify host (strip the prefix):
 
 Suggested implementation: `redirects()` in `apps/docs/next.config.mts` gated
 by `NEXT_PUBLIC_MINTLIFY_DOCS_URL` (e.g. `https://docs.peridot.id`), so the
-redirect only activates when the env var is set at build time. Do not enable
-it before Mintlify serves both custom domains.
+redirect only activates when the env var is set at build time.
 
 ## Local preview / validation
 
@@ -70,12 +68,13 @@ the board user clicks deploy/sync in Mintlify (manual).
 
 ## QA handoff (AC-15)
 
-After the user deploys: old docs URLs still serve (same content as before)
-AND new docs URLs serve the same content. Repro:
+After the user deploys: new docs URLs serve the content AND old docs URLs
+redirect to them (hard cutover — old domains are gone). Repro:
 
-1. `GET https://pid.peridotvault.com/docs/getting-started` → 200, contains "Base URLs".
-2. `GET https://docs.peridot.id/getting-started` → 200, same prose.
-3. `GET https://docs.peridot.id/api/overview` → 200; an endpoint page
+1. `GET https://docs.peridot.id/getting-started` → 200, contains "Base URLs".
+2. `GET https://docs.peridot.id/api/overview` → 200; an endpoint page
    generated from `openapi.yaml` (e.g. `POST /v1/auth/login`) renders.
-4. Sandbox pair mirrors prod (`sandbox.pid.peridotvault.com/docs*` vs
-   `docs.peridot.id/*`).
+3. `GET https://pid.peridotvault.com/docs/getting-started` → 301 to
+   `https://docs.peridot.id/getting-started` (no 200 on old hosts).
+4. Sandbox pair: `sandbox.pid.peridotvault.com/docs*` → 301 to
+   `docs.peridot.id/*` (single docs for all envs).

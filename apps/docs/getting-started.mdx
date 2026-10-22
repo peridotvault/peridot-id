@@ -9,8 +9,8 @@ All endpoints are prefixed with `/v1`.
 
 | Environment | Base URL |
 |---|---|
-| Production | `https://api.peridot.id/v1` (canonical; `https://api.pid.peridotvault.com/v1` still serves — dual-serve) |
-| Sandbox | `https://sandbox-api.peridot.id/v1` (canonical; `https://api.sandbox.pid.peridotvault.com/v1` still serves — dual-serve). Separate deployment, not a path prefix — verify with `GET /v1/env`. |
+| Production | `https://api.peridot.id/v1` |
+| Sandbox | `https://sandbox-api.peridot.id/v1`. Separate deployment, not a path prefix — verify with `GET /v1/env`. |
 | Local development | `http://localhost:3301/v1` |
 
 Sandbox has a **faucet** for instant test money (`POST /v1/fiat/test-credit`,
@@ -28,11 +28,11 @@ Almost every endpoint requires an authenticated session. The quickest way to ver
 API is reachable is the login endpoint, which returns the Google sign-in URL:
 
 ```bash
-curl -X POST https://api.pid.peridotvault.com/v1/auth/login
+curl -X POST https://api.peridot.id/v1/auth/login
 ```
 
 ```json
-{ "url": "https://api.pid.peridotvault.com/v1/auth/google" }
+{ "url": "https://api.peridot.id/v1/auth/google" }
 ```
 
 Open `url` in a browser and sign in with Google. You are redirected back with the session
@@ -40,7 +40,7 @@ cookies set. From then on, use a cookie jar for all requests:
 
 ```bash
 # Save the session cookies (browser already set them; for non-browser clients use -c)
-curl -b cookies.txt https://api.pid.peridotvault.com/v1/identity/me
+curl -b cookies.txt https://api.peridot.id/v1/identity/me
 ```
 
 ```json
