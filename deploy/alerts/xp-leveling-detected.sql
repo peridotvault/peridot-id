@@ -5,10 +5,9 @@
 --   suspicious feed    xp_suspicious_activities (signal, reviewed, appId)
 --   quotas             xp_quotas (dailyCap/weeklyCap/monthlyCap per appId)
 --   level distribution user_xp_states (level, totalXp per pid)
---   throttle probe     security_events with eventType IN
---                      ('xp.throttled','xp.rate_limited','throttle.exceeded')
---                      (forward-compatible: M3 intake will emit these per
---                      Tobias F5; pre-intake this probe reads 0 rows = OK)
+--   throttle probe     xp_suspicious_activities with signal =
+--                      'xp.intake.throttled' (written by intake-throttle.filter
+--                      on 429s; pre-intake reads 0 rows = OK)
 --
 -- READ-ONLY: SELECT only. Safe to run against the deployed DB on a schedule.
 -- Run via deploy/alerts/xp-leveling-check.sh (cron every 5 min).
@@ -27,8 +26,9 @@
 --                      (reconciliation invariant; migration-safety tripwire)
 --   Q6 LEVEL-SKEW:    one level holds > 95% of users (min 100)  -> page/notify
 --                      (curve/policy-config bug tripwire)
---   Q7 THROTTLE-SPIKE: > 50 throttle events per 15 min          -> page/notify
---                      (F5 429-spike alert; 0 pre-intake = OK)
+--   Q7 THROTTLE-SPIKE: > 50 throttle-feed rows per 15 min       -> page/notify
+--                      (F5 429-spike; source = suspicious feed signal
+--                      'xp.intake.throttled', 0 pre-intake = OK)
 --
 -- NOTE: rejected/duplicate/retry intake attempts leave no ledger row until
 -- M3 intake ships structured reason codes (Tyler ANT-441). Until then Q3's
@@ -111,8 +111,10 @@ GROUP BY 1
 ORDER BY 1;
 
 -- Q7: throttle/429 probe, last 15 minutes. Alert when count > 50.
--- Pre-intake this reads 0 rows (no emitter yet) — OK by construction.
+-- Source is the SUSPICIOUS FEED (intake-throttle.filter writes
+-- signal='xp.intake.throttled' rows on 429s), NOT security_events (no
+-- emitter there). Pre-intake this reads 0 rows — OK by construction.
 SELECT count(*) AS throttles_15m
-FROM security_events
-WHERE "eventType" IN ('xp.throttled', 'xp.rate_limited', 'throttle.exceeded')
+FROM xp_suspicious_activities
+WHERE signal = 'xp.intake.throttled'
   AND "createdAt" > now() - interval '15 minutes';

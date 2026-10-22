@@ -2,10 +2,9 @@
 # ANT-445: cron-friendly check for XP & leveling alert thresholds (Tobias F5/F7).
 # READ-ONLY against the DB (SELECT only, via xp-leveling-detected.sql).
 #
-# Signals: xp_ledger_entries (awards), xp_suspicious_activities (feed),
-# xp_quotas (caps), user_xp_states (distribution), security_events (throttle
-# probe — forward-compatible, reads 0 rows until M3 intake emits; OK by
-# construction until then).
+# Signals: xp_ledger_entries (awards), xp_suspicious_activities (feed incl.
+# the xp.intake.throttled 429 probe), xp_quotas (caps), user_xp_states
+# (distribution).
 #
 # Usage:
 #   DATABASE_URL=postgresql://... ./xp-leveling-check.sh
@@ -55,8 +54,21 @@ LVL_MIN="${XP_LEVEL_MIN_USERS:-100}"
 SKEW_PCT="${XP_LEVEL_SKEW_PCT:-95}"
 THR_MAX="${XP_THROTTLE_MAX_15M:-50}"
 
+# Tobias C1: thresholds must be non-negative integers. Garbage fails CLOSED
+# (exit 3 config error) — never fail-open into silently-disabled checks.
+for _var in SPIKE CONC_MIN CONC_PCT SUSP_MAX LVL_MIN SKEW_PCT THR_MAX; do
+  if ! [[ "${!_var}" =~ ^[0-9]+$ ]]; then
+    echo "CRITICAL: threshold $_var='${!_var}' is not a non-negative integer (refusing to run half-blind)" >&2
+    exit 3
+  fi
+done
+
 PSQL=(psql "$DATABASE_URL" -X -q -t -A)
 
+# SYNC-PIN (Tobias C2): Q1..Q7 below are the EXECUTED copies of the canonical
+# queries in xp-leveling-detected.sql. Keep them identical when editing either
+# file (same predicates, same windows, same HAVING/LIMIT bounds); the .sql
+# file is the reviewed contract, these strings are what cron runs.
 Q1="SELECT count(*) FROM xp_ledger_entries WHERE kind = 'task_award' AND \"createdAt\" > now() - interval '15 minutes';"
 Q2="SELECT coalesce(\"appId\",'(none)') AS app, count(*) AS n FROM xp_ledger_entries WHERE kind = 'task_award' AND \"createdAt\" > now() - interval '1 hour' GROUP BY 1 ORDER BY 2 DESC;"
 Q3="SELECT count(*) FROM xp_suspicious_activities WHERE reviewed = false AND \"createdAt\" > now() - interval '1 hour';"
@@ -66,7 +78,7 @@ Q5A="SELECT coalesce(sum(\"deltaXp\"), 0) FROM xp_ledger_entries;"
 Q5B="SELECT coalesce(sum(\"totalXp\"), 0) FROM user_xp_states;"
 Q5C="SELECT s.pid FROM (SELECT pid, \"totalXp\" FROM user_xp_states ORDER BY \"updatedAt\" DESC LIMIT 200) s LEFT JOIN (SELECT pid, sum(\"deltaXp\") AS lt FROM xp_ledger_entries WHERE pid IN (SELECT pid FROM user_xp_states ORDER BY \"updatedAt\" DESC LIMIT 200) GROUP BY pid) l ON l.pid = s.pid WHERE coalesce(l.lt, 0) <> s.\"totalXp\" LIMIT 20;"
 Q6="SELECT level AS lvl, count(*) AS n FROM user_xp_states GROUP BY 1 ORDER BY 1;"
-Q7="SELECT count(*) FROM security_events WHERE \"eventType\" IN ('xp.throttled','xp.rate_limited','throttle.exceeded') AND \"createdAt\" > now() - interval '15 minutes';"
+Q7="SELECT count(*) FROM xp_suspicious_activities WHERE signal = 'xp.intake.throttled' AND \"createdAt\" > now() - interval '15 minutes';"
 
 run_q() {
   local out
@@ -173,11 +185,18 @@ else
 fi
 
 echo "$MSG"
+# Tobias C5: python3 is required only for webhook JSON encoding. If absent,
+# skip the webhook (stdout + exit 2 still carry the signal) instead of
+# posting a malformed body.
 if (( ALERT == 1 )) && [[ -n "${ALERT_WEBHOOK_URL:-}" ]]; then
-  curl -fsS -m 10 -X POST "$ALERT_WEBHOOK_URL" \
-    -H 'Content-Type: application/json' \
-    --data "$(printf '{"text": %s}' "$(printf '%s' "$MSG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
-    >/dev/null || echo "WARNING: webhook POST failed (alert still reported via stdout/exit code)" >&2
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "WARNING: python3 not found — skipping webhook POST (alert still reported via stdout/exit code)" >&2
+  else
+    curl -fsS -m 10 -X POST "$ALERT_WEBHOOK_URL" \
+      -H 'Content-Type: application/json' \
+      --data "$(printf '{"text": %s}' "$(printf '%s' "$MSG" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
+      >/dev/null || echo "WARNING: webhook POST failed (alert still reported via stdout/exit code)" >&2
+  fi
 fi
 
 (( ALERT == 1 )) && exit 2

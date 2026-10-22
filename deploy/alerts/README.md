@@ -8,8 +8,8 @@ XP & leveling operability: award volume + single-app concentration,
 unreviewed `xp_suspicious_activities` feed (incl. `xp.self_grant` tripwire),
 per-app 24h awards vs `xp_quotas.dailyCap`, ledger↔state reconciliation
 drift, level-distribution skew, and the throttle/429 probe
-(`xp.throttled`/`xp.rate_limited`/`throttle.exceeded` — forward-compatible,
-reads 0 rows until M3 intake emits; OK by construction until then).
+(suspicious-feed signal `xp.intake.throttled`, written by the intake
+throttle filter on 429s; 0 rows pre-intake = OK).
 
 Thresholds (starting points, env-tunable via `XP_*` vars — tune, don't
 hardcode business caps): Q1 > 500 awards/15m; Q2 top app > 80% of 1h awards
