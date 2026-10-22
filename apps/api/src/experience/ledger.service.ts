@@ -10,13 +10,13 @@ import { PrismaService } from "../prisma/prisma.service";
 import { LevelsService } from "./levels.service";
 import { levelFromXp } from "./xp-curve";
 
-/** Award kinds (M1 writes task_award + manual_adjustment; reversal ships with M2 admin API). */
-export const XP_AWARD_KINDS = ["task_award", "manual_adjustment"] as const;
+/** Award kinds (M1 writes task_award + manual_adjustment; M2 adds reversal as negative entries). */
+export const XP_AWARD_KINDS = ["task_award", "manual_adjustment", "reversal"] as const;
 export type XpAwardKind = (typeof XP_AWARD_KINDS)[number];
 
 export interface AwardXpInput {
   pid: string;
-  /** Positive integer XP (bigint-safe). Reversals are negative entries — M2. */
+  /** Positive integer XP (bigint-safe). Reversals use reverseXp (negative entries) — M2. */
   deltaXp: bigint | number;
   kind: XpAwardKind;
   taskId?: string;
@@ -51,6 +51,28 @@ export interface ReconciliationMismatch {
   pid: string;
   ledgerTotal: bigint;
   stateTotal: bigint | null;
+}
+
+export interface ManualAdjustInput {
+  pid: string;
+  /** Positive integer XP to credit. */
+  deltaXp: bigint | number;
+  /** REQUIRED (F4): empty/whitespace reasons are refused with 400. */
+  reason: string;
+  /** REQUIRED (F4): the acting admin PID (audit actor). */
+  actorAdminId: string;
+}
+
+export interface ReversalInput {
+  pid: string;
+  /** Positive integer XP to debit (stored as a NEW negative ledger entry — W1). */
+  amount: bigint | number;
+  /** REQUIRED (F4): empty/whitespace reasons are refused with 400. */
+  reason: string;
+  /** REQUIRED (F4): the acting admin PID (audit actor). */
+  actorAdminId: string;
+  /** Optional audit link to the original entry being reversed. */
+  originalEntryId?: string;
 }
 
 const MAX_ID_LEN = 128;
@@ -208,6 +230,120 @@ export class LedgerService {
       }
       throw e;
     }
+  }
+
+  /**
+   * M2 admin manual adjustment (F4): positive credit with server-enforced
+   * reason + audit actor. Reason/actor are NOT NULL by API contract — the
+   * columns stay nullable for pre-existing task_award rows (backward-compatible;
+   * only manual_adjustment/reversal kinds require them).
+   */
+  async adjustXp(input: ManualAdjustInput): Promise<AwardXpResult> {
+    const pid = input.pid.trim().toLowerCase();
+    if (!isPid(pid)) throw new BadRequestException("Invalid pid");
+    const delta = toDelta(input.deltaXp);
+    const reason = (input.reason ?? "").trim();
+    if (!reason) throw new BadRequestException("reason is required for manual adjustments");
+    if (reason.length > MAX_REASON_LEN) throw new BadRequestException("reason too long (max 512)");
+    const actor = (input.actorAdminId ?? "").trim();
+    if (!actor) throw new BadRequestException("actorAdminId is required for manual adjustments");
+    const active = await this.levels.getActivePolicy();
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ pid: string }>>(
+        Prisma.sql`SELECT "pid" FROM "user_xp_states" WHERE "pid" = ${pid} FOR UPDATE`,
+      );
+      let state =
+        locked.length > 0
+          ? await tx.userXpState.findUniqueOrThrow({ where: { pid } })
+          : await tx.userXpState.create({
+              data: { pid, totalXp: 0n, level: 1, policyVersionId: active.policy.id },
+            });
+      const prevLevel = state.level;
+      const newTotal = state.totalXp + delta;
+      const newLevel = levelFromXp(newTotal, active.thresholds);
+      await tx.xpLedgerEntry.create({
+        data: {
+          pid,
+          deltaXp: delta,
+          balanceAfter: newTotal,
+          levelAfter: newLevel,
+          kind: "manual_adjustment",
+          reason,
+          actorAdminId: actor,
+          policyVersionId: active.policy.id,
+        },
+      });
+      state = await tx.userXpState.update({
+        where: { pid },
+        data: { totalXp: newTotal, level: newLevel, policyVersionId: active.policy.id },
+      });
+      return {
+        pid,
+        awardedXp: Number(delta),
+        totalXp: state.totalXp,
+        level: state.level,
+        leveledUp: state.level > prevLevel,
+        duplicate: false,
+      };
+    });
+  }
+
+  /**
+   * M2 reversal (waiver W1, F4): a debit recorded as a NEW negative ledger
+   * entry — history is never rewritten. Reason + actor required (400
+   * otherwise); reversals that would drive the balance below zero are
+   * refused with 400. Append-only: no update/delete path exists on
+   * XpLedgerEntry anywhere in this module (locked by test).
+   */
+  async reverseXp(input: ReversalInput): Promise<AwardXpResult> {
+    const pid = input.pid.trim().toLowerCase();
+    if (!isPid(pid)) throw new BadRequestException("Invalid pid");
+    const amount = toDelta(input.amount);
+    const reason = (input.reason ?? "").trim();
+    if (!reason) throw new BadRequestException("reason is required for reversals");
+    if (reason.length > MAX_REASON_LEN) throw new BadRequestException("reason too long (max 512)");
+    const actor = (input.actorAdminId ?? "").trim();
+    if (!actor) throw new BadRequestException("actorAdminId is required for reversals");
+    const active = await this.levels.getActivePolicy();
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ pid: string }>>(
+        Prisma.sql`SELECT "pid" FROM "user_xp_states" WHERE "pid" = ${pid} FOR UPDATE`,
+      );
+      let state =
+        locked.length > 0
+          ? await tx.userXpState.findUniqueOrThrow({ where: { pid } })
+          : await tx.userXpState.create({
+              data: { pid, totalXp: 0n, level: 1, policyVersionId: active.policy.id },
+            });
+      const newTotal = state.totalXp - amount;
+      if (newTotal < 0n) throw new BadRequestException("reversal exceeds balance");
+      const newLevel = levelFromXp(newTotal, active.thresholds);
+      const prevLevel = state.level;
+      await tx.xpLedgerEntry.create({
+        data: {
+          pid,
+          deltaXp: -amount,
+          balanceAfter: newTotal,
+          levelAfter: newLevel,
+          kind: "reversal",
+          reason: input.originalEntryId ? `reversal of ${input.originalEntryId}: ${reason}` : reason,
+          actorAdminId: actor,
+          policyVersionId: active.policy.id,
+        },
+      });
+      state = await tx.userXpState.update({
+        where: { pid },
+        data: { totalXp: newTotal, level: newLevel, policyVersionId: active.policy.id },
+      });
+      return {
+        pid,
+        awardedXp: Number(-amount),
+        totalXp: state.totalXp,
+        level: state.level,
+        leveledUp: false,
+        duplicate: false,
+      };
+    });
   }
 
   /**
