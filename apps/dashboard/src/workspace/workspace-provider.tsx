@@ -118,7 +118,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const isAdmin = role === "admin";
   // Tabs are routes now (?tab= retired): active state follows the pathname.
   const tab =
-    pathname?.startsWith("/contracts") === true
+    pathname?.startsWith("/leveling") === true
+      ? "leveling"
+      : pathname?.startsWith("/contracts") === true
       ? "contracts"
       : pathname?.startsWith("/chains") === true
         ? "chains"
@@ -136,6 +138,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             { key: "contracts", label: "Contracts" },
             { key: "partners", label: "Partners" },
             { key: "fees", label: "Fees" },
+            { key: "leveling", label: "Leveling" },
           ]
         : [{ key: "apps", label: "Apps" }],
     [isAdmin],
