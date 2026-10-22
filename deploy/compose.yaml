@@ -117,6 +117,16 @@ services:
       # fiat_ledger_entries with kind='fiat_issue' and source='faucet' so the
       # faucet-abuse alert (deploy/alerts/) can count them.
       PID_FAUCET_ENABLED: ${PID_FAUCET_ENABLED:-false}
+      # XP & Leveling M3 release gates (ANT-89 Stage 1, board-approved
+      # 2026-10-22): exact-"true" match, fail-closed in code — unset or
+      # anything-but-"true" ⇒ intake 503 / migration 503 with zero ledger
+      # writes. Secrets injected at runtime via Infisical /apps/api (never
+      # baked into the image); these lines are only the container passthrough.
+      # Stage 1: test env sets PID_XP_INTAKE_ENABLED=true; main stays false
+      # and PID_XP_MIGRATION_ENABLED stays false everywhere until separate
+      # board confirmation.
+      PID_XP_INTAKE_ENABLED: ${PID_XP_INTAKE_ENABLED:-false}
+      PID_XP_MIGRATION_ENABLED: ${PID_XP_MIGRATION_ENABLED:-false}
       PID_BOOTSTRAP_ADMIN_PID: ${PID_BOOTSTRAP_ADMIN_PID:-}
       DOKU_WEBHOOK_URL: ${DOKU_WEBHOOK_URL}
       DOKU_CHECKOUT_NOTIFY_URL: ${DOKU_CHECKOUT_NOTIFY_URL:-${DOKU_WEBHOOK_URL}}
