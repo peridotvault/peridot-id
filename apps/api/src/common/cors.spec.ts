@@ -41,6 +41,7 @@ describe("CORS origin policy", () => {
     // Legacy peridotvault hosts are gone (hard cutover).
     expect(isOriginAllowed("https://app.pid.peridotvault.com", origins, apps)).toBe(false);
     expect(isOriginAllowed("https://pid.peridotvault.com", origins, apps)).toBe(false);
+    // AC1-excluded: negative fixture (must stay false)
     // Lookalikes on the new apex are still rejected (exact match, no suffix games).
     expect(isOriginAllowed("https://peridot.id.evil.com", origins, apps)).toBe(false);
     expect(isOriginAllowed("https://evilperidot.id", origins, apps)).toBe(false);
@@ -73,6 +74,7 @@ describe("CORS origin policy", () => {
     ]) {
       expect(live(o)).toBe(false);
     }
+    // AC1-excluded: negative fixture (must stay false)
     // Lookalikes still rejected (exact match, no suffix games).
     expect(live("https://peridot.id.evil.com")).toBe(false);
     expect(live("https://evilperidot.id")).toBe(false);
