@@ -9,6 +9,12 @@ import ContractsPage from "./src/routes/contracts";
 import FeesPage from "./src/routes/fees";
 import PartnersPage from "./src/routes/partners";
 import DemoPage from "./src/routes/demo";
+import LevelingOverviewPage from "./src/routes/leveling-overview";
+import LevelingLevelsPage from "./src/routes/leveling-levels";
+import LevelingTasksPage from "./src/routes/leveling-tasks";
+import LevelingHistoryPage from "./src/routes/leveling-history";
+import LevelingSettingsPage from "./src/routes/leveling-settings";
+import LevelingAppsPage from "./src/routes/leveling-apps";
 
 /**
  * Dashboard shell: session context + topbar around every route.
@@ -37,6 +43,12 @@ export default function App() {
           <Route path="/fees" element={<FeesPage />} />
           <Route path="/partners" element={<PartnersPage />} />
           <Route path="/demo" element={<DemoPage />} />
+          <Route path="/leveling" element={<LevelingOverviewPage />} />
+          <Route path="/leveling/levels" element={<LevelingLevelsPage />} />
+          <Route path="/leveling/tasks" element={<LevelingTasksPage />} />
+          <Route path="/leveling/history" element={<LevelingHistoryPage />} />
+          <Route path="/leveling/settings" element={<LevelingSettingsPage />} />
+          <Route path="/leveling/apps" element={<LevelingAppsPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </WorkspaceProvider>
