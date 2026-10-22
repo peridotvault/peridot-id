@@ -1,5 +1,11 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.9.1
+
+- **`resolvePeridotUrls(env)`.** The canonical API + popup host table the
+  client uses, exported for server-to-server backends (no browser SDK):
+  `resolvePeridotUrls("sandbox").baseUrl`. Additive — nothing else changed.
+
 ## 1.9.0
 
 - **Canonical hosts `*.peridot.id` (ANT-400 hard cutover).** Presets are now
