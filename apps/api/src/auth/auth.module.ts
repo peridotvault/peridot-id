@@ -44,6 +44,6 @@ import { SsoService } from "./sso.service";
       inject: [GOOGLE_OAUTH_OPTIONS, AuthService],
     },
   ],
-  exports: [AuthService, SsoService],
+  exports: [AuthService, SsoService, PidAppsService],
 })
 export class AuthModule {}

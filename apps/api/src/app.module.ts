@@ -8,6 +8,7 @@ import { AuthModule } from "./auth/auth.module";
 import { CredentialModule } from "./credentials/credential.module";
 import { EnvModule } from "./env/env.module";
 import { ExperienceModule } from "./experience/experience.module";
+import { XP_INTAKE_APP_PID_THROTTLER, XP_INTAKE_APP_THROTTLER, xpIntakeAppPidTracker, xpIntakeAppTracker } from "./experience/rate-limit";
 import { FiatModule } from "./fiat/fiat.module";
 import { IdentityModule } from "./identity/identity.module";
 import { IntentModule } from "./intent/intent.module";
@@ -23,7 +24,14 @@ import { HealthModule } from "./health/health.module";
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{ name: "default", ttl: 60000, limit: 100 }]),
+    // ANT-441 M3 (Tobias F5): intake inner tiers below the global default —
+    // per-app (60/min) and per-app+subject (30/min), keyed by rate-limit.ts
+    // trackers (client_id from the body, IP fallback when absent).
+    ThrottlerModule.forRoot([
+      { name: "default", ttl: 60000, limit: 100 },
+      { ...XP_INTAKE_APP_THROTTLER, getTracker: xpIntakeAppTracker },
+      { ...XP_INTAKE_APP_PID_THROTTLER, getTracker: xpIntakeAppPidTracker },
+    ]),
     PrismaModule,
     HealthModule,
     AuthModule,
