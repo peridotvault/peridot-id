@@ -4,7 +4,7 @@ import { maskEmail } from "../../common/redact";
 
 const BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email";
 const SEND_TIMEOUT_MS = 10_000;
-const EMAIL_FROM = "no-reply@peridotvault.com";
+const EMAIL_FROM = "no-reply@peridot.id";
 const EMAIL_FROM_NAME = "PeridotID";
 
 /**

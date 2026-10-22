@@ -25,9 +25,9 @@ import {
 function configMock(overrides: Record<string, string> = {}) {
   const values: Record<string, string> = {
     COOKIE_SECURE: "true",
-    COOKIE_DOMAIN: "pid.peridotvault.com",
+    COOKIE_DOMAIN: "peridot.id",
     COOKIE_SAMESITE: "lax",
-    API_URL: "https://api.pid.peridotvault.com",
+    API_URL: "https://api.peridot.id",
     ...overrides,
   };
   return { get: jest.fn((key: string, def?: string) => values[key] ?? def ?? "") } as never;
@@ -60,13 +60,13 @@ describe("cookies clear-mirror-set (M5)", () => {
 
     const setAccess = setOpts(res, ACCESS_COOKIE);
     const clearAccess = clearOpts(res, ACCESS_COOKIE);
-    expect(clearAccess).toEqual({ httpOnly: true, sameSite: "lax", secure: true, domain: "pid.peridotvault.com", path: "/" });
+    expect(clearAccess).toEqual({ httpOnly: true, sameSite: "lax", secure: true, domain: "peridot.id", path: "/" });
     expect(clearAccess).toMatchObject({ httpOnly: setAccess.httpOnly, sameSite: setAccess.sameSite, secure: setAccess.secure, domain: setAccess.domain });
     expect(clearAccess.path).toBe(setAccess.path);
 
     const setRefresh = setOpts(res, REFRESH_COOKIE);
     const clearRefresh = clearOpts(res, REFRESH_COOKIE);
-    expect(clearRefresh).toEqual({ httpOnly: true, sameSite: "lax", secure: true, domain: "pid.peridotvault.com", path: "/v1/auth" });
+    expect(clearRefresh).toEqual({ httpOnly: true, sameSite: "lax", secure: true, domain: "peridot.id", path: "/v1/auth" });
     expect(clearRefresh.path).toBe(setRefresh.path);
   });
 
@@ -77,7 +77,7 @@ describe("cookies clear-mirror-set (M5)", () => {
     clearScopedAuthCookies(res as never, config, "web");
 
     expect(clearOpts(res, scopeAccessCookie("web"))).toEqual(
-      expect.objectContaining({ httpOnly: true, sameSite: "lax", secure: true, domain: "pid.peridotvault.com", path: "/" }),
+      expect.objectContaining({ httpOnly: true, sameSite: "lax", secure: true, domain: "peridot.id", path: "/" }),
     );
     expect(clearOpts(res, scopeRefreshCookie("web"))).toEqual(
       expect.objectContaining({ httpOnly: true, path: "/v1/auth" }),
@@ -91,7 +91,7 @@ describe("cookies clear-mirror-set (M5)", () => {
     clearAccountRefreshCookie(res as never, config, "ifal@pid");
     const name = accountRefreshCookieName("ifal@pid");
     expect(clearOpts(res, name)).toEqual(
-      expect.objectContaining({ httpOnly: true, sameSite: "lax", secure: true, domain: "pid.peridotvault.com", path: "/v1/auth" }),
+      expect.objectContaining({ httpOnly: true, sameSite: "lax", secure: true, domain: "peridot.id", path: "/v1/auth" }),
     );
 
     setClaimCookie(res as never, config, "ct_x");

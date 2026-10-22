@@ -53,7 +53,7 @@ allowed origins first — login codes are only issued to registered origins.
 ## Deployment
 
 The wallet host must allow the frame via `Content-Security-Policy:
-frame-ancestors <your-origin>` (set on `app.pid.peridotvault.com`). See the
+frame-ancestors <your-origin>` (set on `peridot.id`). See the
 PeridotID docs "Embed the wallet".
 
 ## Notes

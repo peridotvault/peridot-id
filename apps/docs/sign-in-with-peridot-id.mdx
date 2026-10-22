@@ -98,7 +98,7 @@ store the bearer server-side, then mint your app's own session:
 
 ```ts
 // your backend: verify the code against PeridotID, then create your session
-const r = await fetch('https://api.pid.peridotvault.com/v1/auth/exchange', {
+const r = await fetch('https://api.peridot.id/v1/auth/exchange', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ code, clientId: 'pidapp_...' }),

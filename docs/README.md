@@ -12,7 +12,7 @@ canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
 
 - Docs (Mintlify): `https://docs.peridot.id` (the legacy
   `pid.peridotvault.com/docs*` paths are dead — no redirect, update bookmarks)
-- API (VPS): `https://api.pid.peridotvault.com/v1`
+- API (VPS): `https://api.peridot.id/v1`
 - Preview locally: `cd apps/docs && mint dev` → `http://localhost:3000`
 - API also serves the raw spec at `GET /v1/openapi.yaml`
 
