@@ -32,7 +32,7 @@ COPY . .
 
 # Vite inlines VITE_* at build time — bake in the API URL the browser calls.
 ARG VITE_API_URL
-ENV VITE_API_URL=${VITE_API_URL:-https://api.pid.peridotvault.com}
+ENV VITE_API_URL=${VITE_API_URL:-https://api.peridot.id}
 
 RUN pnpm --filter @peridotvault/pid-types build
 RUN pnpm --filter @peridotvault/pid-core build
@@ -67,7 +67,7 @@ server {
     # trust-critical action escapes to a top-level PeridotID popup (address bar
     # visible). Tightening framing to a per-app allowlist needs a dynamic
     # header (Trevor/nginx + API) — tracked as follow-up.
-    add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self' https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.pid.peridotvault.com https://api.peridot.id https:; upgrade-insecure-requests" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self' https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.peridot.id https:; upgrade-insecure-requests" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
@@ -84,7 +84,7 @@ server {
     location /assets/ {
         expires 1y;
         add_header Cache-Control "public, immutable" always;
-        add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self' https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.pid.peridotvault.com https://api.peridot.id https:; upgrade-insecure-requests" always;
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'self' https:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.peridot.id https:; upgrade-insecure-requests" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
         add_header X-Content-Type-Options "nosniff" always;

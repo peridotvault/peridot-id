@@ -4,23 +4,23 @@
 # external `proxy` network, exposes internal ports only, owns its Traefik labels,
 # healthchecks, stdout logging. No infra repo changes required.
 #
-# Domains (dual-serve since ANT-99/ANT-116 — old hosts stay live, never removed here):
+# Domains (peridot.id hard cutover — ANT-400/ANT-405, single canonical host per service):
 #   main stack (up.sh main):
-#     API    api.pid.peridotvault.com + api.peridot.id          → nest  :3301
-#     wallet app.pid.peridotvault.com (+ peridot.id, frontend)  → nginx :3000
-#     docs   Mintlify-hosted (docs.peridot.id) — no VPS service since ANT-124:
-#            apps/docs is the Mintlify source (board user deploys manually).
-#            The old pid.peridotvault.com docs container keeps running until the
-#            next up.sh run removes it — sequence Mintlify-live BEFORE that.
-#   test stack (up.sh test, ENV_SUFFIX=sandbox., NEW_API_HOST=sandbox-api.peridot.id):
-#     API    api.sandbox.pid.peridotvault.com + sandbox-api.peridot.id → nest :3301
-#     (wallet new host is frontend turf — ANT-117; DevOps DNS/TLS — ANT-118;
-#      docs stay on the single Mintlify host docs.peridot.id (no sandbox docs host)
+#     API       api.peridot.id                 → nest  :3301
+#     wallet    peridot.id                     → nginx :3000
+#     dashboard dashboard.peridot.id           → nginx :3001
+#     docs      Mintlify-hosted (docs.peridot.id) — no VPS service since ANT-124:
+#               apps/docs is the Mintlify source (board user deploys manually).
+#   test stack (up.sh test, NEW_API_HOST=sandbox-api.peridot.id):
+#     API       sandbox-api.peridot.id         → nest  :3301
+#     wallet    sandbox.peridot.id             → nginx :3000
+#     dashboard sandbox-dashboard.peridot.id   → nginx :3001
+#     docs      single Mintlify host docs.peridot.id (no sandbox docs host)
 #
 # main: cp deploy/.env.main.example deploy/.env.main && ./deploy/up.sh main
 #
 # ADR-0006: one VPS runs main + test behind a single Traefik; separation is by
-# hostname (ENV_SUFFIX), router namespace, and compose project name (up.sh).
+# hostname (NEW_*_HOST vars), router namespace, and compose project name (up.sh).
 
 name: peridot-id
 
@@ -71,13 +71,11 @@ services:
       # COOKIE_SECURE derives from the API_URL protocol (https → true in every
       # deployed env). Override only for the http-API-behind-https-proxy edge.
       COOKIE_SECURE: ${COOKIE_SECURE:-}
-      # Dual-serve (ANT-116): host-only cookies (no Domain attribute) are scoped to
-      # the responding API host, so the SAME stack serves old (*.peridotvault.com)
-      # and new (*.peridot.id) origins without a Domain suffix that browsers would
-      # reject on the apex they don't belong to. A `Domain=.peridotvault.com` cookie
-      # set from api.peridot.id is silently dropped — sessions would break there.
-      # Pin per-env explicitly in Infisical /apps/api when cross-subdomain
-      # visibility is ever needed; keep empty for dual-serve.
+      # Host-only cookies (no Domain attribute) are scoped to the responding API
+      # host. A `Domain=` suffix set from a host it doesn't belong to is silently
+      # dropped by browsers — sessions would break there. Pin per-env explicitly
+      # in Infisical /apps/api only when cross-subdomain visibility is ever
+      # needed; keep empty otherwise.
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
       # ONE service-URL set (ANT-193): CORS, WebAuthn origins, wallet landing
@@ -130,22 +128,13 @@ services:
       start_period: 20s
     labels:
       - "traefik.enable=true"
-      # Dual-serve (ANT-116): old host stays first (existing integrations unaffected);
-      # NEW_API_HOST (up.sh: api.peridot.id / sandbox-api.peridot.id) serves alongside.
-      - "traefik.http.routers.pid-api${NAMESPACE}.rule=Host(`api.${ENV_SUFFIX}pid.peridotvault.com`) || Host(`${NEW_API_HOST:-api.peridot.id}`)"
+      # Canonical host only (ANT-405 hard cutover):
+      # NEW_API_HOST (up.sh: api.peridot.id / sandbox-api.peridot.id).
+      - "traefik.http.routers.pid-api${NAMESPACE}.rule=Host(`${NEW_API_HOST:-api.peridot.id}`)"
       - "traefik.http.routers.pid-api${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.pid-api${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.pid-api${NAMESPACE}.loadbalancer.server.port=3301"
-
-  # Cutover redirect (ANT-136/ANT-137, board order 2026-10-19): old docs URLs
-  # pid.peridotvault.com/docs* 301 → Mintlify host (NEW_DOCS_HOST).
-  # No VPS docs image to run — the redirect middleware answers before any
-  # backend is hit, so the router reuses the existing app service as its
-  # backend (zero new images, zero new ports). Next up.sh --remove-orphans
-  # drops the stale pre-migration docs container; this router is what keeps
-  # old links alive afterwards. Sequencing: run up.sh only after Mintlify
-  # serves docs.peridot.id (single docs host for both stacks).
 
   app:
     build:
@@ -170,34 +159,13 @@ services:
       start_period: 10s
     labels:
       - "traefik.enable=true"
-      # Dual-serve (ANT-118): wallet keeps the old app.* host and additionally
-      # answers on the apex (NEW_WALLET_HOST: peridot.id / sandbox.peridot.id).
-      # Same nginx build serves both — no redirect chain, old links keep working.
-      - "traefik.http.routers.app${NAMESPACE}.rule=Host(`app.${ENV_SUFFIX}pid.peridotvault.com`) || Host(`${NEW_WALLET_HOST:-peridot.id}`)"
+      # Canonical wallet host only (ANT-405 hard cutover):
+      # NEW_WALLET_HOST (up.sh: peridot.id / sandbox.peridot.id).
+      - "traefik.http.routers.app${NAMESPACE}.rule=Host(`${NEW_WALLET_HOST:-peridot.id}`)"
       - "traefik.http.routers.app${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.app${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.app${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.app${NAMESPACE}.loadbalancer.server.port=3000"
-      # Cutover redirect ANT-137: old docs path → Mintlify. Router matches only
-      # the old apex + /docs prefix; redirect middleware answers 301 before the
-      # app backend is ever hit (backend is a formality — Traefik requires one).
-      # Order matters: api-specific rule first, generic strip second.
-      # Blast radius: old apex /docs* only; wallet/API/dashboard routers untouched.
-      # Rollback: `git revert` this block + `./deploy/up.sh <env>` restores
-      # pre-cutover routing (old container gone → /docs 404s instead).
-      - "traefik.http.routers.pid-docs${NAMESPACE}.rule=Host(`${ENV_SUFFIX}pid.peridotvault.com`) && PathPrefix(`/docs`)"
-      - "traefik.http.routers.pid-docs${NAMESPACE}.priority=100"
-      - "traefik.http.routers.pid-docs${NAMESPACE}.entrypoints=websecure"
-      - "traefik.http.routers.pid-docs${NAMESPACE}.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.pid-docs${NAMESPACE}.middlewares=security-headers@file,pid-docs-api-redirect${NAMESPACE}@docker,pid-docs-redirect${NAMESPACE}@docker"
-      # /docs/api* → /api/overview (Mintlify page moved; plain prefix-strip would 404).
-      - "traefik.http.middlewares.pid-docs-api-redirect${NAMESPACE}.redirectregex.regex=^https://[^/]+/docs/api(?:/(.*))?"
-      - "traefik.http.middlewares.pid-docs-api-redirect${NAMESPACE}.redirectregex.replacement=https://${NEW_DOCS_HOST:-docs.peridot.id}/api/overview"
-      - "traefik.http.middlewares.pid-docs-api-redirect${NAMESPACE}.redirectregex.permanent=true"
-      # /docs → / and /docs/<sub> → /<sub> (strip prefix, preserve sub-path).
-      - "traefik.http.middlewares.pid-docs-redirect${NAMESPACE}.redirectregex.regex=^https://[^/]+/docs(?:/(.*))?"
-      - "traefik.http.middlewares.pid-docs-redirect${NAMESPACE}.redirectregex.replacement=https://${NEW_DOCS_HOST:-docs.peridot.id}/$${1}"
-      - "traefik.http.middlewares.pid-docs-redirect${NAMESPACE}.redirectregex.permanent=true"
 
   dashboard:
     build:
