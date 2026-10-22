@@ -25,8 +25,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'}));require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test test/embed.test.mjs",
-    "prepack": "npm run build"
+    "test": "node --test test/embed.test.mjs test/level-badge.test.mjs",
+    "prepack": "npm run build",
+    "pretest": "npm run build"
   },
   "peerDependencies": {
     "react": ">=18"
@@ -36,6 +37,7 @@
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "react-dom": "19.2.8"
   }
 }

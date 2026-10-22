@@ -9,6 +9,7 @@ import type {
   ExchangeResult,
   Identity,
   IdentityCredential,
+  LevelSummary,
   LoginResponse,
   Profile,
   ProfileUpdate,
@@ -21,6 +22,7 @@ import type {
 } from "@peridotvault/pid-types";
 import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client.js";
 import { PeridotFiat } from "./fiat/fiat-client.js";
+import { PeridotLevel } from "./level.js";
 import { authenticatePasskey, registerPasskey, BrowserPasskeySigner, PasskeyHostedRequiredError } from "@peridotvault/pid-core";
 import type { PasskeySigner } from "@peridotvault/pid-core";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
@@ -48,6 +50,7 @@ export {
   type TestCreditView,
 } from "./fiat/fiat-client.js";
 export type { ActivationView, ActivationStatus } from "./wallet/wallet-client.js";
+export { PeridotLevel } from "./level.js";
 export { authenticatePasskey, BrowserPasskeySigner, PasskeyHostedRequiredError, registerPasskey } from "@peridotvault/pid-core";
 export type { PasskeySigner } from "@peridotvault/pid-core";
 export {
@@ -598,6 +601,7 @@ class PeridotClient {
   readonly wallet: PeridotWallet;
   readonly fiat: PeridotFiat;
   readonly admin: PeridotAdmin;
+  readonly level: PeridotLevel;
 
   private readonly appOptions: { clientId?: string; clientSecret?: string };
 
@@ -617,6 +621,7 @@ class PeridotClient {
     this.wallet = new PeridotWallet(this, walletOptions);
     this.fiat = new PeridotFiat(this, appOptions.clientId);
     this.admin = new PeridotAdmin(this);
+    this.level = new PeridotLevel(this);
   }
 
   /** Registered app id applied by default (login/exchange/fiat). */
@@ -754,6 +759,7 @@ export type {
   ExchangeResult,
   Identity,
   IdentityCredential,
+  LevelSummary,
   Profile,
   ProfileUpdate,
   Role,
