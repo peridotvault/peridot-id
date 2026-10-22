@@ -82,6 +82,14 @@ model Identity {
   fiatProviderAccounts     FiatProviderAccount[]
   fiatProviderTransactions FiatProviderTransaction[]
   fiatLedgerEntries    FiatLedgerEntry[]
+  // XP & Leveling (ANT-89 M1): derived state + append-only XP journal.
+  // Unlike money, XP is non-financial reputation — pid FKs below Cascade so
+  // account deletion cleans XP rows instead of blocking it (fiat Restricts).
+  xpState            UserXpState?
+  xpLedgerEntries    XpLedgerEntry[]
+  xpTaskCompletions  XpTaskCompletion[]
+  xpSuspiciousEvents XpSuspiciousActivity[]
+  xpOrgQuota         XpOrgQuota?
 
   @@map("identities")
 }
@@ -722,10 +730,18 @@ model PidApp {
   // ledger posts signed events here (X-Pid-Signature). See docs/FIAT_LEDGER.md.
   webhookUrl            String?
   webhookSecret         String?
+  // XP & Leveling (ANT-89 M1): per-app XP permission. Verification alone
+  // grants nothing — event intake (M3) requires isVerified AND xpEnabled AND
+  // an approved event type. Admin-only writes (Role.admin); dev self-approval
+  // is impossible. Read API is open to all authorized apps incl. unverified.
+  xpEnabled           Boolean  @default(false)
+  approvedEventTypes  String[] @default([])
   createdAt             DateTime @db.Timestamptz(3)  @default(now())
   updatedAt             DateTime @db.Timestamptz(3)  @updatedAt
 
   fees PidAppFee[]
+  xpQuota XpQuota?
+  scopedTasks XpTask[]
 
   @@index([ownerPid])
   @@map("pid_apps")
@@ -782,4 +798,197 @@ model BootstrapAdminLock {
   createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@map("bootstrap_admin_locks")
+}
+
+// ---------------------------------------------------------------------------
+// XP & Leveling (ANT-89 M1). Centralized PeridotID authority: PeridotID alone
+// awards XP (M3 intake), all authorized apps read Level. The XP journal is
+// independent of the financial ledger. All Timestamptz(3) (ANT-317).
+//
+// Invariants (see plan rev 4, R1/R2/R4):
+// - Ledger XP totals are NEVER rewritten — only the level mapping changes
+//   across policy versions (UserXpState.policyVersionId stamps the computer).
+// - XpTaskCompletion uniqueness is eventId ONLY (no unique on
+//   (taskId,pid,periodKey)); one-time tasks use partial unique indexes
+//   declared in raw SQL in the M1 migration (Prisma cannot express them).
+// - Exactly one active policy version (partial unique index in migration).
+// ---------------------------------------------------------------------------
+
+model XpPolicyVersion {
+  id           String    @id @default(uuid())
+  version      Int       @unique
+  // { base: 100, exponent: 1.5, rounding: "floor" } — default formula
+  // xpToAdvance(L) = floor(base * L^exponent). R5 locks this as default.
+  formula      Json
+  // Nullable: NULL = uncapped. Default 100.
+  maxLevel     Int?      @default(100)
+  createdBy    String
+  createdAt    DateTime  @db.Timestamptz(3) @default(now())
+  activatedAt  DateTime? @db.Timestamptz(3)
+  supersededAt DateTime? @db.Timestamptz(3)
+
+  thresholds XpLevelThreshold[]
+  states     UserXpState[]
+  entries    XpLedgerEntry[]
+
+  @@map("xp_policy_versions")
+}
+
+model XpLevelThreshold {
+  policyVersionId String
+  policy          XpPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Cascade)
+  // Level this cumulative XP attains (level 1 starts at 0).
+  level           Int
+  cumulativeXp    BigInt
+
+  @@id([policyVersionId, level])
+  @@map("xp_level_thresholds")
+}
+
+model UserXpState {
+  // One row per PID; backfilled lazily on first read (genesis L1 / 0 XP).
+  pid             String          @id
+  identity        Identity        @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  totalXp         BigInt          @default(0)
+  level           Int             @default(1)
+  policyVersionId String
+  policy          XpPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  updatedAt       DateTime        @db.Timestamptz(3) @updatedAt
+
+  @@map("user_xp_states")
+}
+
+model XpTask {
+  id          String  @id @default(uuid())
+  key         String  @unique
+  name        String
+  description String?
+  xpReward    Int
+  // once | daily | weekly | monthly | unlimited
+  recurring   String  @default("once")
+  lifetimeLimit Int?
+  dailyLimit    Int?
+  weeklyLimit   Int?
+  monthlyLimit  Int?
+  cooldownSecs  Int?
+  availableFrom  DateTime? @db.Timestamptz(3)
+  availableUntil DateTime? @db.Timestamptz(3)
+  // draft | active | disabled | archived
+  status      String  @default("draft")
+  // Verification checker (R3): internal_state (PeridotID-observed rows) or
+  // backend_check (validated against PeridotID-owned records). Tasks without
+  // a reliable checker cannot be activated (enforced in admin API, M2).
+  verificationType    String  @default("internal_state")
+  verificationChecker String?
+  // NULL = ecosystem-wide; otherwise scoped to one app.
+  scopeAppId  String?
+  scopeApp    PidApp? @relation(fields: [scopeAppId], references: [id], onDelete: SetNull)
+  createdBy   String
+  createdAt   DateTime @db.Timestamptz(3) @default(now())
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
+
+  completions XpTaskCompletion[]
+  ledgerEntries XpLedgerEntry[]
+
+  @@index([status])
+  @@index([scopeAppId])
+  @@map("xp_tasks")
+}
+
+model XpTaskCompletion {
+  id             String   @id @default(uuid())
+  pid            String
+  identity       Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  taskId         String
+  task           XpTask   @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  // Accounting window label (e.g. "2026-10-22" / "2026-W43"), NOT a
+  // uniqueness key — repeatable tasks keep many valid completions per period
+  // up to configured caps (enforced by COUNT in the award transaction, R1).
+  periodKey      String
+  // Idempotency key: the ONLY uniqueness constraint on this table (R1).
+  // Denormalized once-flag + resource id for the partial one-time unique
+  // indexes declared in raw SQL in the M1 migration:
+  //   (taskId, pid) WHERE isOnce AND resourceId IS NULL
+  //   (taskId, pid, resourceId) WHERE isOnce AND resourceId IS NOT NULL
+  eventId        String   @unique
+  isOnce         Boolean  @default(false)
+  resourceId     String?
+  awardedEntryId String?  @unique
+  awardedEntry   XpLedgerEntry? @relation("CompletionAward", fields: [awardedEntryId], references: [id], onDelete: SetNull)
+  createdAt      DateTime @db.Timestamptz(3) @default(now())
+
+  @@index([pid])
+  @@index([taskId, pid])
+  @@map("xp_task_completions")
+}
+
+model XpLedgerEntry {
+  id            String   @id @default(uuid())
+  pid           String
+  identity      Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  deltaXp       BigInt
+  balanceAfter  BigInt
+  levelAfter    Int
+  // task_award | manual_adjustment | reversal
+  kind          String
+  taskId        String?
+  task          XpTask?  @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  // Per-app idempotency key (informational here; enforced unique on
+  // XpTaskCompletion.eventId).
+  eventId       String?
+  appId         String?
+  reason        String?
+  actorAdminId  String?
+  policyVersionId String
+  policy          XpPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  createdAt     DateTime @db.Timestamptz(3) @default(now())
+
+  completion XpTaskCompletion? @relation("CompletionAward")
+
+  @@index([pid, createdAt])
+  @@index([eventId])
+  @@map("xp_ledger_entries")
+}
+
+// Per-app award caps (M3 enforcement; admin-configured, never hardcoded).
+model XpQuota {
+  appId         String  // FK to PidApp.id; also the PK (one row per app).
+  app           PidApp  @relation(fields: [appId], references: [id], onDelete: Cascade)
+  dailyCap      Int?
+  weeklyCap     Int?
+  monthlyCap    Int?
+  suspended     Boolean @default(false)
+  suspendReason String?
+  updatedAt     DateTime @db.Timestamptz(3) @updatedAt
+
+  @@id([appId])
+  @@map("xp_quotas")
+}
+
+// Organization-level cap: aggregate across all apps of one developer org,
+// keyed by PidApp.ownerPid (R2 lock order: state → quota → org quota).
+model XpOrgQuota {
+  ownerPid    String   // FK to Identity.pid (the app owner's PID); also the PK.
+  owner       Identity @relation(fields: [ownerPid], references: [pid], onDelete: Cascade)
+  dailyCap    Int?
+  weeklyCap   Int?
+  monthlyCap  Int?
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
+
+  @@id([ownerPid])
+  @@map("xp_org_quotas")
+}
+
+model XpSuspiciousActivity {
+  id        String   @id @default(uuid())
+  pid       String?
+  identity  Identity? @relation(fields: [pid], references: [pid], onDelete: SetNull)
+  appId     String?
+  signal    String
+  detail    Json?
+  reviewed  Boolean  @default(false)
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+
+  @@index([reviewed, createdAt])
+  @@map("xp_suspicious_activities")
 }
