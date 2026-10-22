@@ -10,7 +10,8 @@ info:
 
     | Environment | Base URL |
     |---|---|
-    | Production | `https://api.pid.peridotvault.com/v1` |
+    | Production | `https://api.peridot.id/v1` |
+    | Sandbox | `https://sandbox-api.peridot.id/v1` |
     | Local dev | `http://localhost:3300/v1` |
 
     ## Authentication
@@ -30,8 +31,10 @@ info:
     url: https://opensource.org/licenses/MIT
 
 servers:
-  - url: https://api.pid.peridotvault.com/v1
+  - url: https://api.peridot.id/v1
     description: Production
+  - url: https://sandbox-api.peridot.id/v1
+    description: Sandbox
   - url: http://localhost:3300/v1
     description: Local development
 
