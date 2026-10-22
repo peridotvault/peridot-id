@@ -267,15 +267,8 @@ curl -sk https://sandbox-api.peridot.id/v1/health # {"status":"ok"} (sandbox VPS
 ```
 
 Retired-host expectation (after DNS withdrawal — connection refused / NXDOMAIN):
-
-```sh
-for h in peridot.id api.peridot.id dashboard.peridot.id \
-         sandbox.peridot.id sandbox-api.peridot.id \
-         sandbox-dashboard.peridot.id; do
-  curl -sk -o /dev/null -w "$h %{http_code}\n" --max-time 10 https://$h/
-done
-# every line above must print 200; the retired names must NOT resolve.
-```
+see `docs/RETIRED_HOSTS.md` for the verify loop (kept out of `deploy/` so the
+CI retired-host guard stays green — infra surfaces must stay host-free).
 
 ### What this stack change does (and does not do)
 

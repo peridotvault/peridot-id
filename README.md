@@ -75,8 +75,8 @@ const rows = await peridot.wallet.createAccount(); // wallet chain rows
 
 - [Docs site](https://docs.peridot.id) — getting started, authentication flow,
   API reference (generated from the OpenAPI spec), SDK guide, self-hosting/deployment.
-  (Mintlify-hosted; source in `apps/docs`. Legacy docs URLs redirect here
-  following the peridot.id domain cutover.)
+  (Mintlify-hosted; source in `apps/docs`. Legacy `pid.peridotvault.com/docs*`
+  paths are dead and do not redirect — update bookmarks to `docs.peridot.id`.)
 - `docs/` — product spec (PRD_v5), architecture, database, security, roadmap, ADRs.
 - `AGENTS.md` — agent run book (naming, environment, login split, verification).
 
