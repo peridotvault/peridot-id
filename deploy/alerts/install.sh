@@ -27,6 +27,7 @@ RUNNER="$SCRIPT_DIR/run-with-infisical.sh"
 ENTRIES=$(cat <<EOF
 */5 * * * *  ALERT_ENV=$ALERT_ENV $RUNNER $ENV refresh-reuse-check.sh #peridot-alert
 */15 * * * *  ALERT_ENV=$ALERT_ENV $RUNNER $ENV faucet-abuse-check.sh #peridot-alert
+*/5 * * * *  ALERT_ENV=$ALERT_ENV $RUNNER $ENV xp-leveling-check.sh #peridot-alert
 EOF
 )
 
