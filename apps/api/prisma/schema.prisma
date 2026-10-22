@@ -808,9 +808,10 @@ model BootstrapAdminLock {
 // Invariants (see plan rev 4, R1/R2/R4):
 // - Ledger XP totals are NEVER rewritten — only the level mapping changes
 //   across policy versions (UserXpState.policyVersionId stamps the computer).
-// - XpTaskCompletion uniqueness is eventId ONLY (no unique on
-//   (taskId,pid,periodKey)); one-time tasks use partial unique indexes
-//   declared in raw SQL in the M1 migration (Prisma cannot express them).
+// - XpTaskCompletion uniqueness is composite (appId, eventId) (ANT-430 C1;
+//   plan rev 5 §13 supersedes rev-4 R1): no unique on (taskId,pid,periodKey);
+//   one-time tasks use partial unique indexes declared in raw SQL in the M1
+//   migration (Prisma cannot express them).
 // - Exactly one active policy version (partial unique index in migration).
 // ---------------------------------------------------------------------------
 
@@ -905,18 +906,22 @@ model XpTaskCompletion {
   // uniqueness key — repeatable tasks keep many valid completions per period
   // up to configured caps (enforced by COUNT in the award transaction, R1).
   periodKey      String
-  // Idempotency key: the ONLY uniqueness constraint on this table (R1).
+  // Idempotency key, scoped per app (ANT-430 C1 / plan rev 5 §13):
+  // composite @@unique([appId, eventId]) — two apps may independently use
+  // the same event_id; only same-app + same-event_id is a duplicate.
   // Denormalized once-flag + resource id for the partial one-time unique
   // indexes declared in raw SQL in the M1 migration:
   //   (taskId, pid) WHERE isOnce AND resourceId IS NULL
   //   (taskId, pid, resourceId) WHERE isOnce AND resourceId IS NOT NULL
-  eventId        String   @unique
+  appId          String   @default("")
+  eventId        String
   isOnce         Boolean  @default(false)
   resourceId     String?
   awardedEntryId String?  @unique
   awardedEntry   XpLedgerEntry? @relation("CompletionAward", fields: [awardedEntryId], references: [id], onDelete: SetNull)
   createdAt      DateTime @db.Timestamptz(3) @default(now())
 
+  @@unique([appId, eventId])
   @@index([pid])
   @@index([taskId, pid])
   @@map("xp_task_completions")
@@ -933,8 +938,8 @@ model XpLedgerEntry {
   kind          String
   taskId        String?
   task          XpTask?  @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  // Per-app idempotency key (informational here; enforced unique on
-  // XpTaskCompletion.eventId).
+  // Per-app idempotency key (informational here; enforced unique as the
+  // composite (appId, eventId) on XpTaskCompletion).
   eventId       String?
   appId         String?
   reason        String?

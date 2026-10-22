@@ -67,6 +67,20 @@ const r = await fetch('https://api.peridot.id/v1/fiat/balance', {
 - `clientSecret` is required when the app has one set (timing-safe check).
 - Machine tokens are **never admin**, even for an admin owner.
 
+## Levels (XP) read access
+
+`GET /v1/users/:pid/level` is readable with **any authorized credential**
+(machine token or session) — including apps that are **not verified** and
+have no XP permission. Verification and the per-app XP permission gate the
+M3 event-intake path only, never reads. Only live (non-deleted) identities
+resolve; anything else is `404`.
+
+> **MVP-open by design (ANT-430 F1).** Unverified reads stay open through
+> M1/M2. Before M3, the GA decision MUST specify: the per-user visibility
+> default (who may see whose level), per-app read caps, and enumeration
+> throttling — so the M3 event pipeline does not inherit an open read by
+> accident.
+
 ## Fees
 
 Each app can charge its own fee, **stacked on top of the global PeridotID fee**

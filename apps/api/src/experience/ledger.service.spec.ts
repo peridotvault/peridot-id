@@ -25,14 +25,17 @@ const tick = () => new Promise<void>((r) => setImmediate(r));
 interface FakeTables {
   states: Map<string, { pid: string; totalXp: bigint; level: number; policyVersionId: string }>;
   entries: Array<{ id: string; pid: string; deltaXp: bigint; balanceAfter: bigint; levelAfter: number; kind: string; eventId: string | null }>;
-  completions: Map<string, { pid: string; taskId: string; eventId: string }>;
+  completions: Map<string, { pid: string; taskId: string; appId: string; eventId: string }>;
   tasks: Map<string, { id: string; recurring: string }>;
 }
+
+/** Composite dedup key, mirroring @@unique([appId, eventId]). */
+const completionKey = (appId: string, eventId: string) => JSON.stringify([appId, eventId]);
 
 /**
  * In-memory Prisma stand-in that emulates the production concurrency
  * contract: `SELECT ... FOR UPDATE` on user_xp_states serializes same-pid
- * transactions (per-pid mutex held to txn end); unique(eventId) raises
+ * transactions (per-pid mutex held to txn end); unique(appId,eventId) raises
  * P2002 on concurrent double-insert. Whole-txn serialization is NOT
  * assumed — interleaving happens at every await, like the real driver.
  */
@@ -93,15 +96,16 @@ function fakePrisma(tables: FakeTables) {
       },
     },
     xpTaskCompletion: {
-      findUnique: async ({ where }: { where: { eventId: string } }) => {
+      findUnique: async ({ where }: { where: { appId_eventId: { appId: string; eventId: string } } }) => {
         await tick();
-        return tables.completions.get(where.eventId) ?? null;
+        return tables.completions.get(completionKey(where.appId_eventId.appId, where.appId_eventId.eventId)) ?? null;
       },
-      create: async ({ data }: { data: { pid: string; taskId: string; eventId: string } }) => {
+      create: async ({ data }: { data: { pid: string; taskId: string; appId?: string; eventId: string } }) => {
         await tick();
-        if (tables.completions.has(data.eventId)) throw p2002(["eventId"]);
-        const row = { pid: data.pid, taskId: data.taskId, eventId: data.eventId };
-        tables.completions.set(data.eventId, row);
+        const key = completionKey(data.appId ?? "", data.eventId);
+        if (tables.completions.has(key)) throw p2002(["appId", "eventId"]);
+        const row = { pid: data.pid, taskId: data.taskId, appId: data.appId ?? "", eventId: data.eventId };
+        tables.completions.set(key, row);
         return row;
       },
     },
@@ -206,6 +210,9 @@ describe("LedgerService", () => {
     await expect(service.awardXp({ pid: "ifal@pid", deltaXp: 5, kind: "bogus" as never })).rejects.toThrow(BadRequestException);
     await expect(service.awardXp({ pid: "ifal@pid", deltaXp: 5, kind: "task_award", eventId: "e1" })).rejects.toThrow(/requires taskId/);
     await expect(
+      service.awardXp({ pid: "ifal@pid", deltaXp: 5, kind: "task_award", taskId: "task-onboarding", eventId: "e1", appId: "" }),
+    ).rejects.toThrow(/appId must be 1-128 chars/);
+    await expect(
       service.awardXp({ pid: "ifal@pid", deltaXp: 5, kind: "task_award", taskId: "missing", eventId: "e1" }),
     ).rejects.toThrow(NotFoundException);
   });
@@ -228,6 +235,54 @@ describe("LedgerService", () => {
       eventId: "evt-1",
     });
     expect(second).toMatchObject({ duplicate: true, awardedXp: 0, level: 1 });
+    expect(second.totalXp).toBe(50n);
+    expect(tables.entries).toHaveLength(1);
+  });
+
+  it("C1: same event_id from two apps awards independently (per-app dedup)", async () => {
+    const { service, tables } = setup();
+    const appA = await service.awardXp({
+      pid: "ifal@pid",
+      deltaXp: 50,
+      kind: "task_award",
+      taskId: "task-onboarding",
+      appId: "app-a",
+      eventId: "evt-shared",
+    });
+    const appB = await service.awardXp({
+      pid: "ifal@pid",
+      deltaXp: 50,
+      kind: "task_award",
+      taskId: "task-onboarding",
+      appId: "app-b",
+      eventId: "evt-shared",
+    });
+    expect(appA.duplicate).toBe(false);
+    expect(appB.duplicate).toBe(false);
+    expect(tables.entries).toHaveLength(2);
+    expect(tables.states.get("ifal@pid")?.totalXp).toBe(100n);
+  });
+
+  it("C1: same app + same event_id awards exactly once", async () => {
+    const { service, tables } = setup();
+    const first = await service.awardXp({
+      pid: "ifal@pid",
+      deltaXp: 50,
+      kind: "task_award",
+      taskId: "task-onboarding",
+      appId: "app-a",
+      eventId: "evt-1",
+    });
+    expect(first.duplicate).toBe(false);
+    const second = await service.awardXp({
+      pid: "ifal@pid",
+      deltaXp: 50,
+      kind: "task_award",
+      taskId: "task-onboarding",
+      appId: "app-a",
+      eventId: "evt-1",
+    });
+    expect(second).toMatchObject({ duplicate: true, awardedXp: 0 });
     expect(second.totalXp).toBe(50n);
     expect(tables.entries).toHaveLength(1);
   });

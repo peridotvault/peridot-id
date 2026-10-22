@@ -22,6 +22,12 @@ export interface AwardXpInput {
   taskId?: string;
   /** Idempotency key; requires taskId (completion rows are task-scoped). */
   eventId?: string;
+  /**
+   * Idempotency scope (PidApp.id of the submitting app). Combined with
+   * eventId into the composite dedup key (ANT-430 C1): two apps may reuse
+   * the same event_id independently. Empty/absent = ecosystem scope
+   * (pre-data M1 backfill sentinel, never a second award path).
+   */
   appId?: string;
   reason?: string;
   actorAdminId?: string;
@@ -89,6 +95,9 @@ export class LedgerService {
     if (input.taskId !== undefined && (input.taskId.length === 0 || input.taskId.length > MAX_ID_LEN)) {
       throw new BadRequestException("taskId must be 1-128 chars");
     }
+    if (input.appId !== undefined && (input.appId.length === 0 || input.appId.length > MAX_ID_LEN)) {
+      throw new BadRequestException("appId must be 1-128 chars");
+    }
     if (input.reason !== undefined && input.reason.length > MAX_REASON_LEN) {
       throw new BadRequestException("reason too long (max 512)");
     }
@@ -112,9 +121,12 @@ export class LedgerService {
                 data: { pid, totalXp: 0n, level: 1, policyVersionId: active.policy.id },
               });
 
-        // Idempotency fast path (race path handled via P2002 below).
+        // Idempotency fast path, scoped per app (ANT-430 C1): the dedup key
+        // is (appId, eventId), so a colliding event_id from another app is
+        // NOT a duplicate (race path handled via P2002 below).
         if (input.eventId) {
-          const existing = await tx.xpTaskCompletion.findUnique({ where: { eventId: input.eventId } });
+          const appScope = input.appId ?? "";
+          const existing = await tx.xpTaskCompletion.findUnique({ where: { appId_eventId: { appId: appScope, eventId: input.eventId } } });
           if (existing) {
             const current = await tx.userXpState.findUniqueOrThrow({ where: { pid } });
             return {
@@ -156,6 +168,7 @@ export class LedgerService {
               pid,
               taskId: input.taskId,
               periodKey: input.periodKey ?? new Date().toISOString().slice(0, 10),
+              appId: input.appId ?? "",
               eventId: input.eventId,
               isOnce: task.recurring === "once",
               resourceId: input.resourceId ?? null,
@@ -179,9 +192,9 @@ export class LedgerService {
         };
       });
     } catch (e) {
-      // Lost a race: genesis insert or eventId insert collided. Re-read —
-      // the winner's rows are authoritative; a colliding eventId is a
-      // duplicate, never a second award.
+      // Lost a race: genesis insert or (appId,eventId) insert collided.
+      // Re-read — the winner's rows are authoritative; a colliding
+      // (appId,eventId) is a duplicate, never a second award.
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         this.logger.debug(`awardXp race for ${pid} (target: ${(e.meta as { target?: unknown })?.target}): resolving as duplicate/genesis`);
         if (input.eventId) {
