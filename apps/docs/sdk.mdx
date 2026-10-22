@@ -67,6 +67,18 @@ const me = await peridot.identity.me();
 // { id: "ifal@pid", status: "active", createdAt: "2026-08-03T13:30:00.000Z" }
 ```
 
+### Level
+
+```ts
+const summary = await peridot.level.get('ifal@pid');
+// { pid, level: 5, total_xp: 1701, current_level_xp: 1701,
+//   next_level_xp: 2819, progress_percentage: 0 }
+// — or an ApiError ({ statusCode: 404, … }) for unknown users.
+```
+
+Read-only: no XP amounts in, none out. See [Levels & XP](/leveling) for the
+badge component, the event-reporting contract, and rate limits.
+
 ### Login credentials
 
 ```ts

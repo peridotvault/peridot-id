@@ -34,7 +34,7 @@ strings:
 | `400` | Validation error — one or more fields are invalid |
 | `401` | Missing, expired, or invalid access/refresh token |
 | `403` | Authenticated but forbidden — e.g. withdrawals disabled, admin-only route, revoked grant |
-| `404` | Identity, profile, or wallet does not exist |
+| `404` | Identity, profile, or wallet does not exist — also unknown/deleted PIDs on `GET /v1/users/:pid/level` |
 | `409` | Conflict — e.g. email already associated with another account, PID already taken, or credential already linked |
 | `410` | Gone — claim ticket expired; sign in again for a fresh one |
 | `429` | Rate limit exceeded |
@@ -70,6 +70,10 @@ Auth endpoints are rate limited to protect against brute force:
 | `POST /v1/fiat/deposits/:id/sync` | 12 requests / minute |
 | `GET /v1/auth/google`, `/v1/auth/google/callback` | 100 requests / minute |
 | `POST /v1/wallet` | 10 requests / minute |
+
+Reads not listed above — including `GET /v1/users/:pid/level` — inherit the
+global default of 100 requests / minute. Cache level summaries per `pid` and
+re-read on user action rather than polling (see [Levels & XP](/leveling)).
 
 Exceeding a limit returns `429`. Clients should back off and retry.
 
