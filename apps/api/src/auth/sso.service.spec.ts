@@ -10,7 +10,7 @@ function setup(apps?: {
   const config = {
     get: jest.fn((key: string, def?: unknown) => {
       const values: Record<string, unknown> = {
-        CLIENT_REDIRECT_ALLOWLIST: "https://live2dev.com, https://app.pid.peridotvault.com",
+        CLIENT_REDIRECT_ALLOWLIST: "https://live2dev.com, https://peridot.id",
       };
       return values[key] ?? def;
     }),
@@ -109,7 +109,7 @@ describe("SsoService", () => {
   it("only allows configured origins in the returnTo allowlist", () => {
     const { service } = setup();
     expect(service.isAllowedReturnTo("https://live2dev.com/auth/callback")).toBe(true);
-    expect(service.isAllowedReturnTo("https://app.pid.peridotvault.com/")).toBe(true);
+    expect(service.isAllowedReturnTo("https://peridot.id/")).toBe(true);
     expect(service.isAllowedReturnTo("https://evil.com")).toBe(false);
     expect(service.isAllowedReturnTo("javascript:alert(1)")).toBe(false);
     expect(service.isAllowedReturnTo(undefined)).toBe(false);

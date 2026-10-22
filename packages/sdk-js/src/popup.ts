@@ -63,7 +63,7 @@ export function parsePopupOrigin(raw: string | null | undefined): string | null 
 }
 
 interface OpenerOpts {
-  /** PeridotID popup host, e.g. https://app.pid.peridotvault.com (no prod default). */
+  /** PeridotID popup host, e.g. https://peridot.id (no prod default). */
   popupBaseUrl: string;
   /** Page path on the host (default "/"). */
   path?: string;
