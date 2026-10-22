@@ -15,6 +15,7 @@ import { AuthController } from "../auth/auth.controller";
 import { PidAppsController } from "../auth/apps.controller";
 import { ChainController } from "../chain/chain.controller";
 import { CredentialController } from "../credentials/credential.controller";
+import { ExperienceAdminController } from "../experience/experience-admin.controller";
 import { FiatController } from "../fiat/fiat.controller";
 import { FiatLedgerController } from "../fiat/fiat-ledger.controller";
 import { IdentityController } from "../identity/identity.controller";
@@ -45,6 +46,7 @@ const CONTROLLERS = [
   PidAppsController,
   ChainController,
   CredentialController,
+  ExperienceAdminController,
   FiatController,
   FiatLedgerController,
   IdentityController,
