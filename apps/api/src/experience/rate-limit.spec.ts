@@ -38,4 +38,20 @@ describe("intake throttle trackers (F5 keying)", () => {
     expect(xpIntakeAppPidTracker({ body: { client_id: "pidapp_a" }, ip: "1.2.3.4" })).toBe("xp-intake-app-pid:pidapp_a:-");
     expect(xpIntakeAppPidTracker({ body: {}, ip: "1.2.3.4" })).toBe("xp-intake-app-pid:1.2.3.4:-");
   });
+
+  it("length-guards both tracker dimensions (no bucket-key blowup)", () => {
+    // Over-long client_id falls back to IP on BOTH tiers (attacker cannot
+    // mint unbounded per-app buckets).
+    expect(xpIntakeAppPidTracker({ body: { client_id: "x".repeat(129), user_id: "u@pid" }, ip: "1.2.3.4" })).toBe(
+      "xp-intake-app-pid:1.2.3.4:u@pid",
+    );
+    // Over-long user_id degrades to the anonymous subject bucket.
+    expect(xpIntakeAppPidTracker({ body: { client_id: "pidapp_a", user_id: "y".repeat(65) }, ip: "1.2.3.4" })).toBe(
+      "xp-intake-app-pid:pidapp_a:-",
+    );
+    // Boundary values are kept verbatim (128 / 64).
+    expect(
+      xpIntakeAppPidTracker({ body: { client_id: "x".repeat(128), user_id: "y".repeat(64) }, ip: "1.2.3.4" }),
+    ).toBe(`xp-intake-app-pid:${"x".repeat(128)}:${"y".repeat(64)}`);
+  });
 });

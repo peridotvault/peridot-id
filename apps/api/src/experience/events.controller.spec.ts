@@ -1,7 +1,7 @@
 import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { GUARDS_METADATA } from "@nestjs/common/constants";
-import { Test } from "@nestjs/testing";
-import { ThrottlerModule } from "@nestjs/throttler";
+import { Test, TestingModule } from "@nestjs/testing";
+import { getOptionsToken, ThrottlerModule } from "@nestjs/throttler";
 import request from "supertest";
 import { PidAppsService } from "../auth/apps.service";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
@@ -26,6 +26,7 @@ const SECRET = "pidsk_controller_test_secret_0123456789abcdef";
 
 describe("EventsController (intake route)", () => {
   let app: INestApplication;
+  let moduleRef: TestingModule;
   const submit = jest.fn();
 
   const appRow = () => ({
@@ -47,7 +48,7 @@ describe("EventsController (intake route)", () => {
       pidApp: { findUnique: jest.fn(async () => appRow()) },
       xpSuspiciousActivity: { create: jest.fn(async (a: unknown) => a) },
     };
-    const moduleRef = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       imports: [
         ThrottlerModule.forRoot([
           { name: "default", ttl: 60000, limit: 100 },
@@ -129,6 +130,20 @@ describe("EventsController (intake route)", () => {
 
   it("malformed event_type is 400", async () => {
     await request(app.getHttpServer()).post("/v1/experience/events").send(body({ event_type: "BAD TYPE!" })).expect(400);
+  });
+
+  it("spec module carries production per-app tracker keying (S3 lock)", () => {
+    // Reads back the throttler options REGISTERED in this spec module (the
+    // exact array handed to forRoot above) — removing getTracker from the
+    // wiring fails here, so the spec cannot silently drift back to
+    // IP-keyed buckets while production ships per-app keying.
+    const registered = moduleRef.get<unknown>(getOptionsToken(), { strict: false }) as Array<{
+      name?: string;
+      getTracker?: unknown;
+    }>;
+    const byName = new Map((Array.isArray(registered) ? registered : []).map((o) => [o.name, o]));
+    expect(byName.get(XP_INTAKE_APP_THROTTLER.name)?.getTracker).toBe(xpIntakeAppTracker);
+    expect(byName.get(XP_INTAKE_APP_PID_THROTTLER.name)?.getTracker).toBe(xpIntakeAppPidTracker);
   });
 });
 
