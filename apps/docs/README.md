@@ -33,25 +33,17 @@ apps/docs/
   `packages/openapi/src/openapi.yaml` (no schema change — origins only, if any,
   and those belong to the canonical spec first). Re-sync with:
   `cp packages/openapi/src/openapi.yaml apps/docs/openapi.yaml`.
-- Old `*.peridotvault.com` hosts are gone (hard cutover) — they are not
-  documented and code samples use only the canonical `peridot.id` hosts.
+- Old docs hosts are dead: the legacy `pid.peridotvault.com/docs*` and
+  `sandbox.pid.peridotvault.com/docs*` paths no longer serve and do not
+  redirect. Docs live only at `docs.peridot.id`.
 
-## The cutover (done — old domains are gone)
+## Docs location (hard cutover — no redirect)
 
-At cutover, `apps/docs` (Fumadocs) stopped serving
-`pid.peridotvault.com/docs*`. It lands a redirect on the
-old docs service mapping `/docs/*` → the Mintlify host (strip the prefix):
-
-| Old (serves today) | New (Mintlify, after user deploy) |
-|---|---|
-| `pid.peridotvault.com/docs` | `docs.peridot.id/` |
-| `pid.peridotvault.com/docs/getting-started` | `docs.peridot.id/getting-started` |
-| `pid.peridotvault.com/docs/api` | `docs.peridot.id/api/overview` |
-| `sandbox.pid.peridotvault.com/docs*` | `docs.peridot.id/*` (single docs for all envs) |
-
-Suggested implementation: `redirects()` in `apps/docs/next.config.mts` gated
-by `NEXT_PUBLIC_MINTLIFY_DOCS_URL` (e.g. `https://docs.peridot.id`), so the
-redirect only activates when the env var is set at build time.
+Docs live ONLY at `docs.peridot.id`. The legacy
+`pid.peridotvault.com/docs*` and `sandbox.pid.peridotvault.com/docs*`
+paths are dead: they do not serve and do not redirect anywhere.
+There is a single docs site for all environments — update any old
+bookmarks to `docs.peridot.id` directly.
 
 ## Local preview / validation
 
@@ -68,13 +60,11 @@ the board user clicks deploy/sync in Mintlify (manual).
 
 ## QA handoff (AC-15)
 
-After the user deploys: new docs URLs serve the content AND old docs URLs
-redirect to them (hard cutover — old domains are gone). Repro:
+After the user deploys: docs serve ONLY at `docs.peridot.id`. The legacy
+docs hosts are dead (connection refused / NXDOMAIN — no redirect). Repro:
 
 1. `GET https://docs.peridot.id/getting-started` → 200, contains "Base URLs".
 2. `GET https://docs.peridot.id/api/overview` → 200; an endpoint page
    generated from `openapi.yaml` (e.g. `POST /v1/auth/login`) renders.
-3. `GET https://pid.peridotvault.com/docs/getting-started` → 301 to
-   `https://docs.peridot.id/getting-started` (no 200 on old hosts).
-4. Sandbox pair: `sandbox.pid.peridotvault.com/docs*` → 301 to
-   `docs.peridot.id/*` (single docs for all envs).
+3. `GET https://pid.peridotvault.com/docs/getting-started` → fails (dead host,
+   no redirect). Same for the `sandbox.pid.peridotvault.com/docs*` paths.
