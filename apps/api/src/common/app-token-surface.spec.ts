@@ -15,6 +15,7 @@ import { AuthController } from "../auth/auth.controller";
 import { PidAppsController } from "../auth/apps.controller";
 import { ChainController } from "../chain/chain.controller";
 import { CredentialController } from "../credentials/credential.controller";
+import { EventsController } from "../experience/events.controller";
 import { ExperienceAdminController } from "../experience/experience-admin.controller";
 import { FiatController } from "../fiat/fiat.controller";
 import { FiatLedgerController } from "../fiat/fiat-ledger.controller";
@@ -47,6 +48,7 @@ const CONTROLLERS = [
   ChainController,
   CredentialController,
   ExperienceAdminController,
+  EventsController,
   FiatController,
   FiatLedgerController,
   IdentityController,
@@ -78,6 +80,16 @@ const ALLOWLIST: Record<string, string> = {
   "FiatController.checkoutDeposit": "money-in initiation (creates DOKU invoice); moves no funds out",
   "FiatController.syncDeposit": "Tobias-blessed corroboration of caller's own pending deposit; moves no other funds",
   "PermissionsController.validateGrant": "stateless validation; no DB writes",
+  /**
+   * INTENTIONAL app-credential route (ANT-441 M3, Tobias C2): POST
+   * /v1/experience/events is the ONLY write route that authenticates with a
+   * dedicated server-to-server app-credential guard instead of the session
+   * JWT. Cookie/JWT sessions are NEVER accepted on intake (no JwtAuthGuard
+   * by design — a valid user/app JWT alone is 401 there). This entry
+   * documents the exemption; the C2 negative test below (`intake guard
+   * surface`) fails if JwtAuthGuard is ever added to that route.
+   */
+  "EventsController.submit": "dedicated server-to-server app-credential guard (body client_id+client_secret, fail-closed; cookies/JWT never accepted — Tobias C2)",
 };
 
 describe("app-token write surface (ANT-233 F1)", () => {

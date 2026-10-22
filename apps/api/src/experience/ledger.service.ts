@@ -7,7 +7,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { isPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
-import { LevelsService } from "./levels.service";
+import { ActivePolicy, LevelsService } from "./levels.service";
 import { levelFromXp } from "./xp-curve";
 
 /** Award kinds (M1 writes task_award + manual_adjustment; M2 adds reversal as negative entries). */
@@ -45,6 +45,28 @@ export interface AwardXpResult {
   leveledUp: boolean;
   /** True when eventId was already recorded — nothing was written. */
   duplicate: boolean;
+}
+
+export interface AppendTaskAwardInput {
+  pid: string;
+  /** State row as locked/ensured by the caller (null = genesis, created here). */
+  state: { pid: string; totalXp: bigint; level: number } | null;
+  delta: bigint;
+  kind: XpAwardKind;
+  taskId?: string;
+  eventId?: string;
+  appId?: string | null;
+  resourceId?: string | null;
+  reason?: string | null;
+  actorAdminId?: string | null;
+  periodKey?: string;
+  policy: ActivePolicy;
+}
+
+export interface AppendTaskAwardResult {
+  newTotal: bigint;
+  newLevel: number;
+  prevLevel: number;
 }
 
 export interface ReconciliationMismatch {
@@ -126,6 +148,69 @@ export class LedgerService {
     return { pid, delta };
   }
 
+  /**
+   * Shared award writer (M1 awardXp + M3 intake pipeline). The caller owns
+   * the transaction, the row locks, and all preconditions (dedup, quotas,
+   * verification); this performs ONLY the journal append + state maintenance
+   * so both paths stay byte-identical. Creates the genesis state row when
+   * the caller locked a missing pid.
+   */
+  async appendTaskAward(
+    tx: Prisma.TransactionClient,
+    input: AppendTaskAwardInput,
+  ): Promise<AppendTaskAwardResult> {
+    const { pid, delta } = input;
+    let state = input.state;
+    if (!state) {
+      state = await tx.userXpState.create({
+        data: { pid, totalXp: 0n, level: 1, policyVersionId: input.policy.policy.id },
+      });
+    }
+    const prevLevel = state.level;
+    const newTotal = state.totalXp + delta;
+    const newLevel = levelFromXp(newTotal, input.policy.thresholds);
+
+    const entry = await tx.xpLedgerEntry.create({
+      data: {
+        pid,
+        deltaXp: delta,
+        balanceAfter: newTotal,
+        levelAfter: newLevel,
+        kind: input.kind,
+        taskId: input.taskId ?? null,
+        eventId: input.eventId ?? null,
+        appId: input.appId ?? null,
+        reason: input.reason ?? null,
+        actorAdminId: input.actorAdminId ?? null,
+        policyVersionId: input.policy.policy.id,
+      },
+    });
+
+    if (input.eventId && input.taskId) {
+      const task = await tx.xpTask.findUnique({ where: { id: input.taskId } });
+      if (!task) throw new NotFoundException(`Unknown task: ${input.taskId}`);
+      await tx.xpTaskCompletion.create({
+        data: {
+          pid,
+          taskId: input.taskId,
+          periodKey: input.periodKey ?? new Date().toISOString().slice(0, 10),
+          appId: input.appId ?? "",
+          eventId: input.eventId,
+          isOnce: task.recurring === "once",
+          resourceId: input.resourceId ?? null,
+          awardedEntryId: entry.id,
+        },
+      });
+    }
+
+    await tx.userXpState.update({
+      where: { pid },
+      data: { totalXp: newTotal, level: newLevel, policyVersionId: input.policy.policy.id },
+    });
+
+    return { newTotal, newLevel, prevLevel };
+  }
+
   async awardXp(input: AwardXpInput): Promise<AwardXpResult> {
     const { pid, delta } = this.validateInput(input);
     const active = await this.levels.getActivePolicy();
@@ -163,53 +248,29 @@ export class LedgerService {
         }
 
         const prevLevel = state.level;
-        const newTotal = state.totalXp + delta;
-        const newLevel = levelFromXp(newTotal, active.thresholds);
-
-        const entry = await tx.xpLedgerEntry.create({
-          data: {
-            pid,
-            deltaXp: delta,
-            balanceAfter: newTotal,
-            levelAfter: newLevel,
-            kind: input.kind,
-            taskId: input.taskId ?? null,
-            eventId: input.eventId ?? null,
-            appId: input.appId ?? null,
-            reason: input.reason ?? null,
-            actorAdminId: input.actorAdminId ?? null,
-            policyVersionId: active.policy.id,
-          },
+        const written = await this.appendTaskAward(tx, {
+          pid,
+          state,
+          delta,
+          kind: input.kind,
+          taskId: input.taskId,
+          eventId: input.eventId,
+          appId: input.appId,
+          resourceId: input.resourceId,
+          reason: input.reason,
+          actorAdminId: input.actorAdminId,
+          periodKey: input.periodKey,
+          policy: active,
         });
-
-        if (input.eventId && input.taskId) {
-          const task = await tx.xpTask.findUnique({ where: { id: input.taskId } });
-          if (!task) throw new NotFoundException(`Unknown task: ${input.taskId}`);
-          await tx.xpTaskCompletion.create({
-            data: {
-              pid,
-              taskId: input.taskId,
-              periodKey: input.periodKey ?? new Date().toISOString().slice(0, 10),
-              appId: input.appId ?? "",
-              eventId: input.eventId,
-              isOnce: task.recurring === "once",
-              resourceId: input.resourceId ?? null,
-              awardedEntryId: entry.id,
-            },
-          });
-        }
-
-        state = await tx.userXpState.update({
-          where: { pid },
-          data: { totalXp: newTotal, level: newLevel, policyVersionId: active.policy.id },
-        });
+        const newTotal = written.newTotal;
+        const newLevel = written.newLevel;
 
         return {
           pid,
           awardedXp: Number(delta),
-          totalXp: state.totalXp,
-          level: state.level,
-          leveledUp: state.level > prevLevel,
+          totalXp: newTotal,
+          level: newLevel,
+          leveledUp: newLevel > prevLevel,
           duplicate: false,
         };
       });

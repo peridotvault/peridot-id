@@ -65,6 +65,7 @@ Auth endpoints are rate limited to protect against brute force:
 | `GET /v1/apps/:id/fees` | 30 requests / minute |
 | `PUT /v1/apps/:id/fees/:operation` | 20 requests / minute |
 | `POST /v1/auth/token` | 20 requests / minute |
+| `POST /v1/experience/events` | 100/min global + 60/min per app + 30/min per app+subject |
 | `POST /v1/fiat/deposits/checkout` | 10 requests / minute |
 | `POST /v1/fiat/transfers/inquiry`, `…/confirm` | 10 requests / minute |
 | `POST /v1/fiat/deposits/:id/sync` | 12 requests / minute |
