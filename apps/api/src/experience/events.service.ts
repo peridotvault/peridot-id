@@ -62,13 +62,16 @@ const toSafeNumber = (v: bigint): number => (v > BigInt(Number.MAX_SAFE_INTEGER)
  * 9. append ledger + update state (shared writer with LedgerService)
  * 10. return { status, awarded_xp, level, reason? }
  *
- * Locking note (F2 TOCTOU): PidApp/XpTask rows are FRESHLY re-read inside
- * the transaction (READ COMMITTED sees committed admin revokes) and acted on
- * immediately; serialization against concurrent awards comes from the three
- * row locks in plan order, so revocation-mid-flight yields zero post-revoke
- * awards. Unknown subjects and failed verifications share ONE client reason
- * (`not_eligible`) — no PID oracle (F5). Rejections write suspicious-feed
- * rows (F7); awards write the security audit event in-txn.
+ * Locking note (F2 TOCTOU + Tobias re-review S1): predicates are read in-txn
+ * (READ COMMITTED sees committed admin revokes) and acted on immediately;
+ * serialization against concurrent awards comes from the three row locks in
+ * plan order; then — because those locks do NOT serialize against admin
+ * writes to PidApp/XpTask — standing + task status/window/checker/scope are
+ * RE-VERIFIED post-lock immediately before the append (S1). A revoke/disable
+ * landing mid-flight therefore blocks THIS award; residual race is a single
+ * statement. Unknown subjects and failed verifications share ONE client
+ * reason (`not_eligible`) — no PID oracle (F5). Rejections write
+ * suspicious-feed rows (F7); awards write the security audit event in-txn.
  */
 @Injectable()
 export class EventsService {
@@ -219,6 +222,7 @@ export class EventsService {
               availableUntil: Date | null;
               verificationChecker: string | null;
               verificationType: string;
+              scopeAppId: string | null;
             }
           | undefined;
         if (!task) return { status: "rejected", awarded_xp: 0, reason: "no_active_task" };
@@ -360,6 +364,48 @@ export class EventsService {
             reason: "quota_exceeded",
             signal: "xp.intake.quota_exceeded",
             detail: { scope: "org", ownerPid, cause: orgVerdict.reason ?? "cap" },
+          };
+        }
+
+        // S1 (Tobias re-review): post-lock re-verification. The step 2–4
+        // reads above raced admin revokes — the FOR UPDATE locks serialize
+        // concurrent awards, NOT admin writes to PidApp/XpTask (those paths
+        // take no such locks). Re-run the standing + task predicates AFTER
+        // all locks are held, immediately before the append, so a revoke /
+        // disable landing mid-flight still blocks THIS award. Residual race
+        // is a single statement; SERIALIZABLE is not warranted.
+        const reFresh = await tx.pidApp.findUnique({ where: { id: app.id } });
+        const reStanding = this.verification.canSubmitEvents(
+          reFresh
+            ? { isActive: reFresh.isActive, isVerified: reFresh.isVerified, xpEnabled: reFresh.xpEnabled, approvedEventTypes: reFresh.approvedEventTypes }
+            : null,
+          eventType,
+        );
+        if (!reStanding.canSubmitEvents) {
+          if (!reFresh || !reFresh.isActive) throw new ForbiddenException("App is not permitted to submit events");
+          return {
+            status: "rejected",
+            awarded_xp: 0,
+            reason: "app_not_permitted",
+            signal: "xp.intake.permission_denied",
+            detail: { clientId: reFresh.clientId, reason: reStanding.reason ?? "unknown", recheck: true },
+          };
+        }
+        const reTask = await tx.xpTask.findUnique({ where: { id: task.id } });
+        const reTaskOk =
+          reTask &&
+          (reTask as { status: string }).status === "active" &&
+          !((reTask as { availableFrom: Date | null }).availableFrom && now < (reTask as { availableFrom: Date }).availableFrom) &&
+          !((reTask as { availableUntil: Date | null }).availableUntil && now > (reTask as { availableUntil: Date }).availableUntil) &&
+          !validateChecker((reTask as { verificationType: string }).verificationType, (reTask as { verificationChecker: string | null }).verificationChecker) &&
+          (reTask as { scopeAppId: string | null }).scopeAppId === task.scopeAppId;
+        if (!reTaskOk) {
+          return {
+            status: "rejected",
+            awarded_xp: 0,
+            reason: "no_active_task",
+            signal: "xp.intake.checker_drift",
+            detail: { taskId: task.id, recheck: true },
           };
         }
 

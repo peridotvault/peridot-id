@@ -211,5 +211,7 @@ describe("PolicyBackfillService (R4 migration tooling)", () => {
     });
     await expect(service.planBackfill(POLICY_B)).resolves.toMatchObject({ pending: 1 });
     await expect(service.runBackfill("admin@pid", POLICY_B, {})).rejects.toThrow(ServiceUnavailableException);
+    // S2: rollback drafts version rows (a WRITE) — gated like execution.
+    await expect(service.rollbackDraft("admin@pid", 1)).rejects.toThrow(ServiceUnavailableException);
   });
 });

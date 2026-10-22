@@ -154,6 +154,10 @@ export class PolicyBackfillService {
    * superseded row is never revived (M2 invariant holds).
    */
   async rollbackDraft(actorAdminId: string, version: number) {
+    // S2 (Tobias re-review): rollback CREATES version + threshold rows — a
+    // mutating execution step, not read-only planning — so it sits behind
+    // the same migration gate as backfill execution.
+    if (!this.migrationEnabled()) throw new ServiceUnavailableException("XP migration tooling is disabled");
     const source = await this.prisma.xpPolicyVersion.findUnique({ where: { version } });
     if (!source) throw new NotFoundException("policy version not found");
     const active = await this.levels.getActivePolicy().catch(() => null);

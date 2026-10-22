@@ -10,7 +10,7 @@ import { AppCredentialGuard } from "./app-credential.guard";
 import { EventsController } from "./events.controller";
 import { EventsService } from "./events.service";
 import { IntakeThrottleAlertFilter } from "./intake-throttle.filter";
-import { XP_INTAKE_APP_PID_THROTTLER, XP_INTAKE_APP_THROTTLER } from "./rate-limit";
+import { XP_INTAKE_APP_PID_THROTTLER, XP_INTAKE_APP_THROTTLER, xpIntakeAppPidTracker, xpIntakeAppTracker } from "./rate-limit";
 
 /**
  * ANT-89 M3 (ANT-441) — intake route contract.
@@ -51,8 +51,11 @@ describe("EventsController (intake route)", () => {
       imports: [
         ThrottlerModule.forRoot([
           { name: "default", ttl: 60000, limit: 100 },
-          { ...XP_INTAKE_APP_THROTTLER },
-          { ...XP_INTAKE_APP_PID_THROTTLER },
+          // S3 (Tobias re-review): mirror production wiring — the named tiers
+          // MUST carry their getTracker keying here too, or the spec would
+          // exercise IP-keyed buckets instead of the shipped per-app keying.
+          { ...XP_INTAKE_APP_THROTTLER, getTracker: xpIntakeAppTracker },
+          { ...XP_INTAKE_APP_PID_THROTTLER, getTracker: xpIntakeAppPidTracker },
         ]),
       ],
       controllers: [EventsController],

@@ -51,6 +51,13 @@ interface FakeTables {
   quotas: Map<string, Record<string, unknown>>;
   orgQuotas: Map<string, Record<string, unknown>>;
   suspicious: Array<{ signal: string; pid: string | null; appId: string | null; detail: unknown }>;
+  /**
+   * S1 test hook: when true, the app row reads permitted ONCE then revoked
+   * (xpEnabled=false) — emulates an admin revoke landing mid-flight between
+   * the pre-lock predicate read and the post-lock re-verification.
+   */
+  revokeAfterFirstAppRead: boolean;
+  appReads: number;
 }
 
 const completionKey = (appId: string, eventId: string) => JSON.stringify([appId, eventId]);
@@ -125,7 +132,15 @@ function fakePrisma(tables: FakeTables) {
     pidApp: {
       findUnique: async ({ where }: { where: { id: string } | { clientId: string } }) => {
         await tick();
-        if ("id" in where) return tables.apps.get(where.id) ?? null;
+        if ("id" in where) {
+          const row = tables.apps.get(where.id) ?? null;
+          // S1 hook: first read sees the permitted app; later reads see the
+          // admin revoke that landed mid-flight.
+          if (row && tables.revokeAfterFirstAppRead && ++tables.appReads > 1) {
+            return { ...row, xpEnabled: false };
+          }
+          return row;
+        }
         return [...tables.apps.values()].find((a) => a.clientId === (where as { clientId: string }).clientId) ?? null;
       },
       findMany: async ({ where }: { where: { ownerPid: string } }) => {
@@ -305,7 +320,7 @@ function taskRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<string, unknown>; gate?: boolean } = {}) {
+function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<string, unknown>; gate?: boolean; revokeAfterFirstRead?: boolean } = {}) {
   const tables: FakeTables = {
     apps: new Map([[APP.id, { ...APP, ...(opts.app ?? {}) }]]),
     tasks: new Map(),
@@ -318,6 +333,8 @@ function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<stri
     quotas: new Map(),
     orgQuotas: new Map(),
     suspicious: [],
+    revokeAfterFirstAppRead: opts.revokeAfterFirstRead ?? false,
+    appReads: 0,
   };
   for (const t of opts.tasks ?? [taskRow()]) tables.tasks.set(String(t.id), t);
   const prisma = fakePrisma(tables);
@@ -407,6 +424,21 @@ describe("EventsService pipeline", () => {
     expect(awarded).toHaveLength(5);
     expect(rejected).toHaveLength(5);
     expect(rejected.every((r) => r.reason === "quota_exceeded")).toBe(true);
+  });
+
+  it("revoke landing mid-flight still blocks THIS award (S1 post-lock recheck)", async () => {
+    // The guard + pre-lock read see the permitted app; the admin revoke
+    // lands before the post-lock re-verification → zero awards, and the
+    // feed marks the recheck (not the initial check) as the blocker.
+    const { service, tables } = setup({ revokeAfterFirstRead: true });
+    const r = await service.submitEvent(dtoFor(), { ...AUTHED });
+    expect(r).toMatchObject({ status: "rejected", reason: "app_not_permitted" });
+    expect(tables.entries).toHaveLength(0);
+    expect(
+      tables.suspicious.some(
+        (s) => s.signal === "xp.intake.permission_denied" && (s.detail as { recheck?: boolean }).recheck === true,
+      ),
+    ).toBe(true);
   });
 
   it("revocation-mid-flight yields ZERO post-revoke awards (F2 TOCTOU)", async () => {
