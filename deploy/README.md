@@ -269,12 +269,12 @@ curl -sk https://sandbox-api.peridot.id/v1/health # {"status":"ok"} (sandbox VPS
 Retired-host expectation (after DNS withdrawal — connection refused / NXDOMAIN):
 
 ```sh
-for h in peridot.id api.peridot.id dashboard.peridot.id \
-         sandbox.peridot.id sandbox-api.peridot.id \
-         sandbox-dashboard.peridot.id; do
-  curl -sk -o /dev/null -w "$h %{http_code}\n" --max-time 10 https://$h/
+for h in pid.peridotvault.com app.pid.peridotvault.com api.pid.peridotvault.com \
+         sandbox.pid.peridotvault.com app.sandbox.pid.peridotvault.com \
+         api.sandbox.pid.peridotvault.com; do
+  echo "== $h"; dig +short $h A
 done
-# every line above must print 200; the retired names must NOT resolve.
+# every retired name above must print NOTHING (NXDOMAIN / no A record after DNS withdrawal).
 ```
 
 ### What this stack change does (and does not do)
