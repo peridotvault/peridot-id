@@ -164,10 +164,14 @@ describe("SsoService", () => {
     const { service, rows } = setup();
     const before = Date.now();
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    const after = Date.now();
     // (a) expiry lands within TTL of issue time, and the fresh code exchanges.
     const stored = rows.get(code) as unknown as { expiresAt: Date };
     expect(stored.expiresAt.getTime()).toBeGreaterThan(before);
-    expect(stored.expiresAt.getTime() - before).toBeLessThanOrEqual(60 * 1000);
+    // Bound against `after`, not `before`: expiresAt is stamped inside issue(),
+    // so `expiresAt - before` includes issue() execution time and flakes by 1ms
+    // on loaded runners. `expiresAt <= after + TTL` holds by construction.
+    expect(stored.expiresAt.getTime()).toBeLessThanOrEqual(after + 60 * 1000);
     await expect(service.consume(code, "https://live2dev.com/auth/callback")).resolves.toMatchObject({ pid: "pid_1" });
     // (c) replay of the consumed code is rejected.
     await expect(service.consume(code, "https://live2dev.com/auth/callback")).rejects.toThrow("sso_code_invalid");
