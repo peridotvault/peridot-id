@@ -6,6 +6,7 @@ import { setOAuthStateCookie } from "../common/cookies";
 import { decodeState } from "./sso.service";
 import { newOAuthNonce, oauthStateSecret, signOAuthState } from "./oauth-state";
 import { GOOGLE_OAUTH_OPTIONS, GoogleOAuthOptions } from "./google.strategy";
+import { resolveServiceUrls } from "../common/app-config";
 
 /** Marker for a failed OAuth callback — the controller redirects to retry UI. */
 export interface GoogleAuthError {
@@ -51,7 +52,10 @@ export class GoogleGuard extends AuthGuard("google") {
   handleRequest(err: any, user: any, _info?: any, _context?: any): any {
     if (err || !user) {
       const code = toErrorCode(err);
-      this.logger.warn(`google callback failed: ${code}`);
+      // Log the provider cause server-side (codes alone made sandbox triage
+      // blind) — the browser still only ever sees the opaque code.
+      const cause = err instanceof Error ? err.message : typeof err === "string" ? err : "no user";
+      this.logger.warn(`google callback failed: ${code} (cause: ${cause})`);
       return { authError: code } satisfies GoogleAuthError;
     }
     return user;
@@ -71,10 +75,15 @@ export class GoogleGuard extends AuthGuard("google") {
     const req = context.switchToHttp().getRequest();
     const returnTo = typeof req?.query?.returnTo === "string" ? req.query.returnTo : undefined;
     const options: Record<string, unknown> = { prompt: "select_account" };
-    if (!returnTo) return options;
+    // First-party logins carry no returnTo — bind them to the wallet origin
+    // (server-side, never user input) so the callback's state check passes
+    // with the same CSRF guarantees instead of failing every first-party
+    // login with invalid_state.
     // Unwrap the login-step envelope (plain returnTo or app-bound encoding),
     // then re-wrap it signed + nonce-bound for the Google round-trip.
-    const { returnTo: target, clientId } = decodeState(returnTo);
+    const { returnTo: target, clientId } = returnTo
+      ? decodeState(returnTo)
+      : { returnTo: resolveServiceUrls((key, def) => this.config.get(key, def)).walletUrl };
     const nonce = newOAuthNonce();
     const res = context.switchToHttp().getResponse<Response>();
     setOAuthStateCookie(res, this.config, nonce);

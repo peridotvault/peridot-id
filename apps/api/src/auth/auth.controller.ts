@@ -345,7 +345,11 @@ export class AuthController {
       return;
     }
     const { returnTo, clientId } = verified;
-    const resolved = returnTo ? await this.ssoService.resolveReturnTo(returnTo, clientId) : null;
+    // First-party logins were bound to the wallet origin by the guard (no
+    // cross-origin target): land on the wallet with the session, exactly like
+    // pre-M3 — no pid_code minted, no allowlist lookup.
+    const firstParty = !clientId && returnTo === successUrl;
+    const resolved = !firstParty && returnTo ? await this.ssoService.resolveReturnTo(returnTo, clientId) : null;
 
     // Verified credential, no identity yet → mint a claim ticket and send the
     // user to the PID picker. Nothing is created until they claim. An
