@@ -98,7 +98,11 @@ server {
 NGINX
 
 # ANT-347 H1: run as non-root. Ports >1024 so no extra caps needed.
-RUN chown -R nginx:nginx /usr/share/nginx/html /etc/nginx/conf.d /var/cache/nginx
+# The stock nginx.conf keeps `pid /run/nginx.pid` and logs under
+# /var/log/nginx — both root-owned in the base image, so pre-create the
+# pid file and hand all nginx-writable paths to the nginx user, otherwise
+# the master process exits emerg(Permission denied) in a restart loop.
+RUN mkdir -p /var/log/nginx && touch /run/nginx.pid && chown -R nginx:nginx /usr/share/nginx/html /etc/nginx/conf.d /var/cache/nginx /var/log/nginx /run/nginx.pid
 USER nginx
 EXPOSE 3000
 
