@@ -5,7 +5,7 @@ import { CurrentUser, AuthenticatedUser } from "../common/current-user.decorator
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { UserTokenGuard } from "../common/user-token.guard";
 import { UpdateProfileDto } from "./dto/update-profile.dto";
-import { ProfileService } from "./profile.service";
+import { ProfileService, ProfileWithLevel } from "./profile.service";
 
 @Controller("v1/profile")
 @UseGuards(ThrottlerGuard)
@@ -14,7 +14,7 @@ export class ProfileController {
 
   @Get("me")
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: AuthenticatedUser): Promise<Profile> {
+  me(@CurrentUser() user: AuthenticatedUser): Promise<ProfileWithLevel> {
     return this.profileService.getMe(user.pid);
   }
 

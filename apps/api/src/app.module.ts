@@ -7,6 +7,7 @@ import { AdminModule } from "./admin/admin.module";
 import { AuthModule } from "./auth/auth.module";
 import { CredentialModule } from "./credentials/credential.module";
 import { EnvModule } from "./env/env.module";
+import { ExperienceModule } from "./experience/experience.module";
 import { FiatModule } from "./fiat/fiat.module";
 import { IdentityModule } from "./identity/identity.module";
 import { IntentModule } from "./intent/intent.module";
@@ -33,6 +34,7 @@ import { HealthModule } from "./health/health.module";
     AdminModule,
     CredentialModule,
     EnvModule,
+    ExperienceModule,
     FiatModule,
     IntentModule,
     PermissionsModule,

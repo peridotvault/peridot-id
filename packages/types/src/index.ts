@@ -80,8 +80,25 @@ export interface Profile {
   displayName: string | null;
   avatarUrl: string | null;
   locale: string | null;
+  /**
+   * Authoritative level summary, read live from PeridotID (ANT-89 M1).
+   * Optional for back-compat; apps must NOT persist it — no XP duplication
+   * in app DBs, re-read it instead.
+   */
+  level?: LevelSummary;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Wire shape of GET /v1/users/{pid}/level (snake_case). */
+export interface LevelSummary {
+  pid: string;
+  level: number;
+  total_xp: number;
+  current_level_xp: number;
+  /** Null at the max-level cap. */
+  next_level_xp: number | null;
+  progress_percentage: number;
 }
 
 export interface ProfileUpdate {

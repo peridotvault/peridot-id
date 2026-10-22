@@ -1,14 +1,28 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { Profile } from "@prisma/client";
+import { LevelsService, LevelView } from "../experience/levels.service";
 import { PrismaService } from "../prisma/prisma.service";
+
+export interface ProfileWithLevel extends Profile {
+  /**
+   * Authoritative level summary, read live from UserXpState (ANT-89 M1).
+   * Apps must NOT persist this — no XP duplication in app DBs; re-read it.
+   */
+  level: LevelView;
+}
 
 @Injectable()
 export class ProfileService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly levels: LevelsService,
+  ) {}
 
-  getMe(pid: string): Promise<Profile> {
-    return this.prisma.profile.findUniqueOrThrow({ where: { pid } });
+  async getMe(pid: string): Promise<ProfileWithLevel> {
+    const profile = await this.prisma.profile.findUniqueOrThrow({ where: { pid } });
+    const level = await this.levels.getLevelView(pid);
+    return { ...profile, level };
   }
 
   // NOTE: the PID (`<handle>@pid`) is the immutable identity — it is the

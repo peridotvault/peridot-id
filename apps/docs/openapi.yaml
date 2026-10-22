@@ -45,6 +45,8 @@ tags:
     description: The user's identity across products
   - name: profile
     description: The user's public profile
+  - name: leveling
+    description: PeridotID Level + XP reads (ANT-89). Centralized authority — PeridotID alone awards XP; all authorized apps read Level.
   - name: wallet
     description: |
       The user's wallet, associated with their PID. **Deprecated (V3 surface)** — preserved
@@ -1052,6 +1054,46 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /users/{pid}/level:
+    get:
+      tags: [leveling]
+      summary: Get a user's PeridotID level
+      description: |
+        Returns the authoritative Level + XP summary for any live (non-deleted)
+        PeridotID identity (ANT-89 M1). Open to ALL authorized apps, including
+        unverified ones — XP-submission permission is never consulted on reads
+        (it gates the M3 event-intake path only). Users without XP history read
+        as Level 1 / 0 XP. `next_level_xp` is null at the max-level cap.
+        XP totals are JSON-safe integers.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: pid
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z0-9_]{3,20}@pid$"
+          description: The user's permanent PID (e.g. `ifal@pid`)
+      responses:
+        "200":
+          description: The user's level summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LevelSummary"
+              example:
+                pid: "ifal@pid"
+                level: 5
+                total_xp: 1701
+                current_level_xp: 1701
+                next_level_xp: 2819
+                progress_percentage: 0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /wallet/me:
     get:
@@ -2750,12 +2792,46 @@ components:
           type: string
           nullable: true
           maxLength: 16
+        level:
+          $ref: "#/components/schemas/LevelSummary"
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+
+    LevelSummary:
+      type: object
+      required: [pid, level, total_xp, current_level_xp, progress_percentage]
+      description: >
+        Authoritative level summary, read live from PeridotID. Apps must NOT
+        persist this — no XP duplication in app DBs; re-read it instead.
+      properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+        level:
+          type: integer
+          minimum: 1
+          description: Current level (starts at 1)
+        total_xp:
+          type: integer
+          minimum: 0
+          description: Cumulative XP (JSON-safe integer)
+        current_level_xp:
+          type: integer
+          minimum: 0
+          description: XP marking the start of the current level
+        next_level_xp:
+          type: integer
+          nullable: true
+          description: XP marking the next level; null at the max-level cap
+        progress_percentage:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Progress within the current level band (0–100, 100 at cap)
 
     ProfileUpdate:
       type: object
