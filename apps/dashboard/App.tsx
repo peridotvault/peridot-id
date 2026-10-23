@@ -15,6 +15,7 @@ import LevelingTasksPage from "./src/routes/leveling-tasks";
 import LevelingHistoryPage from "./src/routes/leveling-history";
 import LevelingSettingsPage from "./src/routes/leveling-settings";
 import LevelingAppsPage from "./src/routes/leveling-apps";
+import SystemSettingsPage from "./src/routes/system-settings";
 
 /**
  * Dashboard shell: session context + topbar around every route.
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/leveling/history" element={<LevelingHistoryPage />} />
           <Route path="/leveling/settings" element={<LevelingSettingsPage />} />
           <Route path="/leveling/apps" element={<LevelingAppsPage />} />
+          <Route path="/settings" element={<SystemSettingsPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </WorkspaceProvider>
