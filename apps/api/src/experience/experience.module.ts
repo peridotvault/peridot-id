@@ -1,6 +1,9 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { SecurityModule } from "../security/security-event.module";
+import { BackfillRunService } from "../settings/backfill-run.service";
+import { BackfillRunController } from "../settings/settings-admin.controller";
+import { SettingsModule } from "../settings/settings.module";
 import { AppCredentialGuard } from "./app-credential.guard";
 import { IntakeThrottleAlertFilter } from "./intake-throttle.filter";
 import { EventsController } from "./events.controller";
@@ -28,8 +31,8 @@ import { VerificationService } from "./verification.service";
  * (PID_XP_INTAKE_ENABLED / PID_XP_MIGRATION_ENABLED, exact "true").
  */
 @Module({
-  imports: [SecurityModule, AuthModule],
-  controllers: [LevelsController, ExperienceAdminController, EventsController],
+  imports: [SecurityModule, AuthModule, SettingsModule],
+  controllers: [LevelsController, ExperienceAdminController, EventsController, BackfillRunController],
   providers: [
     LevelsService,
     LedgerService,
@@ -39,9 +42,10 @@ import { VerificationService } from "./verification.service";
     EventsService,
     ExperienceAdminService,
     PolicyBackfillService,
+    BackfillRunService,
     AppCredentialGuard,
     IntakeThrottleAlertFilter,
   ],
-  exports: [LevelsService, LedgerService, QuotaService, VerificationService, EvidenceService, EventsService, ExperienceAdminService, PolicyBackfillService],
+  exports: [LevelsService, LedgerService, QuotaService, VerificationService, EvidenceService, EventsService, ExperienceAdminService, PolicyBackfillService, BackfillRunService],
 })
 export class ExperienceModule {}

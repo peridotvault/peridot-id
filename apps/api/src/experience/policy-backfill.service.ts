@@ -3,15 +3,17 @@ import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
+import { XP_MIGRATION_ENABLED_KEY } from "../settings/env-keys";
 import { LedgerService } from "./ledger.service";
 import { LevelsService } from "./levels.service";
 import { levelFromXp } from "./xp-curve";
 
-/** Release gate for migration EXECUTION (R4): same board gate as XP
- * awarding — no backfill runs until Tobias sign-off + Tristan evidence on
- * the parent. Planning (read-only) is always available. Exact-"true"
- * match, fail-closed. */
-export const XP_MIGRATION_ENABLED_KEY = "PID_XP_MIGRATION_ENABLED";
+/** Release gate for migration EXECUTION (R4) — re-exported from settings
+ * (single source; the flag itself is untouched, plan req 5): same board
+ * gate as XP awarding — no backfill runs until Tobias sign-off + Tristan
+ * evidence on the parent. Planning (read-only) is always available.
+ * Exact-"true" match, fail-closed. */
+export { XP_MIGRATION_ENABLED_KEY } from "../settings/env-keys";
 
 const DEFAULT_BATCH = 500;
 const MAX_BATCH = 5000;
