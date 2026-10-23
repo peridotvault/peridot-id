@@ -120,6 +120,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const tab =
     pathname?.startsWith("/leveling") === true
       ? "leveling"
+      : pathname?.startsWith("/settings") === true
+      ? "settings"
       : pathname?.startsWith("/contracts") === true
       ? "contracts"
       : pathname?.startsWith("/chains") === true
@@ -139,6 +141,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             { key: "partners", label: "Partners" },
             { key: "fees", label: "Fees" },
             { key: "leveling", label: "Leveling" },
+            { key: "settings", label: "System" },
           ]
         : [{ key: "apps", label: "Apps" }],
     [isAdmin],
