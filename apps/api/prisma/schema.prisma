@@ -997,3 +997,58 @@ model XpSuspiciousActivity {
   @@index([reviewed, createdAt])
   @@map("xp_suspicious_activities")
 }
+
+// ANT-456 — DB-driven configuration (SystemSetting table, plan §3.1).
+// One table for all future features: namespaced keys
+// (`<domain>.<area>.<field>`), JSONB values with a declared valueType,
+// optimistic locking via `version`. Every write appends a SecurityEvent
+// row (+ a SystemSettingHistory row for the diff view) in the same
+// transaction — reads never bypass the audit on the write path.
+model SystemSetting {
+  key         String   @id
+  value       Json
+  valueType   String
+  description String?
+  updatedBy   String
+  version     Int      @default(1)
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
+
+  @@map("system_settings")
+}
+
+// ANT-456 — per-write history for the admin diff view (spec §7 A2).
+// Append-only; written in the same transaction as the setting update.
+model SystemSettingHistory {
+  id        String   @id @default(uuid())
+  key       String
+  oldValue  Json?
+  newValue  Json
+  reason    String
+  version   Int
+  updatedBy String
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+
+  @@index([key, createdAt])
+  @@map("system_setting_history")
+}
+
+// ANT-456 — auditable backfill-run procedure (plan §3.5), replacing the
+// permanent PID_XP_MIGRATION_ENABLED env var. One row per requested run
+// (preview or execution): resumable via `cursor`, idempotent page
+// execution, run history is the audit trail (plus SecurityEvent rows).
+model BackfillRun {
+  id            String    @id @default(uuid())
+  policyId      String
+  policyVersion Int
+  status        String    @default("queued")
+  cursor        String?
+  dryRun        Boolean   @default(true)
+  processed     Int       @default(0)
+  updated       Int       @default(0)
+  actor         String
+  startedAt     DateTime  @db.Timestamptz(3) @default(now())
+  finishedAt    DateTime? @db.Timestamptz(3)
+
+  @@index([startedAt])
+  @@map("xp_backfill_runs")
+}
