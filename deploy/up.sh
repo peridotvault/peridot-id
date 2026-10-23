@@ -141,7 +141,25 @@ fi
 # `migrate status` is read-only; the actual `migrate deploy` runs at API
 # container boot (Dockerfile.api CMD). Rollback: fix DB/schema, re-run up.sh.
 echo "==> prisma migrate status (pre-deploy check)"
-COMPOSE_PROJECT_NAME="$PROJECT" compose run --rm api node_modules/.bin/prisma migrate status
+# `migrate status` also exits 1 when migrations are merely *pending* — they get
+# applied at API boot by `migrate deploy`, so only real drift/failure blocks.
+set +e
+MIGRATE_STATUS="$(COMPOSE_PROJECT_NAME="$PROJECT" compose run --rm api node_modules/.bin/prisma migrate status 2>&1)"
+MIGRATE_RC=$?
+set -e
+printf '%s\n' "$MIGRATE_STATUS"
+case "$MIGRATE_STATUS" in
+  *"have failed"* | *"Drift detected"*) MIGRATE_RC=1 ;;
+  *"have not yet been applied"*)
+    if [ "$MIGRATE_RC" -ne 0 ]; then
+      echo "warn: pending migrations — applied by migrate deploy at API boot" >&2
+      MIGRATE_RC=0
+    fi ;;
+esac
+if [ "$MIGRATE_RC" -ne 0 ]; then
+  echo "error: prisma migrate status failed — fix the DB/schema before deploying" >&2
+  exit 1
+fi
 
 # --remove-orphans: drops stale containers (renamed services, interrupted recreates)
 # that would otherwise squat on container names and fail the next recreate.
