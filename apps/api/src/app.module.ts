@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { skipIfAnon, skipIfAuthed, USER_THROTTLER, userThrottleTracker } from "./common/user-throttle";
 import { AccountModule } from "./account/account.module";
 import { AdminModule } from "./admin/admin.module";
 import { AuthModule } from "./auth/auth.module";
@@ -27,8 +28,14 @@ import { HealthModule } from "./health/health.module";
     // ANT-441 M3 (Tobias F5): intake inner tiers below the global default —
     // per-app (60/min) and per-app+subject (30/min), keyed by rate-limit.ts
     // trackers (client_id from the body, IP fallback when absent).
+    // Per-user vs anonymous buckets: a verified session/app token skips the
+    // per-IP bucket and counts against its own PID bucket (500/min) instead;
+    // anonymous requests keep the per-IP 100/min bucket. Page-flipping while
+    // logged in can never trip the anonymous budget, and a forged `sub`
+    // falls back to the IP bucket (see user-throttle.ts).
     ThrottlerModule.forRoot([
-      { name: "default", ttl: 60000, limit: 100 },
+      { name: "default", ttl: 60000, limit: 100, skipIf: skipIfAuthed },
+      { ...USER_THROTTLER, skipIf: skipIfAnon, getTracker: userThrottleTracker },
       { ...XP_INTAKE_APP_THROTTLER, getTracker: xpIntakeAppTracker },
       { ...XP_INTAKE_APP_PID_THROTTLER, getTracker: xpIntakeAppPidTracker },
     ]),

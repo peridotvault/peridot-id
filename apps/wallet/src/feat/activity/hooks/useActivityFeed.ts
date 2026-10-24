@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FiatDepositView, FiatLedgerEntry, PeridotClient } from "@peridotvault/pid-sdk-js";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { pendingDeposit } from "../utils/feed";
+import { cachedRead, clearApiCache } from "../../../shared/api-cache";
 import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/network-mode";
 
 // Unified feed source: chain history + DOKU intents + fiat ledger rows.
@@ -18,15 +19,25 @@ export function useActivityFeed(peridot: PeridotClient) {
     setBusy(true);
     setError(null);
     try {
+      // Money reads coalesce for 10s (same window as Home): revisits and the
+      // StrictMode double-mount share one fetch instead of paying full price.
       const [chain, depositsView, ledgerView] = await Promise.all([
         peridot.wallet.history(),
-        peridot.fiat.deposits().catch(() => [] as FiatDepositView[]),
-        peridot.fiat.ledger().then((l) => l.rows).catch(() => [] as FiatLedgerEntry[]),
+        cachedRead("fiat.deposits", { ttlMs: 10_000 }, () => peridot.fiat.deposits()).catch(
+          () => [] as FiatDepositView[],
+        ),
+        cachedRead("fiat.ledger", { ttlMs: 10_000 }, () => peridot.fiat.ledger().then((l) => l.rows)).catch(
+          () => [] as FiatLedgerEntry[],
+        ),
       ]);
       // Heal unsettled deposit intents against DOKU (local rows never self-heal).
+      // Bounded fan-out: this is one request per pending deposit, so an account
+      // with many open intents would blow the per-IP budget in a single load.
+      // The rest heal on the next load.
       const healed = await Promise.all(
         depositsView
           .filter((x) => pendingDeposit(x))
+          .slice(0, 3)
           .map((x) => peridot.fiat.syncTransaction(x.id).catch(() => null)),
       );
       const fresh = new Map(healed.filter((x) => x !== null).map((x) => [x.id, x]));
@@ -48,6 +59,7 @@ export function useActivityFeed(peridot: PeridotClient) {
   // Re-fetch chain history on network switch, then release the signing block.
   useEffect(() => {
     return subscribeNetworkMode(() => {
+      clearApiCache();
       load().then(endNetworkTransition, endNetworkTransition);
     });
   }, [load]);

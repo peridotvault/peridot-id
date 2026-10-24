@@ -5,6 +5,7 @@ import { getOptionsToken, ThrottlerModule } from "@nestjs/throttler";
 import request from "supertest";
 import { PidAppsService } from "../auth/apps.service";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { skipIfAnon, skipIfAuthed, USER_THROTTLER, userThrottleTracker } from "../common/user-throttle";
 import { PrismaService } from "../prisma/prisma.service";
 import { AppCredentialGuard } from "./app-credential.guard";
 import { EventsController } from "./events.controller";
@@ -51,7 +52,11 @@ describe("EventsController (intake route)", () => {
     moduleRef = await Test.createTestingModule({
       imports: [
         ThrottlerModule.forRoot([
-          { name: "default", ttl: 60000, limit: 100 },
+          // Production-shaped buckets (same S3 rule as the per-app tiers):
+          // the spec must mirror the skipIf split, or it would exercise a
+          // wiring that never ships.
+          { name: "default", ttl: 60000, limit: 100, skipIf: skipIfAuthed },
+          { ...USER_THROTTLER, skipIf: skipIfAnon, getTracker: userThrottleTracker },
           // S3 (Tobias re-review): mirror production wiring — the named tiers
           // MUST carry their getTracker keying here too, or the spec would
           // exercise IP-keyed buckets instead of the shipped per-app keying.
@@ -144,6 +149,77 @@ describe("EventsController (intake route)", () => {
     const byName = new Map((Array.isArray(registered) ? registered : []).map((o) => [o.name, o]));
     expect(byName.get(XP_INTAKE_APP_THROTTLER.name)?.getTracker).toBe(xpIntakeAppTracker);
     expect(byName.get(XP_INTAKE_APP_PID_THROTTLER.name)?.getTracker).toBe(xpIntakeAppPidTracker);
+  });
+
+  it("an over-limit burst on one route 429s with a Retry-After header", async () => {
+    // The route has no per-route @Throttle override, so the default (100)
+    // applies — 101 rapid hits must trip it, proving the guard is live here.
+    // (Named tiers are asserted via their own specs, not by burning budgets.)
+    // Sequential, not concurrent: the in-memory budget counts hits, not
+    // sockets, and 101 parallel connections would test the test server
+    // instead of the guard. client_id varies per hit so the per-app intake
+    // tiers (60/min) stay out of the way — the trip must come from the
+    // default IP tier (bare `retry-after`, no suffix).
+    let limited: { status: number; headers: Record<string, string> } | null = null;
+    for (let i = 0; i < 101; i++) {
+      const res = await request(app.getHttpServer())
+        .post("/v1/experience/events")
+        .send(body({ client_id: `burst-app-${i}`, event_id: `burst-${i}` }));
+      if (res.status === 429) {
+        limited = res;
+        break;
+      }
+    }
+    expect(limited).not.toBeNull();
+    expect(limited?.headers["retry-after"]).toBeDefined();
+  });
+
+  it("production-shaped buckets: verified sessions skip the IP tier", async () => {
+    // Module-level integration (S3-style lock, distinct from the unit-level
+    // user-throttle.spec): proves the skipIf split end to end — 101 rapid
+    // hits with a VALID session token never consume the anonymous budget
+    // (no 429 from the IP tier), while the same burst without a token 429s.
+    const secret = "bucket-split-test-secret";
+    process.env.JWT_ACCESS_SECRET = secret;
+    const { sign } = await import("jsonwebtoken");
+    const { JWT_ISSUER } = await import("../common/app-config");
+    const token = sign({ sub: "ifal@pid", type: "access" }, secret, {
+      issuer: JWT_ISSUER,
+      audience: "pid-session",
+      expiresIn: "1h",
+    });
+    try {
+      // Sequential: the budget counts hits, not sockets. client_id varies per
+      // hit so the per-app intake tiers (60/min) stay out of the way — the
+      // only tiers in play are default-IP vs user.
+      let authedLimited = false;
+      for (let i = 0; i < 101; i++) {
+        const res = await request(app.getHttpServer())
+          .post("/v1/experience/events")
+          .set("Authorization", `Bearer ${token}`)
+          .send(body({ client_id: `authed-app-${i}`, event_id: `authed-${i}` }));
+        // 401s (no such app) are fine — the point is NO 429 from the IP tier.
+        if (res.status === 429) {
+          authedLimited = true;
+          break;
+        }
+      }
+      expect(authedLimited).toBe(false);
+
+      let anonLimited = false;
+      for (let i = 0; i < 101; i++) {
+        const res = await request(app.getHttpServer())
+          .post("/v1/experience/events")
+          .send(body({ client_id: `anon-app-${i}`, event_id: `anon-${i}` }));
+        if (res.status === 429) {
+          anonLimited = true;
+          break;
+        }
+      }
+      expect(anonLimited).toBe(true);
+    } finally {
+      delete process.env.JWT_ACCESS_SECRET;
+    }
   });
 });
 
