@@ -48,7 +48,7 @@
     "build": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'}));require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest": "pnpm build",
-    "test": "node --test test/env.test.mjs test/popup.test.mjs test/fiat.test.mjs test/bearer.test.mjs test/embed.test.mjs test/chain-echo.test.mjs test/level.test.mjs test/fee-quote.test.mjs",
+    "test": "node --test test/env.test.mjs test/popup.test.mjs test/fiat.test.mjs test/bearer.test.mjs test/embed.test.mjs test/chain-echo.test.mjs test/level.test.mjs test/fee-quote.test.mjs test/fee-v2-activate.test.mjs",
     "prepack": "tsc -p tsconfig.cjs.json && tsc -p tsconfig.esm.json && node -e \"require('fs').mkdirSync('dist/cjs',{recursive:true});require('fs').mkdirSync('dist/esm',{recursive:true});require('fs').writeFileSync('dist/cjs/package.json',JSON.stringify({type:'commonjs'}));require('fs').writeFileSync('dist/esm/package.json',JSON.stringify({type:'module'}));\""
   },
   "devDependencies": {
