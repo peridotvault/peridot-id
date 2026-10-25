@@ -59,7 +59,7 @@
       "datasource": { "type": "postgres", "uid": "${datasource}" },
       "targets": [
         {
-          "rawSql": "SELECT \"createdAt\" AS time, \"eventType\", COALESCE(metadata->>'chain','unknown') AS chain, metadata FROM security_events WHERE $__timeFilter(\"createdAt\") AND (\"eventType\" IN ('relayer.formula_mismatch','relayer.over_attested') OR (\"eventType\" LIKE '%.reconciled' AND (COALESCE((metadata->>'overAttested')::boolean,false) OR (metadata->>'protocolFee') IS DISTINCT FROM (metadata->>'protocolFeeExpected')))) ORDER BY 1 DESC LIMIT 50;",
+          "rawSql": "SELECT \"createdAt\" AS time, \"eventType\", COALESCE(metadata->>'chain','unknown') AS chain, metadata FROM security_events WHERE $__timeFilter(\"createdAt\") AND (\"eventType\" IN ('reconcile.formula_mismatch','reconcile.over_attested') OR (\"eventType\" LIKE '%.reconciled' AND (COALESCE((metadata->>'overAttested')::boolean,false) OR (metadata->>'protocolFee') IS DISTINCT FROM (metadata->>'protocolFeeExpected')))) ORDER BY 1 DESC LIMIT 50;",
           "format": "table"
         }
       ]
@@ -92,7 +92,7 @@
       "datasource": { "type": "postgres", "uid": "${datasource}" },
       "targets": [
         {
-          "rawSql": "SELECT COALESCE(metadata->>'chain','unknown') AS chain, percentile_cont(0.5) WITHIN GROUP (ORDER BY (metadata->>'latencyMs')::numeric) AS p50_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY (metadata->>'latencyMs')::numeric) AS p95_ms, COUNT(*) AS n FROM security_events WHERE \"eventType\"='rotation.confirmed_latency' AND $__timeFilter(\"createdAt\") GROUP BY 1;",
+          "rawSql": "SELECT COALESCE(metadata->>'chain','unknown') AS chain, percentile_cont(0.5) WITHIN GROUP (ORDER BY (metadata->>'latencyMs')::numeric) AS p50_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY (metadata->>'latencyMs')::numeric) AS p95_ms, COUNT(*) AS n FROM security_events WHERE \"eventType\"='rotation.confirmed' AND $__timeFilter(\"createdAt\") GROUP BY 1;",
           "format": "table"
         }
       ]
@@ -103,7 +103,7 @@
       "datasource": { "type": "postgres", "uid": "${datasource}" },
       "targets": [
         {
-          "rawSql": "SELECT \"eventType\" AS outcome, COUNT(*) AS events FROM security_events WHERE \"eventType\" IN ('broadcast.resolved_landed','broadcast.resolved_not_landed_rebroadcast','broadcast.parked_unreadable','broadcast.duplicate_suppressed','broadcast.rebroadcast','broadcast.conflicting_bytes_rejected','relayer.parked') AND $__timeFilter(\"createdAt\") GROUP BY 1;",
+          "rawSql": "SELECT \"eventType\" AS outcome, COUNT(*) AS events FROM security_events WHERE \"eventType\" IN ('relay.resolve_landed','relay.resolve_not_landed_rebroadcast','relay.parked_unreadable') AND $__timeFilter(\"createdAt\") GROUP BY 1;",
           "format": "table"
         }
       ]
