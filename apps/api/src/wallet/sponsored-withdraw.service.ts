@@ -16,6 +16,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ChainAccount } from "@prisma/client";
+import { createHash } from "node:crypto";
 import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { ACCOUNT_TYPE_SMART, SolanaSelection } from "../common/chains";
@@ -31,6 +32,18 @@ import {
 } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
+import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
+import {
+  BROADCAST_CHAIN_SOLANA,
+  ChainStateResolution,
+  RelayerIdempotencyService,
+} from "../relayer/relayer-idempotency.service";
+import {
+  IntentRejectionCause,
+  RelayerEvents,
+  SponsoredEntryPoint,
+  absorbedLoss,
+} from "../relayer/relayer-events";
 
 export interface ChainEcho {
   namespace: "solana";
@@ -72,10 +85,103 @@ export class SponsoredWithdrawService {
     private readonly config: ConfigService,
     private readonly security: SecurityEventService,
     private readonly chains: ChainRegistryService,
+    private readonly idempotency: RelayerIdempotencyService,
+    private readonly breaker: CircuitBreakerService,
   ) {}
 
   private policyVersion(): number {
     return configuredPolicyVersion();
+  }
+
+  /** H1.ii: every pre-broadcast rejection writes a typed `intent.rejected` event. */
+  private rejected(
+    pid: string,
+    entryPoint: SponsoredEntryPoint,
+    cause: IntentRejectionCause,
+    meta: Record<string, unknown> = {},
+  ): Promise<void> {
+    return this.security.log(pid, RelayerEvents.intentRejected, {
+      entryPoint,
+      chain: BROADCAST_CHAIN_SOLANA,
+      cause,
+      ...meta,
+    });
+  }
+
+  /**
+   * H2 slot key: sha256 over the canonical intent + the user's assertion
+   * signature. Same signed intent ⇒ same hash (idempotent retry); a re-sign
+   * under the same nonce ⇒ different hash ⇒ conflicting-nonce-reuse rejection.
+   * Wire bytes (blockhash) may vary per attempt — replay safety is the nonce.
+   */
+  private intentHash(entryPoint: SponsoredEntryPoint, signatureB64: string, parts: unknown[]): string {
+    const h = createHash("sha256");
+    h.update(JSON.stringify([entryPoint, ...parts]));
+    h.update(signatureB64);
+    return h.digest("hex");
+  }
+
+  /**
+   * H2.v duplicate-no-submission path: a previous attempt claimed the slot but
+   * recorded no signature (crash between broadcast and record, or a concurrent
+   * in-flight attempt). Resolve chain state before any rebroadcast. Returns
+   * the duplicate response when chain state proves landing, or null to fall
+   * through to the single allowed broadcast on proven non-landing.
+   */
+  private async resolveDuplicateSlot(
+    pid: string,
+    adapter: SolanaAdapter,
+    accountAddress: string,
+    entryPoint: SponsoredEntryPoint,
+    nonce: string,
+    chainNonce: bigint,
+    networkFee: bigint,
+    protocolFee: bigint,
+  ): Promise<SponsoredWithdrawResult | null> {    const state = await this.resolveSvmState(adapter, pid, accountAddress, chainNonce).catch(() => ({
+      unreadable: true as const,
+    }));
+    if ("unreadable" in state) {
+      throw new ServiceUnavailableException(
+        "The network outcome is unclear and the request was parked for operator review — no funds moved twice",
+      );
+    }
+    if (!state.landed) return null;
+    if (!state.signature) {
+      await this.security.log(pid, RelayerEvents.resolvedLanded, {
+        entryPoint,
+        chain: BROADCAST_CHAIN_SOLANA,
+        nonce,
+        unattributed: true,
+      });
+      throw new ServiceUnavailableException(
+        "The transaction landed but its receipt is unreadable — support has been alerted, please check state before retrying",
+      );
+    }
+    await this.idempotency.recordOutcome(pid, nonce, BROADCAST_CHAIN_SOLANA, "resolved-landed", state.signature);
+    return {
+      signature: state.signature,
+      networkFeeLamports: networkFee.toString(),
+      protocolFeeLamports: protocolFee.toString(),
+      status: "confirmed",
+    };
+  }
+  private async resolveSvmState(
+    adapter: SolanaAdapter,
+    pid: string,
+    accountAddress: string,
+    expectedNonce: bigint,
+  ): Promise<ChainStateResolution> {
+    // H2.v ground truth: the account nonce. Consumed nonce ⇒ the authorization
+    // landed (attribute the newest confirmed account tx; null when history is
+    // unreadable — still landed). Unconsumed nonce ⇒ proven non-landing.
+    // Throwing readers ⇒ unreadable (bounded by the caller's resolve budget).
+    const nonceNow = await adapter.getNonce(pid);
+    if (nonceNow !== expectedNonce) {
+      const history = await adapter.getHistory(accountAddress, 5);
+      const hit = history.find((tx) => !tx.err);
+      return { landed: true, signature: hit?.signature ?? null };
+    }
+    return { landed: false };
   }
 
   /** Lazy pid-solana module (keeps @solana/web3.js out of Jest's transform graph). */
@@ -171,16 +277,23 @@ export class SponsoredWithdrawService {
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
 
+    // H3: fail-closed while the per-chain spend-rate breaker is open.
+    await this.breaker.requireClosed(pid, BROADCAST_CHAIN_SOLANA, "withdraw");
+
     // The asserting credential must be one of this wallet's active passkeys.
     const authority = await this.prisma.authority.findFirst({
       where: { pid, credentialId: dto.assertion.id, status: "active" },
     });
-    if (!authority) throw new BadRequestException("Unknown or inactive passkey");
+    if (!authority) {
+      await this.rejected(pid, "withdraw", "unauthorized", { credentialId: dto.assertion.id });
+      throw new BadRequestException("Unknown or inactive passkey");
+    }
 
     const amount = BigInt(dto.amount);
     if (amount <= 0n) throw new BadRequestException("Amount must be greater than 0");
     const version = this.policyVersion();
     if (dto.feePolicyVersion !== version) {
+      await this.rejected(pid, "withdraw", "policy-unknown", { feePolicyVersion: dto.feePolicyVersion });
       throw new BadRequestException("Unsupported fee policy — re-quote and try again");
     }
     const bps = protocolFeeBps(version);
@@ -188,11 +301,16 @@ export class SponsoredWithdrawService {
     // Stale-nonce / expired / over-TTL rejections happen before broadcast.
     const chainNonce = BigInt(await adapter.getNonce(pid));
     if (BigInt(dto.nonce) !== chainNonce) {
+      await this.rejected(pid, "withdraw", "stale-nonce", { nonce: dto.nonce });
       throw new ConflictException("Authorization is stale — please try again (a newer nonce is active)");
     }
     const chainTime = await adapter.chainTime();
-    if (dto.expiry <= chainTime) throw new BadRequestException("Authorization expired — please try again");
+    if (dto.expiry <= chainTime) {
+      await this.rejected(pid, "withdraw", "expired", { expiry: dto.expiry });
+      throw new BadRequestException("Authorization expired — please try again");
+    }
     if (dto.expiry - chainTime > MAX_TTL_SECS) {
+      await this.rejected(pid, "withdraw", "over-ttl", { expiry: dto.expiry, chainTime });
       throw new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again");
     }
 
@@ -201,6 +319,16 @@ export class SponsoredWithdrawService {
     const quoted = BigInt(dto.quotedNetworkFeeLamports);
     const networkFee = await this.networkFeeLamports(adapter);
     if (exceedsDriftBound(networkFee, quoted)) {
+      await this.rejected(pid, "withdraw", "drift", {
+        quoted: quoted.toString(),
+        attested: networkFee.toString(),
+      });
+      await this.security.log(pid, RelayerEvents.quoteDriftRejected, {
+        entryPoint: "withdraw",
+        chain: BROADCAST_CHAIN_SOLANA,
+        quoted: quoted.toString(),
+        attested: networkFee.toString(),
+      });
       throw new ConflictException("Network fee moved — re-quote and try again");
     }
     const protocolFee = protocolFeeOf(networkFee, bps);
@@ -212,6 +340,7 @@ export class SponsoredWithdrawService {
     if (dto.asset === "SOL") {
       const smart = BigInt(await adapter.getBalanceOf(chain.address));
       if (smart < amount + totalFee) {
+        await this.rejected(pid, "withdraw", "insufficient-funds", { asset: dto.asset });
         throw new BadRequestException(
           `Insufficient balance — need ${amount + totalFee} lamports, have ${smart}`,
         );
@@ -223,10 +352,12 @@ export class SponsoredWithdrawService {
       const balances = await adapter.getTokenBalancesOf(sourceAta.toBase58()).catch(() => []);
       const row = balances.find((b) => b.mint === mint.toBase58());
       if (!row || BigInt(row.amount) < amount) {
+        await this.rejected(pid, "withdraw", "insufficient-funds", { asset: dto.asset });
         throw new BadRequestException("Insufficient token balance");
       }
       const smartSol = BigInt(await adapter.getBalanceOf(chain.address));
       if (smartSol < totalFee) {
+        await this.rejected(pid, "withdraw", "insufficient-funds", { asset: dto.asset });
         throw new BadRequestException(`Insufficient SOL for fee — need ${totalFee} lamports, have ${smartSol}`);
       }
     }
@@ -235,6 +366,7 @@ export class SponsoredWithdrawService {
     const relayerBal = await adapter.getBalanceOf(this.relayer().publicKey.toBase58());
     const feeForTx = await adapter.estimateWithdrawFee().catch(() => 5000n);
     if (BigInt(relayerBal) < feeForTx) {
+      await this.rejected(pid, "withdraw", "relayer-unfunded", {});
       await this.security.log(pid, "withdraw.relayer_unfunded", {});
       throw new ServiceUnavailableException(
         "Peridot's fee service is briefly unavailable. No SOL was deducted from your wallet — please try again in a moment.",
@@ -254,44 +386,131 @@ export class SponsoredWithdrawService {
     const nonce = chainNonce;
     const expiry = dto.expiry;
 
-    let signature: string;
-    if (dto.asset === "SOL") {
-      signature = await adapter.sponsoredWithdrawSolV3(
+    // H2: claim the (pid, nonce, chain) slot. Same-signed-intent retries return
+    // the recorded signature with no new broadcast; different bytes under the
+    // same nonce throw (conflicting submissions are forbidden).
+    const slotHash = this.intentHash("withdraw", dto.assertion.signature, [
+      dto.asset,
+      dto.to,
+      dto.amount,
+      dto.nonce,
+      dto.expiry,
+      version,
+    ]);
+    const claim = await this.idempotency.claimSlot(
+      pid,
+      dto.nonce,
+      BROADCAST_CHAIN_SOLANA,
+      slotHash,
+      "withdraw",
+    );
+    if (claim.decision === "duplicate" && claim.signature) {
+      return {
+        signature: claim.signature,
+        networkFeeLamports: networkFee.toString(),
+        protocolFeeLamports: protocolFee.toString(),
+        status: "confirmed",
+      };
+    }
+    if (claim.decision === "duplicate") {
+      const resolved = await this.resolveDuplicateSlot(
         pid,
-        authorityCompressed,
-        this.pubkeyOr400(PublicKey, dto.to, "Destination"),
-        amount,
-        version,
+        adapter,
+        chain.address,
+        "withdraw",
+        dto.nonce,
+        chainNonce,
         networkFee,
-        nonce,
-        expiry,
-        assertion,
-        this.relayer(),
-        this.treasury(),
+        protocolFee,
       );
+      if (resolved) return resolved;
+      // Proven non-landing → fall through to the single allowed broadcast.
+    }
+
+    let signature: string | null;
+    if (dto.asset === "SOL") {
+      const out = await this.idempotency.broadcastWithResolveThenAct({
+        pid,
+        nonce: dto.nonce,
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "withdraw",
+        broadcast: () =>
+          adapter
+            .sponsoredWithdrawSolV3(
+              pid,
+              authorityCompressed,
+              this.pubkeyOr400(PublicKey, dto.to, "Destination"),
+              amount,
+              version,
+              networkFee,
+              nonce,
+              expiry,
+              assertion,
+              this.relayer(),
+              this.treasury(),
+            )
+            .then((sig) => ({ signature: sig, result: null })),
+        resolveState: () => this.resolveSvmState(adapter, pid, chain.address, chainNonce),
+      });
+      signature = out.signature;
     } else {
       const mint = this.pubkeyOr400(PublicKey, dto.asset, "Asset mint");
       const sourceAta = await adapter.tokenAta(pid, mint);
       if (!(await adapter.hasAccount(sourceAta.toBase58()))) {
         throw new BadRequestException("Token account is not registered on this wallet yet");
       }
-      signature = await adapter.sponsoredWithdrawTokenV3(
+      const out = await this.idempotency.broadcastWithResolveThenAct({
         pid,
-        authorityCompressed,
-        mint,
-        this.pubkeyOr400(PublicKey, dto.to, "Destination"),
-        amount,
-        version,
-        networkFee,
-        nonce,
-        expiry,
-        assertion as never,
-        this.relayer(),
-        this.treasury(),
+        nonce: dto.nonce,
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "withdraw",
+        broadcast: () =>
+          adapter
+            .sponsoredWithdrawTokenV3(
+              pid,
+              authorityCompressed,
+              mint,
+              this.pubkeyOr400(PublicKey, dto.to, "Destination"),
+              amount,
+              version,
+              networkFee,
+              nonce,
+              expiry,
+              assertion as never,
+              this.relayer(),
+              this.treasury(),
+            )
+            .then((sig) => ({ signature: sig, result: null })),
+        resolveState: () => this.resolveSvmState(adapter, pid, chain.address, chainNonce),
+      });
+      signature = out.signature;
+    }
+    if (!signature) {
+      // Proven landed but unattributed (nonce consumed, history unreadable):
+      // reconcile what can be reconciled and alert — never rebroadcast.
+      await this.security.log(pid, RelayerEvents.resolvedLanded, {
+        entryPoint: "withdraw",
+        chain: BROADCAST_CHAIN_SOLANA,
+        nonce: dto.nonce,
+        unattributed: true,
+      });
+      throw new ServiceUnavailableException(
+        "The withdrawal landed but its receipt is unreadable — support has been alerted, please check your balance before retrying",
       );
     }
 
-    const status = (await adapter.waitForConfirmation(signature, 8, 1000)) === "confirmed" ? "confirmed" : "pending";
+    const confirmation = await adapter.waitForConfirmation(signature, 8, 1000);
+    if (confirmation === "failed") {
+      // Post-confirmation failure: alert, never rebroadcast (H2.iii).
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "failed", signature);
+      await this.security.log(pid, RelayerEvents.intentRejected, {
+        entryPoint: "withdraw",
+        chain: BROADCAST_CHAIN_SOLANA,
+        cause: "post-confirmation-failure",
+        signature,
+      });
+    }
+    const status = confirmation === "confirmed" ? "confirmed" : "pending";
     await this.security.log(pid, "withdraw.submitted", {
       signature,
       amount: amount.toString(),
@@ -300,6 +519,12 @@ export class SponsoredWithdrawService {
       protocolFee: protocolFee.toString(),
       feePolicyVersion: version,
     });
+    if (confirmation === "confirmed") {
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "confirmed", signature);
+    }
+    if (confirmation === "confirmed") {
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "confirmed", signature);
+    }
     await this.reconcile(pid, adapter, signature, networkFee, protocolFee, version).catch((err) =>
       this.logger.warn(`withdraw reconcile failed for ${signature}: ${(err as Error).message}`),
     );
@@ -324,12 +549,12 @@ export class SponsoredWithdrawService {
     networkFee: bigint,
     protocolFee: bigint,
     version: number,
-    kind = "withdraw",
+    kind: SponsoredEntryPoint = "withdraw",
   ): Promise<void> {
     const expectedProtocol = protocolFeeOf(networkFee, protocolFeeBps(version));
     const parsed = await adapter.parseTransaction(signature).catch(() => null);
     const actual = parsed?.fee != null ? BigInt(parsed.fee) : null;
-    const absorbed = actual != null && actual > networkFee ? (actual - networkFee).toString() : "0";
+    const absorbed = absorbedLoss(networkFee, actual);
     const overAttested = actual != null && exceedsDriftBound(networkFee, actual);
     await this.security.log(pid, `${kind}.reconciled`, {
       signature,
@@ -337,13 +562,41 @@ export class SponsoredWithdrawService {
       protocolFee: protocolFee.toString(),
       protocolFeeExpected: expectedProtocol.toString(),
       actualNetworkFee: actual?.toString() ?? "unknown",
-      relayerAbsorbed: absorbed,
+      relayerAbsorbed: absorbed.toString(),
       overAttested,
     });
+    // H1.iv: per-tx relayer P&L, dashboarded per chain + entry point.
+    await this.security.log(pid, RelayerEvents.pnl, {
+      signature,
+      entryPoint: kind,
+      chain: BROADCAST_CHAIN_SOLANA,
+      absorbed: absorbed.toString(),
+    });
+    // H3: absorbed losses feed the per-chain spend-rate breaker.
+    await this.breaker.recordAbsorbed(pid, BROADCAST_CHAIN_SOLANA, absorbed).catch((err) =>
+      this.logger.warn(`breaker record failed: ${(err as Error).message}`),
+    );
     if (protocolFee !== expectedProtocol) {
+      // H1.iii: formula divergence — alert, never rebroadcast.
+      await this.security.log(pid, RelayerEvents.formulaMismatch, {
+        signature,
+        entryPoint: kind,
+        chain: BROADCAST_CHAIN_SOLANA,
+        attested: networkFee.toString(),
+        actual: actual?.toString() ?? "unknown",
+        expected: expectedProtocol.toString(),
+      });
       this.logger.error(`${kind} formula anomaly: ${signature} protocol=${protocolFee} expected=${expectedProtocol}`);
     }
     if (overAttested) {
+      await this.security.log(pid, RelayerEvents.overAttested, {
+        signature,
+        entryPoint: kind,
+        chain: BROADCAST_CHAIN_SOLANA,
+        attested: networkFee.toString(),
+        actual: actual?.toString() ?? "unknown",
+        expected: expectedProtocol.toString(),
+      });
       this.logger.error(`${kind} over-attestation anomaly: ${signature} attested=${networkFee} actual=${actual}`);
     }
   }
@@ -430,14 +683,21 @@ export class SponsoredWithdrawService {
     await this.assertActivated(adapter, chain.address);
     const decoded = await this.decodeExecuteCall(chain.address, dto, selection);
 
+    // H3: fail-closed while the per-chain spend-rate breaker is open.
+    await this.breaker.requireClosed(pid, BROADCAST_CHAIN_SOLANA, "execute");
+
     // The asserting credential must be one of this wallet's active passkeys.
     const authority = await this.prisma.authority.findFirst({
       where: { pid, credentialId: dto.assertion.id, status: "active" },
     });
-    if (!authority) throw new BadRequestException("Unknown or inactive passkey");
+    if (!authority) {
+      await this.rejected(pid, "execute", "unauthorized", { credentialId: dto.assertion.id });
+      throw new BadRequestException("Unknown or inactive passkey");
+    }
 
     const version = this.policyVersion();
     if (dto.feePolicyVersion !== version) {
+      await this.rejected(pid, "execute", "policy-unknown", { feePolicyVersion: dto.feePolicyVersion });
       throw new BadRequestException("Unsupported fee policy — re-quote and try again");
     }
     const bps = protocolFeeBps(version);
@@ -445,11 +705,16 @@ export class SponsoredWithdrawService {
     // Stale-nonce / expired / over-TTL rejections happen before broadcast.
     const chainNonce = BigInt(await adapter.getNonce(pid));
     if (BigInt(dto.nonce) !== chainNonce) {
+      await this.rejected(pid, "execute", "stale-nonce", { nonce: dto.nonce });
       throw new ConflictException("Authorization is stale — please try again (a newer nonce is active)");
     }
     const chainTime = await adapter.chainTime();
-    if (dto.expiry <= chainTime) throw new BadRequestException("Authorization expired — please try again");
+    if (dto.expiry <= chainTime) {
+      await this.rejected(pid, "execute", "expired", { expiry: dto.expiry });
+      throw new BadRequestException("Authorization expired — please try again");
+    }
     if (dto.expiry - chainTime > MAX_TTL_SECS) {
+      await this.rejected(pid, "execute", "over-ttl", { expiry: dto.expiry, chainTime });
       throw new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again");
     }
 
@@ -458,6 +723,16 @@ export class SponsoredWithdrawService {
     const quoted = BigInt(dto.quotedNetworkFeeLamports);
     const networkFee = await adapter.estimateExecuteFee(decoded.target, decoded.metas, decoded.data.length);
     if (exceedsDriftBound(networkFee, quoted)) {
+      await this.rejected(pid, "execute", "drift", {
+        quoted: quoted.toString(),
+        attested: networkFee.toString(),
+      });
+      await this.security.log(pid, RelayerEvents.quoteDriftRejected, {
+        entryPoint: "execute",
+        chain: BROADCAST_CHAIN_SOLANA,
+        quoted: quoted.toString(),
+        attested: networkFee.toString(),
+      });
       throw new ConflictException("Network fee moved — re-quote and try again");
     }
     const protocolFee = protocolFeeOf(networkFee, bps);
@@ -470,6 +745,7 @@ export class SponsoredWithdrawService {
     // + user intent.
     const smartSol = BigInt(await adapter.getBalanceOf(chain.address));
     if (smartSol < totalFee) {
+      await this.rejected(pid, "execute", "insufficient-funds", {});
       throw new BadRequestException(`Insufficient SOL for fee — need ${totalFee} lamports, have ${smartSol}`);
     }
 
@@ -477,6 +753,7 @@ export class SponsoredWithdrawService {
     const relayerBal = await adapter.getBalanceOf(this.relayer().publicKey.toBase58());
     const feeForTx = await adapter.estimateExecuteFee(decoded.target, decoded.metas, decoded.data.length).catch(() => 5000n);
     if (BigInt(relayerBal) < feeForTx) {
+      await this.rejected(pid, "execute", "relayer-unfunded", {});
       await this.security.log(pid, "execute.relayer_unfunded", {});
       throw new ServiceUnavailableException(
         "Peridot's fee service is briefly unavailable. No SOL was deducted from your wallet — please try again in a moment.",
@@ -492,22 +769,93 @@ export class SponsoredWithdrawService {
       clientDataJSON: b64urlToBytes(dto.assertion.clientDataJSON) as unknown as Uint8Array<ArrayBufferLike>,
     };
 
-    const signature = await adapter.sponsoredExecuteV3(
-      pid,
-      authorityCompressed,
-      decoded.target,
-      decoded.metas,
-      decoded.data,
-      version,
-      networkFee,
-      chainNonce,
+    // H2: claim the (pid, nonce, chain) slot (same semantics as withdraw).
+    const slotHash = this.intentHash("execute", dto.assertion.signature, [
+      dto.target,
+      dto.data,
+      dto.nonce,
       dto.expiry,
-      assertion,
-      this.relayer(),
-      this.treasury(),
+      version,
+    ]);
+    const claim = await this.idempotency.claimSlot(
+      pid,
+      dto.nonce,
+      BROADCAST_CHAIN_SOLANA,
+      slotHash,
+      "execute",
     );
+    if (claim.decision === "duplicate" && claim.signature) {
+      return {
+        signature: claim.signature,
+        networkFeeLamports: networkFee.toString(),
+        protocolFeeLamports: protocolFee.toString(),
+        status: "confirmed",
+      };
+    }
+    if (claim.decision === "duplicate") {
+      const resolved = await this.resolveDuplicateSlot(
+        pid,
+        adapter,
+        chain.address,
+        "execute",
+        dto.nonce,
+        chainNonce,
+        networkFee,
+        protocolFee,
+      );
+      if (resolved) return resolved;
+      // Proven non-landing → fall through to the single allowed broadcast.
+    }
 
-    const status = (await adapter.waitForConfirmation(signature, 8, 1000)) === "confirmed" ? "confirmed" : "pending";
+    const out = await this.idempotency.broadcastWithResolveThenAct({
+      pid,
+      nonce: dto.nonce,
+      chain: BROADCAST_CHAIN_SOLANA,
+      entryPoint: "execute",
+      broadcast: () =>
+        adapter
+          .sponsoredExecuteV3(
+            pid,
+            authorityCompressed,
+            decoded.target,
+            decoded.metas,
+            decoded.data,
+            version,
+            networkFee,
+            chainNonce,
+            dto.expiry,
+            assertion,
+            this.relayer(),
+            this.treasury(),
+          )
+          .then((sig) => ({ signature: sig, result: null })),
+      resolveState: () => this.resolveSvmState(adapter, pid, chain.address, chainNonce),
+    });
+    const signature = out.signature;
+    if (!signature) {
+      await this.security.log(pid, RelayerEvents.resolvedLanded, {
+        entryPoint: "execute",
+        chain: BROADCAST_CHAIN_SOLANA,
+        nonce: dto.nonce,
+        unattributed: true,
+      });
+      throw new ServiceUnavailableException(
+        "The transaction landed but its receipt is unreadable — support has been alerted, please check state before retrying",
+      );
+    }
+
+    const confirmation = await adapter.waitForConfirmation(signature, 8, 1000);
+    if (confirmation === "failed") {
+      // Post-confirmation failure: alert, never rebroadcast (H2.iii).
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "failed", signature);
+      await this.security.log(pid, RelayerEvents.intentRejected, {
+        entryPoint: "execute",
+        chain: BROADCAST_CHAIN_SOLANA,
+        cause: "post-confirmation-failure",
+        signature,
+      });
+    }
+    const status = confirmation === "confirmed" ? "confirmed" : "pending";
     await this.security.log(pid, "execute.submitted", {
       signature,
       target: decoded.target.toBase58(),
@@ -520,6 +868,9 @@ export class SponsoredWithdrawService {
     await this.reconcile(pid, adapter, signature, networkFee, protocolFee, version, "execute").catch((err) =>
       this.logger.warn(`execute reconcile failed for ${signature}: ${(err as Error).message}`),
     );
+    if (status === "confirmed") {
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "confirmed", signature);
+    }
     return {
       signature,
       networkFeeLamports: networkFee.toString(),

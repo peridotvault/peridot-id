@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { SponsoredWithdrawService } from "./sponsored-withdraw.service";
-import { mockSecurity, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
+import { mockSecurity, mockIdempotency, mockBreaker, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
 
 
 const ACCOUNT_ID = "50997bcf-f3e3-406b-bc77-7108593ef5cb";
@@ -36,6 +36,7 @@ const adapterMock = {
     { mint: "USDCmint11111111111111111111111111111111", amount: "10000000", decimals: 6, account: "AtAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaAAA" },
   ]),
   parseTransaction: jest.fn(async () => ({ signature: "sig", fee: 5000 })),
+  getHistory: jest.fn(async (): Promise<{ signature: string; err: unknown }[]> => []),
   sponsoredWithdrawSolV3: jest.fn(async () => "sig-sponsor-sol") as jest.Mock,
   sponsoredWithdrawTokenV3: jest.fn(async () => "sig-sponsor-token") as jest.Mock,
   estimateExecuteFee: jest.fn(async () => 10000n) as jest.Mock,
@@ -71,8 +72,10 @@ function setup() {
   };
   const chains = minimalChainsStub();
   chains.solanaProgramId.mockResolvedValue("PidProgram1111111111111111111111111111111");
-  const service = new SponsoredWithdrawService(prisma as never, config as never, security as never, chains as never);
-  return { service, security };
+  const idempotency = mockIdempotency();
+  const breaker = mockBreaker();
+  const service = new SponsoredWithdrawService(prisma as never, config as never, security as never, chains as never, idempotency as never, breaker as never);
+  return { service, security, idempotency };
 }
 
 const assertion = {
@@ -393,5 +396,60 @@ describe("SponsoredWithdrawService", () => {
       data: executeBase.data,
     });
     expect(q.chain).toBeUndefined();
+  });
+
+  it("emits typed rejection + quote.drift_rejected on fee drift (H-AC2/H-AC6)", async () => {
+    const { service, security } = setup();
+    adapterMock.estimateWithdrawFee.mockResolvedValueOnce(7000n);
+    await expect(service.withdraw(IDENTITY_ID, base)).rejects.toThrow(ConflictException);
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "intent.rejected",
+      expect.objectContaining({ entryPoint: "withdraw", cause: "drift" }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "quote.drift_rejected",
+      expect.objectContaining({ entryPoint: "withdraw", quoted: "5000", attested: "7000" }),
+    );
+    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+  });
+
+  it("emits over_attested + pnl on reconcile divergence, never rebroadcasts (H-AC4)", async () => {
+    const { service, security } = setup();
+    adapterMock.parseTransaction.mockResolvedValueOnce({ signature: "sig", fee: 1000 });
+    const res = await service.withdraw(IDENTITY_ID, base);
+    expect(res.status).toBe("confirmed");
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "relayer.over_attested",
+      expect.objectContaining({ entryPoint: "withdraw", attested: "5000", actual: "1000" }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "relayer.pnl",
+      expect.objectContaining({ entryPoint: "withdraw", absorbed: "0" }),
+    );
+    expect(adapterMock.sponsoredWithdrawSolV3).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves a duplicate claim without submission via chain state (H-AC7)", async () => {
+    const { service, idempotency } = setup();
+    idempotency.claimSlot.mockResolvedValue({ decision: "duplicate", signature: null });
+    // Validation reads nonce 7; the crashed attempt consumed it (now 8) and the
+    // history confirms ⇒ proven landed, no rebroadcast.
+    adapterMock.getNonce.mockResolvedValueOnce(7n).mockResolvedValue(8n);
+    adapterMock.getHistory.mockResolvedValue([{ signature: "sig-h", err: null }]);
+    const landed = await service.withdraw(IDENTITY_ID, base);
+    expect(landed).toMatchObject({ signature: "sig-h", status: "confirmed" });
+    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    // Nonce unconsumed ⇒ proven non-landing ⇒ the single allowed broadcast.
+    adapterMock.getNonce.mockReset();
+    adapterMock.getNonce.mockResolvedValue(7n);
+    jest.clearAllMocks();
+    idempotency.claimSlot.mockResolvedValue({ decision: "duplicate", signature: null });
+    const fresh = await service.withdraw(IDENTITY_ID, base);
+    expect(fresh.signature).toBe("sig-sponsor-sol");
+    expect(adapterMock.sponsoredWithdrawSolV3).toHaveBeenCalledTimes(1);
   });
 });

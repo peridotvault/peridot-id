@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { RotateService } from "./rotate.service";
-import { mockSecurity, solanaRelayerConfig, minimalChainsStub, COSE_HEX } from "../../test/factories";
+import { mockSecurity, mockIdempotency, mockBreaker, mockRevocations, solanaRelayerConfig, minimalChainsStub, COSE_HEX } from "../../test/factories";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 
 const IDENTITY_ID = "pid_01HASH";
@@ -23,6 +23,7 @@ const adapterMock = {
   getNonce: jest.fn(async () => 4n),
   submitRotateAuthorityTx: jest.fn(async () => "sig-rotate"),
   getAuthority: jest.fn(async () => Buffer.from(rotatedKeyHex, "hex")),
+  parseTransaction: jest.fn(async () => ({ signature: "sig", fee: 5000 })),
 };
 
 jest.mock("@peridotvault/pid-solana", () => ({
@@ -63,7 +64,7 @@ function setup() {
       update: jest.fn(async (args: unknown) => args),
     },
   };
-  const service = new RotateService(prisma as never, config as never, security as never, minimalChainsStub() as never);
+  const service = new RotateService(prisma as never, config as never, security as never, minimalChainsStub() as never, mockIdempotency() as never, mockBreaker() as never, mockRevocations() as never);
   return { service, prisma, security };
 }
 
@@ -121,5 +122,21 @@ describe("RotateService", () => {
     rotatedKeyHex = "03" + "cd".repeat(32); // chain never shows the new key
     await expect(service.rotate(IDENTITY_ID, base)).rejects.toThrow(ServiceUnavailableException);
     expect(prisma.authority.update).not.toHaveBeenCalled();
+  }, 30000);
+
+  it("emits rotation latency + unconfirmed event on the 503 path (H1.vi)", async () => {
+    const { service, security } = setup();
+    rotatedKeyHex = "03" + "cd".repeat(32); // chain never shows the new key
+    await expect(service.rotate(IDENTITY_ID, base)).rejects.toThrow(/not confirmed on-chain yet/);
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "rotation.confirmed_latency",
+      expect.objectContaining({ confirmed: false }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "credential.rotation.unconfirmed",
+      expect.objectContaining({ signature: "sig-rotate" }),
+    );
   }, 30000);
 });

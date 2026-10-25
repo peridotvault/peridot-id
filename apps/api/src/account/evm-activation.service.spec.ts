@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { keccak256, fromAscii, toHex } from "@peridotvault/pid-evm";
 import { EvmActivationService } from "./evm-activation.service";
-import { mockSecurity, COSE_HEX } from "../../test/factories";
+import { mockSecurity, mockIdempotency, mockBreaker, COSE_HEX } from "../../test/factories";
 import { coseToRawXy } from "../credentials/cose";
 
 const IDENTITY_ID = "pid_01HASH";
@@ -133,7 +133,7 @@ function setup(relayerSecret?: string) {
     relayerSecretFor: jest.fn(async () => relayerSecret ?? null),
     invalidate: jest.fn(),
   };
-  const service = new EvmActivationService(prisma as never, config as never, security as never, chains as never);
+  const service = new EvmActivationService(prisma as never, config as never, security as never, chains as never, mockIdempotency() as never, mockBreaker() as never);
   return { service, prisma, config, security };
 }
 

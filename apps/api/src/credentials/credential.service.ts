@@ -18,6 +18,7 @@ import { SecurityEventService } from "../security/security-event.service";
 import { WEBAUTHN_RP_NAME, resolveServiceUrls, serviceOrigins, webauthnRpId } from "../common/app-config";
 import { FIRST_PARTY_ORIGINS, parseEnvOrigins } from "../common/cors";
 import { coseToCompressedBase64url } from "./cose";
+import { RevocationMonitor } from "../relayer/revocation-monitor.service";
 
 const SECP256R1_ALG = -7; // ES256 = ECDSA P-256 (secp256r1) — owner passkey alg
 const CHALLENGE_TTL_MS = 5 * 60 * 1000; // PRD_v4 §22: challenge TTL ≤ 5 min, single use
@@ -89,6 +90,7 @@ export class CredentialService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly security: SecurityEventService,
+    private readonly revocations: RevocationMonitor,
   ) {}
 
   private rpId(): string {
@@ -413,6 +415,10 @@ export class CredentialService {
       data: { status: "revoked" as AuthorityStatus },
     });
     await this.security.log(pid, "credential.revoked", { credentialId: authority.credentialId });
+    // H1.i: registry revokes are chain-agnostic — count under "global".
+    await this.revocations.recordRevocation(pid, "global").catch((err) =>
+      this.logger.warn(`revocation record failed: ${(err as Error).message}`),
+    );
     return toView(updated);
   }
 }

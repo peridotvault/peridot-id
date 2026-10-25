@@ -17,6 +17,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { ChainAccountStatus } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { EvmAdapter, EvmRpc, buildViewCalldata, splitEvmFeeV2, toHex } from "@peridotvault/pid-evm";
 import { ChainRegistryService, type RegistryChain } from "../chain/chain-registry.service";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
@@ -32,6 +33,9 @@ import { coseToRawXy } from "../credentials/cose";
 import { PID_EVM_POLL_MS } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
+import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
+import { RelayerIdempotencyService } from "../relayer/relayer-idempotency.service";
+import { RelayerEvents, absorbedLoss } from "../relayer/relayer-events";
 
 export interface EvmActivationView {
   pid: string;
@@ -70,6 +74,8 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly security: SecurityEventService,
     private readonly chains: ChainRegistryService,
+    private readonly idempotency: RelayerIdempotencyService,
+    private readonly breaker: CircuitBreakerService,
   ) {}
 
   onModuleInit(): void {
@@ -306,6 +312,9 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException(`Wallet must be READY to activate (currently ${live.status})`);
     }
 
+    // H3: fail-closed while the per-chain spend-rate breaker is open.
+    await this.breaker.requireClosed(user.pid, chainReference, "activate");
+
     const authority = await requireActiveAuthority(this.prisma, user.pid);
 
     // EVM relayer key is dashboard-managed (evm_relayer_keys table, admin-only) —
@@ -336,6 +345,19 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     const quoted = BigInt(dto.quotedNetworkFeeWei);
     const networkFee = await this.networkFeeWei(chainReference);
     if (exceedsDriftBound(networkFee, quoted)) {
+      await this.security.log(user.pid, RelayerEvents.intentRejected, {
+        entryPoint: "activate",
+        chain: chainReference,
+        cause: "drift",
+        quoted: quoted.toString(),
+        attested: networkFee.toString(),
+      });
+      await this.security.log(user.pid, RelayerEvents.quoteDriftRejected, {
+        entryPoint: "activate",
+        chain: chainReference,
+        quoted: quoted.toString(),
+        attested: networkFee.toString(),
+      });
       throw new ConflictException("Network fee moved — re-quote and try again");
     }
     const protocolFee = this.protocolFeeFor(networkFee, version, chainId);
@@ -391,7 +413,20 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
               r,
               s,
             });
-      const receipt = await this.sendDeployTx(chainReference, secret as `0x${string}`, data);
+      const deploy = await this.broadcastDeploy(chainReference, user.pid, row.address, dto, secret, data);
+      if (deploy.resolved) {
+        // Resolve-then-act proved OUR deployment without an attributable
+        // receipt: mark active, log the resolution, skip receipt-bound records
+        // (no fake hashes in the unique txHash column, no false reconcile).
+        await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "active" } });
+        await this.security.log(user.pid, RelayerEvents.resolvedLanded, {
+          entryPoint: "activate",
+          chain: chainReference,
+          unattributed: true,
+        });
+        return this.viewOf(user, chainReference);
+      }
+      const receipt = deploy.receipt;
       // Verify the relayer deployed OUR authority (fail closed on mismatch).
       const matches = await this.deploymentMatches(
         await this.rpcFor(chainReference),
@@ -438,6 +473,78 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * H2 broadcast for EVM activation: claim the (pid, deadline, chain) slot
+   * (the deadline is the replay-protection scalar on EVM), then send with
+   * resolve-then-act. A duplicate identical retry returns the live view; an
+   * ambiguous send resolves via deploymentMatches (deployed ⇒ success, no
+   * rebroadcast; not deployed ⇒ ONE identical-bytes rebroadcast; unreadable
+   * ⇒ park + alert).
+   */
+  private async broadcastDeploy(
+    chainReference: string,
+    pid: string,
+    address: string,
+    dto: { deadline: number },
+    secret: string,
+    data: string,
+  ): Promise<
+    | { resolved: true; receipt: null }
+    | { resolved: false; receipt: { hash: string; from: string; costWei: string; l1FeeWei: string } }
+  > {
+    const slotHash = createHash("sha256").update(data).digest("hex");
+    const claim = await this.idempotency.claimSlot(pid, String(dto.deadline), chainReference, slotHash, "activate");
+    if (claim.decision === "duplicate") {
+      // Identical retry: chain state is the answer — active returns through
+      // the resolved path, anything else throws for an explicit retry.
+      await this.resolveDeployedView(chainReference, pid);
+      return { resolved: true, receipt: null };
+    }
+    const out = await this.idempotency.broadcastWithResolveThenAct({
+      pid,
+      nonce: String(dto.deadline),
+      chain: chainReference,
+      entryPoint: "activate",
+      broadcast: () =>
+        this.sendDeployTx(chainReference, secret as `0x${string}`, data).then((receipt) => ({
+          signature: receipt.hash,
+          result: receipt,
+        })),
+      resolveState: async () => {
+        const matches = await this.deploymentMatches(
+          await this.rpcFor(chainReference),
+          address,
+          pid,
+          chainReference,
+        ).catch(() => null);
+        if (matches == null) return { unreadable: true as const };
+        return matches
+          ? { landed: true as const, signature: claim.signature }
+          : { landed: false as const };
+      },
+    });
+    if (!out.result) {
+      // Resolved-landed: chain state proves OUR deployment; viewOf re-verifies.
+      await this.idempotency.recordOutcome(pid, String(dto.deadline), chainReference, "resolved-landed");
+      await this.resolveDeployedView(chainReference, pid);
+      return { resolved: true, receipt: null };
+    }
+    return { resolved: false, receipt: out.result };
+  }
+
+  /**
+   * Re-verify a resolved-landed EVM deployment: active returns silently,
+   * anything else throws for an explicit retry (never silently dropped).
+   */
+  private async resolveDeployedView(chainReference: string, pid: string): Promise<void> {
+    const view = await this.viewOf({ pid }, chainReference);
+    if (view.status !== "active") {
+      throw new ServiceUnavailableException(
+        "Activation state is unclear — please check the wallet status before retrying",
+      );
+    }
+  }
+
+  /**
    * Post-confirmation reconciliation for EVM activation: verify the contract
    * applied the canonical formula, and the attested network fee tracks the
    * actual receipt cost (execution gas + L1 data fee where the oracle exists).
@@ -458,20 +565,50 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     const l1Fee = receipt.l1FeeWei != null ? BigInt(receipt.l1FeeWei) : 0n;
     const actual = BigInt(receipt.costWei) + l1Fee;
     const overAttested = exceedsDriftBound(networkFee, actual);
+    const absorbed = absorbedLoss(networkFee, actual);
     await this.security.log(pid, "account.evm.activation.reconciled", {
       txHash: receipt.hash,
       networkFee: networkFee.toString(),
       protocolFee: protocolFee.toString(),
       protocolFeeExpected: expectedProtocol.toString(),
       actualNetworkFee: actual.toString(),
+      relayerAbsorbed: absorbed.toString(),
       overAttested,
     });
+    // H1.iv: per-tx relayer P&L, dashboarded per chain + entry point.
+    await this.security.log(pid, RelayerEvents.pnl, {
+      txHash: receipt.hash,
+      entryPoint: "activate",
+      chain: chainReference,
+      absorbed: absorbed.toString(),
+    });
+    // H3: absorbed losses feed the per-chain spend-rate breaker.
+    await this.breaker.recordAbsorbed(pid, chainReference, absorbed).catch((err) =>
+      this.logger.warn(`breaker record failed: ${(err as Error).message}`),
+    );
     if (protocolFee !== expectedProtocol) {
+      // H1.iii: formula divergence — alert, never rebroadcast.
+      await this.security.log(pid, RelayerEvents.formulaMismatch, {
+        txHash: receipt.hash,
+        entryPoint: "activate",
+        chain: chainReference,
+        attested: networkFee.toString(),
+        actual: actual.toString(),
+        expected: expectedProtocol.toString(),
+      });
       this.logger.error(
         `evm activation formula anomaly: ${receipt.hash} protocol=${protocolFee} expected=${expectedProtocol}`,
       );
     }
     if (overAttested) {
+      await this.security.log(pid, RelayerEvents.overAttested, {
+        txHash: receipt.hash,
+        entryPoint: "activate",
+        chain: chainReference,
+        attested: networkFee.toString(),
+        actual: actual.toString(),
+        expected: expectedProtocol.toString(),
+      });
       this.logger.error(
         `evm activation over-attestation anomaly: ${receipt.hash} attested=${networkFee} actual=${actual}`,
       );

@@ -14,6 +14,10 @@ import { SponsoredWithdrawService } from "./sponsored-withdraw.service";
 import { RotateService } from "./rotate.service";
 import { WalletController } from "./wallet.controller";
 import { WalletService } from "./wallet.service";
+import { RelayerIdempotencyService } from "../relayer/relayer-idempotency.service";
+import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
+import { RevocationMonitor } from "../relayer/revocation-monitor.service";
+import { mockIdempotency, mockBreaker, mockRevocations } from "../../test/factories";
 
 // SponsoredWithdrawService lazily requires pid-solana at runtime; stub it so route tests
 // that reach the service don't try to load the real @solana/web3.js graph in Jest.
@@ -108,6 +112,9 @@ describe("Wallet authorization & abuse cases (routes)", () => {
         WalletService,
         SponsoredWithdrawService,
         { provide: RotateService, useValue: {} },
+        { provide: RelayerIdempotencyService, useValue: mockIdempotency() },
+        { provide: CircuitBreakerService, useValue: mockBreaker() },
+        { provide: RevocationMonitor, useValue: mockRevocations() },
         JwtStrategy,
         {
           provide: ChainRegistryService,

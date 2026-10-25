@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { CredentialService } from "../credentials/credential.service";
-import { mockSecurity, coseKey } from "../../test/factories";
+import { mockSecurity, coseKey, mockRevocations } from "../../test/factories";
 
 
 // Opaque ES256 key (verification is mocked — exact bytes don't matter here).
@@ -55,7 +55,7 @@ function setup() {
       findUnique: jest.fn(async () => ({ displayName: "Peridot" })),
     },
   };
-  const service = new CredentialService(prisma as never, config as never, security as never);
+  const service = new CredentialService(prisma as never, config as never, security as never, mockRevocations() as never);
   return { service, prisma, security };
 }
 

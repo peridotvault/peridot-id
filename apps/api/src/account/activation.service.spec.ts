@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { ActivationService } from "./activation.service";
 import { SOLANA_DEVNET_REFERENCE } from "../common/chains";
-import { mockSecurity, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
+import { mockSecurity, mockIdempotency, mockBreaker, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
 
 
 const IDENTITY_ID = "pid_01HASH";
@@ -84,7 +84,7 @@ function setup() {
     securityEvent: { create: jest.fn(async () => ({})) },
   };
 
-  const service = new ActivationService(prisma as never, config as never, security as never, minimalChainsStub() as never);
+  const service = new ActivationService(prisma as never, config as never, security as never, minimalChainsStub() as never, mockIdempotency() as never, mockBreaker() as never);
   return { service, prisma, security };
 }
 

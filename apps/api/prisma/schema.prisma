@@ -77,6 +77,8 @@ model Identity {
   // Platform: third-party apps, audit log.
   securityEvents SecurityEvent[]
   pidApps        PidApp[]
+  // Relayer hardening (ANT-581 H2): at-most-once broadcast ledger.
+  relayerBroadcasts RelayerBroadcast[]
   // Money rails (journals; Postgres is journal+cache, DOKU is the ledger —
   // internal credit excepted, see docs/INTERNAL_CREDIT.md).
   fiatProviderAccounts     FiatProviderAccount[]
@@ -300,6 +302,32 @@ model SecurityEvent {
 
   @@index([pid])
   @@map("security_events")
+}
+
+// ANT-581 H2: at-most-once broadcast ledger per (pid, nonce, chain).
+// `nonce` holds the replay-protection scalar: the SVM account nonce, or the
+// EVM authorization deadline (EVM has no nonce). `txBytesHash` is the sha256
+// of the exact bytes submitted — identical-bytes retries reuse the row, while
+// DIFFERENT bytes under the SAME nonce are forbidden (no conflicting
+// submissions). Expand-only (new table, no data movement).
+model RelayerBroadcast {
+  id          String   @id @default(uuid())
+  pid         String
+  identity    Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  nonce       String
+  chain       String
+  entryPoint  String
+  txBytesHash String
+  signature   String?
+  // claimed|submitted|confirmed|failed|rebroadcast|resolved-landed|
+  // resolved-not-landed-rebroadcast|parked-unreadable
+  status      String   @default("claimed")
+  createdAt   DateTime @db.Timestamptz(3) @default(now())
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
+
+  @@unique([pid, nonce, chain])
+  @@index([pid])
+  @@map("relayer_broadcasts")
 }
 
 // Pending post-auth PID claims (Google + email-OTP entry). A verified credential

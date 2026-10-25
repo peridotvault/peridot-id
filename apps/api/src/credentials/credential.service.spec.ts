@@ -1,7 +1,7 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { CredentialService } from "./credential.service";
-import { mockSecurity } from "../../test/factories";
+import { mockSecurity, mockRevocations } from "../../test/factories";
 
 
 jest.mock("@simplewebauthn/server", () => {
@@ -59,7 +59,7 @@ function setup() {
       findUnique: jest.fn(async () => ({ displayName: "Peridot" })),
     },
   };
-  const service = new CredentialService(prisma as never, config as never, security as never);
+  const service = new CredentialService(prisma as never, config as never, security as never, mockRevocations() as never);
   return { service, prisma, config, security };
 }
 
