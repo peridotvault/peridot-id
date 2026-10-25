@@ -11,6 +11,8 @@ import { EventsService } from "./events.service";
 import { EvidenceService } from "./evidence.service";
 import { ExperienceAdminController } from "./experience-admin.controller";
 import { ExperienceAdminService } from "./experience-admin.service";
+import { ExperiencePoliciesService } from "./experience-policies.service";
+import { ExperienceTasksService } from "./experience-tasks.service";
 import { LedgerService } from "./ledger.service";
 import { LevelsController } from "./levels.controller";
 import { LevelsService } from "./levels.service";
@@ -42,6 +44,8 @@ import { VerificationService } from "./verification.service";
     EvidenceService,
     EventsService,
     ExperienceAdminService,
+    ExperiencePoliciesService,
+    ExperienceTasksService,
     PolicyBackfillService,
     BackfillRunService,
     AppCredentialGuard,

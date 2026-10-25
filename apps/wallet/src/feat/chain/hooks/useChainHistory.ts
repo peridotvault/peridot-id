@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import type { WalletTransaction } from "@peridotvault/pid-types";
-import { clearApiCache } from "../../../shared/data/api-cache";
-import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/data/network-mode";
+import { clearApiCache } from "../../../shared/data/apiCache";
+import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/data/networkMode";
 
 // Chain half of the activity feed. Tab-agnostic — the screen merges this with
 // the fiat half. Re-fetches on network switch like useHomeData.

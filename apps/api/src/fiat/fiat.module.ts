@@ -6,6 +6,8 @@ import { CHECKOUT_CLIENT } from "./checkout-client.token";
 import { FaucetController } from "./faucet.controller";
 import { FiatController } from "./fiat.controller";
 import { FiatLedgerController } from "./fiat-ledger.controller";
+import { FiatLedgerChainService } from "./fiat-ledger-chain.service";
+import { FiatLedgerEventsService } from "./fiat-ledger-events.service";
 import { FiatLedgerService } from "./fiat-ledger.service";
 import { FiatSubAccountService } from "./fiat-subaccount.service";
 import { PaymentFeeService } from "./payment-fee.service";
@@ -55,6 +57,8 @@ const FAUCET_ENABLED = process.env.PID_FAUCET_ENABLED === "true";
     },
     FiatSubAccountService,
     FiatLedgerService,
+    FiatLedgerChainService,
+    FiatLedgerEventsService,
     PaymentFeeService,
   ],
 })

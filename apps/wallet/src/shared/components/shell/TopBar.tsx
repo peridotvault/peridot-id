@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { Identity, Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../../app/AppContext";
-import { cachedRead } from "../../data/api-cache";
+import { cachedRead } from "../../data/apiCache";
 import { useNetworkMode } from "../../hooks/useNetworkMode";
 import { HomeHeader } from "./HomeHeader";
 

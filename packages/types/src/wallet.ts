@@ -1,0 +1,76 @@
+import type { IdentityStatus } from "./identity";
+
+export interface Wallet {
+  id: string;
+  chain: string;
+  address: string;
+  status: IdentityStatus;
+  createdAt: string;
+}
+
+export interface WalletCreate {
+  address: string;
+}
+
+export interface Authority {
+  id: string;
+  type: "secp256r1";
+  credentialId: string | null;
+  /** 33-byte compressed secp256r1 public key, base64url — the on-chain authority. */
+  publicKey: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export type IntentType = "WITHDRAW_SOL" | "WITHDRAW_TOKEN";
+
+export interface IntentPayload {
+  amount: string;
+  destination?: string;
+  mint?: string;
+  destinationAta?: string;
+}
+
+export interface Intent {
+  id: string;
+  type: IntentType;
+  payload: IntentPayload & {
+    chain: string;
+    network: string;
+    pid: string;
+    smartAccountAddress: string;
+  };
+  status: "pending" | "approved" | "executed" | "expired" | "rejected" | "cancelled";
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface IntentCreate {
+  type: IntentType;
+  payload: IntentPayload;
+}
+
+export interface WalletTransaction {
+  id: string;
+  intentId: string | null;
+  type: "DEPOSIT" | "WITHDRAW" | "ACTIVATION" | null;
+  amount: string | null;
+  asset: string | null;
+  direction: "in" | "out" | null;
+  counterparty: string | null;
+  chain: string;
+  network: string;
+  txHash: string | null;
+  status: "prepared" | "submitted" | "confirmed" | "failed";
+  createdAt: string;
+  confirmedAt: string | null;
+}
+
+export interface ActivityRecord {
+  type: "DEPOSIT" | "WITHDRAW" | "ACTIVATION";
+  amount: string;
+  asset: string;
+  direction: "in" | "out";
+  counterparty?: string;
+  txHash?: string;
+}

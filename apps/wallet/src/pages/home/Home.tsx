@@ -17,9 +17,9 @@ import {
   type Currency,
   type Rates,
 } from "../../shared/data/currency";
-import { cachedRead, clearApiCache } from "../../shared/data/api-cache";
-import { endNetworkTransition, subscribeNetworkMode } from "../../shared/data/network-mode";
-import { buildCoins } from "../../feat/chain/utils/assets";
+import { cachedRead, clearApiCache } from "../../shared/data/apiCache";
+import { endNetworkTransition, subscribeNetworkMode } from "../../shared/data/networkMode";
+import { buildCoins } from "../../feat/chain/utils/coins";
 import { FiatSection } from "../../feat/fiat/components/FiatSection";
 import { AssetSection } from "../../feat/chain/components/AssetSection";
 
@@ -108,7 +108,7 @@ export function Home({
 // balances separate (never merged client-side).
 //
 // Request budget (per-IP 100/min): slow-changing reads go through cachedRead
-// (see shared/api-cache.ts) and NTFs load only when the Items tab is opened,
+// (see shared/apiCache.ts) and NTFs load only when the Items tab is opened,
 // so revisiting Home costs 3 requests (balance, tokens, fiat) instead of 9.
 function useHomeData(peridot: PeridotClient) {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -249,8 +249,13 @@ function useHomeData(peridot: PeridotClient) {
   };
 }
 
-// All Balance = fiat IDR + crypto converted to the selected currency.
-// Unknown SPL mints have no price — counted as 0 in the total, shown native.
+// Priced assets: [IDR rates field, USD rates field]. Unknown SPL mints have
+// no price — counted as 0 in the total, shown native. New priced assets
+// extend the table, not the branch.
+const RATE_FIELD: Record<string, [keyof Rates, keyof Rates]> = {
+  SOL: ["solIdr", "solUsd"],
+  USDC: ["usdcIdr", "usdcUsd"],
+};
 // Cross-rail math (fiat + chain + FX): no single feat owns it — route-private.
 function calcTotal(input: {
   solLamports: number;
@@ -264,9 +269,9 @@ function calcTotal(input: {
     if (!rates) return 0;
     const units = Number(raw) / 10 ** decimals;
     if (!Number.isFinite(units)) return 0;
-    if (symbol === "SOL") return units * (currency === "IDR" ? rates.solIdr : rates.solUsd);
-    if (symbol === "USDC") return units * (currency === "IDR" ? rates.usdcIdr : rates.usdcUsd);
-    return 0;
+    const fields = RATE_FIELD[symbol];
+    if (!fields) return 0;
+    return units * rates[currency === "IDR" ? fields[0] : fields[1]];
   };
   const fiatValue =
     balanceIdr === null || !Number.isFinite(Number(balanceIdr))

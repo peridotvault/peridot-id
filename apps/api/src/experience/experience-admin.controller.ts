@@ -19,6 +19,8 @@ import {
   RunBackfillDto,
 } from "./experience-admin.dto";
 import { ExperienceAdminService } from "./experience-admin.service";
+import { ExperiencePoliciesService } from "./experience-policies.service";
+import { ExperienceTasksService } from "./experience-tasks.service";
 import { PolicyBackfillService } from "./policy-backfill.service";
 
 /**
@@ -35,6 +37,8 @@ import { PolicyBackfillService } from "./policy-backfill.service";
 export class ExperienceAdminController {
   constructor(
     private readonly xpAdmin: ExperienceAdminService,
+    private readonly policies: ExperiencePoliciesService,
+    private readonly tasks: ExperienceTasksService,
     private readonly backfill: PolicyBackfillService,
   ) {}
 
@@ -43,13 +47,13 @@ export class ExperienceAdminController {
   @Get("policies")
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   listPolicies() {
-    return this.xpAdmin.listPolicies();
+    return this.policies.listPolicies();
   }
 
   @Post("policies")
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   createPolicy(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreatePolicyDto) {
-    return this.xpAdmin.createPolicyDraft(user.pid, dto);
+    return this.policies.createPolicyDraft(user.pid, dto);
   }
 
   @Post("policies/:id/materialize")
@@ -59,13 +63,13 @@ export class ExperienceAdminController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: MaterializePolicyDto,
   ) {
-    return this.xpAdmin.materializePolicy(user.pid, id, dto);
+    return this.policies.materializePolicy(user.pid, id, dto);
   }
 
   @Get("policies/:id/preview")
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   previewPolicy(@Param("id", ParseUUIDPipe) id: string) {
-    return this.xpAdmin.previewPolicy(id);
+    return this.policies.previewPolicy(id);
   }
 
   @Post("policies/:id/activate")
@@ -75,7 +79,7 @@ export class ExperienceAdminController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: ActivatePolicyDto,
   ) {
-    return this.xpAdmin.activatePolicy(user.pid, id, dto);
+    return this.policies.activatePolicy(user.pid, id, dto);
   }
 
   // -- policy migration execution (R4, M3 release-gated) ----------------------
@@ -113,13 +117,13 @@ export class ExperienceAdminController {
   @Post("tasks")
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   createTask(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateTaskDto) {
-    return this.xpAdmin.createTask(user.pid, dto);
+    return this.tasks.createTask(user.pid, dto);
   }
 
   @Get("tasks")
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   listTasks(@Query("status") status?: string, @Query("limit") limit?: string, @Query("offset") offset?: string) {
-    return this.xpAdmin.listTasks({
+    return this.tasks.listTasks({
       status,
       limit: limit === undefined ? undefined : Number(limit),
       offset: offset === undefined ? undefined : Number(offset),
@@ -129,7 +133,7 @@ export class ExperienceAdminController {
   @Get("tasks/:id")
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   getTask(@Param("id", ParseUUIDPipe) id: string) {
-    return this.xpAdmin.getTask(id);
+    return this.tasks.getTask(id);
   }
 
   @Patch("tasks/:id")
@@ -139,7 +143,7 @@ export class ExperienceAdminController {
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: UpdateTaskDto,
   ) {
-    return this.xpAdmin.updateTask(user.pid, id, dto as Record<string, unknown>);
+    return this.tasks.updateTask(user.pid, id, dto as Record<string, unknown>);
   }
 
   // -- verification / XP permission (C3 + F3) --------------------------------

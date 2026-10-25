@@ -4,7 +4,7 @@ import { Pressable } from "../../shared/components/ui/Pressable";
 import { KeyRound, Plus, Trash2 } from "../../shared/components/icons";
 import type { Authority } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
-import { cachedRead, invalidate } from "../../shared/data/api-cache";
+import { cachedRead, invalidate } from "../../shared/data/apiCache";
 import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";

@@ -6,7 +6,7 @@ import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
-import { isNetworkSwitching, isTestnetMode } from "../../shared/data/network-mode";
+import { isNetworkSwitching, isTestnetMode } from "../../shared/data/networkMode";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
 
 function fmtIdr(units: string): string {

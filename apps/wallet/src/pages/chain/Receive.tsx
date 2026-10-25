@@ -10,7 +10,7 @@ import { useCopyAddress } from "../../feat/chain/hooks/useCopyAddress";
 import { useDepositTargets } from "../../feat/chain/hooks/useDepositTargets";
 import { DepositCardList } from "../../feat/chain/components/DepositCardList";
 import { SolActivationModal } from "../../feat/chain/components/SolActivationModal";
-import type { DepositTarget } from "../../feat/chain/utils/deposit-targets";
+import type { DepositTarget } from "../../feat/chain/utils/depositTargets";
 
 export function Receive({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {
   const { peridot } = usePeridot();

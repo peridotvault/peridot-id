@@ -2,7 +2,7 @@ import { ScrollArea } from "../../shared/components/ui/ScrollArea";
 import { openExternalUrl } from "../../shared/app/openExternal";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { styles as s } from "../../shared/styles/theme";
-import { solanaExplorerTxUrl } from "../../shared/data/network-mode";
+import { solanaExplorerTxUrl } from "../../shared/data/networkMode";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 

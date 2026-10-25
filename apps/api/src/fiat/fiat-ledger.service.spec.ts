@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { ConfigService } from "@nestjs/config";
 import { encryptSecret } from "../common/secret-crypto";
+import { FiatLedgerEventsService } from "./fiat-ledger-events.service";
 import { FiatLedgerService } from "./fiat-ledger.service";
 
 function configStub(store: Record<string, string> = {}) {
@@ -105,7 +106,8 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
   };
   const security = { log: jest.fn(async () => undefined) };
   const service = new FiatLedgerService(prisma as never, configStub(store), checkoutStub(paidAmount), security as never);
-  return { service, prisma, created, security };
+  const events = new FiatLedgerEventsService(prisma as never, configStub(store));
+  return { service, events, prisma, created, security };
 }
 
 describe("FiatLedgerService.issueForDeposit", () => {
@@ -156,7 +158,7 @@ describe("FiatLedgerService.issueForDeposit", () => {
 
 describe("FiatLedgerService transfers", () => {
   it("allows sending to any user", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     await expect(service.transferInquiry("dev@pid", { amountIdr: "100", beneficiaryPid: "dev@pid" }))
       .rejects.toThrow("Cannot transfer to yourself");
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "rani@pid" });
@@ -217,7 +219,7 @@ describe("FiatLedgerService transfers", () => {
   });
 
   it("denies cross-pid confirm and cancel (no IDOR on intents)", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     // Intent belongs to dev@pid; attacker rani@pid must see NotFound, and
     // nothing may be written.
     prisma.fiatLedgerEntry.findFirst.mockResolvedValue(null);
@@ -229,7 +231,7 @@ describe("FiatLedgerService transfers", () => {
   });
 
   it("rejects machine tokens without fiat:transfer scope on money paths (ANT-344 H3)", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.identity.findUnique.mockResolvedValue({ pid: "rani@pid" });
     // Unscoped legacy app token: fail closed before any DB write.
     await expect(
@@ -249,7 +251,7 @@ describe("FiatLedgerService transfers", () => {
   });
 
   it("allows machine tokens with fiat:transfer scope on money paths (ANT-344 H3)", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "rani@pid" });
     const inq = await service.transferInquiry(
       "dev@pid",
@@ -353,7 +355,7 @@ describe("FiatLedgerService transfers", () => {
   });
 
   it("cancel takes the identity lock and leaves a posted intent untouched", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     const posted = {
       id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", entryGroup: "CT-P",
       counterpartyPid: "rani@pid", amountIdr: 10_000n, direction: "out",
@@ -381,7 +383,7 @@ describe("FiatLedgerService transfers", () => {
   });
 
   it("cancel claims a created intent with a guarded update", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     const row = (status: string) => ({
       id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", entryGroup: "CT-C",
       counterpartyPid: "rani@pid", amountIdr: 10_000n, direction: "out",
@@ -405,7 +407,7 @@ describe("FiatLedgerService transfers", () => {
   });
 
   it("balance and journal flag truncated replays instead of silently rounding", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     const big = Array.from({ length: 5000 }, (_, i) => ({
       pid: "dev@pid", entryGroup: `G-${i % 10}`, kind: "fiat_issue",
       idempotencyKey: `K-${i}`, amountIdr: 1n, direction: "in", status: "posted", replaySeq: BigInt(i),
@@ -426,7 +428,7 @@ describe("FiatLedgerService transfers", () => {
 
 describe("FiatLedgerService fees", () => {
   it("stacks the app fee on the global fee when an app context is given", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.pidApp.findUnique.mockResolvedValueOnce({ id: "app1", ownerPid: "live2dev@pid", isActive: true });
     prisma.pidAppFee.findUnique.mockResolvedValueOnce({ percentBps: 200, minIdr: 0n, maxIdr: 0n, enabled: true });
     // Mocked global policy is 5% uncapped → 50k; app fee 2% → 20k.
@@ -437,7 +439,7 @@ describe("FiatLedgerService fees", () => {
   });
 
   it("ignores a disabled or missing app fee", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.pidApp.findUnique.mockResolvedValueOnce({ id: "app1", ownerPid: "live2dev@pid", isActive: true });
     prisma.pidAppFee.findUnique.mockResolvedValueOnce({ percentBps: 200, minIdr: 0n, maxIdr: 0n, enabled: false });
     const q = await service.quoteFees("pidapp_x", "transaction", 1_000_000n);
@@ -445,7 +447,7 @@ describe("FiatLedgerService fees", () => {
   });
 
   it("waives the global fee for verified apps but keeps their own fee", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.pidApp.findUnique.mockResolvedValueOnce({ id: "app1", ownerPid: "live2dev@pid", isActive: true, isVerified: true });
     prisma.pidAppFee.findUnique.mockResolvedValueOnce({ percentBps: 200, minIdr: 0n, maxIdr: 0n, enabled: true });
     const q = await service.quoteFees("pidapp_x", "transaction", 1_000_000n);
@@ -455,7 +457,7 @@ describe("FiatLedgerService fees", () => {
   });
 
   it("keeps the global fee for unverified apps", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.pidApp.findUnique.mockResolvedValueOnce({ id: "app1", ownerPid: "live2dev@pid", isActive: true, isVerified: false });
     prisma.pidAppFee.findUnique.mockResolvedValueOnce({ percentBps: 0, minIdr: 0n, maxIdr: 0n, enabled: false });
     const q = await service.quoteFees("pidapp_x", "transaction", 1_000_000n);
@@ -466,7 +468,7 @@ describe("FiatLedgerService fees", () => {
 
 describe("FiatLedgerService callbacks", () => {
   it("delivers a pending event with an HMAC signature", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
       { id: "e1", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: { hello: "world" }, attempts: 0 },
     ]);
@@ -474,7 +476,7 @@ describe("FiatLedgerService callbacks", () => {
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
     (global as unknown as { fetch: unknown }).fetch = fetchMock;
 
-    const res = await service.dispatchEvents({});
+    const res = await events.dispatchEvents({});
     expect(res.sent).toBe(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string>; body: string }];
     expect(url).toBe("https://x/hook");
@@ -485,14 +487,14 @@ describe("FiatLedgerService callbacks", () => {
   });
 
   it("retries a failed delivery with backoff", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
       { id: "e2", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: {}, attempts: 0 },
     ]);
     prisma.pidApp.findFirst.mockResolvedValueOnce({ webhookSecret: "s" });
     (global as unknown as { fetch: unknown }).fetch = jest.fn(async () => ({ ok: false, status: 500 }));
 
-    const res = await service.dispatchEvents({});
+    const res = await events.dispatchEvents({});
     expect(res.failed).toBe(1);
     expect(prisma.fiatLedgerEvent.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "pending", attempts: 1 }) }),
@@ -500,7 +502,7 @@ describe("FiatLedgerService callbacks", () => {
   });
 
   it("signs with the secret of the app matching the event URL (not the first app)", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
       { id: "e3", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://b/hook", payload: { hello: "world" }, attempts: 0 },
     ]);
@@ -512,7 +514,7 @@ describe("FiatLedgerService callbacks", () => {
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
     (global as unknown as { fetch: unknown }).fetch = fetchMock;
 
-    const res = await service.dispatchEvents({});
+    const res = await events.dispatchEvents({});
     expect(res.sent).toBe(1);
     expect(prisma.pidApp.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ ownerPid: "app@pid", webhookUrl: "https://b/hook" }) }),
@@ -523,7 +525,7 @@ describe("FiatLedgerService callbacks", () => {
   });
 
   it("refuses unsigned dispatch when the target app/secret is gone", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
       { id: "e4", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://gone/hook", payload: {}, attempts: 0 },
     ]);
@@ -531,7 +533,7 @@ describe("FiatLedgerService callbacks", () => {
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
     (global as unknown as { fetch: unknown }).fetch = fetchMock;
 
-    const res = await service.dispatchEvents({});
+    const res = await events.dispatchEvents({});
     expect(res.sent).toBe(0);
     expect(res.failed).toBe(1);
     expect(fetchMock).not.toHaveBeenCalled(); // never send with an empty-key HMAC
@@ -541,7 +543,7 @@ describe("FiatLedgerService callbacks", () => {
   });
 
   it("enqueues a callback when an app owns a transfer party", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
     prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", webhookUrl: "https://x/hook" }]);
     const inq = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" });
@@ -588,7 +590,7 @@ describe("FiatLedgerService callbacks", () => {
   });
 
   it("skips a duplicate outbox enqueue on retried confirm", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
     prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", webhookUrl: "https://x/hook" }]);
     // A previous confirm already enqueued this movement's callback.
@@ -629,7 +631,7 @@ describe("FiatLedgerService callbacks", () => {
 
 describe("FiatLedgerService escrow fee operation", () => {
   it("escrow legs carry no app fee; a verified app also skips the global fee", async () => {
-    const { service, prisma } = setup();
+    const { service, events, prisma } = setup();
     // Verified app, no app-fee row for `escrow` → both fees zero (exact refund).
     prisma.pidApp.findUnique.mockResolvedValue({ id: "app1", ownerPid: "live2dev@pid", isActive: true, isVerified: true });
     prisma.pidAppFee.findUnique.mockResolvedValue(null);
@@ -790,7 +792,7 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
   const TEST_KEY = "ab".repeat(32);
 
   it("dispatches with a decrypted enc:v1: webhook secret (legacy plaintext still works)", async () => {
-    const { service, prisma } = setup({ PID_SECRETS_ENC_KEY: TEST_KEY });
+    const { service, events, prisma } = setup({ PID_SECRETS_ENC_KEY: TEST_KEY });
     const raw = "pidwh_testsecret123";
     const enc = encryptSecret(raw, TEST_KEY);
     expect(enc.startsWith("enc:v1:")).toBe(true);
@@ -801,7 +803,7 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
     (global as unknown as { fetch: unknown }).fetch = fetchMock;
 
-    const res = await service.dispatchEvents({});
+    const res = await events.dispatchEvents({});
     expect(res.sent).toBe(1);
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string>; body: string }];
     const expected = "sha256=" + createHmac("sha256", raw).update(init.body).digest("hex");
@@ -810,7 +812,7 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
 
   it("refuses dispatch when the envelope is undecryptable without the key (never empty-key HMAC)", async () => {
     const enc = encryptSecret("pidwh_secret", TEST_KEY);
-    const { service, prisma } = setup({ PID_SECRETS_ENC_KEY: "" });
+    const { service, events, prisma } = setup({ PID_SECRETS_ENC_KEY: "" });
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
       { id: "e-nokey", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: {}, attempts: 0 },
     ]);
@@ -818,14 +820,14 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
     (global as unknown as { fetch: unknown }).fetch = fetchMock;
 
-    const res = await service.dispatchEvents({});
+    const res = await events.dispatchEvents({});
     expect(res.sent).toBe(0);
     expect(res.failed).toBe(1);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("emits fiat.transfer.app_token with app+scope on inquiry AND confirm", async () => {
-    const { service, prisma, security } = setup();
+    const { service, events, prisma, security } = setup();
     prisma.identity.findUnique.mockResolvedValue({ pid: "rani@pid" });
     const inq = await service.transferInquiry(
       "dev@pid",

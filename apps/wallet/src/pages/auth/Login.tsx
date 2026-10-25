@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePeridot } from "../../shared/app/AppContext";
-import { readLoginContext, type LoginContext } from "../../feat/auth/utils/popup-login";
+import { readLoginContext, type LoginContext } from "../../feat/auth/utils/popupLogin";
 import { readSsoParams, ssoOrigin } from "../../feat/auth/utils/sso";
 import { LoadingScreen } from "../../shared/components/shell/LoadingScreen";
 import { AccountSwitcherModal } from "../../shared/components/shell/AccountSwitcherModal";

@@ -1,7 +1,7 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { Check } from "../../../shared/components/icons";
 import { styles as s } from "../../../shared/styles/theme";
-import type { DepositTarget } from "../utils/deposit-targets";
+import type { DepositTarget } from "../utils/depositTargets";
 
 export function DepositCardList({
   targets,

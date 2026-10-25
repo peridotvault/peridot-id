@@ -1,28 +1,39 @@
 import type { FiatDepositView, FiatLedgerEntry } from "@peridotvault/pid-sdk-js";
 import type { FiatItem, FiatKind, FiatLedgerItem, LedgerKind } from "../../../shared/data/fiat";
 
+// Kind vocabularies as sets: new API kinds extend the set, not the branch.
+const DEPOSIT_KINDS = new Set(["deposit", "points_issue"]);
+const TRANSFER_KINDS = new Set(["transfer_internal"]);
+const DEBIT_KINDS = new Set(["debit", "debit_cancel", "points_clawback"]);
+const FEE_KINDS = new Set(["fee", "points_fee"]);
+
 export function fiatKindOf(kind: string): FiatKind {
-  if (kind === "deposit" || kind === "points_issue") return "deposit";
-  if (kind === "transfer_internal") return "transfer";
-  if (kind === "debit" || kind === "debit_cancel" || kind === "points_clawback") return "debit";
-  if (kind === "fee" || kind === "points_fee") return "fee";
+  if (DEPOSIT_KINDS.has(kind)) return "deposit";
+  if (TRANSFER_KINDS.has(kind)) return "transfer";
+  if (DEBIT_KINDS.has(kind)) return "debit";
+  if (FEE_KINDS.has(kind)) return "fee";
   return "withdraw";
 }
 
+const FIAT_LABELS: Record<FiatKind, string> = {
+  deposit: "Deposit",
+  transfer: "Transfer",
+  debit: "Debit",
+  fee: "Service fee",
+  withdraw: "Withdraw",
+};
+
 export function fiatLabel(kind: FiatKind): string {
-  switch (kind) {
-    case "deposit": return "Deposit";
-    case "transfer": return "Transfer";
-    case "debit": return "Debit";
-    case "fee": return "Service fee";
-    default: return "Withdraw";
-  }
+  return FIAT_LABELS[kind];
 }
 
+const LEDGER_KIND: Record<string, LedgerKind> = {
+  fiat_issue: "deposit",
+  fiat_adjust: "adjust",
+};
+
 export function ledgerKindOf(kind: string): LedgerKind {
-  if (kind === "fiat_issue") return "deposit";
-  if (kind === "fiat_adjust") return "adjust";
-  return "transfer"; // fiat_transfer_in / fiat_transfer_out
+  return LEDGER_KIND[kind] ?? "transfer"; // fiat_transfer_in / fiat_transfer_out
 }
 
 export function ledgerLabel(kind: LedgerKind, incoming: boolean): string {

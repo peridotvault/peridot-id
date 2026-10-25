@@ -3,6 +3,8 @@ import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { FiatLedgerChainService } from "./fiat-ledger-chain.service";
+import { FiatLedgerEventsService } from "./fiat-ledger-events.service";
 import { FiatLedgerService } from "./fiat-ledger.service";
 import { DispatchEventsDto, LedgerAdjustDto, LedgerFreezeDto, LedgerTransferInquiryDto } from "./dto/ledger.dto";
 
@@ -18,6 +20,8 @@ import { DispatchEventsDto, LedgerAdjustDto, LedgerFreezeDto, LedgerTransferInqu
 export class FiatLedgerController {
   constructor(
     private readonly ledger: FiatLedgerService,
+    private readonly chain: FiatLedgerChainService,
+    private readonly ledgerEvents: FiatLedgerEventsService,
   ) {}
 
   /** Current internal-credit balance (replayed, source labelled). */
@@ -125,14 +129,14 @@ export class FiatLedgerController {
   @Get("admin/chain")
   @UseGuards(JwtAuthGuard, AdminGuard)
   verifyChain() {
-    return this.ledger.verifyLedger();
+    return this.chain.verifyLedger();
   }
 
   /** Admin: current chain head (publish externally to make it tamper-proof). */
   @Get("admin/chain/head")
   @UseGuards(JwtAuthGuard, AdminGuard)
   chainHead() {
-    return this.ledger.chainHead();
+    return this.chain.chainHead();
   }
 
   /** Admin: chain posted rows that predate the chain (idempotent repair). */
@@ -141,7 +145,7 @@ export class FiatLedgerController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, AdminGuard)
   chainBackfill() {
-    return this.ledger.backfillChain();
+    return this.chain.backfillChain();
   }
 
   /** Admin: deliver due third-party callbacks (cron-driven). */
@@ -150,13 +154,13 @@ export class FiatLedgerController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, AdminGuard)
   dispatchEvents(@Body() dto: DispatchEventsDto) {
-    return this.ledger.dispatchEvents(dto);
+    return this.ledgerEvents.dispatchEvents(dto);
   }
 
   /** Admin: inspect the callback outbox. */
   @Get("admin/events")
   @UseGuards(JwtAuthGuard, AdminGuard)
   events(@Query("status") status?: string) {
-    return this.ledger.events(status);
+    return this.ledgerEvents.events(status);
   }
 }

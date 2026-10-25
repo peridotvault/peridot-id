@@ -4,8 +4,8 @@ import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
-import { sendDestinationError } from "../../feat/chain/utils/solana-address";
-import { isNetworkSwitching } from "../../shared/data/network-mode";
+import { sendDestinationError } from "../../feat/chain/utils/solanaAddress";
+import { isNetworkSwitching } from "../../shared/data/networkMode";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
 
 const LAMPORTS_PER_SOL = 1e9;

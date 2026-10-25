@@ -12,15 +12,15 @@ export function fmtAmount(t: WalletTransaction): string {
   return `${sign}${value.toLocaleString("en-US", { maximumFractionDigits: 4 })} ${asset}`;
 }
 
+// Row identity per tx type: new types extend the table, not the branch.
+const TX_META: Record<string, { label: string; icon: typeof ArrowUpRight; color: string }> = {
+  DEPOSIT: { label: "Receive", icon: ArrowDownLeft, color: theme.colors.success },
+  WITHDRAW: { label: "Send", icon: ArrowUpRight, color: theme.colors.foreground },
+  ACTIVATION: { label: "Activation", icon: Rocket, color: theme.colors.foreground },
+};
+
+const DEFAULT_META = { label: "Transaction", icon: RefreshCw, color: theme.colors.mutedForeground };
+
 export function meta(t: WalletTransaction): { label: string; icon: typeof ArrowUpRight; color: string } {
-  switch (t.type) {
-    case "DEPOSIT":
-      return { label: "Receive", icon: ArrowDownLeft, color: theme.colors.success };
-    case "WITHDRAW":
-      return { label: "Send", icon: ArrowUpRight, color: theme.colors.foreground };
-    case "ACTIVATION":
-      return { label: "Activation", icon: Rocket, color: theme.colors.foreground };
-    default:
-      return { label: "Transaction", icon: RefreshCw, color: theme.colors.mutedForeground };
-  }
+  return TX_META[t.type ?? ""] ?? DEFAULT_META;
 }

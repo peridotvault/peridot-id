@@ -2,7 +2,7 @@ import { Pressable } from "../../../shared/components/ui/Pressable";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { ChevronRight } from "../../../shared/components/icons";
 import { styles as s } from "../../../shared/styles/theme";
-import { fmtAmount, meta } from "../utils/history";
+import { fmtAmount, meta } from "../utils/txFormat";
 import { fmtDate } from "../../../shared/data/format";
 
 export function ChainRow({ tx: t, onSelect }: { tx: WalletTransaction; onSelect: (tx: WalletTransaction) => void }) {

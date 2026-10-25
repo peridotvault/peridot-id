@@ -4,7 +4,10 @@ import { AdminGuard } from "../common/admin.guard";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { validateChecker, validateEventTypeAllowlist } from "./catalog";
 import { ExperienceAdminController } from "./experience-admin.controller";
-import { checkGrantEnvelope, ExperienceAdminService } from "./experience-admin.service";
+import { checkGrantEnvelope } from "./experience-admin-guards";
+import { ExperienceAdminService } from "./experience-admin.service";
+import { ExperiencePoliciesService } from "./experience-policies.service";
+import { ExperienceTasksService } from "./experience-tasks.service";
 import { LedgerService } from "./ledger.service";
 import { buildThresholds, DEFAULT_FORMULA } from "./xp-curve";
 
@@ -15,8 +18,10 @@ function serviceWith(prisma: Record<string, unknown>, overrides: Record<string, 
   const security = { log: jest.fn(async () => undefined) };
   const levels = { getActivePolicy: jest.fn(async () => ({ policy: { id: "p1", version: 1 }, formula: DEFAULT_FORMULA, thresholds: buildThresholds(100, DEFAULT_FORMULA) })) };
   const ledger = { adjustXp: jest.fn(), reverseXp: jest.fn() };
-  const svc = new ExperienceAdminService(prisma as never, levels as never, ledger as never, security as never);
-  return { svc, security: security as { log: jest.Mock }, levels, ledger: ledger as { adjustXp: jest.Mock; reverseXp: jest.Mock }, ...(overrides as object) };
+  const svc = new ExperienceAdminService(prisma as never, ledger as never, security as never);
+  const policies = new ExperiencePoliciesService(prisma as never, levels as never, security as never);
+  const tasks = new ExperienceTasksService(prisma as never, security as never);
+  return { svc, policies, tasks, security: security as { log: jest.Mock }, levels, ledger: ledger as { adjustXp: jest.Mock; reverseXp: jest.Mock }, ...(overrides as object) };
 }
 
 const APP_ROW = {
@@ -181,15 +186,15 @@ describe("ExperienceAdminService.updateTask (F8 activation refusal)", () => {
 
   it("F8: checker-less activation -> 400 via direct service call", async () => {
     const update = jest.fn();
-    const { svc } = serviceWith({ xpTask: { findUnique: jest.fn(async () => DRAFT), update } });
-    await expect(svc.updateTask(ADMIN, "task-1", { status: "active" })).rejects.toThrow(/no reliable checker/);
+    const { tasks } = serviceWith({ xpTask: { findUnique: jest.fn(async () => DRAFT), update } });
+    await expect(tasks.updateTask(ADMIN, "task-1", { status: "active" })).rejects.toThrow(/no reliable checker/);
     expect(update).not.toHaveBeenCalled();
   });
 
   it("activation with a registered checker succeeds", async () => {
     const update = jest.fn(async ({ data }: { data: object }) => ({ ...DRAFT, ...data }));
-    const { svc } = serviceWith({ xpTask: { findUnique: jest.fn(async () => DRAFT), update } });
-    const r = await svc.updateTask(ADMIN, "task-1", {
+    const { tasks } = serviceWith({ xpTask: { findUnique: jest.fn(async () => DRAFT), update } });
+    const r = await tasks.updateTask(ADMIN, "task-1", {
       status: "active",
       verificationChecker: "internal_state.campaign_verified",
     });
@@ -197,14 +202,14 @@ describe("ExperienceAdminService.updateTask (F8 activation refusal)", () => {
   });
 
   it("archived tasks are immutable", async () => {
-    const { svc } = serviceWith({ xpTask: { findUnique: jest.fn(async () => ({ ...DRAFT, status: "archived" })), update: jest.fn() } });
-    await expect(svc.updateTask(ADMIN, "task-1", { name: "x" })).rejects.toThrow(/immutable/);
+    const { tasks } = serviceWith({ xpTask: { findUnique: jest.fn(async () => ({ ...DRAFT, status: "archived" })), update: jest.fn() } });
+    await expect(tasks.updateTask(ADMIN, "task-1", { name: "x" })).rejects.toThrow(/immutable/);
   });
 
   it("availability window is validated (from < until)", async () => {
-    const { svc } = serviceWith({ xpTask: { findUnique: jest.fn(async () => DRAFT), update: jest.fn() } });
+    const { tasks } = serviceWith({ xpTask: { findUnique: jest.fn(async () => DRAFT), update: jest.fn() } });
     await expect(
-      svc.updateTask(ADMIN, "task-1", { availableFrom: "2026-12-01", availableUntil: "2026-01-01" } as never),
+      tasks.updateTask(ADMIN, "task-1", { availableFrom: "2026-12-01", availableUntil: "2026-01-01" } as never),
     ).rejects.toThrow(/before/);
   });
 });
@@ -227,17 +232,17 @@ describe("ExperienceAdminService quotas + policy gates", () => {
   });
 
   it("policy activation without envelope -> 400", async () => {
-    const { svc } = serviceWith({});
-    await expect(svc.activatePolicy(ADMIN, "policy-id", {})).rejects.toThrow(/second-person|justification/);
+    const { policies } = serviceWith({});
+    await expect(policies.activatePolicy(ADMIN, "policy-id", {})).rejects.toThrow(/second-person|justification/);
   });
 
   it("policy activation without materialized thresholds -> 400", async () => {
-    const { svc } = serviceWith({
+    const { policies } = serviceWith({
       identity: { findUnique: jest.fn(async () => ({ role: "admin", status: "active" })) },
       xpPolicyVersion: { findUnique: jest.fn(async () => ({ id: "p9", version: 9, activatedAt: null, supersededAt: null })) },
       xpLevelThreshold: { count: jest.fn(async () => 0) },
     });
-    await expect(svc.activatePolicy(ADMIN, "p9", { reason: "rollout approved by product review" })).rejects.toThrow(
+    await expect(policies.activatePolicy(ADMIN, "p9", { reason: "rollout approved by product review" })).rejects.toThrow(
       /materialize first/,
     );
   });

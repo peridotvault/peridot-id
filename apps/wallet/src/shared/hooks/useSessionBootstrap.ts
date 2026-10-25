@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { needsProvisioning } from "../app/fiat-ensure";
-import { cachedRead } from "../data/api-cache";
+import { needsProvisioning } from "../app/fiatEnsure";
+import { cachedRead } from "../data/apiCache";
 
 // Shell screen map. Owned here (not in App.tsx) so the session hooks and the
 // shell share one vocabulary; the router JSX stays in App.

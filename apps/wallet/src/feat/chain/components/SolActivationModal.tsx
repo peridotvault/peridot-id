@@ -4,8 +4,8 @@ import QRCode from "react-qr-code";
 import { theme, styles as s } from "../../../shared/styles/theme";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import type { useActivationGate } from "../hooks/useActivationGate";
-import type { DepositTarget } from "../utils/deposit-targets";
-import { isSolanaAvailable, subscribeNetworkMode } from "../../../shared/data/network-mode";
+import type { DepositTarget } from "../utils/depositTargets";
+import { isSolanaAvailable, subscribeNetworkMode } from "../../../shared/data/networkMode";
 
 type Gate = ReturnType<typeof useActivationGate>;
 

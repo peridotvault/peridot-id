@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { ChainAccount } from "@peridotvault/pid-types";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { buildDepositTargets, type DepositTarget } from "../utils/deposit-targets";
+import { buildDepositTargets, type DepositTarget } from "../utils/depositTargets";
 import {
   getNetworkMode,
   isSolanaAvailable,
   refreshSolanaAvailability,
   subscribeNetworkMode,
-} from "../../../shared/data/network-mode";
+} from "../../../shared/data/networkMode";
 
 // ANT-74 + ANT-78: Solana deposit targets render only when a Solana program
 // exists for the current selection. Testnet always shows them; mainnet shows

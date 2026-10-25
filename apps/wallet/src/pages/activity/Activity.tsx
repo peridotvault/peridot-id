@@ -81,17 +81,39 @@ export function Activity({
         <p style={s.hint}>No IDR activity yet — top up to get started.</p>
       )}
 
-      {visible.map((item) =>
-        item.type === "chain" ? (
-          <ChainRow key={item.tx.id} tx={item.tx} onSelect={onSelect} />
-        ) : item.type === "fiat" ? (
-          <FiatRow key={item.item.tx.id} item={item.item} onSelect={onSelectFiat} />
-        ) : (
-          <LedgerRow key={item.item.tx.id} item={item.item} onSelect={onSelectLedger} />
-        ),
-      )}
+      {visible.map((item) => (
+        <FeedRow
+          key={rowKey(item)}
+          item={item}
+          onSelect={onSelect}
+          onSelectFiat={onSelectFiat}
+          onSelectLedger={onSelectLedger}
+        />
+      ))}
     </ScrollArea>
   );
+}
+
+function rowKey(item: AllItem): string {
+  return item.type === "chain" ? item.tx.id : item.item.tx.id;
+}
+
+// Row dispatch: the union carries its own renderer — new feed kinds add a
+// branch here, row internals stay in their owner feats.
+function FeedRow({
+  item,
+  onSelect,
+  onSelectFiat,
+  onSelectLedger,
+}: {
+  item: AllItem;
+  onSelect: (tx: WalletTransaction) => void;
+  onSelectFiat: (item: FiatItem) => void;
+  onSelectLedger: (item: FiatLedgerItem) => void;
+}) {
+  if (item.type === "chain") return <ChainRow tx={item.tx} onSelect={onSelect} />;
+  if (item.type === "fiat") return <FiatRow item={item.item} onSelect={onSelectFiat} />;
+  return <LedgerRow item={item.item} onSelect={onSelectLedger} />;
 }
 
 // Tab pills live here, not in a feat: the All/Onchain/IDR split is this

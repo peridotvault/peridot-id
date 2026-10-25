@@ -1,5 +1,5 @@
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { deliverLoginCode, type LoginContext } from "../utils/popup-login";
+import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
 import { finishSso, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "./useLoginSession";
 

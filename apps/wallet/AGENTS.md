@@ -16,13 +16,13 @@ src/
     styles/           # index.css (+tokens/fonts/base split), theme.ts
                       # (TS token source, byte-identical to tokens.css),
                       # stylesheet.ts (StyleSheet + flatten, Phase 4 exceptions)
-    data/             # api-cache.ts (cachedRead/invalidate/clearApiCache),
+    data/             # apiCache.ts (cachedRead/invalidate/clearApiCache),
                       # currency.ts (IDR/USD pref + CoinGecko), fiat.ts
                       # (FiatItem/FiatLedgerItem + labels + sumIdr),
                       # format.ts (fmtDate feed helper, used by 2 feats),
-                      # network-mode.ts (testnet store; view: hooks/useNetworkMode)
+                      # networkMode.ts (testnet store; view: hooks/useNetworkMode)
     app/              # AppContext.tsx (SDK provider + usePeridot()),
-                      # config.ts (API_BASE_URL), fiat-ensure.ts (post-auth
+                      # config.ts (API_BASE_URL), fiatEnsure.ts (post-auth
                       # provisioning check), shims.ts (Buffer bootstrap,
                       # first import in main.tsx), openExternal.ts
                       # (openExternalUrl, guards via safeUrl.ts), safeUrl.ts
@@ -33,7 +33,7 @@ src/
       shell/          # app chrome: TabBar, TopBar, HomeHeader, AppColumn,
                       # LoadingScreen, AccountSwitcherModal
       icons.ts        # lucide barrel (deep per-icon imports only)
-    hooks/            # session bootstrap/sync, startup gate, network-mode
+    hooks/            # session bootstrap/sync, startup gate, networkMode
                       # view, wide layout, window dimensions
   feat/<domain>/      # auth | chain | fiat | identity | embed — one domain
                       # capability each (one SDK namespace); each: components/
@@ -48,7 +48,7 @@ src/
    under `pages/` — route-private helpers live in the screen file.
 2. `shared/` → may import from `shared/` only (any subfolder).
    **Never** from `pages/` or `feat/`. Shell-only app-wide modules
-   (`app/config`, `app/fiat-ensure`, `components/shell/TabBar`) live
+   (`app/config`, `app/fiatEnsure`, `components/shell/TabBar`) live
    here, never in a feat. `components/ui/` primitives never import
    from `components/shell/` (shell composes ui, not the reverse).
 3. `feat/<domain>/` → may import from `shared/` and from its **own**
@@ -65,6 +65,8 @@ src/
    design system — generic primitives, exempt from multi-use.
    Test: which SDK namespace does it wrap? More than one (or none) means
    it is not a feat. No new top-level `src/*.ts` files.
+   File names: camelCase `.ts` (components PascalCase, hooks `useX`);
+   single-word lowercase allowed (`fiat.ts`, `sso.ts`); never kebab-case.
 
 ## Page → domain map (no `Page` suffix — the folder says it; `pages/activity`
 composes `feat/chain` + `feat/fiat` — the merge is the page's job, there is
@@ -125,16 +127,16 @@ done
 
 - Home → `pages/home/Home.tsx` (route assembly: `useHomeData`, `calcTotal`,
   `TotalBalanceSection`, `QuickActions`, `SendChoiceModal` in-file — no
-  single feat owns them) over `feat/chain/{utils/assets,components/AssetSection}`
+  single feat owns them) over `feat/chain/{utils/coins,components/AssetSection}`
   + `feat/fiat/components/FiatAccountActions` (tap DOKU card → Rupiah page).
 - Activity → `pages/activity/Activity.tsx` composes `feat/chain/hooks/useChainHistory`
   + `feat/fiat/hooks/useFiatHistory` (merge + tab header inline — composition
   is the page's job) over `feat/chain/components/ChainRow` and
   `feat/fiat/components/{FiatRow,LedgerRow}`.
-- Receive/Activation → `feat/chain/{utils/deposit-targets,
+- Receive/Activation → `feat/chain/{utils/depositTargets,
   hooks/useDepositTargets,components/DepositCardList,SolActivationModal,
   DepositAddressCard,ActivationStatusCard}` (reuses Phase-1 gate/copy hooks).
-- Topup → `feat/fiat/{utils/topup-amount,hooks/useDepositQuote,
+- Topup → `feat/fiat/{utils/topupAmount,hooks/useDepositQuote,
   hooks/useCheckoutSync}`.
 - Approve → `feat/auth/{utils/popupAction,hooks/usePopupRequest,
   components/PopupReview}` + `feat/fiat/hooks/useFiatPrepare`.
@@ -191,8 +193,8 @@ done
 
 - `feat/embed/` is a sixth domain (guard loop covers it now): Screen lives
   in `pages/embed/EmbedConnect.tsx`, bridge in `feat/embed/hooks/useEmbedBridge.ts`,
-  client in `utils/embed-client.ts` — no loose files at feat roots.
-- `feat/auth/popup-login.ts` + `sso.ts` moved to `feat/auth/utils/`
+  client in `utils/embedClient.ts` — no loose files at feat roots.
+- `feat/auth/popupLogin.ts` + `sso.ts` moved to `feat/auth/utils/`
   (were loose at the feat root); all importers updated.
 - `shared/utils/` (empty, only `.gitkeep`) deleted. Rule 5 still holds:
   new shared code lands as a named top-level module, not a utils pile.
@@ -204,8 +206,8 @@ done
   `main.tsx` re-pointed. Byte-identical token rule now spans
   `styles/tokens.css` ↔ `styles/theme.ts`.
 - `shared/` grouped by role: `styles/` (paint), `data/` (reads:
-  api-cache, currency, fiat, network-mode), `app/` (bootstrap:
-  AppContext, config, fiat-ensure, shims, openExternal, safeUrl),
+  apiCache, currency, fiat, networkMode), `app/` (bootstrap:
+  AppContext, config, fiatEnsure, shims, openExternal, safeUrl),
   `components/{ui,shell}` + `icons.ts`, `hooks/` (unchanged).
   `useNetworkMode` stays in `hooks/` (view over the `data/` store).
 - `TopBar` + `HomeHeader` moved `feat/wallet/components/` →
@@ -260,7 +262,7 @@ done
 
 - `pages/home/` submodules deleted (the Phase 9 colocation violated the
   pages-are-pure-screens law): chain-pure `assets.ts` (`Coin`,
-  `fmtBalance`, `shortMint`, `buildCoins`) → `feat/chain/utils/assets.ts`;
+  `fmtBalance`, `shortMint`, `buildCoins`) → `feat/chain/utils/coins.ts`;
   `AssetSection` (already fully props-driven) → `feat/chain/components/`
   (zero import changes — same depth); `useHomeData`, `calcTotal`,
   `TotalBalanceSection`, `QuickActions`, `SendChoiceModal` inlined in
@@ -276,7 +278,28 @@ done
   `BottomSheet`, `BackButton`) stay: `shared/components/ui` is the design
   system, exempt from multi-use (moving a generic Modal into a feat would
   be wrong-homing). `shared/data|hooks|app` = multi-domain or shell infra.
-- Guards fixed: pages = flatness (`find -mindepth 2`) + strict allowlist
+- Guards fixed: pages = flatness (`find -mindepth 2 -type d`) + strict allowlist
   (no submodules left to allow); cross-feat check rewritten — the old
   `feat/` substring match was blind to `../../<other-feat>/` imports
   (green in practice, broken in theory; verified both directions).
+
+## Done (Phase 11 — naming standard, types verdict, OCP tables)
+
+- File names standardized to camelCase (was mixed kebab/camel): 8 renames
+  (`apiCache`, `networkMode`, `fiatEnsure`, `popupLogin`, `depositTargets`,
+  `solanaAddress`, `topupAmount`, `embedClient`) + 2 content renames
+  (`assets` → `coins`, chain `history` → `txFormat`; fiat keeps `history`
+  — it holds history selectors). Kept deliberately: `knownPrograms.ts`
+  (registry is the noun), `sso.ts`, `SolActivationModal` (Solana-specific),
+  `vite-env.d.ts` (Vite standard), kebab `*.test.mjs` (test-dir convention).
+- Types verdict: no wallet `types/` folder needed. All entities come from
+  `@peridotvault/pid-types` (410-line single index, no local duplicates);
+  view models already homed (`Coin`/`DepositTarget` in `feat/chain`,
+  `FiatItem`/`Currency`/`Rates`/`NetworkMode` in `shared/`, flow state in
+  owner modules, screen props in-file). Deleted 2 stale `.gitkeep`s.
+- OOP as tables, not classes (hooks can't be classes — paradigm mismatch):
+  `meta()`/label switches → `Record`s, kind if-chains → `Set`s,
+  `calcTotal` SOL/USDC branch → `RATE_FIELD` table, feed ternary →
+  in-file `FeedRow`. New variants extend tables, not branches.
+  Rejected: `ApiCache` class (module singleton is idiomatic), splitting
+  `useHomeData`, branded primitives (over-engineering).

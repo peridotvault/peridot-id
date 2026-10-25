@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FiatDepositView, FiatLedgerEntry, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { pendingDeposit } from "../utils/history";
-import { cachedRead, clearApiCache } from "../../../shared/data/api-cache";
-import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/data/network-mode";
+import { cachedRead, clearApiCache } from "../../../shared/data/apiCache";
+import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/data/networkMode";
 
 // Fiat half of the activity feed: DOKU intents + ledger rows. Tab-agnostic —
 // the screen merges this with the chain half. Re-fetches on network switch.

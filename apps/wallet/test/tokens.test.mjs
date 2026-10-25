@@ -4,7 +4,7 @@
 // Run: `node --test test/` from apps/wallet.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildCoins, shortMint } from "../src/feat/chain/utils/assets.ts";
+import { buildCoins, shortMint } from "../src/feat/chain/utils/coins.ts";
 
 const USDC_DEV = "4zMMC6tc2RJf5zkCBqsqJ5mTcgnEHXUsdt8E3uBcps15";
 const UNKNOWN = "11111111111111111111111111111112";

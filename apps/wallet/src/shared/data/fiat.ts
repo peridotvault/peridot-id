@@ -14,42 +14,35 @@ export type FiatItem = { kind: FiatKind; createdAt: string; tx: FiatDepositView 
 export type LedgerKind = "deposit" | "transfer" | "adjust";
 export type FiatLedgerItem = { kind: LedgerKind; createdAt: string; tx: FiatLedgerEntry };
 
+// [incoming label, outgoing label] per provider status. Unknown statuses
+// degrade to "Pending" — new DOKU states extend the table, not the branch.
+const FIAT_STATUS_LABELS: Record<string, [string, string]> = {
+  success: ["Payment received", "Completed"],
+  settled: ["Payment received", "Completed"],
+  created: ["Waiting for payment", "Processing"],
+  processing: ["Waiting for payment", "Processing"],
+  expired: ["Payment expired", "Expired"],
+  failed: ["Payment failed", "Failed"],
+  cancelled: ["Cancelled", "Cancelled"],
+  refunded: ["Refunded", "Refunded"],
+};
+
 /** Friendly status text — provider enums (settled/processing/...) never reach the user. */
 export function fiatStatusLabel(kind: FiatKind, status: string): string {
-  const incoming = kind === "deposit";
-  switch (status) {
-    case "success":
-    case "settled":
-      return incoming ? "Payment received" : "Completed";
-    case "created":
-    case "processing":
-      return incoming ? "Waiting for payment" : "Processing";
-    case "expired":
-      return incoming ? "Payment expired" : "Expired";
-    case "failed":
-      return incoming ? "Payment failed" : "Failed";
-    case "cancelled":
-      return "Cancelled";
-    case "refunded":
-      return "Refunded";
-    default:
-      return "Pending";
-  }
+  const pair = FIAT_STATUS_LABELS[status];
+  if (!pair) return "Pending";
+  return kind === "deposit" ? pair[0] : pair[1];
 }
 
+const LEDGER_STATUS_LABELS: Record<string, string> = {
+  posted: "Completed",
+  created: "Pending",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
 export function ledgerStatusLabel(status: string): string {
-  switch (status) {
-    case "posted":
-      return "Completed";
-    case "created":
-      return "Pending";
-    case "failed":
-      return "Failed";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return "Pending";
-  }
+  return LEDGER_STATUS_LABELS[status] ?? "Pending";
 }
 
 /** Sum two whole-IDR strings (PPN folded into the shown fee lines). */

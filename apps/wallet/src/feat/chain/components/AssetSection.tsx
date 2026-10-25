@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import type { NftItem } from "@peridotvault/pid-solana";
 import { styles as s } from "../../../shared/styles/theme";
-import type { Coin } from "../utils/assets";
+import type { Coin } from "../utils/coins";
 
 // Tokens/Items tabs + lists. TabButton stays here (not shared): Home's
 // bare-text underline variant differs from Activity's boxed pill.

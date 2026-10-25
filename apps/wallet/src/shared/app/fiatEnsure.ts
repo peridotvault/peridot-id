@@ -1,5 +1,5 @@
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { cachedRead } from "../data/api-cache";
+import { cachedRead } from "../data/apiCache";
 
 /**
  * Read-only provisioning check (no side effects, no DOKU calls). True when the

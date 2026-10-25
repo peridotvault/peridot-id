@@ -4,12 +4,12 @@ import { Pressable } from "../../shared/components/ui/Pressable";
 import { ChevronRight, FlaskConical, KeyRound, Monitor, Link2, Check, Banknote, TriangleAlert } from "../../shared/components/icons";
 import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
-import { cachedRead } from "../../shared/data/api-cache";
+import { cachedRead } from "../../shared/data/apiCache";
 import { styles as s } from "../../shared/styles/theme";
 import { BackButton } from "../../shared/components/ui/BackButton";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { CURRENCIES, getCurrency, setCurrency, type Currency } from "../../shared/data/currency";
-import { setNetworkMode } from "../../shared/data/network-mode";
+import { setNetworkMode } from "../../shared/data/networkMode";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
 
 interface Props {

@@ -7,10 +7,10 @@ import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { fmtIdr } from "../../shared/data/fiat";
-import { isNetworkSwitching, isTestnetMode } from "../../shared/data/network-mode";
+import { isNetworkSwitching, isTestnetMode } from "../../shared/data/networkMode";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
 import { FiatQuoteBreakdown } from "../../feat/fiat/components/FiatQuoteBreakdown";
-import { digitsOnly, groupDigits, MIN_NET_IDR } from "../../feat/fiat/utils/topup-amount";
+import { digitsOnly, groupDigits, MIN_NET_IDR } from "../../feat/fiat/utils/topupAmount";
 import { useDepositQuote } from "../../feat/fiat/hooks/useDepositQuote";
 import { useCheckoutSync } from "../../feat/fiat/hooks/useCheckoutSync";
 
@@ -108,10 +108,10 @@ export function Topup({ onDone }: { onDone: () => void }) {
       {error && <p role="alert" tabIndex={-1} id="topup-error" style={s.error}>{error}</p>}
 
       <div className="flex flex-col mt-3 gap-1.5 border border-border bg-surface p-3">
-        <label htmlFor="topup-amount">
+        <label htmlFor="topupAmount">
           <span style={s.label}>Amount credited to you (IDR)</span>
         </label>
-        <TextField id="topup-amount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000"  />
+        <TextField id="topupAmount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000"  />
         {belowMin && <p role="alert" style={s.error}>Minimum top-up is Rp50.000.</p>}
 
         {q.quote && (

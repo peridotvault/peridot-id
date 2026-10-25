@@ -11,7 +11,7 @@ import {
 } from "@peridotvault/pid-payments";
 import { decryptSecret } from "../common/secret-crypto";
 import { replayFiatLedger } from "./fiat-ledger-replay";
-import { GENESIS_HASH, entryHash, verifyChain as verifyLedgerChain, type ChainableEntry } from "./fiat-ledger-hash";
+import { CHAIN_LOCK, GENESIS_HASH, entryHash } from "./fiat-ledger-hash";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CHECKOUT_CLIENT } from "./checkout-client.token";
@@ -864,7 +864,6 @@ export class FiatLedgerService {
   // --- hash chain (tamper-evident journal) ---
 
   /** Global advisory lock id serializing chain writes (one ledger head). */
-  private static readonly CHAIN_LOCK = 918273645;
 
   /**
    * Append value-bearing legs to the tamper-evident chain and write them.
@@ -884,7 +883,7 @@ export class FiatLedgerService {
     },
     ops: Array<{ id?: string; data: Record<string, unknown> }>,
   ): Promise<void> {
-    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${FiatLedgerService.CHAIN_LOCK}::bigint)`);
+    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${CHAIN_LOCK}::bigint)`);
     const last = await tx.fiatLedgerEntry.findFirst({
       where: { hash: { not: null } }, orderBy: { hashSeq: "desc" }, select: { hash: true, hashSeq: true },
     });
@@ -906,66 +905,6 @@ export class FiatLedgerService {
       else await tx.fiatLedgerEntry.create({ data });
       prevHash = hash;
     }
-  }
-
-  /** Verify the whole chain; expose the head hash for external anchoring. */
-  async verifyLedger(): Promise<{ ok: boolean; checked: number; headHash: string; firstBadIdempotencyKey: string | null; error: string | null; postedUnchained: number }> {
-    const unchained = await this.prisma.fiatLedgerEntry.count({ where: { status: "posted", hash: null } });
-    const rows = await this.prisma.fiatLedgerEntry.findMany({
-      where: { status: "posted", hash: { not: null } }, orderBy: { hashSeq: "asc" }, take: 100000,
-    });
-    const v = verifyLedgerChain(rows.map((r) => ({
-      entryGroup: r.entryGroup, kind: r.kind, pid: r.pid, counterpartyPid: r.counterpartyPid,
-      amountIdr: r.amountIdr, direction: r.direction, idempotencyKey: r.idempotencyKey,
-      parentRef: r.parentRef, status: r.status, feePolicyVersion: r.feePolicyVersion,
-      prevHash: r.prevHash, hash: r.hash,
-    })));
-    if (unchained > 0) {
-      const e = v.error ? `${v.error}; ${unchained} posted row(s) unchained` : `${unchained} posted row(s) unchained — run chain backfill`;
-      return { ...v, ok: false, error: e, postedUnchained: unchained };
-    }
-    return { ...v, postedUnchained: 0 };
-  }
-
-  /** Head of the chain (the value to publish externally to make it tamper-proof). */
-  async chainHead(): Promise<{ headHash: string; hashSeq: string | null }> {
-    const last = await this.prisma.fiatLedgerEntry.findFirst({
-      where: { hash: { not: null } }, orderBy: { hashSeq: "desc" }, select: { hash: true, hashSeq: true },
-    });
-    return { headHash: last?.hash ?? GENESIS_HASH, hashSeq: last?.hashSeq?.toString() ?? null };
-  }
-
-  /**
-   * One-time/repair: chain posted rows that predate the chain (replaySeq order).
-   * ANT-254 P2 note: yes, this UPDATEs posted rows — deliberately and narrowly.
-   * It only fills NULL hash fields (posted-but-unchained rows) and never
-   * rewrites an existing hash/prevHash/hashSeq, so chained history is
-   * append-only in effect. Admin-guarded + throttled at the controller;
-   * verifyLedger reports `postedUnchained` so the need is visible before use.
-   */
-  async backfillChain(): Promise<{ chained: number }> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${FiatLedgerService.CHAIN_LOCK}::bigint)`);
-      const unchained = await tx.fiatLedgerEntry.findMany({
-        where: { status: "posted", hash: null }, orderBy: { replaySeq: "asc" }, take: 100000,
-      });
-      const last = await tx.fiatLedgerEntry.findFirst({
-        where: { hash: { not: null } }, orderBy: { hashSeq: "desc" }, select: { hash: true, hashSeq: true },
-      });
-      let prevHash: string = last?.hash ?? GENESIS_HASH;
-      let seq: bigint = last?.hashSeq ?? 0n;
-      for (const r of unchained) {
-        seq += 1n;
-        const hash = entryHash({
-          entryGroup: r.entryGroup, kind: r.kind, pid: r.pid, counterpartyPid: r.counterpartyPid,
-          amountIdr: r.amountIdr, direction: r.direction, idempotencyKey: r.idempotencyKey,
-          parentRef: r.parentRef, status: r.status, feePolicyVersion: r.feePolicyVersion, prevHash,
-        });
-        await tx.fiatLedgerEntry.update({ where: { id: r.id }, data: { prevHash, hash, hashSeq: seq } });
-        prevHash = hash;
-      }
-      return { chained: unchained.length };
-    });
   }
 
   // --- third-party callbacks (escrow apps) ---
@@ -1013,83 +952,6 @@ export class FiatLedgerService {
         },
       });
     }
-  }
-
-  /**
-   * Deliver due callback events (cron-driven), HMAC-SHA256 signed with the
-   * target app's webhook secret (`X-Pid-Signature: sha256=<hex>`). Failures
-   * retry with backoff up to 6 attempts, then stay `failed` for admin review.
-   */
-  async dispatchEvents(input: { take?: number }): Promise<{ sent: number; failed: number; pending: number }> {
-    const take = Math.min(Math.max(input.take ?? 20, 1), 100);
-    const due = await this.prisma.fiatLedgerEvent.findMany({
-      where: { status: "pending", nextAttemptAt: { lte: new Date() } }, orderBy: { createdAt: "asc" }, take,
-    });
-    let sent = 0;
-    let failed = 0;
-    for (const ev of due) {
-      // Resolve the secret for the exact app this event targets (owner + URL),
-      // not just the first active app under the owner. A missing/inactive app
-      // or secret is fail-closed: never dispatch with an empty-key HMAC —
-      // record and retry with backoff like any delivery failure. ANT-286a:
-      // the stored value is an `enc:v1:` envelope — decrypt server-side with
-      // PID_SECRETS_ENC_KEY; missing/undecryptable = failNoSecret.
-      const app = await this.prisma.pidApp.findFirst({
-        where: { ownerPid: ev.targetPid, webhookUrl: ev.targetUrl, isActive: true },
-        select: { webhookSecret: true },
-      });
-      const failNoSecret = async (reason: string) => {
-        const attempts = ev.attempts + 1;
-        const dead = attempts >= 6;
-        const backoffMs = Math.min(3_600_000, 1000 * 2 ** attempts);
-        await this.prisma.fiatLedgerEvent.update({
-          where: { id: ev.id },
-          data: { status: dead ? "failed" : "pending", attempts, nextAttemptAt: new Date(Date.now() + backoffMs), lastError: reason.slice(0, 200) },
-        });
-        failed++;
-      };
-      let rawSecret: string | null = null;
-      try {
-        const key = this.config.get<string>("PID_SECRETS_ENC_KEY", "") || undefined;
-        rawSecret = decryptSecret(app?.webhookSecret ?? null, key);
-      } catch {
-        rawSecret = null;
-      }
-      if (!rawSecret) {
-        await failNoSecret("webhook app missing, inactive, or secret undecryptable — refusing unsigned dispatch");
-        continue;
-      }
-      const body = JSON.stringify(ev.payload);
-      const sig = "sha256=" + createHmac("sha256", rawSecret).update(body).digest("hex");
-      try {
-        const res = await fetch(ev.targetUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Pid-Event": ev.eventType, "X-Pid-Signature": sig },
-          body,
-          // Bound delivery so a hung endpoint can't stall the dispatcher.
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        await this.prisma.fiatLedgerEvent.update({ where: { id: ev.id }, data: { status: "delivered", deliveredAt: new Date(), attempts: ev.attempts + 1, lastError: null } });
-        sent++;
-      } catch (err) {
-        const attempts = ev.attempts + 1;
-        const dead = attempts >= 6;
-        const backoffMs = Math.min(3_600_000, 1000 * 2 ** attempts);
-        await this.prisma.fiatLedgerEvent.update({
-          where: { id: ev.id },
-          data: { status: dead ? "failed" : "pending", attempts, nextAttemptAt: new Date(Date.now() + backoffMs), lastError: String(err).slice(0, 200) },
-        });
-        failed++;
-      }
-    }
-    const pending = await this.prisma.fiatLedgerEvent.count({ where: { status: "pending" } });
-    return { sent, failed, pending };
-  }
-
-  /** Admin read-model for the callback outbox. */
-  events(status?: string) {
-    return this.prisma.fiatLedgerEvent.findMany({ where: status ? { status } : undefined, orderBy: { createdAt: "desc" }, take: 100 });
   }
 
   /** Payment-confirmation predicate for deposit rows (same semantics as the
