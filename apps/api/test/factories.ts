@@ -10,6 +10,70 @@ export function mockSecurity() {
 }
 
 /**
+ * Relayer H2 idempotency double: pass-through slot claim (first-claim
+ * proceeds) + direct broadcast (no resolve path). Specs covering
+ * resolve-then-act override `broadcastWithResolveThenAct` per test.
+ */
+export function mockIdempotency() {
+  return {
+    claimSlot: jest.fn(
+    async (): Promise<{ decision: "proceed" | "duplicate"; signature: string | null }> => ({
+      decision: "proceed",
+      signature: null,
+    }),
+  ),
+    recordSubmission: jest.fn(async () => undefined),
+    recordOutcome: jest.fn(async () => undefined),
+    assertNoInflightRotation: jest.fn(async () => undefined),
+    broadcastWithResolveThenAct: jest.fn(
+      async (opts: { broadcast: () => Promise<{ signature: string; result: null }> }) => {
+        const out = await opts.broadcast();
+        return { signature: out.signature, result: out.result, outcome: "broadcast-ok" as const };
+      },
+    ),
+  };
+}
+
+/** Relayer H1.i revocation-spike double: records without ever paging. */
+export function mockRevocations() {
+  return { recordRevocation: jest.fn(async () => ({ spike: false })) };
+}
+
+/** Relayer H3 breaker double: closed breaker, recording absorbed without opening. */
+export function mockBreaker() {
+  return {
+    requireClosed: jest.fn(async () => undefined),
+    recordAbsorbed: jest.fn(
+      async (): Promise<{ chain: string; open: boolean; absorbedWindow: string; cap: string }> => ({
+        chain: "",
+        open: false,
+        absorbedWindow: "0",
+        cap: "0",
+      }),
+    ),
+    isOpen: jest.fn(() => false),
+    closeBreaker: jest.fn(
+      async (): Promise<{ chain: string; open: boolean; absorbedWindow: string; cap: string }> => ({
+        chain: "",
+        open: false,
+        absorbedWindow: "0",
+        cap: "0",
+      }),
+    ),
+    snapshot: jest.fn((chain: string) => ({ chain, open: false, absorbedWindow: "0", cap: "0" })),
+    withBoundedRetries: jest.fn(
+      async (
+        _pid: string,
+        _chain: string,
+        _entry: string,
+        _op: string,
+        fn: () => Promise<unknown>,
+      ) => fn(),
+    ),
+  };
+}
+
+/**
  * Solana relayer config stub (activation + sponsored withdraw). Per-file extras
  * (e.g. confirm attempts) pass via `extra`; unknown keys throw like the real one.
  */

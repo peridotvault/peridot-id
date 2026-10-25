@@ -2,7 +2,7 @@
 // relayer key (EvmRelayerKey, dashboard-managed since ANT-193) is write-only
 // via the admin API and read server-side only. Other relayer keys and RPC API
 // keys stay in env by design.
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, ValidateNested } from "class-validator";
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 
 export class CreateChainDto {
@@ -237,4 +237,16 @@ export class PreviewChainDto {
   @IsString()
   @MaxLength(256)
   rpcUrl!: string;
+}
+
+/** F3: manual circuit-breaker resume. Evidence is required and recorded in the security log. */
+export class CloseBreakerDto {
+  @IsString()
+  @MaxLength(88)
+  chain!: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(500)
+  evidence!: string;
 }

@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { RotateService } from "./rotate.service";
-import { mockSecurity, solanaRelayerConfig, minimalChainsStub, COSE_HEX } from "../../test/factories";
+import { mockSecurity, mockIdempotency, mockBreaker, mockRevocations, solanaRelayerConfig, minimalChainsStub, COSE_HEX } from "../../test/factories";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 
 const IDENTITY_ID = "pid_01HASH";
@@ -23,6 +23,7 @@ const adapterMock = {
   getNonce: jest.fn(async () => 4n),
   submitRotateAuthorityTx: jest.fn(async () => "sig-rotate"),
   getAuthority: jest.fn(async () => Buffer.from(rotatedKeyHex, "hex")),
+  parseTransaction: jest.fn(async () => ({ signature: "sig", fee: 5000 })),
 };
 
 jest.mock("@peridotvault/pid-solana", () => ({
@@ -63,8 +64,9 @@ function setup() {
       update: jest.fn(async (args: unknown) => args),
     },
   };
-  const service = new RotateService(prisma as never, config as never, security as never, minimalChainsStub() as never);
-  return { service, prisma, security };
+  const idempotency = mockIdempotency();
+  const service = new RotateService(prisma as never, config as never, security as never, minimalChainsStub() as never, idempotency as never, mockBreaker() as never, mockRevocations() as never);
+  return { service, prisma, security, idempotency };
 }
 
 const base = {
@@ -122,4 +124,44 @@ describe("RotateService", () => {
     await expect(service.rotate(IDENTITY_ID, base)).rejects.toThrow(ServiceUnavailableException);
     expect(prisma.authority.update).not.toHaveBeenCalled();
   }, 30000);
+
+  it("emits rotation latency + unconfirmed event on the 503 path (H1.vi)", async () => {
+    const { service, security } = setup();
+    rotatedKeyHex = "03" + "cd".repeat(32); // chain never shows the new key
+    await expect(service.rotate(IDENTITY_ID, base)).rejects.toThrow(/not confirmed on-chain yet/);
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "rotation.confirmed_latency",
+      expect.objectContaining({ confirmed: false }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "credential.rotation.unconfirmed",
+      expect.objectContaining({ signature: "sig-rotate" }),
+    );
+  }, 30000);
+
+  it("claims the duplicate slot before the double-rotation guard (F1)", async () => {
+    const { service, idempotency } = setup();
+    const order: string[] = [];
+    idempotency.claimSlot.mockImplementation(async () => {
+      order.push("claim");
+      return { decision: "proceed", signature: null };
+    });
+    idempotency.assertNoInflightRotation.mockImplementation(async () => {
+      order.push("guard");
+    });
+    await service.rotate(IDENTITY_ID, base);
+    expect(order).toEqual(["claim", "guard"]);
+  });
+
+  it("skips the guard on the duplicate-slot resolve path (F1)", async () => {
+    const { service, idempotency } = setup();
+    // Chain already shows the new authority: idempotent completion, no guard.
+    idempotency.claimSlot.mockResolvedValue({ decision: "duplicate", signature: "sig-old" });
+    const res = await service.rotate(IDENTITY_ID, base);
+    expect(res).toEqual({ signature: "sig-old", status: "confirmed" });
+    expect(idempotency.assertNoInflightRotation).not.toHaveBeenCalled();
+    expect(adapterMock.submitRotateAuthorityTx).not.toHaveBeenCalled();
+  });
 });

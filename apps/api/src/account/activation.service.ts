@@ -16,6 +16,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ChainAccount, ChainAccountStatus, TransactionStatus } from "@prisma/client";
+import { createHash } from "node:crypto";
 import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
@@ -36,6 +37,12 @@ import {
 import { PID_ACTIVATION_CONFIRM_INTERVAL_MS, PID_ACTIVATION_CONFIRM_ATTEMPTS, PID_ACTIVATION_POLL_MS } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
+import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
+import {
+  BROADCAST_CHAIN_SOLANA,
+  RelayerIdempotencyService,
+} from "../relayer/relayer-idempotency.service";
+import { RelayerEvents, absorbedLoss } from "../relayer/relayer-events";
 
 export type ActivationStatus = ChainAccountStatus;
 
@@ -93,6 +100,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     private readonly config: ConfigService,
     private readonly security: SecurityEventService,
     private readonly chains: ChainRegistryService,
+    private readonly idempotency: RelayerIdempotencyService,
+    private readonly breaker: CircuitBreakerService,
   ) {}
 
   onModuleInit(): void {
@@ -348,6 +357,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException(`Wallet must be READY to activate (currently ${live})`);
     }
 
+    // H3: fail-closed while the per-chain spend-rate breaker is open.
+    await this.breaker.requireClosed(user.pid, BROADCAST_CHAIN_SOLANA, "activate");
+
     await requireActiveAuthority(this.prisma, user.pid);
 
     await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "activating" } });
@@ -357,7 +369,15 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       const asserting = await this.prisma.authority.findFirst({
         where: { pid: user.pid, credentialId: dto.assertion.id, status: "active" },
       });
-      if (!asserting) throw new BadRequestException("Unknown or inactive passkey");
+      if (!asserting) {
+        await this.security.log(user.pid, RelayerEvents.intentRejected, {
+          entryPoint: "activate",
+          chain: BROADCAST_CHAIN_SOLANA,
+          cause: "unauthorized",
+          credentialId: dto.assertion.id,
+        });
+        throw new BadRequestException("Unknown or inactive passkey");
+      }
       // Pre-check: Peridot's relayer floats the fee + rent. If it's out of SOL the tx would
       // be silently dropped (skipPreflight), so fail fast with a clear message instead.
       let relayerBalance = 0;
@@ -368,6 +388,11 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       }
       if (relayerBalance < required) {
         await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
+        await this.security.log(user.pid, RelayerEvents.intentRejected, {
+          entryPoint: "activate",
+          chain: BROADCAST_CHAIN_SOLANA,
+          cause: "relayer-unfunded",
+        });
         await this.security.log(user.pid, "account.activation.relayer_unfunded", { relayer: this.relayer().publicKey.toBase58() });
         throw new ServiceUnavailableException(
           "Peridot's activation service is temporarily out of funds. No SOL was deducted from your wallet — please try again in a moment.",
@@ -377,11 +402,31 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       // Stale expiries are rejected before broadcast (the program enforces it too),
       // as are lifetimes beyond the cross-cluster replay bound.
       const chainTime = await adapter.chainTime().catch(() => 0);
-      if (dto.expiry <= chainTime) throw new BadRequestException("Authorization expired — please try again");
+      if (dto.expiry <= chainTime) {
+        await this.security.log(user.pid, RelayerEvents.intentRejected, {
+          entryPoint: "activate",
+          chain: BROADCAST_CHAIN_SOLANA,
+          cause: "expired",
+          expiry: dto.expiry,
+        });
+        throw new BadRequestException("Authorization expired — please try again");
+      }
       if (dto.expiry - chainTime > MAX_TTL_SECS) {
+        await this.security.log(user.pid, RelayerEvents.intentRejected, {
+          entryPoint: "activate",
+          chain: BROADCAST_CHAIN_SOLANA,
+          cause: "over-ttl",
+          expiry: dto.expiry,
+        });
         throw new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again");
       }
       if (dto.feePolicyVersion !== quoted.version) {
+        await this.security.log(user.pid, RelayerEvents.intentRejected, {
+          entryPoint: "activate",
+          chain: BROADCAST_CHAIN_SOLANA,
+          cause: "policy-unknown",
+          feePolicyVersion: dto.feePolicyVersion,
+        });
         throw new BadRequestException("Unsupported fee policy — re-quote and try again");
       }
       // Attest the realtime network fee at submit time; fail closed when it drifted
@@ -390,6 +435,19 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       const submitCost = await adapter.estimateActivationCost(0);
       const networkFee = submitCost.rentLamports + submitCost.feeLamports;
       if (exceedsDriftBound(networkFee, quotedNetwork)) {
+        await this.security.log(user.pid, RelayerEvents.intentRejected, {
+          entryPoint: "activate",
+          chain: BROADCAST_CHAIN_SOLANA,
+          cause: "drift",
+          quoted: quotedNetwork.toString(),
+          attested: networkFee.toString(),
+        });
+        await this.security.log(user.pid, RelayerEvents.quoteDriftRejected, {
+          entryPoint: "activate",
+          chain: BROADCAST_CHAIN_SOLANA,
+          quoted: quotedNetwork.toString(),
+          attested: networkFee.toString(),
+        });
         throw new ConflictException("Network fee moved — re-quote and try again");
       }
       const protocolFee = platformFeeOf(networkFee, "solana", quoted.version);
@@ -410,20 +468,82 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         throw new ConflictException("Total fee exceeds your authorized maximum — re-quote and try again");
       }
 
-      const signature = await adapter.activateV3(
+      // H2: claim the (pid, expiry, chain) slot — the expiry is the
+      // replay-protection scalar for activation. Identical retries reuse the
+      // slot; different bytes under the same expiry are forbidden.
+      const slotHash = createHash("sha256")
+        .update(JSON.stringify(["activate", dto.expiry, quoted.version, networkFee.toString()]))
+        .update(dto.assertion.signature)
+        .digest("hex");
+      const claim = await this.idempotency.claimSlot(
         user.pid,
-        coseToCompressedSecp256r1(Buffer.from(asserting.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
-        quoted.version,
-        networkFee,
-        dto.expiry,
-        this.relayer(),
-        this.treasury(),
-        this.toAssertion(dto.assertion),
+        String(dto.expiry),
+        BROADCAST_CHAIN_SOLANA,
+        slotHash,
+        "activate",
       );
+      if (claim.decision === "duplicate" && claim.signature) {
+        return this.viewOf(user, selection);
+      }
+
+      const out = await this.idempotency.broadcastWithResolveThenAct({
+        pid: user.pid,
+        nonce: String(dto.expiry),
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "activate",
+        broadcast: () =>
+          adapter
+            .activateV3(
+              user.pid,
+              coseToCompressedSecp256r1(Buffer.from(asserting.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
+              quoted.version,
+              networkFee,
+              dto.expiry,
+              this.relayer(),
+              this.treasury(),
+              this.toAssertion(dto.assertion),
+            )
+            .then((sig) => ({ signature: sig, result: null })),
+        resolveState: async () => {
+          const activated = await adapter.isActivated(chain.address).catch(() => null);
+          if (activated == null) return { unreadable: true as const };
+          return activated
+            ? { landed: true as const, signature: claim.signature }
+            : { landed: false as const };
+        },
+      });
+      const signature = out.signature;
+      if (!signature) {
+        // Proven landed (account active) but receipt unattributed: chain state
+        // IS the confirmation. Record active, alert for the missing receipt.
+        await this.idempotency.recordOutcome(
+          user.pid,
+          String(dto.expiry),
+          BROADCAST_CHAIN_SOLANA,
+          "activate",
+          "resolved-landed",
+        );
+        await this.security.log(user.pid, RelayerEvents.resolvedLanded, {
+          entryPoint: "activate",
+          chain: BROADCAST_CHAIN_SOLANA,
+          unattributed: true,
+        });
+        await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "active" } });
+        return this.viewOf(user, selection);
+      }
 
       const { outcome, reason } = await this.confirmActivation(signature, chain.address, selection);
       if (outcome !== "confirmed") {
         // Revert — the transaction never landed (or errored); the user's deposit is untouched.
+        // Post-confirmation failure alerts, never rebroadcasts (H2.iii).
+        await this.idempotency.recordOutcome(
+          user.pid,
+          String(dto.expiry),
+          BROADCAST_CHAIN_SOLANA,
+          "activate",
+          outcome === "failed" ? "failed" : "submitted",
+          signature,
+        );
         await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
         await this.security.log(user.pid, "account.activation.unconfirmed", { signature, outcome, reason });
         throw new ServiceUnavailableException(
@@ -432,6 +552,14 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
             : "Activation was submitted but not confirmed on-chain yet. No SOL was deducted from your wallet — please try again in a moment.",
         );
       }
+      await this.idempotency.recordOutcome(
+        user.pid,
+        String(dto.expiry),
+        BROADCAST_CHAIN_SOLANA,
+        "activate",
+        "confirmed",
+        signature,
+      );
 
       await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "active" } });
       // Activity history: account creation + exact network-cost reimbursement to the
@@ -550,14 +678,36 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const expectedProtocol = platformFeeOf(networkFee, "solana", version);
     const formulaDiverged = protocolFee !== expectedProtocol;
+    const parsed = await adapter.parseTransaction(signature).catch(() => null);
+    const actual = parsed?.fee != null ? BigInt(parsed.fee) : null;
+    const absorbed = absorbedLoss(networkFee, actual);
     await this.security.log(pid, "account.activation.reconciled", {
       signature,
       networkFee: networkFee.toString(),
       protocolFee: protocolFee.toString(),
       protocolFeeExpected: expectedProtocol.toString(),
+      actualNetworkFee: actual?.toString() ?? "unknown",
+      relayerAbsorbed: absorbed.toString(),
       formulaDiverged,
     });
+    await this.security.log(pid, RelayerEvents.pnl, {
+      signature,
+      entryPoint: "activate",
+      chain: BROADCAST_CHAIN_SOLANA,
+      absorbed: absorbed.toString(),
+    });
+    await this.breaker.recordAbsorbed(pid, BROADCAST_CHAIN_SOLANA, absorbed).catch((err) =>
+      this.logger.warn(`breaker record failed: ${(err as Error).message}`),
+    );
     if (formulaDiverged) {
+      await this.security.log(pid, RelayerEvents.formulaMismatch, {
+        signature,
+        entryPoint: "activate",
+        chain: BROADCAST_CHAIN_SOLANA,
+        attested: networkFee.toString(),
+        actual: actual?.toString() ?? "unknown",
+        expected: expectedProtocol.toString(),
+      });
       this.logger.error(
         `activation formula anomaly: ${signature} protocol=${protocolFee} expected=${expectedProtocol}`,
       );
