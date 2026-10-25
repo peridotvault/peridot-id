@@ -17,7 +17,7 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { ChainAccountStatus } from "@prisma/client";
-import { EvmAdapter, EvmRpc, buildViewCalldata, toHex } from "@peridotvault/pid-evm";
+import { EvmAdapter, EvmRpc, buildViewCalldata, splitEvmFeeV2, toHex } from "@peridotvault/pid-evm";
 import { ChainRegistryService, type RegistryChain } from "../chain/chain-registry.service";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
 import { ACCOUNT_TYPE_SMART, EIP155_NAMESPACE } from "../common/chains";
@@ -45,6 +45,12 @@ export interface EvmActivationView {
   networkFeeWei: string;
   /** Fixed protocol percentage in bps for the quoted policy version. */
   protocolFeeBps: number;
+  /** Signed fee-policy version the quote was computed under (1 sunset, 2 V4 canonical). */
+  feePolicyVersion: number;
+  /** networkFee + protocolFee at quote time (informational — settles at submit-time values). */
+  totalFeeWei: string;
+  /** Suggested user-approved bound for submit (`maxTotalFeeWei >= totalFeeWei`, V4 B5). */
+  maxTotalFeeWei: string;
 }
 
 const ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
@@ -96,7 +102,23 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private policyVersion(): number {
-    return configuredPolicyVersion();
+    // EVM canonical is V4 policy 2 (MAX 50%, chainMin floor). Policy 1 stays
+    // accepted on submit for sunset (frozen semantics: 50% no floor).
+    return 2;
+  }
+
+  /** Chain id numeric for the V2 floor table (reference IS the decimal chain id). */
+  private chainIdFor(chain: { reference: string }): number {
+    const cid = Number(chain.reference);
+    if (!Number.isInteger(cid) || cid <= 0) throw new NotFoundException("Unsupported EVM chain");
+    return cid;
+  }
+
+  /** Protocol fee for a policy version (1 = frozen 50% no-floor; 2 = V2 MAX with chainMin). */
+  private protocolFeeFor(networkFee: bigint, version: number, chainId: number): bigint {
+    if (version === 1) return protocolFeeOf(networkFee, protocolFeeBps(version));
+    if (version === 2) return splitEvmFeeV2(networkFee, chainId).protocolFee;
+    throw new BadRequestException("Unsupported fee policy — re-quote and try again");
   }
 
   /** Realtime network-cost estimate for the deploy (no margin — the protocol fee is separate). */
@@ -232,10 +254,14 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     }
     const networkFee = await this.networkFeeWei(chainReference).catch(() => 0n);
     const version = this.policyVersion();
-    const required = networkFee + protocolFeeOf(networkFee, protocolFeeBps(version));
+    const chainId = this.chainIdFor(chain);
+    const protocolFee = this.protocolFeeFor(networkFee, version, chainId);
+    const totalFee = networkFee + protocolFee;
     const status = deployed && (await this.deploymentMatches(rpc, row.address, user.pid, chainReference).catch(() => false))
       ? "active"
-      : this.classify(balance, required, row.status);
+      : this.classify(balance, totalFee, row.status);
+    // V4 B5: the quote OFFERS the user-approved bound. Suggested max == attested
+    // total (client MAY raise it; submit verifies total <= max, B6).
     return {
       pid: user.pid,
       chainReference,
@@ -243,16 +269,19 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       smartAccountAddress: row.address,
       deployed,
       balanceWei: balance.toString(),
-      requiredWei: required.toString(),
+      requiredWei: totalFee.toString(),
       networkFeeWei: networkFee.toString(),
-      protocolFeeBps: protocolFeeBps(version),
+      protocolFeeBps: 5000,
+      feePolicyVersion: version,
+      totalFeeWei: totalFee.toString(),
+      maxTotalFeeWei: totalFee.toString(),
     };
   }
 
   /**
-   * Deploy the counterfactual via the Peridot relayer (V3 passkey-bound
-   * `deployAndInit` with the registered passkey as authority). The user's
-   * assertion binds salt, authority, policy, deadline,
+   * Deploy the counterfactual via the Peridot relayer (V4 `deployAndInitV4` when
+   * policy 2, frozen V3 `deployAndInit` when policy 1 sunset). The user's
+   * assertion binds salt, authority, policy, maxTotalFee (V4 only), deadline,
    * chainId and factory (no amounts) — the relayer submits but authorizes
    * nothing. Idempotent once ACTIVE.
    */
@@ -262,6 +291,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     dto: {
       quotedNetworkFeeWei: string;
       feePolicyVersion: number;
+      maxTotalFeeWei?: string;
       deadline: number;
       assertion: { id: string; r: string; s: string; authenticatorData: string; clientDataJSON: string };
     },
@@ -288,11 +318,13 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const version = this.policyVersion();
-    if (dto.feePolicyVersion !== version) {
+    // Accept policy 1 (sunset, frozen) and 2 (V4 canonical). Quote offers 2;
+    // submit must match what the client signed — mismatch means re-quote.
+    const version = dto.feePolicyVersion;
+    if (version !== 1 && version !== 2) {
       throw new BadRequestException("Unsupported fee policy — re-quote and try again");
     }
-    const bps = protocolFeeBps(version);
+    const chainId = this.chainIdFor(chain);
     const rpc = await this.rpcFor(chainReference);
     const now = await rpc.blockTimestamp().catch(() => Math.floor(Date.now() / 1000));
     if (dto.deadline <= now) throw new BadRequestException("Authorization expired — please try again");
@@ -306,7 +338,20 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     if (exceedsDriftBound(networkFee, quoted)) {
       throw new ConflictException("Network fee moved — re-quote and try again");
     }
-    const protocolFee = protocolFeeOf(networkFee, bps);
+    const protocolFee = this.protocolFeeFor(networkFee, version, chainId);
+    const totalFee = networkFee + protocolFee;
+    // V4 B6: VERIFY the user-approved bound. total > max reverts on-chain
+    // (FeeExceedsMax) — fail closed here before broadcast.
+    let maxTotalFee = totalFee;
+    if (version === 2) {
+      if (dto.maxTotalFeeWei == null) {
+        throw new BadRequestException("maxTotalFeeWei is required for fee policy 2 — re-quote and try again");
+      }
+      maxTotalFee = BigInt(dto.maxTotalFeeWei);
+      if (totalFee > maxTotalFee) {
+        throw new ConflictException("Network fee exceeds maxTotalFee — re-quote and try again");
+      }
+    }
     const asserting = await this.prisma.authority.findFirst({
       where: { pid: user.pid, credentialId: dto.assertion.id, status: "active" },
     });
@@ -315,18 +360,37 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "activating" } });
     try {
       const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
-      const data = adapter.buildDeployAndInitDataV3({
-        salt: adapter.getSalt(user.pid),
-        x: new Uint8Array(x),
-        y: new Uint8Array(y),
-        feePolicyVersion: version,
-        deadline: dto.deadline,
-        networkFee,
-        authenticatorData: fromHexDto(dto.assertion.authenticatorData),
-        clientDataJSON: Buffer.from(dto.assertion.clientDataJSON, "base64url"),
-        r: fromHexDto(dto.assertion.r),
-        s: fromHexDto(dto.assertion.s),
-      });
+      const authData = fromHexDto(dto.assertion.authenticatorData);
+      const clientData = Buffer.from(dto.assertion.clientDataJSON, "base64url");
+      const r = fromHexDto(dto.assertion.r);
+      const s = fromHexDto(dto.assertion.s);
+      const data =
+        version === 2
+          ? adapter.buildDeployAndInitDataV4({
+              salt: adapter.getSalt(user.pid),
+              x: new Uint8Array(x),
+              y: new Uint8Array(y),
+              feePolicyVersion: version,
+              maxTotalFee,
+              deadline: dto.deadline,
+              networkFee,
+              authenticatorData: authData,
+              clientDataJSON: clientData,
+              r,
+              s,
+            })
+          : adapter.buildDeployAndInitDataV3({
+              salt: adapter.getSalt(user.pid),
+              x: new Uint8Array(x),
+              y: new Uint8Array(y),
+              feePolicyVersion: version,
+              deadline: dto.deadline,
+              networkFee,
+              authenticatorData: authData,
+              clientDataJSON: clientData,
+              r,
+              s,
+            });
       const receipt = await this.sendDeployTx(chainReference, secret as `0x${string}`, data);
       // Verify the relayer deployed OUR authority (fail closed on mismatch).
       const matches = await this.deploymentMatches(
@@ -361,6 +425,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         networkFee: networkFee.toString(),
         protocolFee: protocolFee.toString(),
         feePolicyVersion: version,
+        maxTotalFee: maxTotalFee.toString(),
       });
       await this.reconcileActivation(user.pid, chainReference, receipt, networkFee, protocolFee, version).catch(
         (err) => this.logger.warn(`evm activation reconcile failed for ${receipt.hash}: ${(err as Error).message}`),
@@ -385,7 +450,11 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     protocolFee: bigint,
     version: number,
   ): Promise<void> {
-    const expectedProtocol = protocolFeeOf(networkFee, protocolFeeBps(version));
+    const chainId = Number(chainReference);
+    const expectedProtocol =
+      version === 2 && Number.isInteger(chainId)
+        ? splitEvmFeeV2(networkFee, chainId).protocolFee
+        : protocolFeeOf(networkFee, protocolFeeBps(version));
     const l1Fee = receipt.l1FeeWei != null ? BigInt(receipt.l1FeeWei) : 0n;
     const actual = BigInt(receipt.costWei) + l1Fee;
     const overAttested = exceedsDriftBound(networkFee, actual);
