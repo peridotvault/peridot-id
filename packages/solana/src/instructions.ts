@@ -20,7 +20,7 @@ import {
 } from "@solana/spl-token";
 import { concat, u16le, u64le, i64le, fromAscii, serializeExecuteCall, serializeSessionMetas } from "@peridotvault/pid-core";
 import type { Bytes, ExecuteMeta, SessionMeta } from "@peridotvault/pid-core";
-import { IX, IX_SESSION, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
+import { IX, IX_SESSION, IX_V4, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
 
 /**
  * Build the passkey-signed `initialize(account_id, authority, clientDataJSON)` instruction (disc 0).
@@ -338,6 +338,160 @@ export function buildWithdrawTokenInstructionV2(
     ],
     programId,
     data: concat([IX.withdrawToken], u64le(nonce), u64le(amount), destinationAta.toBytes(), i64le(expiry), u64le(maxFeeLamports), u16le(feePolicyVersion), u64le(feeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+  });
+}
+
+/**
+ * Sponsored V4 `withdraw_sol` (disc 11, ANT-544 B5, ANT-556): `nonce | amount |
+ * destination | expiry | policy | network_fee | max_total_fee | clientDataJSON`.
+ * The program recomputes `protocol_fee` from the signed policy (v1 frozen row,
+ * v2 with the 17_000-lamport floor) and enforces
+ * `network_fee + protocol_fee ≤ max_total_fee` (`FeeExceedsMax`).
+ * Layout MUST match `withdraw_sol_v4.rs` byte-for-byte.
+ */
+export function buildWithdrawSolInstructionV4(
+  smartAccount: PublicKey,
+  destination: PublicKey,
+  treasury: PublicKey,
+  relayer: PublicKey,
+  nonce: bigint,
+  amount: bigint,
+  feePolicyVersion: number,
+  networkFeeLamports: bigint,
+  maxTotalFeeLamports: bigint,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: destination, isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: relayer, isSigner: true, isWritable: true },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat([IX_V4.withdrawSol], u64le(nonce), u64le(amount), destination.toBytes(), i64le(expiry), u16le(feePolicyVersion), u64le(networkFeeLamports), u64le(maxTotalFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+  });
+}
+
+/**
+ * Sponsored V4 `withdraw_token` (disc 12): as V3 plus `max_total_fee` after
+ * `network_fee`. Layout MUST match `withdraw_token_v4.rs` byte-for-byte.
+ */
+export function buildWithdrawTokenInstructionV4(
+  smartAccount: PublicKey,
+  sourceAta: PublicKey,
+  destinationAta: PublicKey,
+  mint: PublicKey,
+  treasury: PublicKey,
+  relayer: PublicKey,
+  nonce: bigint,
+  amount: bigint,
+  feePolicyVersion: number,
+  networkFeeLamports: bigint,
+  maxTotalFeeLamports: bigint,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: sourceAta, isSigner: false, isWritable: true },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: destinationAta, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: relayer, isSigner: true, isWritable: true },
+    ],
+    programId,
+    data: concat([IX_V4.withdrawToken], u64le(nonce), u64le(amount), destinationAta.toBytes(), i64le(expiry), u16le(feePolicyVersion), u64le(networkFeeLamports), u64le(maxTotalFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+  });
+}
+
+/**
+ * Sponsored V4 `activate` (disc 14): `account_id | authority | policy | expiry |
+ * network_fee | max_total_fee | clientDataJSON`. Layout MUST match
+ * `activate_v4.rs` byte-for-byte.
+ */
+export function buildActivateInstructionV4(
+  accountId32: Uint8Array,
+  authorityCompressed: Uint8Array,
+  feePolicyVersion: number,
+  expiry: number,
+  networkFeeLamports: bigint,
+  maxTotalFeeLamports: bigint,
+  relayer: PublicKey,
+  smartAccount: PublicKey,
+  treasury: PublicKey,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
+  if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: relayer, isSigner: true, isWritable: true },
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat([IX_V4.activate], accountId32, authorityCompressed, u16le(feePolicyVersion), i64le(expiry), u64le(networkFeeLamports), u64le(maxTotalFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+  });
+}
+
+/**
+ * Sponsored V4 `execute` (disc 13): V3 call bytes plus `max_total_fee` after
+ * `network_fee`. Same call-confinement checks as V3 (PDA-signer proof, exact
+ * account coverage, fail-fast here and on-chain). Layout MUST match
+ * `execute_v4.rs` byte-for-byte.
+ */
+export function buildExecuteInstructionV4(
+  smartAccount: PublicKey,
+  treasury: PublicKey,
+  relayer: PublicKey,
+  nonce: bigint,
+  target: PublicKey,
+  metas: ExecuteMeta[],
+  data: Uint8Array,
+  feePolicyVersion: number,
+  networkFeeLamports: bigint,
+  maxTotalFeeLamports: bigint,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (target.equals(programId)) throw new Error("execute target cannot be the smart-account program");
+  const smartStr = smartAccount.toBase58();
+  const relayerStr = relayer.toBase58();
+  for (const m of metas) {
+    if (m.signer && m.address.toBase58() !== smartStr && m.address.toBase58() !== relayerStr) {
+      throw new Error(`execute signer meta must be the PDA or relayer: ${m.address.toBase58()}`);
+    }
+  }
+  const call = serializeExecuteCall(target, metas, data);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: relayer, isSigner: true, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: target, isSigner: false, isWritable: false },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+      // The PDA is never an outer signer (it signs the CPI via seeds); every
+      // other meta mirrors its bound flags outward so the CPI privilege check passes.
+      ...metas.map((m) => ({
+        pubkey: m.address,
+        isSigner: m.signer && m.address.toBase58() === relayerStr,
+        isWritable: m.writable,
+      })),
+    ],
+    programId,
+    data: concat([IX_V4.execute], u64le(nonce), call, i64le(expiry), u16le(feePolicyVersion), u64le(networkFeeLamports), u64le(maxTotalFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
 

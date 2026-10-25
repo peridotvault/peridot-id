@@ -134,6 +134,9 @@ describe("V4 adapter selectors", () => {
   };
 
   it("builds grant/revoke/exec calldata with contract selectors", () => {
+    // ANT-556: GrantArgs gains `feeLimit` (new tuple → new selector 0xcaffc881).
+    // Mechanical update forced by the contract change; backend validation of
+    // kinds/feeLimit itself is Tyler's (ANT-555).
     const grant = adapter.buildGrantPermissionData({
       grant: {
         permissionId: B("0xb4c008c91489c0d39b391924fad92b9d272cec1be7c2dee6a12c49fe450eb934"),
@@ -146,6 +149,7 @@ describe("V4 adapter selectors", () => {
         to: ZERO,
         perTxCap: 0,
         totalLimit: 0,
+        feeLimit: 0,
         nftId: 0,
         validAfter: NOW,
         validUntil: VALID_UNTIL,
@@ -154,7 +158,7 @@ describe("V4 adapter selectors", () => {
       },
       ...assertion,
     });
-    expect(grant.slice(0, 10)).toBe("0x2de1b436");
+    expect(grant.slice(0, 10)).toBe("0xcaffc881");
     const revoke = adapter.buildRevokePermissionData({
       permissionId: B("0xb4c008c91489c0d39b391924fad92b9d272cec1be7c2dee6a12c49fe450eb934"),
       deadline: NOW + 300,
