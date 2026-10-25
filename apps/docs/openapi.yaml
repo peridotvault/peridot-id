@@ -10,7 +10,8 @@ info:
 
     | Environment | Base URL |
     |---|---|
-    | Production | `https://api.pid.peridotvault.com/v1` |
+    | Production | `https://api.peridot.id/v1` |
+    | Sandbox | `https://sandbox-api.peridot.id/v1` |
     | Local dev | `http://localhost:3300/v1` |
 
     ## Authentication
@@ -30,8 +31,10 @@ info:
     url: https://opensource.org/licenses/MIT
 
 servers:
-  - url: https://api.pid.peridotvault.com/v1
+  - url: https://api.peridot.id/v1
     description: Production
+  - url: https://sandbox-api.peridot.id/v1
+    description: Sandbox
   - url: http://localhost:3300/v1
     description: Local development
 
@@ -42,6 +45,8 @@ tags:
     description: The user's identity across products
   - name: profile
     description: The user's public profile
+  - name: leveling
+    description: PeridotID Level + XP reads (ANT-89). Centralized authority — PeridotID alone awards XP; all authorized apps read Level.
   - name: wallet
     description: |
       The user's wallet, associated with their PID. **Deprecated (V3 surface)** — preserved
@@ -49,6 +54,10 @@ tags:
       the smart account instead.
   - name: account
     description: PeridotID account — owns chain accounts (smart account PDA, legacy linked address)
+  - name: meta
+    description: |
+      Deployment metadata: self-describing environment endpoints (sandbox vs
+      production). Public, server-derived, never echoing client input.
   - name: fiat
     description: |
       The internal IDR fiat ledger: balances, statements, sends, and money-in.
@@ -169,6 +178,8 @@ paths:
               example:
                 available: true
                 pid: "ifal@pid"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -452,6 +463,9 @@ paths:
                 clientSecret:
                   type: string
                   description: Required only when the bound app has a secret set (backend-only, never ship in frontend code)
+                codeVerifier:
+                  type: string
+                  description: PKCE verifier (RFC 7636); required iff the code was issued with a codeChallenge
             example:
               code: "mF8xQ2vT9nR4kL7pZ3wX6yA1bD5eF0gH"
               clientId: "pidapp_0123456789abcdef0123456789abcdef"
@@ -784,6 +798,9 @@ paths:
                 clientId:
                   type: string
                   description: Binds the issued code to the app
+                codeChallenge:
+                  type: string
+                  description: PKCE S256 challenge (43-128 base64url chars); the exchange must present the matching verifier. Public clients only — confidential clients use their secret instead.
       responses:
         "200":
           description: The minted code
@@ -877,6 +894,33 @@ paths:
           description: Session ended and cookies cleared
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /env:
+    get:
+      tags: [meta]
+      summary: Self-describing environment (sandbox vs production)
+      description: |
+        Public, unauthenticated. Every value is server-derived — any
+        client-supplied `?env=` / body value is ignored (never read). SDKs and
+        the dashboard call this at startup to verify they reached the intended
+        deployment (sandbox = `sandbox-api.peridot.id`, DOKU test mode, no real
+        money moves). Cacheable for 60s.
+      responses:
+        "200":
+          description: Server environment
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: "public, max-age=60"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvInfo"
+              example:
+                env: "sandbox"
+                dokuMode: "sandbox"
+                docs: "https://docs.peridot.id"
 
   /identity/me:
     get:
@@ -1010,6 +1054,140 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /users/{pid}/level:
+    get:
+      tags: [leveling]
+      summary: Get a user's PeridotID level
+      description: |
+        Returns the authoritative Level + XP summary for any live (non-deleted)
+        PeridotID identity (ANT-89 M1). Open to ALL authorized apps, including
+        unverified ones — XP-submission permission is never consulted on reads
+        (it gates the M3 event-intake path only). Users without XP history read
+        as Level 1 / 0 XP. `next_level_xp` is null at the max-level cap.
+        XP totals are JSON-safe integers.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: pid
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-z0-9_]{3,20}@pid$"
+          description: The user's permanent PID (e.g. `ifal@pid`)
+      responses:
+        "200":
+          description: The user's level summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LevelSummary"
+              example:
+                pid: "ifal@pid"
+                level: 5
+                total_xp: 1701
+                current_level_xp: 1701
+                next_level_xp: 2819
+                progress_percentage: 0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /experience/events:
+    post:
+      tags: [leveling]
+      summary: Report an application activity event (server-to-server)
+      description: |
+        Submit a supported activity event for a user so PeridotID can verify
+        it and award XP (ANT-89 M3). Server-to-server ONLY: authenticate with
+        the app's `client_id` + `client_secret` in the body. Cookie/JWT
+        sessions are NEVER accepted here (401 without valid app credentials).
+
+        Restricted to Verified apps with explicit XP permission and an
+        admin-approved event type (403 otherwise, nothing written). The task
+        is resolved server-side (`event_type` → active task, app-scoped wins);
+        XP comes from the task's configured reward — the request MUST NOT
+        carry any xp/amount field (stripped at the boundary, never read).
+
+        Idempotent per app: retries with the same (`client_id`, `event_id`)
+        return `duplicate` without a second award. Unknown subjects and
+        failed verifications share the generic `not_eligible` rejection (no
+        PID oracle). Awards return 503 only while the runtime kill-switch
+        (`xp.suspend.global` / `xp.suspend.<appId>`) is on.
+
+        Rate limits: global default plus per-app (60/min) and
+        per-app+subject (30/min) tiers.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, client_secret, event_id, user_id, event_type]
+              properties:
+                client_id:
+                  type: string
+                  description: Public app identifier (`pidapp_*`)
+                client_secret:
+                  type: string
+                  description: Confidential-client secret (`pidsk_*`; never logged, never echoed)
+                event_id:
+                  type: string
+                  description: App-scoped idempotency key (dedup is per app + event_id)
+                user_id:
+                  type: string
+                  pattern: "^[a-z0-9_]{3,20}@pid$"
+                  description: Subject user PID
+                event_type:
+                  type: string
+                  description: Approved event type (e.g. `onboarding_completed`)
+                resource_id:
+                  type: string
+                  description: Checker input (e.g. achievement/resource reference)
+            example:
+              client_id: "pidapp_abc123"
+              client_secret: "pidsk_..."
+              event_id: "evt_123"
+              user_id: "ifal@pid"
+              event_type: "onboarding_completed"
+      responses:
+        "200":
+          description: Processing result (awarded, duplicate, or rejected with a reason)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/XpIntakeResult"
+              examples:
+                awarded:
+                  value:
+                    status: awarded
+                    awarded_xp: 50
+                    level: 2
+                    leveledUp: true
+                duplicate:
+                  value:
+                    status: duplicate
+                    awarded_xp: 0
+                    level: 2
+                    reason: duplicate_event
+                rejected:
+                  value:
+                    status: rejected
+                    awarded_xp: 0
+                    reason: not_eligible
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/XpIntakeDisabled"
 
   /wallet/me:
     get:
@@ -1787,6 +1965,59 @@ paths:
         "503":
           $ref: "#/components/responses/Unavailable"
 
+  /fiat/test-credit:
+    post:
+      tags: [fiat]
+      summary: Sandbox faucet — mint test credit (sandbox only, 201)
+      description: |
+        Sandbox-only instant test money. Credits the caller's ledger through the
+        same `fiat_issue` path as corroborated DOKU deposits (identical
+        balance/webhook behavior) without touching DOKU — works even when DOKU
+        sandbox is down. Every mint is audited. Per-identity caps: Rp50.000 per
+        call, Rp100.000/day, 10 calls/day (proposed — CTO confirms). The route
+        is registered only when the server flag `PID_FAUCET_ENABLED` is exactly
+        `"true"` (fail-closed; unset/false ⇒ absent). On production the route
+        does not exist: 404 (not 401/403 — no oracle).
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountMinor]
+              properties:
+                amountMinor:
+                  type: integer
+                  minimum: 1
+                  maximum: 50000
+                  example: 50000
+      responses:
+        "201":
+          description: Test credit minted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FaucetCredit"
+              example:
+                ok: true
+                creditId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                amountMinor: "50000"
+                currency: "IDR"
+                env: "sandbox"
+                dailyRemainingMinor: "50000"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Production (route absent) or unknown identity scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+
   /fiat/ledger:
     get:
       tags: [fiat]
@@ -2476,6 +2707,23 @@ components:
           example:
             statusCode: 404
             message: "No Identity found"
+    Unprocessable:
+      description: Semantically invalid request (faucet amount/cap violations)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          examples:
+            invalidAmount:
+              value:
+                statusCode: 422
+                error: "faucet_invalid_amount"
+                perCallMaxMinor: "50000"
+            capExceeded:
+              value:
+                statusCode: 422
+                error: "faucet_cap_exceeded"
+                dailyRemainingMinor: "0"
     RateLimited:
       description: Too many requests
       content:
@@ -2494,6 +2742,15 @@ components:
           example:
             statusCode: 503
             message: "Google OAuth is not configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET (and GOOGLE_CALLBACK_URL) in the env for this environment"
+    XpIntakeDisabled:
+      description: XP intake is suspended by the runtime kill-switch (xp.suspend.global / xp.suspend.<appId>)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 503
+            message: "XP intake is disabled"
 
   schemas:
     LoginResponse:
@@ -2638,12 +2895,70 @@ components:
           type: string
           nullable: true
           maxLength: 16
+        level:
+          $ref: "#/components/schemas/LevelSummary"
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+
+    LevelSummary:
+      type: object
+      required: [pid, level, total_xp, current_level_xp, progress_percentage]
+      description: >
+        Authoritative level summary, read live from PeridotID. Apps must NOT
+        persist this — no XP duplication in app DBs; re-read it instead.
+      properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+        level:
+          type: integer
+          minimum: 1
+          description: Current level (starts at 1)
+        total_xp:
+          type: integer
+          minimum: 0
+          description: Cumulative XP (JSON-safe integer)
+        current_level_xp:
+          type: integer
+          minimum: 0
+          description: XP marking the start of the current level
+        next_level_xp:
+          type: integer
+          nullable: true
+          description: XP marking the next level; null at the max-level cap
+        progress_percentage:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Progress within the current level band (0–100, 100 at cap)
+
+    XpIntakeResult:
+      type: object
+      required: [status, awarded_xp]
+      description: >
+        Event-intake processing result. `awarded_xp` is always the
+        server-side task reward (clients can never submit XP); `reason` is a
+        machine-readable cause that never oracles PID existence.
+      properties:
+        status:
+          type: string
+          enum: [awarded, duplicate, rejected]
+        awarded_xp:
+          type: integer
+          minimum: 0
+        level:
+          type: integer
+          minimum: 1
+          description: Authoritative level after processing (awarded/duplicate)
+        leveledUp:
+          type: boolean
+        reason:
+          type: string
+          description: Machine-readable cause (duplicate_event, not_eligible, task_limit, cooldown, quota_exceeded, suspended, no_active_task, task_not_available, app_not_permitted)
 
     ProfileUpdate:
       type: object
@@ -3213,6 +3528,50 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    EnvInfo:
+      type: object
+      required: [env, dokuMode, docs]
+      properties:
+        env:
+          type: string
+          enum: [sandbox, production]
+          description: Server-derived deployment environment (never echoes client input)
+        dokuMode:
+          type: string
+          enum: [sandbox, production]
+          description: DOKU rail mode for this deployment
+        docs:
+          type: string
+          format: uri
+          description: Canonical docs base URL
+      example:
+        env: "sandbox"
+        dokuMode: "sandbox"
+        docs: "https://docs.peridot.id"
+
+    FaucetCredit:
+      type: object
+      required: [ok, creditId, amountMinor, currency, env, dailyRemainingMinor]
+      properties:
+        ok:
+          type: boolean
+        creditId:
+          type: string
+          format: uuid
+          description: Ledger entryGroup of the minted faucet credit
+        amountMinor:
+          type: string
+          description: Minted amount, whole IDR (decimal string, same convention as FiatBalance.balanceIdr)
+        currency:
+          type: string
+          enum: [IDR]
+        env:
+          type: string
+          enum: [sandbox]
+        dailyRemainingMinor:
+          type: string
+          description: Faucet quota left for this identity today, whole IDR (decimal string)
 
     FiatBalance:
       type: object

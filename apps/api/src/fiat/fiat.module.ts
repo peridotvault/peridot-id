@@ -3,16 +3,30 @@ import { ConfigService } from "@nestjs/config";
 import { DokuCheckoutClient, DokuSubAccountProvider } from "@peridotvault/pid-payments";
 import { SecurityModule } from "../security/security-event.module";
 import { CHECKOUT_CLIENT } from "./checkout-client.token";
+import { FaucetController } from "./faucet.controller";
 import { FiatController } from "./fiat.controller";
 import { FiatLedgerController } from "./fiat-ledger.controller";
+import { FiatLedgerChainService } from "./fiat-ledger-chain.service";
+import { FiatLedgerEventsService } from "./fiat-ledger-events.service";
 import { FiatLedgerService } from "./fiat-ledger.service";
 import { FiatSubAccountService } from "./fiat-subaccount.service";
 import { PaymentFeeService } from "./payment-fee.service";
 import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
 
+/**
+ * Faucet gate flag (ANT-290 contract, deploy/compose.yaml): the faucet route
+ * is registered IFF `PID_FAUCET_ENABLED` is exactly `"true"`. Anything else
+ * (unset, "false", any other string) ⇒ route absent ⇒ 404, zero ledger
+ * writes. Fail-closed default: compose passes `false` unless the sandbox
+ * deploy sets `true`. The controller + service re-check at runtime in case
+ * the env changed after boot (defense in depth). Never gate on DOKU_MODE —
+ * it defaults to sandbox and would fail open.
+ */
+const FAUCET_ENABLED = process.env.PID_FAUCET_ENABLED === "true";
+
 @Module({
   imports: [SecurityModule],
-  controllers: [FiatController, FiatLedgerController],
+  controllers: [FiatController, FiatLedgerController, ...(FAUCET_ENABLED ? [FaucetController] : [])],
   providers: [
     // DOKU Sub-Account provider — legacy surface kept for internal/admin
     // paths only; the user-facing money-in (Checkout) needs no sub-account.
@@ -43,6 +57,8 @@ import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
     },
     FiatSubAccountService,
     FiatLedgerService,
+    FiatLedgerChainService,
+    FiatLedgerEventsService,
     PaymentFeeService,
   ],
 })

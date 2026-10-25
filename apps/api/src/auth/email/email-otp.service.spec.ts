@@ -1,7 +1,7 @@
 import { BadRequestException, ServiceUnavailableException } from "@nestjs/common";
 import { ThrottlerException } from "@nestjs/throttler";
-import { createHash } from "node:crypto";
-import { EmailOtpService } from "./email-otp.service";
+import { createHash, hkdfSync } from "node:crypto";
+import { EMAIL_OTP_HKDF_INFO, EmailOtpService, emailOtpPepper } from "./email-otp.service";
 
 const PEPPER = "test-pepper";
 const hashOf = (code: string) => createHash("sha256").update(`${PEPPER}:${code}`).digest("hex");
@@ -54,8 +54,11 @@ describe("EmailOtpService", () => {
       data: expect.objectContaining({ email: "user@example.com", requestIp: "1.2.3.4" }),
     });
     expect(rows[0].codeHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(rows[0].codeHash).not.toContain("123");
-    expect(email.sendOtp).toHaveBeenCalledWith("user@example.com", expect.stringMatching(/^\d{6}$/));
+    const sentCode: string = (email.sendOtp as jest.Mock).mock.calls[0][1];
+    expect(sentCode).toMatch(/^\d{6}$/);
+    expect(rows[0].codeHash).toBe(hashOf(sentCode)); // stored value is the hash of the sent code...
+    expect(rows[0].codeHash).not.toBe(sentCode); // ...never the plaintext code itself
+    expect(email.sendOtp).toHaveBeenCalledWith("user@example.com", sentCode);
   });
 
   it("rejects a resend within the cooldown and caps hourly requests", async () => {
@@ -98,5 +101,31 @@ describe("EmailOtpService", () => {
   it("refuses to verify when the sender is unconfigured", async () => {
     const { service } = setup({ configured: false, rows: [liveRow("428311")] });
     await expect(service.verify("user@example.com", "428311")).rejects.toThrow(ServiceUnavailableException);
+  });
+});
+
+describe("emailOtpPepper key separation (ANT-285(c))", () => {
+  it("prefers the dedicated pepper when set", () => {
+    const get = (k: string, d?: string) => (k === "EMAIL_OTP_PEPPER" ? "dedicated" : (d ?? ""));
+    expect(emailOtpPepper(get)).toBe("dedicated");
+  });
+
+  it("derives (never reuses) from JWT_REFRESH_SECRET via HKDF", () => {
+    const master = "refresh-secret-test-value-min-32-chars-0123456789";
+    const derived = emailOtpPepper((k: string, d?: string) => (k === "JWT_REFRESH_SECRET" ? master : (d ?? "")));
+    const expected = Buffer.from(hkdfSync("sha256", master, "", EMAIL_OTP_HKDF_INFO, 32)).toString("hex");
+    expect(derived).toBe(expected);
+    expect(derived).not.toContain(master);
+    expect(derived).not.toBe(master);
+  });
+
+  it("fails closed in production when no secret is configured", () => {
+    const get = (k: string, d?: string) => (k === "NODE_ENV" ? "production" : (d ?? ""));
+    expect(() => emailOtpPepper(get)).toThrow(/not configured/);
+  });
+
+  it("keeps a dev fallback outside production so local dev works", () => {
+    const get = (k: string, d?: string) => (k === "NODE_ENV" ? "development" : (d ?? ""));
+    expect(emailOtpPepper(get)).toBe("email-otp-dev-pepper");
   });
 });

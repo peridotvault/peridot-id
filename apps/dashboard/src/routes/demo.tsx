@@ -13,7 +13,7 @@ import { PageHeader } from "../workspace/page-header";
 import { CutButton } from "../workspace/cut-button";
 import { resolveBrowserUrl } from "../lib/api-base";
 
-const API_BASE = resolveBrowserUrl(import.meta.env.VITE_API_URL ?? "https://api.pid.peridotvault.com");
+const API_BASE = resolveBrowserUrl(import.meta.env.VITE_API_URL ?? "https://api.peridot.id");
 // Wallet host that renders the approval popup (local Vite web or prod app).
 const POPUP_URL = resolveBrowserUrl(import.meta.env.VITE_POPUP_URL ?? "http://localhost:3302");
 const CLIENT_ID = import.meta.env.VITE_PID_CLIENT_ID; // optional; loopback needs none
@@ -93,7 +93,7 @@ export default function DemoPage() {
     });
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-5 py-16 sm:px-8">
+    <main id="main-content" className="mx-auto w-full max-w-3xl px-5 py-16 sm:px-8">
       <PageHeader eyebrow="Sample dapp" title="Third-party demo" />
       <p className={`mt-2 text-sm ${MUTED}`}>
         Behaves like an external app: no session, no signer — approvals open the PeridotID popup.

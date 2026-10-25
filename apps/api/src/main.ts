@@ -6,6 +6,7 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
+import { PrismaExceptionFilter, Sanitize500Filter } from "./common/prisma-exception.filter";
 import { APP_ORIGINS_TTL_MS, isOriginAllowed, staticOriginsFor } from "./common/cors";
 import { PrismaService } from "./prisma/prisma.service";
 
@@ -49,6 +50,12 @@ async function bootstrap(): Promise<void> {
       (req as { rawBody?: string }).rawBody = buf.toString("utf8");
     },
   });
+  // ANT-344 M1: trust exactly ONE proxy hop (Traefik). deploy/compose.yaml
+  // publishes no service ports — Traefik is the sole ingress and appends the
+  // real client IP to X-Forwarded-For, so hop 1 is edge-attested and any
+  // client-spoofed prefix beyond it is ignored. Do not raise this count
+  // (each extra hop lets a spoofed prefix become req.ip and defeats the
+  // OTP/login throttles); proxy-addr is pinned >=2.0.8 (GHSA-jqcg-44mw-7w3h).
   app.set("trust proxy", 1);
 
   const staticOrigins = staticOriginsFor(config);
@@ -78,6 +85,11 @@ async function bootstrap(): Promise<void> {
   });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  // ANT-285(b): P2002→409 / P2025→404 globally; unhandled 500s sanitized.
+  // ANT-324: Sanitize500Filter extends BaseExceptionFilter, which needs the
+  // HTTP adapter to serialize delegated non-500s as JSON (useGlobalFilters
+  // instantiates — no DI — so pass app.getHttpAdapter() explicitly).
+  app.useGlobalFilters(new PrismaExceptionFilter(), new Sanitize500Filter(app.getHttpAdapter()));
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle("PeridotID API")

@@ -1,8 +1,9 @@
-import { Pressable, Text, TextInput, View } from "../../../shared/primitives";
-import { styles as s } from "../../../shared/theme";
-import { AsciiRidges } from "../../../shared/components/AsciiRidges";
-import { UIButton } from "../../../shared/components/UIButton";
-import { ArrowRight, Mail } from "../../../shared/icons";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { TextField } from "../../../shared/components/ui/TextField";
+import { styles as s } from "../../../shared/styles/theme";
+import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
+import { UIButton } from "../../../shared/components/ui/UIButton";
+import { ArrowRight, Mail } from "../../../shared/components/icons";
 
 // Brand glyphs (Google "G", Apple logo) — inline SVG, the only two brand
 // marks in the wallet. lucide ships no brand icons; two tiny paths beat a
@@ -63,24 +64,26 @@ export function LoginOptions({
   onPasskey: () => void;
 }) {
   return (
-    <View className="flex-1">
+    <div className="flex flex-col flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <View style={s.container}>
-      <View className="flex-1 w-full items-center justify-center gap-5">
-        <View className="items-center gap-2">
-          <Text className="font-serif text-[40px] tracking-[-0.4px] text-foreground">PeridotID</Text>
+      <div style={s.container} className="flex flex-col">
+      <div className="flex flex-col flex-1 w-full items-center justify-center gap-5">
+        <div className="flex flex-col items-center gap-2">
+          <span className="font-serif text-4xl tracking-[-0.4px] text-foreground">PeridotID</span>
           {ssoOrigin ? (
-            <Text className="font-sans text-sm text-muted-foreground">Sign in to continue to {ssoOrigin}</Text>
+            <span className="font-sans text-sm text-muted-foreground">Sign in to continue to {ssoOrigin}</span>
           ) : ctxOrigin ? (
-            <Text className="font-sans text-sm text-muted-foreground">Sign in to continue to {ctxOrigin}</Text>
+            <span className="font-sans text-sm text-muted-foreground">Sign in to continue to {ctxOrigin}</span>
           ) : null}
-        </View>
-        {error && <Text style={s.error}>{error}</Text>}
-        <View className="w-full max-w-[343px] gap-3">
-          <View style={{ flexDirection: "row" }} className="items-center gap-2">
-            <View className="flex-1 items-center gap-2.5 border border-border bg-background px-5 py-[15px]" style={{ flexDirection: "row" }}>
+        </div>
+        {error && <p role="alert" style={s.error}>{error}</p>}
+        <div className="flex flex-col w-full max-w-[343px] gap-3">
+          <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-2">
+            <div className="flex flex-col flex-1 items-center gap-2.5 border border-border bg-background px-5 py-[15px]" style={{ flexDirection: "row" }}>
               <Mail size={16} className="text-muted-foreground" />
-              <TextInput
+              <TextField
+                id="login-email-inline"
+                aria-label="Email address"
                 className="flex-1 p-0 font-sans text-sm text-foreground [--placeholder:var(--color-muted-foreground)] outline-none"
                 value={email}
                 onChangeText={onEmailChange}
@@ -91,8 +94,8 @@ export function LoginOptions({
                 placeholder="Continue with email"
                 editable={!busy}
                 onSubmitEditing={onSubmitEmail}
-              />
-            </View>
+               />
+            </div>
             <Pressable
               onPress={onSubmitEmail}
               disabled={busy}
@@ -101,11 +104,11 @@ export function LoginOptions({
               style={({ pressed }) => ({ opacity: pressed && !busy ? 0.7 : busy ? 0.55 : 1 })}
               className="self-stretch"
             >
-              <View className="flex h-full w-[50px] items-center justify-center border border-foreground bg-foreground">
+              <div className="flex flex-col flex h-full w-[50px] items-center justify-center border border-foreground bg-foreground">
                 <ArrowRight size={18} className="text-background" />
-              </View>
+              </div>
             </Pressable>
-          </View>
+          </div>
           <UIButton
             title="Continue with Google"
             onPress={onGoogle}
@@ -119,13 +122,13 @@ export function LoginOptions({
             align="left"
             icon={<AppleIcon size={18} className="text-muted-foreground" />}
           />
-          <View style={{ flexDirection: "row" }} className="items-center gap-3">
-            <View className="h-px flex-1 bg-border" />
-            <Text className="font-sans text-xs text-muted-foreground">or</Text>
-            <View className="h-px flex-1 bg-border" />
-          </View>
+          <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+            <div className="flex flex-col h-px flex-1 bg-border"  />
+            <span className="font-sans text-xs text-muted-foreground">or</span>
+            <div className="flex flex-col h-px flex-1 bg-border"  />
+          </div>
           {stepUp && (
-            <Text className="text-center font-sans text-[13px] text-foreground">Session expired — please confirm it's you with your passkey.</Text>
+            <span className="text-center font-sans text-sm text-foreground">Session expired — please confirm it's you with your passkey.</span>
           )}
           <UIButton
             title={busy ? "Waiting for passkey…" : "Select a passkey"}
@@ -133,10 +136,10 @@ export function LoginOptions({
             disabled={busy}
             variant="primary"
           />
-          <Text className="text-center font-sans text-[11px] text-muted-foreground">By continuing, I agree to PeridotID Terms of Use and Privacy notice</Text>
-        </View>
-      </View>
-      </View>
-    </View>
+          <span className="text-center font-sans text-xs text-muted-foreground">By continuing, I agree to PeridotID Terms of Use and Privacy notice</span>
+        </div>
+      </div>
+      </div>
+    </div>
   );
 }

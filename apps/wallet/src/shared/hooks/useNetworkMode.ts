@@ -6,10 +6,10 @@ import {
   networkLabel,
   refreshSolanaAvailability,
   subscribeNetworkMode,
-} from "../network-mode";
+} from "../data/networkMode";
 
-// Reactive view over the network-mode store. Screens and feat hooks
-// subscribe here; shared/ never imports screens/ or feat/ (AGENTS.md).
+// Reactive view over the networkMode store. Screens and feat hooks
+// subscribe here; shared/ never imports pages/ or feat/ (AGENTS.md).
 // solanaAvailable is the data-driven ANT-78 gate: testnet → true (no fetch),
 // mainnet → cached GET /v1/chains/solana-availability (fail closed, refresh
 // on mount/mode change, 30s TTL + in-flight dedup in the store).

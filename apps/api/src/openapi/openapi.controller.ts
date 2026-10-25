@@ -1,4 +1,5 @@
-import { Controller, Get, Res } from "@nestjs/common";
+import { Controller, Get, Res, UseGuards } from "@nestjs/common";
+import { ThrottlerGuard } from "@nestjs/throttler";
 import { Response } from "express";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
@@ -12,6 +13,7 @@ const SPEC_PATH =
   ].find((p) => existsSync(p)) ?? resolve(process.cwd(), "../../packages/openapi/src/openapi.yaml");
 
 @Controller("v1")
+@UseGuards(ThrottlerGuard)
 export class OpenApiController {
   @Get("openapi.yaml")
   spec(@Res() res: Response): void {

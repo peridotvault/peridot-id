@@ -22,7 +22,7 @@ follow-up work, not silently missing.
 
 ## Stack
 
-- Vite 8 / React 19 (plain DOM + inline styles via `src/shared/primitives.tsx`)
+- Vite 8 / React 19 (semantic DOM + `src/shared/styles.ts` helpers)
 - `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`, `@peridotvault/pid-types`
 
 ## Local
@@ -42,7 +42,7 @@ This wallet is the **first-party** client: it talks to the API directly
 `@peridotvault/pid-solana`. It signs inline with an explicit passkey signer — this
 origin IS the trusted DOM — and must **never** use the popup/hosted flow
 (`popupBaseUrl`, `openLoginPopup`) reserved for third-party apps
-(hosted login on `app.pid.peridotvault.com`). CI enforces this split.
+(hosted login on `peridot.id`). CI enforces this split.
 
 Dev and prod run the identical auth code paths — only credentials differ:
 

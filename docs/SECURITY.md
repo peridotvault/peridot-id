@@ -123,7 +123,7 @@ Triage query (Postgres):
 SELECT "createdAt", pid, metadata->>'deviceId' AS device,
   (metadata->>'revokedAgoMs')::bigint AS revoked_ago_ms,
   metadata->>'userAgent' AS replay_ua
-FROM security_event
+FROM security_events
 WHERE "eventType" = 'refresh.reuse_detected'
   AND "createdAt" > now() - interval '1 hour'
 ORDER BY "createdAt" DESC;

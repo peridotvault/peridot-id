@@ -132,7 +132,9 @@ describe("Account authorization & abuse cases (routes)", () => {
     state.identities.set("pid_a", "active");
     const t = await token("pid_a");
 
-    const res = await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${t}`).expect(200);
+    // ANT-367: cookie-authed writes require an allowlisted Origin (browsers always send one).
+    // localhost:3302 = this spec's mock WALLET_URL (cookieExtractor walletOrigin + CSRF allowlist).
+    const res = await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${t}`).set("Origin", "http://localhost:3302").expect(200);
 
     expect(res.body).toHaveLength(1);
     expect(res.body[0].accountType).toBe("smart_account");
@@ -142,7 +144,7 @@ describe("Account authorization & abuse cases (routes)", () => {
   it("rejects a machine (app) token on account writes (ANT-233 F1)", async () => {
     state.identities.set("pid_a", "active");
     const t = await token("pid_a", { app: "pidapp_x" });
-    await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${t}`).expect(403);
+    await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${t}`).set("Origin", "http://localhost:3302").expect(403);
   });
 
   it("never returns another PID's wallet (isolation by construction — no ids in routes)", async () => {
@@ -151,7 +153,7 @@ describe("Account authorization & abuse cases (routes)", () => {
     const tA = await token("pid_a");
     const tB = await token("pid_b");
 
-    await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${tA}`).expect(200);
+    await request(app.getHttpServer()).post("/v1/account").set("Cookie", `pid_access=${tA}`).set("Origin", "http://localhost:3302").expect(200);
 
     await request(app.getHttpServer()).get("/v1/account").set("Cookie", `pid_access=${tB}`).expect(404);
     const resA = await request(app.getHttpServer()).get("/v1/account").set("Cookie", `pid_access=${tA}`).expect(200);

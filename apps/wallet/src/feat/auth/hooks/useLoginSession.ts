@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { deliverLoginCode, type LoginContext } from "../popup-login";
-import type { SsoRequest } from "../sso";
+import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
+import type { SsoRequest } from "../utils/sso";
 import type { ClaimState } from "./usePidClaim";
 
 export interface LoginFlowFlags {

@@ -1,4 +1,4 @@
-FROM node:22-slim AS base
+FROM node:22-slim@sha256:3ed98443660ff48413b5af19ecefce3b9d50845a901a43420d47cc63a9fddbe9 AS base
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -57,9 +57,14 @@ RUN pnpm --filter @peridotvault/pid-api build
 # `prisma migrate deploy`.
 RUN CI=true pnpm install --prod --frozen-lockfile --ignore-scripts
 
-FROM node:22-slim AS runner
+FROM node:22-slim@sha256:3ed98443660ff48413b5af19ecefce3b9d50845a901a43420d47cc63a9fddbe9 AS runner
 
 ENV NODE_ENV=production
+
+# ANT-385: image traceability. up.sh passes --build-arg GIT_SHA=<short sha>;
+# /v1/health reports it so the running version is observable without a lookup.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl ca-certificates \

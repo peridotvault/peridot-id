@@ -92,13 +92,12 @@ when the app has one set (timing-safe). Admin routes reject machine tokens even
 for an admin owner. `APP_TOKEN_TTL` (default `1h`).
 
 Pass `scope: "fiat:transfer"` for the least-privilege escrow-release form
-(ANT-286b): scoped tokens are the only machine tokens that should initiate
-`POST /v1/fiat/transfers/*`; a machine token carrying any other scope is 403
-on those routes (fail closed). Unscoped legacy tokens still work (back-compat)
-but are logged server-side (`fiat.transfer.legacy_app_token`) so SOC can track
-migration. Every app-token use on inquiry AND confirm also emits
+(ANT-286b, enforced by ANT-344 H3): scoped tokens are the ONLY machine tokens
+that may initiate `POST /v1/fiat/transfers/*` — JwtAuthGuard and the ledger
+service both reject unscoped or mis-scoped machine tokens 403 (fail closed).
+Every app-token use on inquiry AND confirm emits
 `fiat.transfer.app_token` with `{ app, scope }` — the SOC anomaly signal for a
-leaked `pidsk_` (an app token appearing from an unexpected network/pattern).
+leaked app secret (an app token appearing from an unexpected network/pattern).
 
 Typical backend use: read the escrow balance (`GET /v1/fiat/balance`), list the
 statement (`GET /v1/fiat/ledger`), initiate escrow releases
@@ -113,7 +112,8 @@ with the old secret fails closed until the owner rotates. Rotate proactively:
 - **Schedule:** rotate at least every 365 days (before expiry) and on every
   staff exit with backend-secret access.
 - **Suspected leak:** rotate immediately, then review `fiat.transfer.app_token`
-  + `fiat.transfer.legacy_app_token` SOC events for unexpected app-token use
+  SOC events (and 403 spikes on `POST /v1/fiat/transfers/*`, which now reject
+  unscoped tokens) for unexpected app-token use
   (unknown source, odd hours, unfamiliar amounts).
 - **Grace procedure:** mint the new secret (`POST /v1/apps/:id/secret` returns
   it ONCE — store it in the backend vault, never in code), deploy the backend

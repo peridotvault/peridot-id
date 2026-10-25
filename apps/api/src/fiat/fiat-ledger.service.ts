@@ -1,5 +1,5 @@
-import { createHmac } from "node:crypto";
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { createHmac, randomUUID } from "node:crypto";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnprocessableEntityException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import {
@@ -11,7 +11,7 @@ import {
 } from "@peridotvault/pid-payments";
 import { decryptSecret } from "../common/secret-crypto";
 import { replayFiatLedger } from "./fiat-ledger-replay";
-import { GENESIS_HASH, entryHash, verifyChain as verifyLedgerChain, type ChainableEntry } from "./fiat-ledger-hash";
+import { CHAIN_LOCK, GENESIS_HASH, entryHash } from "./fiat-ledger-hash";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CHECKOUT_CLIENT } from "./checkout-client.token";
@@ -291,6 +291,127 @@ export class FiatLedgerService {
   // --- send/receive (generic primitive + phase-1 policy gate) ---
 
   /**
+   * Sandbox faucet caps (ANT-287 §6, proposed values — CTO confirms via
+   * parent OQ-1; adjust here and in the openapi spec together).
+   */
+  static readonly FAUCET_PER_CALL_MAX_IDR = 50_000n;
+  static readonly FAUCET_DAILY_CAP_IDR = 100_000n;
+  static readonly FAUCET_DAILY_MAX_CALLS = 10;
+
+  /**
+   * Faucet gate flag (ANT-290 contract): true IFF `PID_FAUCET_ENABLED` is
+   * exactly `"true"`. Fail-closed — unset/"false"/anything-else ⇒ off.
+   * Never DOKU_MODE (defaults to sandbox ⇒ would fail open).
+   */
+  faucetEnabled(): boolean {
+    return this.config.get<string>("PID_FAUCET_ENABLED", "false") === "true";
+  }
+
+  /** Boundary check for faucet amounts: null/missing/zero/negative/over-max → 422 (never 400). */
+  private parseFaucetAmount(raw: unknown): bigint {
+    let v: bigint | null = null;
+    if (typeof raw === "number" && Number.isInteger(raw)) {
+      try {
+        v = BigInt(raw);
+      } catch {
+        v = null;
+      }
+    } else if (typeof raw === "string" && /^\d+$/.test(raw)) {
+      try {
+        v = BigInt(raw);
+      } catch {
+        v = null;
+      }
+    }
+    if (v === null || v <= 0n || v > FiatLedgerService.FAUCET_PER_CALL_MAX_IDR) {
+      throw new UnprocessableEntityException({
+        error: "faucet_invalid_amount",
+        perCallMaxMinor: FiatLedgerService.FAUCET_PER_CALL_MAX_IDR.toString(),
+      });
+    }
+    return v;
+  }
+
+  /**
+   * Mint sandbox test credit straight into the ledger (ANT-287 FR-2).
+   *
+   * Same `fiat_issue` leg shape as corroborated Checkout deposits, so
+   * balance/webhook behavior is identical — but no deposit row and no DOKU
+   * corroboration, so the faucet works when DOKU sandbox is down.
+   *
+   * Concurrency: the per-identity day-bucket count + sum and the insert run
+   * inside one transaction behind `lockAccounts` (per-pid `FOR UPDATE` on
+   * `identities`), so concurrent double-calls are serialized and can never
+   * jointly exceed the daily cap or call budget. Every mint is audited via
+   * `security.log` (`fiat.faucet_minted`).
+   */
+  async mintTestCredit(
+    pid: string,
+    amountMinor: unknown,
+  ): Promise<{ creditId: string; amountMinor: string; currency: "IDR"; env: "sandbox"; dailyRemainingMinor: string }> {
+    this.requireUsable();
+    if (!this.faucetEnabled()) throw new NotFoundException("Not found");
+    const amount = this.parseFaucetAmount(amountMinor);
+    const creditId = randomUUID();
+    const issueKey = `FAUCET-${creditId}`;
+    let remaining = 0n;
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockAccounts(tx as never, [pid]);
+      const dayStart = new Date();
+      dayStart.setUTCHours(0, 0, 0, 0);
+      const todays = (await (tx as unknown as {
+        fiatLedgerEntry: {
+          findMany: (a: unknown) => Promise<Array<{ amountIdr: bigint }>>;
+        };
+      }).fiatLedgerEntry.findMany({
+        where: { pid, kind: "fiat_issue", source: "faucet", status: "posted", createdAt: { gte: dayStart } },
+        select: { amountIdr: true },
+      })) as Array<{ amountIdr: bigint }>;
+      let spent = 0n;
+      for (const r of todays) spent += r.amountIdr;
+      if (
+        todays.length >= FiatLedgerService.FAUCET_DAILY_MAX_CALLS ||
+        spent + amount > FiatLedgerService.FAUCET_DAILY_CAP_IDR
+      ) {
+        const left = FiatLedgerService.FAUCET_DAILY_CAP_IDR - spent;
+        throw new UnprocessableEntityException({
+          error: "faucet_cap_exceeded",
+          dailyRemainingMinor: (left > 0n ? left : 0n).toString(),
+        });
+      }
+      remaining = FiatLedgerService.FAUCET_DAILY_CAP_IDR - spent - amount;
+      await this.appendChained(tx as never, [
+        {
+          data: {
+            entryGroup: creditId,
+            kind: "fiat_issue",
+            pid,
+            amountIdr: amount,
+            direction: "in",
+            idempotencyKey: issueKey,
+            parentRef: null,
+            feePolicyVersion: null,
+            counterparty: json({ faucet: true, creditId }),
+            source: "faucet",
+          },
+        },
+      ]);
+    });
+    await this.security
+      .log(pid, "fiat.faucet_minted", { creditId, amountMinor: amount.toString() })
+      .catch((err) => {
+        this.logger.error(`AUDIT-SINK-FAILURE fiat.faucet_minted ${creditId} unaudited: ${String(err)?.slice(0, 200)}`);
+      });
+    return {
+      creditId,
+      amountMinor: amount.toString(),
+      currency: "IDR",
+      env: "sandbox",
+      dailyRemainingMinor: remaining.toString(),
+    };
+  }
+
+  /**
    * Send inquiry (moves no money). GROSS-in: requested amount is gross;
    * fee quote + net computed under the active policy and pinned by
    * feePolicyVersion. Creates the intent row (`created`) the confirm step
@@ -298,12 +419,24 @@ export class FiatLedgerService {
    * NO allowlist is enforced here (see the class doc: Phase-1 escrow-only
    * is a stated policy with no check; user→user sends succeed today).
    */
+  /**
+   * ANT-344 H3 defense in depth: money paths reject machine tokens without
+   * the explicit `fiat:transfer` scope even if a route guard is bypassed or
+   * miswired. User sessions (no `app` claim) are unaffected.
+   */
+  private requireTransferScope(auth?: { app?: string; scope?: string }): void {
+    if (auth?.app && auth.scope !== "fiat:transfer") {
+      throw new ForbiddenException("Machine token scope not authorized for transfers");
+    }
+  }
+
   async transferInquiry(
     pid: string,
     input: { amountIdr: string; beneficiaryPid: string; remark?: string; operation?: FeeOperation },
     appClientId?: string | null,
     auth?: { app?: string; scope?: string },
   ) {
+    this.requireTransferScope(auth);
     this.requireUsable();
     const gross = this.parseAmount(input.amountIdr);
     const beneficiaryPid = input.beneficiaryPid.trim().toLowerCase();
@@ -354,6 +487,7 @@ export class FiatLedgerService {
    * no double-spend.
    */
   async transferConfirm(pid: string, id: string, auth?: { app?: string; scope?: string }): Promise<FiatLedgerEntryView> {
+    this.requireTransferScope(auth);
     this.requireUsable();
     const intent = await this.prisma.fiatLedgerEntry.findFirst({ where: { id, pid } });
     if (!intent) throw new NotFoundException("Transfer not found");
@@ -380,7 +514,9 @@ export class FiatLedgerService {
         // Close the cancel-vs-confirm race: cancelIntent takes the same
         // identity lock, so this status read is serialized against cancel.
         // A cancelled (or otherwise closed) intent must never post legs.
-        const fresh = await tx.fiatLedgerEntry.findFirst({ where: { id: intent.id } });
+        // ANT-344 L1: re-read stays pid-scoped — a row id alone must never
+        // resolve another identity's intent inside the txn.
+        const fresh = await tx.fiatLedgerEntry.findFirst({ where: { id: intent.id, pid } });
         if (!fresh || fresh.status !== "created") {
           throw new BadRequestException("Transfer is closed — start a new inquiry");
         }
@@ -494,7 +630,8 @@ export class FiatLedgerService {
         where: { id: row.id, status: "created" },
         data: { status: "cancelled" },
       });
-      const final = await tx.fiatLedgerEntry.findFirst({ where: { id: row.id } });
+      // ANT-344 L1: re-read stays pid-scoped (same rationale as confirm).
+      const final = await tx.fiatLedgerEntry.findFirst({ where: { id: row.id, pid } });
       if (!final) throw new NotFoundException("Transfer not found");
       return this.toTxView(final as never);
     });
@@ -538,7 +675,9 @@ export class FiatLedgerService {
     }
     for (const pid of [fromPid, toPid]) {
       const ident = await this.prisma.identity.findUnique({ where: { pid } }).catch(() => null);
-      if (!ident) throw new NotFoundException(`Identity not found: ${pid}`);
+      // ANT-344 L9: never echo the queried identifier in a client-visible
+      // error — the admin caller already knows the input they sent.
+      if (!ident) throw new NotFoundException("Identity not found");
     }
     // Deterministic keys when the caller supplies requestId; random per-POST
     // otherwise (legacy behavior, documented above).
@@ -725,7 +864,6 @@ export class FiatLedgerService {
   // --- hash chain (tamper-evident journal) ---
 
   /** Global advisory lock id serializing chain writes (one ledger head). */
-  private static readonly CHAIN_LOCK = 918273645;
 
   /**
    * Append value-bearing legs to the tamper-evident chain and write them.
@@ -745,7 +883,7 @@ export class FiatLedgerService {
     },
     ops: Array<{ id?: string; data: Record<string, unknown> }>,
   ): Promise<void> {
-    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${FiatLedgerService.CHAIN_LOCK}::bigint)`);
+    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${CHAIN_LOCK}::bigint)`);
     const last = await tx.fiatLedgerEntry.findFirst({
       where: { hash: { not: null } }, orderBy: { hashSeq: "desc" }, select: { hash: true, hashSeq: true },
     });
@@ -767,66 +905,6 @@ export class FiatLedgerService {
       else await tx.fiatLedgerEntry.create({ data });
       prevHash = hash;
     }
-  }
-
-  /** Verify the whole chain; expose the head hash for external anchoring. */
-  async verifyLedger(): Promise<{ ok: boolean; checked: number; headHash: string; firstBadIdempotencyKey: string | null; error: string | null; postedUnchained: number }> {
-    const unchained = await this.prisma.fiatLedgerEntry.count({ where: { status: "posted", hash: null } });
-    const rows = await this.prisma.fiatLedgerEntry.findMany({
-      where: { status: "posted", hash: { not: null } }, orderBy: { hashSeq: "asc" }, take: 100000,
-    });
-    const v = verifyLedgerChain(rows.map((r) => ({
-      entryGroup: r.entryGroup, kind: r.kind, pid: r.pid, counterpartyPid: r.counterpartyPid,
-      amountIdr: r.amountIdr, direction: r.direction, idempotencyKey: r.idempotencyKey,
-      parentRef: r.parentRef, status: r.status, feePolicyVersion: r.feePolicyVersion,
-      prevHash: r.prevHash, hash: r.hash,
-    })));
-    if (unchained > 0) {
-      const e = v.error ? `${v.error}; ${unchained} posted row(s) unchained` : `${unchained} posted row(s) unchained — run chain backfill`;
-      return { ...v, ok: false, error: e, postedUnchained: unchained };
-    }
-    return { ...v, postedUnchained: 0 };
-  }
-
-  /** Head of the chain (the value to publish externally to make it tamper-proof). */
-  async chainHead(): Promise<{ headHash: string; hashSeq: string | null }> {
-    const last = await this.prisma.fiatLedgerEntry.findFirst({
-      where: { hash: { not: null } }, orderBy: { hashSeq: "desc" }, select: { hash: true, hashSeq: true },
-    });
-    return { headHash: last?.hash ?? GENESIS_HASH, hashSeq: last?.hashSeq?.toString() ?? null };
-  }
-
-  /**
-   * One-time/repair: chain posted rows that predate the chain (replaySeq order).
-   * ANT-254 P2 note: yes, this UPDATEs posted rows — deliberately and narrowly.
-   * It only fills NULL hash fields (posted-but-unchained rows) and never
-   * rewrites an existing hash/prevHash/hashSeq, so chained history is
-   * append-only in effect. Admin-guarded + throttled at the controller;
-   * verifyLedger reports `postedUnchained` so the need is visible before use.
-   */
-  async backfillChain(): Promise<{ chained: number }> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${FiatLedgerService.CHAIN_LOCK}::bigint)`);
-      const unchained = await tx.fiatLedgerEntry.findMany({
-        where: { status: "posted", hash: null }, orderBy: { replaySeq: "asc" }, take: 100000,
-      });
-      const last = await tx.fiatLedgerEntry.findFirst({
-        where: { hash: { not: null } }, orderBy: { hashSeq: "desc" }, select: { hash: true, hashSeq: true },
-      });
-      let prevHash: string = last?.hash ?? GENESIS_HASH;
-      let seq: bigint = last?.hashSeq ?? 0n;
-      for (const r of unchained) {
-        seq += 1n;
-        const hash = entryHash({
-          entryGroup: r.entryGroup, kind: r.kind, pid: r.pid, counterpartyPid: r.counterpartyPid,
-          amountIdr: r.amountIdr, direction: r.direction, idempotencyKey: r.idempotencyKey,
-          parentRef: r.parentRef, status: r.status, feePolicyVersion: r.feePolicyVersion, prevHash,
-        });
-        await tx.fiatLedgerEntry.update({ where: { id: r.id }, data: { prevHash, hash, hashSeq: seq } });
-        prevHash = hash;
-      }
-      return { chained: unchained.length };
-    });
   }
 
   // --- third-party callbacks (escrow apps) ---
@@ -874,83 +952,6 @@ export class FiatLedgerService {
         },
       });
     }
-  }
-
-  /**
-   * Deliver due callback events (cron-driven), HMAC-SHA256 signed with the
-   * target app's webhook secret (`X-Pid-Signature: sha256=<hex>`). Failures
-   * retry with backoff up to 6 attempts, then stay `failed` for admin review.
-   */
-  async dispatchEvents(input: { take?: number }): Promise<{ sent: number; failed: number; pending: number }> {
-    const take = Math.min(Math.max(input.take ?? 20, 1), 100);
-    const due = await this.prisma.fiatLedgerEvent.findMany({
-      where: { status: "pending", nextAttemptAt: { lte: new Date() } }, orderBy: { createdAt: "asc" }, take,
-    });
-    let sent = 0;
-    let failed = 0;
-    for (const ev of due) {
-      // Resolve the secret for the exact app this event targets (owner + URL),
-      // not just the first active app under the owner. A missing/inactive app
-      // or secret is fail-closed: never dispatch with an empty-key HMAC —
-      // record and retry with backoff like any delivery failure. ANT-286a:
-      // the stored value is an `enc:v1:` envelope — decrypt server-side with
-      // PID_SECRETS_ENC_KEY; missing/undecryptable = failNoSecret.
-      const app = await this.prisma.pidApp.findFirst({
-        where: { ownerPid: ev.targetPid, webhookUrl: ev.targetUrl, isActive: true },
-        select: { webhookSecret: true },
-      });
-      const failNoSecret = async (reason: string) => {
-        const attempts = ev.attempts + 1;
-        const dead = attempts >= 6;
-        const backoffMs = Math.min(3_600_000, 1000 * 2 ** attempts);
-        await this.prisma.fiatLedgerEvent.update({
-          where: { id: ev.id },
-          data: { status: dead ? "failed" : "pending", attempts, nextAttemptAt: new Date(Date.now() + backoffMs), lastError: reason.slice(0, 200) },
-        });
-        failed++;
-      };
-      let rawSecret: string | null = null;
-      try {
-        const key = this.config.get<string>("PID_SECRETS_ENC_KEY", "") || undefined;
-        rawSecret = decryptSecret(app?.webhookSecret ?? null, key);
-      } catch {
-        rawSecret = null;
-      }
-      if (!rawSecret) {
-        await failNoSecret("webhook app missing, inactive, or secret undecryptable — refusing unsigned dispatch");
-        continue;
-      }
-      const body = JSON.stringify(ev.payload);
-      const sig = "sha256=" + createHmac("sha256", rawSecret).update(body).digest("hex");
-      try {
-        const res = await fetch(ev.targetUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Pid-Event": ev.eventType, "X-Pid-Signature": sig },
-          body,
-          // Bound delivery so a hung endpoint can't stall the dispatcher.
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        await this.prisma.fiatLedgerEvent.update({ where: { id: ev.id }, data: { status: "delivered", deliveredAt: new Date(), attempts: ev.attempts + 1, lastError: null } });
-        sent++;
-      } catch (err) {
-        const attempts = ev.attempts + 1;
-        const dead = attempts >= 6;
-        const backoffMs = Math.min(3_600_000, 1000 * 2 ** attempts);
-        await this.prisma.fiatLedgerEvent.update({
-          where: { id: ev.id },
-          data: { status: dead ? "failed" : "pending", attempts, nextAttemptAt: new Date(Date.now() + backoffMs), lastError: String(err).slice(0, 200) },
-        });
-        failed++;
-      }
-    }
-    const pending = await this.prisma.fiatLedgerEvent.count({ where: { status: "pending" } });
-    return { sent, failed, pending };
-  }
-
-  /** Admin read-model for the callback outbox. */
-  events(status?: string) {
-    return this.prisma.fiatLedgerEvent.findMany({ where: status ? { status } : undefined, orderBy: { createdAt: "desc" }, take: 100 });
   }
 
   /** Payment-confirmation predicate for deposit rows (same semantics as the

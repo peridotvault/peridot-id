@@ -41,24 +41,24 @@ describe("googleOAuthOptionsFactory", () => {
         GOOGLE_CLIENT_ID: "my-id",
         GOOGLE_CLIENT_SECRET: "my-secret",
         API_URL: "https://api.peridot.id",
-        API_DOMAIN: "https://api.pid.peridotvault.com",
+        API_DOMAIN: "https://sandbox-api.peridot.id",
       }),
     );
     expect(opts?.callbackURL).toBe("https://api.peridot.id/v1/auth/google/callback");
   });
 
-  it("derives the callback from API_DOMAIN (ANT-184 cutover fallback)", () => {
+  it("derives the sandbox callback from API_URL (ANT-400)", () => {
     const opts = googleOAuthOptionsFactory(
       config({
         GOOGLE_CLIENT_ID: "my-id",
         GOOGLE_CLIENT_SECRET: "my-secret",
-        API_DOMAIN: "https://api.pid.peridotvault.com",
+        API_URL: "https://sandbox-api.peridot.id",
       }),
     );
     expect(opts).toEqual({
       clientID: "my-id",
       clientSecret: "my-secret",
-      callbackURL: "https://api.pid.peridotvault.com/v1/auth/google/callback",
+      callbackURL: "https://sandbox-api.peridot.id/v1/auth/google/callback",
     });
   });
 
@@ -67,11 +67,11 @@ describe("googleOAuthOptionsFactory", () => {
       config({
         GOOGLE_CLIENT_ID: "my-id",
         GOOGLE_CLIENT_SECRET: "my-secret",
-        API_DOMAIN: "https://api.pid.peridotvault.com",
-        GOOGLE_CALLBACK_URL: "https://api.pid.peridotvault.com/v1/auth/google/callback",
+        API_URL: "https://api.peridot.id",
+        GOOGLE_CALLBACK_URL: "https://api.peridot.id/v1/auth/google/callback",
       }),
     );
-    expect(opts?.callbackURL).toBe("https://api.pid.peridotvault.com/v1/auth/google/callback");
+    expect(opts?.callbackURL).toBe("https://api.peridot.id/v1/auth/google/callback");
   });
 
   it("returns null when id or secret is missing", () => {

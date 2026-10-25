@@ -8,8 +8,8 @@ every Peridot product.
 
 | Service | URL |
 |---|---|
-| API | `https://api.pid.peridotvault.com/v1` |
-| Docs | `https://pid.peridotvault.com` |
+| API | `https://api.peridot.id/v1` |
+| Docs | `https://docs.peridot.id` |
 | OpenAPI spec | `GET /v1/openapi.yaml` (API reference at `https://docs.peridot.id/api/overview`) |
 
 ## Repo layout
@@ -53,7 +53,7 @@ under `contracts/svm/`). Scripts: `pnpm test`, `pnpm typecheck`.
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
 const peridot = Peridot({
-  baseUrl: 'https://api.pid.peridotvault.com',
+  baseUrl: 'https://api.peridot.id',
   solanaRpcUrl: 'https://api.devnet.solana.com',
   onUnauthorized: async () => {
     const ok = await peridot.auth.refresh();
@@ -75,8 +75,8 @@ const rows = await peridot.wallet.createAccount(); // wallet chain rows
 
 - [Docs site](https://docs.peridot.id) — getting started, authentication flow,
   API reference (generated from the OpenAPI spec), SDK guide, self-hosting/deployment.
-  (Mintlify-hosted; source in `apps/docs`. Old `https://pid.peridotvault.com/docs*`
-  keeps serving until the cutover redirect lands.)
+  (Mintlify-hosted; source in `apps/docs`. Legacy `pid.peridotvault.com/docs*`
+  paths are dead and do not redirect — update bookmarks to `docs.peridot.id`.)
 - `docs/` — product spec (PRD_v5), architecture, database, security, roadmap, ADRs.
 - `AGENTS.md` — agent run book (naming, environment, login split, verification).
 

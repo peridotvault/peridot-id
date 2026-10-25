@@ -1,6 +1,6 @@
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { deliverLoginCode, type LoginContext } from "../popup-login";
-import { finishSso, type SsoRequest } from "../sso";
+import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
+import { finishSso, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "./useLoginSession";
 
 export function useSignInMethods(
@@ -49,7 +49,7 @@ export function useSignInMethods(
     try {
       // Google always leaves the page (OAuth redirect). Only cross-origin SSO requests
       // carry a returnTo (an allowlisted third-party origin). A first-party login omits
-      // it: window.location.origin here (app.pid.peridotvault.com) is NOT in the server's
+      // it: window.location.origin here (peridot.id) is NOT in the server's
       // returnTo allowlist, so sending it 400s (localhost only "worked" because loopback
       // URLs are exempt). Without returnTo the Google callback lands on CLIENT_SUCCESS_URL
       // (= this wallet's origin) with the session cookie — or, for a new credential,

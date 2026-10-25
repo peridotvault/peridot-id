@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { PeridotClient } from "@peridotvault/pid-sdk-js";
+import type { ChainPreview, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
-import { Card, ERROR, FIELD, MUTED } from "./ui";
+import { Card, ERROR, FIELD, MUTED, WARN } from "./ui";
 import { CutButton } from "./cut-button";
 
 export function AddChainForm({
@@ -18,8 +18,34 @@ export function AddChainForm({
   const [name, setName] = useState("");
   const [reference, setReference] = useState("");
   const [symbol, setSymbol] = useState("");
+  const [rpcUrl, setRpcUrl] = useState("");
+  const [preview, setPreview] = useState<ChainPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const check = async () => {
+    if (!reference.trim() || !rpcUrl.trim()) {
+      setError("Chain id and RPC URL are required.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    onError(null);
+    try {
+      const p = await client.admin
+        .previewChain({ chainNamespace: "eip155", reference: reference.trim(), rpcUrl: rpcUrl.trim() })
+        .then((r) => unwrap({ ok: true, data: r }, "Checking chain"));
+      setPreview(p);
+      if (p.suggest && !name) setName(p.suggest.name ?? "");
+      if (p.suggest?.nativeSymbol && !symbol) setSymbol(p.suggest.nativeSymbol);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Check failed";
+      setError(message);
+      onError(message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const create = async () => {
     if (!name.trim() || !reference.trim() || !symbol.trim()) {
@@ -31,7 +57,13 @@ export function AddChainForm({
     onError(null);
     try {
       await client.admin
-        .createChain({ namespace: "eip155", reference: reference.trim(), name: name.trim(), nativeSymbol: symbol.trim() })
+        .createChain({
+          namespace: "eip155",
+          reference: reference.trim(),
+          name: name.trim(),
+          nativeSymbol: symbol.trim(),
+          rpcUrls: rpcUrl.trim() ? [rpcUrl.trim()] : undefined,
+        })
         .then((r) => unwrap({ ok: true, data: r }, "Adding chain"));
       onDone();
     } catch (e) {
@@ -46,8 +78,8 @@ export function AddChainForm({
   return (
     <Card>
       <h3 className="font-semibold tracking-tight">Register a new EVM chain</h3>
-      <p className={`mt-1 text-sm ${MUTED}`}>Metadata and RPCs are editable after — set its factory contract next.</p>
-      {error && <p className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
+      <p className={`mt-1 text-sm ${MUTED}`}>Check first — the RPC itself must serve this chain id.</p>
+      {error && <p role="alert" className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
         <label className="text-sm">
           Name
@@ -55,13 +87,38 @@ export function AddChainForm({
         </label>
         <label className="text-sm">
           Chain id
-          <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="84532" maxLength={16} className={FIELD} />
+          <input value={reference} onChange={(e) => { setReference(e.target.value); setPreview(null); }} placeholder="84532" maxLength={16} className={FIELD} />
         </label>
         <label className="text-sm">
           Native symbol
           <input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="ETH" maxLength={12} className={FIELD} />
         </label>
       </div>
+      <label className="mt-2 block text-sm">
+        RPC URL
+        <input value={rpcUrl} onChange={(e) => { setRpcUrl(e.target.value); setPreview(null); }} placeholder="https://…" maxLength={256} className={FIELD} />
+      </label>
+      <div className="mt-3 flex gap-2">
+        <CutButton type="button" onClick={check} disabled={busy}>
+          {busy ? "Checking…" : "Check chain"}
+        </CutButton>
+      </div>
+      {preview && (
+        <div className="mt-3 rounded border border-border p-3 text-sm">
+          <p>
+            RPC:{" "}
+            {preview.rpc.ok ? (
+              <>serves chainId <strong>{preview.rpc.chainId}</strong></>
+            ) : (
+              <span className={ERROR}>{preview.rpc.error ?? "unreachable"}</span>
+            )}
+            {preview.suggest && <> · chainlist: <strong>{preview.suggest.name}</strong> ({preview.suggest.nativeSymbol})</>}
+          </p>
+          {preview.conflicts.map((c) => (
+            <p key={c} className={`mt-1 ${WARN}`}>{c}</p>
+          ))}
+        </div>
+      )}
       <CutButton
         type="button"
         onClick={create}

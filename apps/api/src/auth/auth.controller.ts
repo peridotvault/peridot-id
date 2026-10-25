@@ -9,8 +9,10 @@ import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator
 import { AuthenticateFinishDto } from "../credentials/dto/credential.dto";
 import { AuthenticateStartResult, CredentialService } from "../credentials/credential.service";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
+import { CsrfOriginGuard } from "../common/csrf-origin.guard";
 import { UserTokenGuard } from "../common/user-token.guard";
 import { AuthService } from "./auth.service";
+import { isPidHandle, normalizePidHandle } from "../common/pid";
 import { ClaimService, isUnverifiedEmailError } from "./claim.service";
 import { EmailStartDto, EmailVerifyDto } from "./email/dto/email.dto";
 import { EmailOtpService } from "./email/email-otp.service";
@@ -51,7 +53,7 @@ function withErrorFlag(successUrl: string, code: string): string {
 }
 
 @Controller("v1/auth")
-@UseGuards(ThrottlerGuard)
+@UseGuards(ThrottlerGuard, CsrfOriginGuard)
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
@@ -105,8 +107,16 @@ export class AuthController {
   @Get("pid/available")
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async pidAvailable(@Req() req: Request): Promise<{ available: boolean; pid: string | null }> {
-    const handle = typeof req.query.handle === "string" ? req.query.handle : "";
-    return this.authService.isPidAvailable(handle);
+    // Spec marks `handle` required with `^[a-z0-9_]{3,20}$`: a missing or
+    // malformed handle is a 400 (not a 200 `available:false`, which would read
+    // as "taken"). Same message/shape as ClaimDto validation. The service
+    // stays lenient (returns false) as defense-in-depth; the boundary owns 400.
+    const raw = typeof req.query.handle === "string" ? req.query.handle : "";
+    const normalized = normalizePidHandle(raw);
+    if (!isPidHandle(normalized)) {
+      throw new BadRequestException("handle must be 3-20 chars: lowercase letters, numbers, underscore");
+    }
+    return this.authService.isPidAvailable(normalized);
   }
 
   /**
@@ -242,7 +252,7 @@ export class AuthController {
   }
 
   @Get("grants")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async grants(@CurrentUser() user: AuthenticatedUser) {
     return this.ssoService.listGrants(user.pid);
@@ -335,7 +345,11 @@ export class AuthController {
       return;
     }
     const { returnTo, clientId } = verified;
-    const resolved = returnTo ? await this.ssoService.resolveReturnTo(returnTo, clientId) : null;
+    // First-party logins were bound to the wallet origin by the guard (no
+    // cross-origin target): land on the wallet with the session, exactly like
+    // pre-M3 — no pid_code minted, no allowlist lookup.
+    const firstParty = !clientId && returnTo === successUrl;
+    const resolved = !firstParty && returnTo ? await this.ssoService.resolveReturnTo(returnTo, clientId) : null;
 
     // Verified credential, no identity yet → mint a claim ticket and send the
     // user to the PID picker. Nothing is created until they claim. An
@@ -454,7 +468,7 @@ export class AuthController {
   }
 
   @Get("sessions")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   async sessions(
     @Req() req: Request,

@@ -1,0 +1,185 @@
+---
+title: Levels & XP
+description: Read a user's level, report XP events server-to-server, and monitor the leveling pipeline
+---
+
+PeridotID is the **sole authority** that awards XP. Apps never compute, store, or
+duplicate XP — they **read** the level and **report** well-defined events; the
+platform validates, de-duplicates, quota-checks, and journals everything.
+
+## Read a level
+
+`GET /v1/users/:pid/level` returns the authoritative summary for any live
+(non-deleted) identity. It is readable with **any authorized credential** — a
+session cookie or a machine token — including apps that are **not verified** and
+have no XP permission. Permission gates the event-intake path only, never reads.
+
+```bash
+curl https://api.peridot.id/v1/users/ifal@pid/level \
+  -H "Authorization: Bearer $MACHINE_TOKEN"
+```
+
+```json
+{
+  "pid": "ifal@pid",
+  "level": 5,
+  "total_xp": 1701,
+  "current_level_xp": 1701,
+  "next_level_xp": 2819,
+  "progress_percentage": 0
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `level` | Current level (starts at 1) |
+| `total_xp` | Cumulative XP, JSON-safe integer (server throws rather than emit an unsafe value) |
+| `current_level_xp` | XP marking the start of the current level |
+| `next_level_xp` | XP marking the next level; `null` at the max-level cap |
+| `progress_percentage` | Progress within the current level band (0–100, 100 at cap) |
+
+Unknown or deleted PIDs answer `404` with the standard error envelope. Users
+with no XP history read as Level 1 / 0 XP (the state row is created lazily on
+first read — no ledger entry). `GET /v1/profile/me` also carries the same
+summary as its optional `level` field.
+
+### SDK helper
+
+```ts
+import { Peridot } from '@peridotvault/pid-sdk-js';
+
+const peridot = Peridot({ clientId: 'pidapp_…' });
+const summary = await peridot.level.get('ifal@pid');
+// { pid, level, total_xp, current_level_xp, next_level_xp, progress_percentage }
+// — or an ApiError ({ statusCode: 404, … }) for unknown users.
+```
+
+Read-only by construction: the helper has no parameter for XP amounts and
+performs no awarding. Re-read instead of persisting.
+
+### Level badge (React)
+
+`@peridotvault/pid-react-embed` ships a drop-in badge that fetches and renders
+the summary. Pass your own client (preferred — reuses its auth) or let the
+badge build a narrow internal one from `env` / `baseUrl`:
+
+```tsx
+import { PeridotLevelBadge } from '@peridotvault/pid-react-embed';
+
+<PeridotLevelBadge pid="ifal@pid" client={peridot} showProgress />;
+```
+
+All four states render: loading (`role="status"`), empty (no `pid`),
+error (`role="alert"` with retry — `404` maps to "Unknown user"), and success
+(`Lv 5 · 1,701 XP` plus an optional `role="progressbar"` with value
+attributes). The layout is fluid (no fixed widths) for desktop and mobile.
+
+## Report XP events (server-to-server)
+
+> **Availability.** The HTTP event-intake route is M3-gated and not yet
+> shipped. The contract below is what the platform already enforces in code
+> (permission model, event catalog, idempotency, quotas) and what intake will
+> enforce at the HTTP boundary. Until intake ships, awards happen through the
+> admin API (adjustments / reversals) and the dashboard. Do not build a
+> client-side award path — there will not be one.
+
+Event reporting is **server-to-server only**. Your backend holds the app
+secret, exchanges it for a short-lived machine token
+(`POST /v1/auth/token` — see [Apps & workspace](/apps#machine-token)), and
+reports events with that token. Browser code never reports events.
+
+### Idempotency
+
+Every report carries an `event_id` chosen by your backend. Deduplication is
+**per app**: the completion key is the composite `(appId, eventId)`, so two
+apps may independently reuse the same `event_id` — only the same app
+reporting the same `event_id` twice is a duplicate, and the retry writes
+nothing. An `event_id` always belongs to a task (`eventId` requires
+`taskId`); one-time achievements additionally scope on `resource_id`.
+
+Rules for `event_id`: 1–128 chars, stable per real-world occurrence
+(e.g. `order_9f2…_delivered`), never reused across distinct occurrences.
+On retry-after-timeout, resend the **same** `event_id` — the duplicate is
+acknowledged without a second award.
+
+### Permission errors
+
+Intake fails closed. A report is rejected unless the app is **active**,
+**Verified**, explicitly **XP-enabled**, and the event type is on the app's
+admin-approved list. Losing Verified (or XP permission) disables submissions
+immediately. Reads are unaffected.
+
+| Rejection | Meaning |
+|---|---|
+| Unknown app | No such `clientId` |
+| App is not active | Disabled app |
+| App is not Verified | Verification required before any submission |
+| App has no XP permission | `xpEnabled` is false — ask an admin |
+| Event type not approved | Not on the app's `approvedEventTypes` list |
+
+Approved event types come from the MVP catalog only:
+`onboarding_completed`, `identity_verified`, `campaign_completed`,
+`achievement_earned`, `ecosystem_activity` (lowercase letters, digits, and
+underscores, 3–64 chars). Unknown types are refused and nothing is persisted.
+
+### Quotas
+
+Admins set per-app daily / weekly / monthly XP caps plus org-level caps, and
+can suspend an app's awards (reason required). Over-cap and suspended reports
+are rejected with the accounting state (`sum + delta > cap`) — no partial
+awards, no ledger write.
+
+## Error envelopes
+
+Same shape as every PeridotID error:
+
+```json
+{ "statusCode": 404, "message": "Unknown user" }
+```
+
+`message` is a string, or an array of strings when validation fails. The codes
+relevant here: `400` (bad `pid` format, invalid event/task payload),
+`401` (missing/expired credential), `403` (forbidden — e.g. unverified or
+XP-disabled app on intake, admin-only route), `404` (unknown/deleted user,
+unknown task), `429` (rate limit — back off and retry; see below).
+
+## Rate limits
+
+Every route is rate-limited; the global default is **100 requests/minute**
+per client. Level reads inherit that default. Auth and token endpoints carry
+stricter per-route limits (see [Errors](/errors)). Integrators polling levels
+(e.g. a leaderboard refresh) should cache per `pid` and stay well under the
+default — re-read on user action, not on a timer.
+
+## Monitoring (operators)
+
+The dashboard's **Leveling → Overview** page aggregates the pipeline health:
+total XP distributed, users with XP state, the level distribution, recent
+ledger activity, and unreviewed suspicious signals. The underlying data:
+
+- Award / error rates: `xp_ledger_entries` (`kind`, `appId`, `createdAt`;
+  `task_award` rows are awards). Rejected intake attempts leave no ledger
+  row — the `xp_suspicious_activities` feed is the rejection-visibility
+  proxy until intake ships structured reason codes.
+- Level-distribution drift: `user_xp_states` grouped by `level` (one level
+  holding nearly all users points at a curve/policy-config problem).
+- Quota breaches: per-app ledger sums vs `xp_quotas` caps — any award over a
+  `dailyCap` is a cap-enforcement failure, page immediately.
+- Reconciliation invariant: `sum(xp_ledger_entries.deltaXp)` must equal
+  `sum(user_xp_states.totalXp)` — drift means corruption or a bad migration.
+
+Scheduled SQL checks plus the on-call runbook live in `deploy/alerts/`
+(`xp-leveling-check.sh` on cron, queries in `xp-leveling-detected.sql`,
+triage in `xp-leveling-runbook.md`).
+
+### Intake kill-switch
+
+Any admin can stop awards **without touching the ledger** — no deploy, no SSH,
+no DB writes: suspend the offending app (`suspended=true`, reason required),
+deactivate the task, or revoke XP permission (`xpEnabled=false`). New award
+attempts then fail closed with a permission error and **no ledger write**;
+existing totals, levels, history, and reads are unaffected. The ledger is
+append-only (reversals are new negative entries — there is no update or
+delete path), so repair is re-level/backfill, never hand-editing. Confirm
+the flip in **Leveling → XP History** (no new `task_award` rows) and re-enable
+by unsuspending / reactivating when the incident clears.

@@ -25,3 +25,4 @@ contracts/**/test-ledger/
 
 test-ledger/
 .infisical.json
+deploys.log

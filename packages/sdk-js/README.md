@@ -53,10 +53,10 @@ const available = await peridot.auth.pidAvailable('ifal'); // { available, pid }
 | Wallet | `peridot.wallet` | smart-account balance, history, deposit, withdraw (see `PeridotWallet`) |
 | Fiat | `peridot.fiat` | balance, statement (`ledger`), send/receive, DOKU Checkout top-up (writes approve via popup, see below), sandbox faucet `testCredit()` |
 
-> **Canonical hosts (FR-4).** `Peridot()` presets now target `https://api.peridot.id`
+> **Canonical hosts (FR-4).** `Peridot()` presets target `https://api.peridot.id`
 > / `https://sandbox-api.peridot.id` (popup `https://peridot.id` /
-> `https://sandbox.peridot.id`). Legacy `*.pid.peridotvault.com` hosts still work
-> for one release with a console deprecation warning, then are removed.
+> `https://sandbox.peridot.id`). The legacy `*.pid.peridotvault.com` hosts
+> are removed (ANT-400 hard cutover) — update stored URLs.
 
 EVM permissions (WHITEPAPER.md §10) are not SDK-wrapped yet: use `@peridotvault/pid-evm`
 (payload + calldata builders) with the `v1/permissions` API directly

@@ -26,12 +26,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV="${1:-main}"
 
+# ANT-385: immutable images. Every build is tagged with the short git SHA
+# (TAG defaults to it; pre-set TAG wins for tag-switch rollbacks) and :latest
+# is re-pointed at the same image IDs so `latest` stays a usable alias.
+# Rollback without rebuild: TAG=<prev-sha> SKIP_BUILD=1 ./deploy/up.sh <env>.
+# Each deploy appends one line to deploy/.deploys.log (gitignored).
+if [ -z "${GIT_SHA:-}" ]; then
+  GIT_SHA="$(git -C "$SCRIPT_DIR/.." rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  export GIT_SHA
+fi
+export TAG="${TAG:-$GIT_SHA}"
+
 PROJECT="peridot-id"
 [ "$ENV" = "test" ] && PROJECT="peridot-id-test"
 
 # Deploy meta (not secrets) — hardcoded per stack instead of living in Infisical.
-# NEW_API_HOST is the ANT-99 dual-serve API hostname (old *.peridotvault.com hosts
-# stay live via the same Traefik router — see compose.yaml).
+# NEW_API_HOST is the canonical API hostname (ANT-405 hard cutover — one host
+# per Traefik router, see compose.yaml).
 if [ "$ENV" = "test" ]; then
   export ENV_SUFFIX="${ENV_SUFFIX:-sandbox.}"
   export NAMESPACE="${NAMESPACE:--test}"
@@ -48,19 +59,15 @@ case "$NEW_API_HOST" in
   *[!a-zA-Z0-9.-]* | "" | .* | *.) echo "error: NEW_API_HOST invalid: '$NEW_API_HOST'" >&2; exit 1 ;;
 esac
 
-# ANT-99 dual-serve new hosts (DevOps ANT-118): deploy meta, not secrets —
+# Canonical peridot.id hosts (ANT-405 hard cutover): deploy meta, not secrets —
 # hardcoded per stack like ENV_SUFFIX above. Pre-set env vars win (override).
-# NEW_API_HOST is owned by ANT-116 (api.peridot.id / sandbox-api.peridot.id);
-# the dashboard API default below tracks the same canonical names so this stack
-# stays correct even if that var is unset.
-# NEW_DOCS_HOST (ANT-137) is the Mintlify target for the old-docs cutover
-# redirect; it lands verbatim in a redirectregex replacement — same hostname
-# hardening as NEW_API_HOST so a bad value fails fast here, not as an open redirect.
+# The dashboard API default below tracks the same canonical API names so this
+# stack stays correct even if NEW_API_HOST is unset.
+# (Docs are Mintlify-hosted at docs.peridot.id — no VPS redirect anymore, so no
+# docs host var is exported here.)
 if [ "$ENV" = "test" ]; then
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-sandbox.peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox-dashboard.peridot.id}"
-  # Single docs for all envs (board decision 2026-10-20): no sandbox docs host.
-  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-docs.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox-api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
   export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-sandbox}"
@@ -68,15 +75,11 @@ if [ "$ENV" = "test" ]; then
 else
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-dashboard.peridot.id}"
-  export NEW_DOCS_HOST="${NEW_DOCS_HOST:-docs.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://peridot.id}"
   export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-production}"
   export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://sandbox-dashboard.peridot.id}"
 fi
-case "$NEW_DOCS_HOST" in
-  *[!a-zA-Z0-9.-]* | "" | .* | *.) echo "error: NEW_DOCS_HOST invalid: '$NEW_DOCS_HOST'" >&2; exit 1 ;;
-esac
 
 INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID:-51f99bb1-16c8-4b74-be1f-52657e066a93}"
 
@@ -111,16 +114,79 @@ compose() {
 }
 
 echo "Deploying PeridotID [$ENV]..."
+# Faucet prod lock (ANT-290, board order 2026-10-21): strict abort for main
+# deploys that would enable the sandbox faucet. Logic lives in
+# deploy/faucet-preflight.sh (sourced — function only, so it stays unit
+# testable); this block runs for ENV=main only, test stack unaffected.
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/faucet-preflight.sh"
+if [ "$ENV" = "main" ]; then
+  faucet_preflight_main
+fi
 # Serial builds (small VPS): api + app are the proven set; dashboard
 # (ANT-118) joins the same loop — same pattern, independent image.
 # (docs left the loop in ANT-124: Mintlify-hosted, no VPS image to build.)
-for s in api app dashboard; do
-  echo "==> build $s"
-  COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
-done
+# SKIP_BUILD=1 skips the loop for tag-switch rollbacks (TAG=<prev-sha>).
+if [ "${SKIP_BUILD:-0}" != "1" ]; then
+  for s in api app dashboard; do
+    echo "==> build $s"
+    COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
+  done
+else
+  echo "==> SKIP_BUILD=1: reusing existing images (rollback path)"
+fi
+
+# ANT-347 LOW-5: pre-deploy migration check — fail fast if the DB is
+# unreachable or migrations have drifted, BEFORE swapping containers.
+# `migrate status` is read-only; the actual `migrate deploy` runs at API
+# container boot (Dockerfile.api CMD). Rollback: fix DB/schema, re-run up.sh.
+echo "==> prisma migrate status (pre-deploy check)"
+# `migrate status` also exits 1 when migrations are merely *pending* — they get
+# applied at API boot by `migrate deploy`, so only real drift/failure blocks.
+set +e
+MIGRATE_STATUS="$(COMPOSE_PROJECT_NAME="$PROJECT" compose run --rm api node_modules/.bin/prisma migrate status 2>&1)"
+MIGRATE_RC=$?
+set -e
+printf '%s\n' "$MIGRATE_STATUS"
+case "$MIGRATE_STATUS" in
+  *"have failed"* | *"Drift detected"*) MIGRATE_RC=1 ;;
+  *"have not yet been applied"*)
+    if [ "$MIGRATE_RC" -ne 0 ]; then
+      echo "warn: pending migrations — applied by migrate deploy at API boot" >&2
+      MIGRATE_RC=0
+    fi ;;
+esac
+if [ "$MIGRATE_RC" -ne 0 ]; then
+  echo "error: prisma migrate status failed — fix the DB/schema before deploying" >&2
+  exit 1
+fi
 
 # --remove-orphans: drops stale containers (renamed services, interrupted recreates)
 # that would otherwise squat on container names and fail the next recreate.
 COMPOSE_PROJECT_NAME="$PROJECT" compose up -d --remove-orphans
+
+# ANT-385: alias :latest to the just-built :TAG images, record the deploy,
+# and (re)install the alert crons. `docker tag` never pulls — source images
+# were just built above (or reused via SKIP_BUILD=1).
+for s in api app dashboard; do
+  SRC="peridot-id-$s${NAMESPACE}:$TAG"
+  if docker image inspect "$SRC" >/dev/null 2>&1; then
+    docker tag "$SRC" "peridot-id-$s${NAMESPACE}:latest"
+  else
+    echo "warn: image $SRC not found — :latest alias skipped for $s" >&2
+  fi
+done
+printf '%s env=%s sha=%s tag=%s\n' "$(date -u +%FT%TZ)" "$ENV" "$GIT_SHA" "$TAG" >> "$SCRIPT_DIR/.deploys.log"
+
+# Alert crons (ANT-385 observability): idempotent, runtime secrets only.
+# Warn-and-continue so a crontab failure can't fail an otherwise good deploy;
+# verify with `crontab -l | grep peridot-alert`. Opt out: INSTALL_ALERT_CRONS=0.
+if [ "${INSTALL_ALERT_CRONS:-1}" = "1" ]; then
+  if bash "$SCRIPT_DIR/alerts/install.sh" "$ENV"; then
+    crontab -l 2>/dev/null | grep 'peridot-alert' || true
+  else
+    echo "warn: alert cron install failed — run deploy/alerts/install.sh $ENV on the VPS" >&2
+  fi
+fi
 
 echo "Done."

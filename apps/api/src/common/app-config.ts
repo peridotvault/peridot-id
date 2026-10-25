@@ -176,7 +176,7 @@ export function apiServesHttps(get: (key: string, def?: string) => unknown, urls
 
 /**
  * Derive the Google OAuth callback from the API's own public origin.
- * Single source: API_URL (e.g. https://api.pid.peridotvault.com).
+ * Single source: API_URL (e.g. https://api.peridot.id).
  * An explicit GOOGLE_CALLBACK_URL env still wins when set (dual-serve edge),
  * but examples no longer carry it — set API_URL instead.
  */

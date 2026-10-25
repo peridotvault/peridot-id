@@ -21,10 +21,27 @@ export function EditChainForm({
   const [rpcUrls, setRpcUrls] = useState((chain.rpcUrls ?? []).join("\n"));
   const [explorerUrl, setExplorerUrl] = useState(chain.explorerUrl ?? "");
   const [logoUrl, setLogoUrl] = useState(chain.logoUrl ?? "");
+  const [uploading, setUploading] = useState(false);
   const [isTestnet, setIsTestnet] = useState(chain.isTestnet);
   const [isActive, setIsActive] = useState(chain.isActive);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const uploadLogo = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const updated = await client.admin
+        .uploadChainLogo(chain.id, file)
+        .then((r) => unwrap({ ok: true, data: r }, "Uploading logo"));
+      setLogoUrl(updated.logoUrl ?? "");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const save = async () => {
     if (!name.trim() || !symbol.trim()) {
@@ -64,7 +81,7 @@ export function EditChainForm({
       <div className={`rounded-lg border border-border px-3 py-2 font-mono text-xs ${MUTED}`}>
         {chain.namespace}:{chain.reference} · id {chain.id}
       </div>
-      {error && <p className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
+      {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="text-sm">
           Name
@@ -95,17 +112,39 @@ export function EditChainForm({
             className={FIELD}
           />
         </label>
-        <label className="text-sm sm:col-span-2">
-          Logo URL
+        <div className="text-sm sm:col-span-2">
+          <span>Logo</span>
+          <div className="mt-1 flex items-center gap-3">
+            {logoUrl ? (
+              <img src={logoUrl} alt="" className="h-8 w-8 rounded-full" />
+            ) : (
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                {symbol.slice(0, 3).toUpperCase() || "?"}
+              </span>
+            )}
+            <label className="inline-flex cursor-pointer items-center rounded border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+              {uploading ? "Uploading…" : "Upload to our storage"}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="sr-only"
+                disabled={uploading || busy}
+                onChange={(e) => {
+                  void uploadLogo(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
           <input
             value={logoUrl}
             onChange={(e) => setLogoUrl(e.target.value)}
-            placeholder="https://…"
+            placeholder="https://… (or upload above)"
             inputMode="url"
             maxLength={512}
-            className={FIELD}
+            className={`${FIELD} mt-2`}
           />
-        </label>
+        </div>
         <label className="text-sm sm:col-span-2">
           RPC URLs <span className={MUTED}>(one per line, max 5)</span>
           <textarea

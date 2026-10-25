@@ -5,7 +5,7 @@ Browser SDK (`@peridotvault/pid-sdk-js`). Full usage guide: see the public docs 
 
 ```ts
 const peridot = Peridot({
-  baseUrl: "https://api.pid.peridotvault.com",
+  baseUrl: "https://api.peridot.id",
   solanaRpcUrl: "https://api.devnet.solana.com",
   onUnauthorized: async () => {
     const ok = await peridot.auth.refresh();

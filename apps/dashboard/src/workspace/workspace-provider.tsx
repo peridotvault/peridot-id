@@ -31,6 +31,7 @@ interface WorkspaceContextValue {
   onTab: (key: string) => void;
   contractChainId: string | null;
   openContracts: (chainId?: string) => void;
+  clearContractChainId: () => void;
   env: string;
   otherWorkspaceUrl?: string;
   busy: boolean;
@@ -117,11 +118,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const isAdmin = role === "admin";
   // Tabs are routes now (?tab= retired): active state follows the pathname.
   const tab =
-    pathname?.startsWith("/contracts") === true
+    pathname?.startsWith("/leveling") === true
+      ? "leveling"
+      : pathname?.startsWith("/settings") === true
+      ? "settings"
+      : pathname?.startsWith("/contracts") === true
       ? "contracts"
       : pathname?.startsWith("/chains") === true
         ? "chains"
-        : pathname?.startsWith("/partners") === true
+        : pathname?.startsWith("/tokens") === true
+          ? "tokens"
+          : pathname?.startsWith("/partners") === true
           ? "partners"
           : pathname?.startsWith("/fees") === true
             ? "fees"
@@ -132,9 +139,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ? [
             { key: "apps", label: "Apps" },
             { key: "chains", label: "Chains" },
+            { key: "tokens", label: "Tokens" },
             { key: "contracts", label: "Contracts" },
             { key: "partners", label: "Partners" },
             { key: "fees", label: "Fees" },
+            { key: "leveling", label: "Leveling" },
+            { key: "settings", label: "System" },
           ]
         : [{ key: "apps", label: "Apps" }],
     [isAdmin],
@@ -155,6 +165,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     },
     [navigate],
   );
+  // ANT-341 FR7: the handoff is single-use — ContractsManager clears it after
+  // consume so a later visit never re-selects a stale chain.
+  const clearContractChainId = useCallback(() => setContractChainId(null), []);
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
@@ -168,6 +181,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       onTab,
       contractChainId,
       openContracts,
+      clearContractChainId,
       env: PID_ENV,
       otherWorkspaceUrl: OTHER_WORKSPACE_URL,
       busy,
@@ -175,7 +189,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
     }),
-    [client, status, role, isAdmin, pid, tabs, tab, onTab, contractChainId, openContracts, busy, error, signIn, signOut],
+    [client, status, role, isAdmin, pid, tabs, tab, onTab, contractChainId, openContracts, clearContractChainId, busy, error, signIn, signOut],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

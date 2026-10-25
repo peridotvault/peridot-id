@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
+import { normalizeOriginInput } from "./origins";
 import type { AppFee, PidApp } from "./app-types";
 import { Card, DIVIDER, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "./ui";
 
@@ -36,44 +37,42 @@ function fmtIdr(units: string): string {
   return `Rp${Number(units).toLocaleString("id-ID")}`;
 }
 
-/** Client-side mirror of the API bare-origin rule (app.dto.ts ORIGIN_PATTERN +
- *  apps.service.ts normalizeOrigin): trim, strip trailing slashes, lowercase,
- *  then require scheme + host + optional port with no path/query/fragment.
- *  Returns the normalized origin, or null when invalid. */
-function normalizeOriginInput(value: string): string | null {
-  const trimmed = value.trim().replace(/\/+$/, "").toLowerCase();
-  if (!/^https?:\/\/[^/:?#]+(?::\d+)?$/.test(trimmed)) return null;
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    if (parsed.origin !== trimmed) return null;
-    return parsed.origin;
-  } catch {
-    return null;
-  }
-}
+/** Client-side origin check lives in ./origins (exported for unit tests). */
 
-async function copy(text: string): Promise<void> {
+async function copy(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch {
-    // clipboard unavailable — ignore
+    // clipboard unavailable or denied — caller surfaces the failure.
+    return false;
   }
 }
 
 function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
+  const [state, setState] = useState<"idle" | "done" | "failed">("idle");
+  // ANT-341 FR7: reset timer cleaned up on unmount.
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
   return (
     <MiniButton
       onClick={() => {
-        void copy(text).then(() => {
-          setDone(true);
-          setTimeout(() => setDone(false), 1500);
+        void copy(text).then((ok) => {
+          // ANT-333: only claim success when the clipboard write succeeded.
+          setState(ok ? "done" : "failed");
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => setState("idle"), 1500);
         });
       }}
+      title={state === "failed" ? "Copy failed — your browser blocked clipboard access" : undefined}
       className="font-mono"
     >
-      {done ? "Copied" : "Copy"}
+      {state === "done" ? "Copied" : state === "failed" ? "Copy failed" : "Copy"}
     </MiniButton>
   );
 }
@@ -94,6 +93,8 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   const [newOrigin, setNewOrigin] = useState("");
   const [originError, setOriginError] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<string | null>(null);
+  const [newWebhookUrl, setNewWebhookUrl] = useState("");
+  const [revealedWebhook, setRevealedWebhook] = useState<string | null>(null);
   // Sandbox faucet state — env comes from GET /v1/env only (never a client var).
   const [envInfo, setEnvInfo] = useState<EnvInfo | null>(null);
   const [faucetAmount, setFaucetAmount] = useState("50000");
@@ -101,12 +102,27 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   const [faucetError, setFaucetError] = useState<string | null>(null);
   const [dailyRemaining, setDailyRemaining] = useState<number | null>(null);
 
+  // ANT-341 FR7: flash timeout cleaned up on unmount (no setState-after-unmount).
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
   const flash = (m: string) => {
     setMsg(m);
-    setTimeout(() => setMsg(null), 2500);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setMsg(null), 2500);
   };
 
   const load = useCallback(async () => {
+    // ANT-341 FR7: never fire API calls with an empty app id.
+    if (!appId) {
+      setLoading(false);
+      setNotFound(true);
+      return;
+    }
     setLoading(true);
     setError(null);
     setNotFound(false);
@@ -161,17 +177,17 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   const addOrigin = () => {
     const raw = newOrigin.trim();
     if (!raw || !app) return;
-    const normalized = normalizeOriginInput(raw);
-    if (!normalized) {
-      setOriginError("Use a bare http(s) origin — scheme + host + optional port, no path. e.g. https://mygame.dev");
+    const checked = normalizeOriginInput(raw);
+    if ("error" in checked) {
+      setOriginError(checked.error);
       return;
     }
     setOriginError(null);
-    if (app.allowedOrigins.includes(normalized)) {
+    if (app.allowedOrigins.includes(checked.origin)) {
       setNewOrigin("");
       return;
     }
-    void save({ allowedOrigins: [...app.allowedOrigins, normalized] }, () => setNewOrigin(""));
+    void save({ allowedOrigins: [...app.allowedOrigins, checked.origin] }, () => setNewOrigin(""));
   };
 
   const rotateSecret = async () => {
@@ -184,6 +200,46 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
       await load();
     } catch {
       setError("Secret rotation failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Set (or replace) the ledger-callback endpoint. The signing secret is
+   *  returned ONCE — shown with copy + dismiss, never fetched again. */
+  const saveWebhook = async () => {
+    const url = newWebhookUrl.trim();
+    if (!url || !app) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = unwrap(
+        await client.post<{ url: string; secret: string }>(`/v1/apps/${appId}/webhook`, { url }),
+        "Save webhook",
+      );
+      setApp({ ...app, webhookUrl: res.url });
+      setRevealedWebhook(res.secret);
+      setNewWebhookUrl("");
+      flash("Webhook saved. Copy the signing secret now.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save webhook failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Remove the ledger-callback endpoint (and its signing secret). */
+  const clearWebhook = async () => {
+    if (!window.confirm("Remove this webhook endpoint? PeridotID will stop signing callbacks to it.")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      unwrap(await client.delete<{ url: string | null }>(`/v1/apps/${appId}/webhook`), "Remove webhook");
+      if (app) setApp({ ...app, webhookUrl: null });
+      setRevealedWebhook(null);
+      flash("Webhook removed.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Remove webhook failed.");
     } finally {
       setBusy(false);
     }
@@ -249,7 +305,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   if (loading) {
     return (
       <section className="mt-8">
-        <p className={`text-sm ${MUTED}`}>Loading…</p>
+        <p role="status" className={`text-sm ${MUTED}`}>Loading…</p>
       </section>
     );
   }
@@ -274,7 +330,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         ← All apps
       </Link>
 
-      <div className="mt-3 flex items-center justify-between gap-3">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         {editingName ? (
           <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} className={`${FIELD} text-xl font-semibold`} />
         ) : (
@@ -282,7 +338,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
             {app.name} {!app.isActive && <span className={`text-sm font-normal ${MUTED}`}>(disabled)</span>}{" "}
             {app.isVerified && (
               <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 align-middle text-xs font-semibold text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
-                ✓ Verified partner — 0% PeridotID fee
+                <span aria-hidden="true">✓</span> Verified partner — 0% PeridotID fee
               </span>
             )}
           </h1>
@@ -324,13 +380,20 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-2 text-sm">
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
         <span className={MUTED}>client_id</span>
         <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{app.clientId}</code>
         <CopyButton text={app.clientId} />
       </div>
 
-      {error && <p className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
+      {error && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
+          <MiniButton size="sm" onClick={() => void load()}>
+            Retry
+          </MiniButton>
+        </div>
+      )}
       {msg && <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{msg}</p>}
 
       <div className="mt-6 grid gap-4">
@@ -352,7 +415,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
                 ? ` ${fmtIdr(String(dailyRemaining))} remaining today.`
                 : " Daily cap Rp100.000 per identity."}
             </p>
-            {faucetError && <p className={`mt-2 text-xs ${ERROR}`}>{faucetError}</p>}
+            {faucetError && <p role="alert" className={`mt-2 text-xs ${ERROR}`}>{faucetError}</p>}
             <div className="mt-2 flex flex-col gap-2 sm:flex-row">
               <label htmlFor="faucet-amount" className="sr-only">
                 Faucet amount in IDR
@@ -422,7 +485,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
               Add
             </MiniButton>
           </div>
-          {originError && <p className={`mt-2 text-xs ${ERROR}`}>{originError}</p>}
+          {originError && <p role="alert" className={`mt-2 text-xs ${ERROR}`}>{originError}</p>}
         </Card>
 
         <Card>
@@ -451,6 +514,64 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
               </MiniButton>
             </div>
           )}
+        </Card>
+
+        <Card>
+          <p className={SECTION_LABEL}>Webhook endpoint</p>
+          <p className={`mt-1 text-xs ${MUTED}`}>
+            PeridotID POSTs signed ledger events here (e.g. <code className="font-mono">fiat.transfer.posted</code> when
+            funds land on this app&apos;s escrow account). Every callback carries{" "}
+            <code className="font-mono">X-Pid-Signature: sha256=&lt;hex&gt;</code> over the raw body.
+          </p>
+          {revealedWebhook ? (
+            <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
+              <p className="text-xs font-semibold">Copy it now — it will never be shown again.</p>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <code className="min-w-0 flex-1 break-all rounded bg-white px-2 py-1 font-mono text-xs dark:bg-black/50">
+                  {revealedWebhook}
+                </code>
+                <div className="flex shrink-0 gap-2">
+                  <CopyButton text={revealedWebhook} />
+                  <MiniButton onClick={() => setRevealedWebhook(null)}>Dismiss</MiniButton>
+                </div>
+              </div>
+            </div>
+          ) : app.webhookUrl ? (
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-muted px-3 py-1.5">
+              <code className="min-w-0 flex-1 break-all font-mono text-xs">{app.webhookUrl}</code>
+              <MiniButton onClick={() => void clearWebhook()} disabled={busy}>
+                Remove
+              </MiniButton>
+            </div>
+          ) : (
+            <p className={`mt-2 text-xs ${MUTED}`}>No webhook — ledger events will not be pushed to this app.</p>
+          )}
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <label htmlFor="webhook-url" className="sr-only">
+              Webhook endpoint URL
+            </label>
+            <input
+              id="webhook-url"
+              value={newWebhookUrl}
+              onChange={(e) => setNewWebhookUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void saveWebhook();
+              }}
+              placeholder="https://mygame.dev/peridot/webhook"
+              inputMode="url"
+              className={`${FIELD} font-mono text-xs`}
+            />
+            <MiniButton
+              variant="solid"
+              size="sm"
+              onClick={() => void saveWebhook()}
+              disabled={busy || !newWebhookUrl.trim()}
+              className="self-start sm:self-end"
+            >
+              {app.webhookUrl ? "Replace" : "Set endpoint"}
+            </MiniButton>
+          </div>
+          <p className={`mt-1 text-xs ${MUTED}`}>https required (http allowed only for localhost). Setting a new URL rotates the signing secret.</p>
         </Card>
 
         <Card>

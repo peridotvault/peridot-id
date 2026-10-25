@@ -23,6 +23,7 @@ export class PidAppsController {
   /** List my registered apps. */
   @Get()
   @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   list(@CurrentUser() user: AuthenticatedUser) {
     return this.apps.list(user.pid);
   }
@@ -30,6 +31,7 @@ export class PidAppsController {
   /** One owned app (404 unless the caller owns it). */
   @Get(":id")
   @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   get(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.apps.get(user.pid, id);
   }
@@ -80,6 +82,7 @@ export class PidAppsController {
   /** Per-app fee schedule (topup / transaction / withdraw). Owner only. */
   @Get(":id/fees")
   @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
   listFees(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.apps.listFees(user.pid, id);
   }

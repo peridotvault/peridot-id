@@ -1,4 +1,4 @@
-import { decodeState, encodeState, isLoopbackReturnTo, pkceS256Challenge, pkceVerifyS256, SsoService } from "./sso.service";
+import { CODE_TTL_MS, decodeState, encodeState, isLoopbackReturnTo, pkceS256Challenge, pkceVerifyS256, SsoService } from "./sso.service";
 import { PidAppsService } from "./apps.service";
 import { mockSecurity } from "../../test/factories";
 
@@ -10,7 +10,7 @@ function setup(apps?: {
   const config = {
     get: jest.fn((key: string, def?: unknown) => {
       const values: Record<string, unknown> = {
-        CLIENT_REDIRECT_ALLOWLIST: "https://live2dev.com, https://app.pid.peridotvault.com",
+        CLIENT_REDIRECT_ALLOWLIST: "https://live2dev.com, https://peridot.id",
       };
       return values[key] ?? def;
     }),
@@ -109,7 +109,7 @@ describe("SsoService", () => {
   it("only allows configured origins in the returnTo allowlist", () => {
     const { service } = setup();
     expect(service.isAllowedReturnTo("https://live2dev.com/auth/callback")).toBe(true);
-    expect(service.isAllowedReturnTo("https://app.pid.peridotvault.com/")).toBe(true);
+    expect(service.isAllowedReturnTo("https://peridot.id/")).toBe(true);
     expect(service.isAllowedReturnTo("https://evil.com")).toBe(false);
     expect(service.isAllowedReturnTo("javascript:alert(1)")).toBe(false);
     expect(service.isAllowedReturnTo(undefined)).toBe(false);
@@ -155,6 +155,30 @@ describe("SsoService", () => {
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
     await service.consume(code, "https://live2dev.com/auth/callback");
     await expect(service.consume(code, "https://live2dev.com/auth/callback")).rejects.toThrow("sso_code_invalid");
+  });
+
+  // ANT-368: pid_code TTL is <=60s; code valid immediately, rejected after
+  // expiry, replay still rejected (single-use intact).
+  it("enforces a <=60s TTL: valid at issue, rejected after expiry, replay rejected", async () => {
+    expect(CODE_TTL_MS).toBeLessThanOrEqual(60 * 1000);
+    const { service, rows } = setup();
+    const before = Date.now();
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    const after = Date.now();
+    // (a) expiry lands within TTL of issue time, and the fresh code exchanges.
+    const stored = rows.get(code) as unknown as { expiresAt: Date };
+    expect(stored.expiresAt.getTime()).toBeGreaterThan(before);
+    // Bound against `after`, not `before`: expiresAt is stamped inside issue(),
+    // so `expiresAt - before` includes issue() execution time and flakes by 1ms
+    // on loaded runners. `expiresAt <= after + TTL` holds by construction.
+    expect(stored.expiresAt.getTime()).toBeLessThanOrEqual(after + 60 * 1000);
+    await expect(service.consume(code, "https://live2dev.com/auth/callback")).resolves.toMatchObject({ pid: "pid_1" });
+    // (c) replay of the consumed code is rejected.
+    await expect(service.consume(code, "https://live2dev.com/auth/callback")).rejects.toThrow("sso_code_invalid");
+    // (b) an un-consumed code past its expiry is rejected.
+    const code2 = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    (rows.get(code2) as unknown as { expiresAt: Date }).expiresAt = new Date(Date.now() - 1000);
+    await expect(service.consume(code2, "https://live2dev.com/auth/callback")).rejects.toThrow("sso_code_invalid");
   });
 
   it("rejects an unknown or expired code", async () => {

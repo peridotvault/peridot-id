@@ -14,6 +14,9 @@ import { createHash } from "node:crypto";
 /** prevHash of the first entry in the chain. */
 export const GENESIS_HASH = "0".repeat(64);
 
+/** Advisory-lock key serializing chain appends and backfills (writer + repair share it). */
+export const CHAIN_LOCK = 918273645;
+
 /** Immutable, value-bearing fields of one ledger entry, plus its chain link. */
 export interface ChainableEntry {
   entryGroup: string;

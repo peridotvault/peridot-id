@@ -15,7 +15,11 @@ export class PermissionsController {
    * pid ownership. No server submission path exists — the owner-signed payload
    * is the pid→account binding (account + chainId are part of the signed
    * payload); any future relay must re-check pid ownership before forwarding
-   * (see PermissionsService).
+   * (see PermissionsService). ANT-285(d): this endpoint is intentionally
+   * stateless so it cannot re-derive the CREATE2 address inline — do not add
+   * account-scoped writes behind it without adding an inline binding check
+   * (cf. `POST /v1/session-keys/grants/validate`, which binds
+   * `accountId == sha256(caller pid)` because that derivation is pure).
    */
   @Post("grants/validate")
   @HttpCode(HttpStatus.OK)

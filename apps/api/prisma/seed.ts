@@ -116,6 +116,70 @@ async function main(): Promise<void> {
     }
   }
   console.log("chain registry seeded");
+
+  // Chain logos (one file per chain in Wasabi; rows point at the API proxy).
+  // Only fills blanks — a manually set logoUrl is never overwritten.
+  const apiBase = (process.env.API_URL ?? "http://localhost:3300").replace(/\/+$/, "");
+  for (const c of await prisma.chain.findMany({ where: { logoUrl: null } })) {
+    const key = `public/chains/${c.namespace}-${c.reference.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)}.png`;
+    await prisma.chain.update({
+      where: { id: c.id },
+      data: { logoUrl: `${apiBase}/v1/tokens/logo?key=${encodeURIComponent(key)}` },
+    });
+  }
+
+  // Curated token registry: Token holds metadata once, deployments hang one
+  // token off many chains (chainId FK → chains.id). Logos live once per
+  // symbol at public/tokens/<SYMBOL>.png.
+  const TOKENS: { symbol: string; name: string; deployments: { reference: string; mint: string; decimals: number; pinned: boolean; order: number }[] }[] = [
+    {
+      symbol: "wSOL", name: "Wrapped SOL",
+      deployments: [
+        { reference: SOLANA_DEVNET_REFERENCE, mint: "So11111111111111111111111111111111111111112", decimals: 9, pinned: false, order: 1 },
+        { reference: SOLANA_TESTNET_REFERENCE, mint: "So11111111111111111111111111111111111111112", decimals: 9, pinned: false, order: 1 },
+      ],
+    },
+    {
+      symbol: "USDC", name: "USD Coin",
+      deployments: [
+        { reference: SOLANA_TESTNET_REFERENCE, mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6, pinned: true, order: 0 },
+      ],
+    },
+    {
+      symbol: "USDT", name: "Tether",
+      deployments: [
+        { reference: SOLANA_DEVNET_REFERENCE, mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6, pinned: false, order: 2 },
+        { reference: SOLANA_TESTNET_REFERENCE, mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6, pinned: false, order: 2 },
+      ],
+    },
+  ];
+  for (const t of TOKENS) {
+    const token = await prisma.token.upsert({
+      where: { symbol: t.symbol },
+      update: { name: t.name },
+      create: { symbol: t.symbol, name: t.name, logoKey: `public/tokens/${t.symbol}.png` },
+    });
+    for (const d of t.deployments) {
+      const chain = await prisma.chain.findUnique({
+        where: { namespace_reference: { namespace: SOLANA_NAMESPACE, reference: d.reference } },
+      });
+      if (!chain) continue;
+      const existing = await prisma.tokenDeployment.findFirst({ where: { tokenId: token.id, chainId: chain.id } });
+      if (existing) continue;
+      await prisma.tokenDeployment.create({
+        data: {
+          tokenId: token.id,
+          chainId: chain.id,
+          mint: d.mint,
+          decimals: d.decimals,
+          isVisible: true,
+          isPinned: d.pinned,
+          sortOrder: d.order,
+        },
+      });
+    }
+  }
+  console.log("token registry seeded");
 }
 
 main()

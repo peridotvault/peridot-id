@@ -45,9 +45,9 @@ describe("service-URL set (ANT-193: one set, everything derived)", () => {
     const urls = resolveServiceUrls(
       get({
         API_URL: "https://api.peridot.id",
-        API_DOMAIN: "https://api.pid.peridotvault.com",
+        API_DOMAIN: "https://sandbox-api.peridot.id",
         WALLET_URL: "https://peridot.id",
-        CLIENT_SUCCESS_URL: "https://app.pid.peridotvault.com",
+        CLIENT_SUCCESS_URL: "https://sandbox.peridot.id",
         DASHBOARD_URL: "https://dashboard.peridot.id",
         DOCS_URL: "https://docs.peridot.id",
       }),
@@ -68,25 +68,25 @@ describe("service-URL set (ANT-193: one set, everything derived)", () => {
 
   it("reads the deprecated keys as a cutover fallback", () => {
     const urls = resolveServiceUrls(
-      get({ API_DOMAIN: "https://api.pid.peridotvault.com", CLIENT_SUCCESS_URL: "https://app.pid.peridotvault.com" }),
+      get({ API_DOMAIN: "https://sandbox-api.peridot.id", CLIENT_SUCCESS_URL: "https://sandbox.peridot.id" }),
     );
-    expect(urls.apiUrl).toBe("https://api.pid.peridotvault.com");
-    expect(urls.walletUrl).toBe("https://app.pid.peridotvault.com");
+    expect(urls.apiUrl).toBe("https://sandbox-api.peridot.id");
+    expect(urls.walletUrl).toBe("https://sandbox.peridot.id");
   });
 
   it("derives the RP ID from the wallet hostname (port stripped)", () => {
-    expect(webauthnRpId(get({ WALLET_URL: "https://app.pid.peridotvault.com" }))).toBe("app.pid.peridotvault.com");
+    expect(webauthnRpId(get({ WALLET_URL: "https://peridot.id" }))).toBe("peridot.id");
     expect(webauthnRpId(get({}))).toBe("localhost");
   });
 
   it("keeps an explicit WEBAUTHN_RP_ID for passkey continuity", () => {
     expect(
-      webauthnRpId(get({ WALLET_URL: "https://app.pid.peridotvault.com", WEBAUTHN_RP_ID: "pid.peridotvault.com" })),
-    ).toBe("pid.peridotvault.com");
+      webauthnRpId(get({ WALLET_URL: "https://peridot.id", WEBAUTHN_RP_ID: "peridot.id" })),
+    ).toBe("peridot.id");
   });
 
   it("derives cookie-secure from the API protocol unless overridden", () => {
-    expect(apiServesHttps(get({ API_URL: "https://api.pid.peridotvault.com" }))).toBe(true);
+    expect(apiServesHttps(get({ API_URL: "https://api.peridot.id" }))).toBe(true);
     expect(apiServesHttps(get({}))).toBe(false);
   });
 });

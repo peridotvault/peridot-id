@@ -1,0 +1,224 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { usePeridot } from "../../shared/app/AppContext";
+import { readLoginContext, type LoginContext } from "../../feat/auth/utils/popupLogin";
+import { readSsoParams, ssoOrigin } from "../../feat/auth/utils/sso";
+import { LoadingScreen } from "../../shared/components/shell/LoadingScreen";
+import { AccountSwitcherModal } from "../../shared/components/shell/AccountSwitcherModal";
+import { SsoConsentModal } from "../../feat/auth/components/SsoConsentModal";
+import { useAppVerified } from "../../feat/auth/hooks/useAppVerified";
+import { useLoginSession } from "../../feat/auth/hooks/useLoginSession";
+import { usePidClaim } from "../../feat/auth/hooks/usePidClaim";
+import { useEmailSignIn } from "../../feat/auth/hooks/useEmailSignIn";
+import { useSignInMethods } from "../../feat/auth/hooks/useSignInMethods";
+import { useConsentActions } from "../../feat/auth/hooks/useConsentActions";
+import { PidClaimForm } from "../../feat/auth/components/PidClaimForm";
+import { EmailOtpForm } from "../../feat/auth/components/EmailOtpForm";
+import { LoginOptions } from "../../feat/auth/components/LoginOptions";
+import { readOAuthError, stripOAuthError } from "../../feat/auth/utils/parseOAuthError";
+
+import { styles as s } from "../../shared/styles/theme";
+import { flatten } from "../../shared/styles/stylesheet";
+
+export function Login({
+  onLoggedIn,
+  stepUp,
+  loginContext,
+}: {
+  onLoggedIn: () => void;
+  stepUp?: boolean;
+  loginContext?: LoginContext | null;
+}) {
+  const { peridot } = usePeridot();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sso] = useState(readSsoParams);
+  // Auth-in-a-new-tab (`?popup=login&origin=…&client_id=…` opened by a dapp):
+  // the tab authenticates (and creates a PID if the user has none), then mints a
+  // pid_code and posts it to the opener instead of navigating.
+  const [ctx, setCtx] = useState<LoginContext | null>(() => loginContext ?? readLoginContext());
+  const autoStarted = useRef(false);
+  // Auth-in-a-new-tab consent: a session that already existed at tab open must
+  // not auto-issue — the user picks Allow / different account in the consent
+  // modal. A session created by an explicit login in this tab (no session at
+  // open, or after "different account") delivers without a second prompt.
+  // `delivered` guards the double-mint (inline deliver + effect).
+  const flags = useRef({ delivered: false, hadSessionAtOpen: null as boolean | null }).current;
+
+  // Verified-partner badge (server-sourced trust signal, fail-closed to hidden).
+  const appClientId = sso?.clientId ?? ctx?.clientId;
+  const appVerified = useAppVerified(peridot, appClientId);
+
+  // Terminal state for auth-in-a-new-tab: the code was delivered (or denied)
+  // but window.close() didn't take, so this window is still open. Without it
+  // the stale ctx renders the consent scrim again over a finished flow.
+  const [finished, setFinished] = useState<string | null>(null);
+  const finishCtx = useCallback((denied: boolean) => {
+    setCtx(null);
+    setFinished(denied ? "Request denied — you can close this window." : "Signed in — you can close this window.");
+  }, []);
+
+  const claim = usePidClaim(peridot, { sso, ctx, flags, onLoggedIn, setBusy, setError });
+  const emailSignIn = useEmailSignIn(peridot, {
+    sso,
+    ctx,
+    flags,
+    onLoggedIn,
+    refreshClaim: claim.refreshClaim,
+    setBusy,
+    setError,
+    onCtxDone: finishCtx,
+  });
+  const { session, setSession, showLogin, setShowLogin } = useLoginSession(peridot, { sso, ctx, flags, claim: claim.claim, onCtxDone: finishCtx });
+  const consent = useConsentActions(peridot, { sso, ctx, flags, setSession, setShowLogin, setBusy, setError, onCtxDone: finishCtx });
+  const signIn = useSignInMethods(peridot, { sso, ctx, flags, onLoggedIn, setBusy, setError, onCtxDone: finishCtx });
+
+  /** Retryable OAuth failure from the callback (?error=) — show inline, then strip. */
+  useEffect(() => {
+    const code = readOAuthError();
+    if (!code) return;
+    setError(
+      code === "oauth_not_configured"
+        ? "Sign-in is not available right now — please try again later."
+        : "Google sign-in failed — please try again.",
+    );
+    stripOAuthError();
+  }, []);
+
+  // Popup opened from a method button: auto-start that method once the login
+  // form is showing (not on the claim/consent screens).
+  useEffect(() => {
+    if (!ctx?.method || autoStarted.current) return;
+    if (claim.claim !== null) return;
+    if ((sso || ctx) && session !== null) return;
+    autoStarted.current = true;
+    if (ctx.method === "passkey") void signIn.signInWithPasskey();
+    else void signIn.continueWithGoogle();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ctx, claim.claim, sso, session]);
+
+  // SSO check in flight: branded loader, so the login form never flashes
+  // before the consent modal resolves.
+  if ((sso || ctx) && session === undefined) {
+    return <LoadingScreen />;
+  }
+
+  // Pending post-auth claim: the credential is verified but no identity exists
+  // yet. Claiming creates it — this screen is the only way forward.
+  if (claim.claim === undefined) {
+    return <LoadingScreen />;
+  }
+
+  if (claim.claim) {
+    return (
+      <PidClaimForm
+        email={claim.claim.email}
+        displayName={claim.claim.displayName}
+        handle={claim.handle}
+        handleStatus={claim.handleStatus}
+        ackPermanent={claim.ackPermanent}
+        busy={busy}
+        error={error}
+        onHandle={claim.setHandle}
+        onAck={() => claim.setAckPermanent((v) => !v)}
+        onSubmit={claim.claimPid}
+        onSignOut={claim.claimSignOut}
+      />
+    );
+  }
+
+  // Already logged in + third-party SSO request: one-tap consent, no redundant login.
+  if (sso && session && !showLogin) {
+    return (
+      <SsoConsentModal
+        origin={ssoOrigin(sso.redirectUri)}
+        sessionLabel={session.label}
+        busy={busy}
+        error={error}
+        onAllow={consent.allowApp}
+        onDifferent={() => setShowLogin(true)}
+        onDeny={consent.denyApp}
+        verified={appVerified}
+      />
+    );
+  }
+
+  // Delivered/denied but still open: terminal screen, never the consent card.
+  if (finished) {
+    return (
+      <div style={flatten([s.container, { justifyContent: "center", alignItems: "center" }])} className="flex flex-col">
+        <h1 style={s.title}>PeridotID</h1>
+        <p style={s.hint}>{finished}</p>
+      </div>
+    );
+  }
+
+  // Auth-in-a-new-tab + pre-existing session: explicit consent, same card as SSO.
+  if (ctx && session && !showLogin && claim.claim === null) {
+    if (consent.picker !== null) {
+      return (
+        <AccountSwitcherModal
+          visible
+          accounts={consent.picker}
+          busy={busy}
+          error={consent.pickerError}
+          onClose={() => consent.setPicker(null)}
+          onSelect={consent.pickAccount}
+          onAdd={consent.addAccountCtx}
+        />
+      );
+    }
+    return (
+      <SsoConsentModal
+        origin={ctx.origin}
+        sessionLabel={session.label}
+        busy={busy}
+        error={error}
+        onAllow={consent.allowCtx}
+        onDifferent={consent.useDifferentCtx}
+        onDeny={consent.denyApp}
+        verified={appVerified}
+      />
+    );
+  }
+
+  // Email OTP: address is entered inline on LoginOptions (arrow submit);
+  // a sent code flips `step` to "code" and swaps in the OTP screen.
+  if (emailSignIn.step === "code") {
+    return (
+      <EmailOtpForm
+        step={emailSignIn.step}
+        email={emailSignIn.email}
+        code={emailSignIn.code}
+        resendIn={emailSignIn.resendIn}
+        busy={busy}
+        error={error}
+        onEmail={emailSignIn.setEmail}
+        onCode={emailSignIn.setCode}
+        onStart={() => emailSignIn.start()}
+        onVerify={() => emailSignIn.verify()}
+        onBack={() => {
+          emailSignIn.reset();
+          setError(null);
+        }}
+      />
+    );
+  }
+
+  return (
+    <LoginOptions
+      busy={busy}
+      error={error}
+      stepUp={!!stepUp}
+      ssoOrigin={sso ? ssoOrigin(sso.redirectUri) : null}
+      ctxOrigin={ctx?.origin ?? null}
+      email={emailSignIn.email}
+      onGoogle={() => signIn.continueWithGoogle()}
+      onEmailChange={(t) => {
+        if (error) setError(null);
+        emailSignIn.setEmail(t);
+      }}
+      onSubmitEmail={() => emailSignIn.start()}
+      onPasskey={signIn.signInWithPasskey}
+    />
+  );
+}

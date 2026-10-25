@@ -130,3 +130,6 @@ export function PeridotWalletEmbed(props: PeridotWalletEmbedProps) {
     />
   );
 }
+
+export { PeridotLevelBadge, PeridotLevelBadgeView, formatBadgeXp, isLevelApiError, levelErrorMessage } from "./level-badge.js";
+export type { PeridotLevelBadgeProps, LevelBadgeClient, LevelBadgeState } from "./level-badge.js";

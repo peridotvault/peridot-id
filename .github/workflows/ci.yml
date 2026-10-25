@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, test]
   pull_request:
 
 jobs:
@@ -119,9 +119,16 @@ jobs:
             echo "::error::apps/wallet must not use the popup/hosted flow — see apps/wallet README"
             exit 1
           fi
-          # Canonical prod host is api.pid.peridotvault.com (Vercel peridot-id hosts retired).
-          if rg -n 'peridot-id\.peridotvault\.com' --glob '!node_modules/**' .; then
-            echo "::error::retired peridot-id.peridotvault.com host referenced"
+          # Canonical hosts are peridot.id only (ANT-400 hard cutover): any
+          # retired-host remnant in INFRA-OWNED surfaces fails the build.
+          # Scoped to deploy + image + pipeline files on purpose — app source and
+          # docs are Tyler/Thomas turf (their tickets), and the SDK keeps a
+          # runtime warning-set for the retired hosts. Sole infra exception: the
+          # documented EMAIL_FROM sender note in deploy/README.md (Brevo-verified
+          # sender; migration is a human-gated follow-up — see README).
+          # NOTE: patterns use [.] so this guard never matches its own lines.
+          if rg -n 'peridotvault[.]com' deploy/ Dockerfile.app Dockerfile.dashboard Dockerfile.api docker-compose.yml .github/workflows/ci.yml | rg -v 'no-reply@peridotvault[.]com'; then
+            echo "::error::retired-host remnant in infra surface — ANT-400 hard cutover is peridot.id only"
             exit 1
           fi
 
@@ -145,6 +152,32 @@ jobs:
             echo "::error::ledger controller must never issue directly — issuance runs only inside FiatLedgerService after corroboration, see docs/FIAT_LEDGER.md"
             exit 1
           fi
+
+      - name: Faucet prod lock guard
+        run: |
+          # ANT-290 (board order 2026-10-21): the sandbox faucet is strictly
+          # sandbox-only — NEVER on main. Four repo-contract assertions:
+          # 1. compose default is fail-closed (:-false}).
+          if ! rg -q 'PID_FAUCET_ENABLED: \$\{PID_FAUCET_ENABLED:-false\}' deploy/compose.yaml; then
+            echo "::error::compose PID_FAUCET_ENABLED default must stay fail-closed (:-false})"
+            exit 1
+          fi
+          # 2. main example pins it off explicitly (not just the default).
+          if ! rg -q '^PID_FAUCET_ENABLED=false$' deploy/.env.main.example; then
+            echo "::error::.env.main.example must pin PID_FAUCET_ENABLED=false explicitly"
+            exit 1
+          fi
+          # 3. up.sh sources the preflight lib and calls it for main deploys.
+          if ! rg -q 'faucet_preflight_main' deploy/up.sh || ! test -f deploy/faucet-preflight.sh; then
+            echo "::error::up.sh main-deploy faucet preflight missing"
+            exit 1
+          fi
+          # 4. test example keeps it on (sandbox needs the faucet).
+          if ! rg -q '^PID_FAUCET_ENABLED=true$' deploy/.env.test.example; then
+            echo "::error::.env.test.example must keep PID_FAUCET_ENABLED=true"
+            exit 1
+          fi
+          echo "faucet prod lock: all assertions held"
 
       - name: Fiat popup approval guard
         run: |
@@ -173,6 +206,16 @@ jobs:
             exit 1
           fi
 
+      - name: Semantic DOM guard
+        run: |
+          # The RN shim (apps/wallet/src/shared/primitives.tsx) is deleted —
+          # wallet renders semantic HTML. Any reintroduced primitives import
+          # fails the build.
+          if rg -n "shared/primitives" apps/wallet/src apps/wallet/App.tsx; then
+            echo "::error::apps/wallet must not import the deleted RN shim — use semantic DOM (see apps/wallet AGENTS.md Phase 5)"
+            exit 1
+          fi
+
       - name: Delegatecall ban guard
         run: |
           # V4_PERMISSIONS.md: no delegatecall anywhere in first-party account code
@@ -196,3 +239,31 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  trivy:
+    # ANT-347 LOW-1: image + filesystem vuln scan. Non-blocking (continue-
+    # on-error + exit-code 1 only after SARIF upload path stays) so a new
+    # upstream CVE cannot freeze merges; findings stay visible in the job log
+    # and Security tab. Blast radius: this job only.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Trivy filesystem + config scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        continue-on-error: true
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          # Explicit non-blocking: findings must never flip the job red.
+          exit-code: '0'
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: trivy-results.sarif

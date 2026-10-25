@@ -1770,6 +1770,23 @@ describe("FiatSubAccountService", () => {
     }));
   });
 
+  it("approveClawback fails closed when the candidate pid drifts from the parent (ANT-344 L2)", async () => {
+    const { service, prisma, sac } = setup({
+      DOKU_SYSTEM_POINT_ACCOUNT_NO: "9900000001",
+      DOKU_TREASURY_POINT_ACCOUNT_NO: "2299999999",
+    });
+    prisma.fiatProviderTransaction.findUnique.mockResolvedValue({
+      id: "c9", pid: "mallory@pid", kind: "points_clawback", providerRef: "DP1-CLAWBACK-9",
+      amountIdr: 100000n, providerStatus: "created", ledgerStatus: "review",
+      counterparty: { parentRef: "DP1" },
+    });
+    (prisma.fiatProviderTransaction.findFirst as jest.Mock).mockResolvedValue({
+      id: "d1", pid: "ifal@pid", kind: "deposit", providerRef: "DP1", ledgerStatus: "issued",
+    });
+    await expect(service.approveClawback("c9")).rejects.toThrow("does not match parent deposit");
+    expect(sac.debit).not.toHaveBeenCalled();
+  });
+
   it("VA issues on SUCCESS notify + corroboration; defers without a SUCCESS notify", async () => {
     const { service, prisma, sac } = setup({
       DOKU_SYSTEM_POINT_ACCOUNT_NO: "9900000001",

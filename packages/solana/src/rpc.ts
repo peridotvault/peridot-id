@@ -68,6 +68,16 @@ export interface NftItem {
   uri?: string;
 }
 
+/** SPL / Token-2022 balance with resolved display metadata (Phantom-style list). */
+export interface TokenInfo extends TokenBalance {
+  name?: string;
+  symbol?: string;
+  uri?: string;
+  image?: string;
+  /** Curated-registry pin: render even at zero balance. */
+  pinned?: boolean;
+}
+
 // Canonical id from mpl-token-metadata programs/token-metadata/program/src/lib.rs.
 const METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 const NFT_SCAN_LIMIT = 20;
@@ -121,8 +131,9 @@ async function fetchOffchainMeta(uri: string): Promise<{ name?: string; image?: 
 }
 
 /**
- * Heuristic NFT discovery (classic SPL only — misses Token-2022 and cNFTs,
- * which need DAS). Candidates: decimals 0 + balance 1. Offchain JSON is
+ * Heuristic NFT discovery (balances now cover SPL + Token-2022; metadata
+ * lookup is still the classic Metaplex PDA, cNFTs need DAS).
+ * Candidates: decimals 0 + balance 1. Offchain JSON is
  * untrusted: timeouts, size caps, mint fallback on any failure.
  */
 export async function getNftsOf(rpc: ChainRpc, owner: PublicKey, limit = NFT_SCAN_LIMIT): Promise<NftItem[]> {
@@ -265,16 +276,24 @@ export class SolanaRpc implements ChainRpc {
 
   getTokenAccountsByOwner(owner: PublicKey): Promise<TokenBalance[]> {
     return this.withFailover(async (c) => {
-      const res = await c.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID });
-      return res.value.map((v) => {
+      const [classic, v2022] = await Promise.all([
+        c.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }),
+        // Older RPCs may not know Token-2022: degrade to classic only.
+        c.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }).catch(() => null),
+      ]);
+      const seen = new Map<string, TokenBalance>();
+      for (const v of [...classic.value, ...(v2022?.value ?? [])]) {
+        const key = v.pubkey.toBase58();
+        if (seen.has(key)) continue;
         const info = v.account.data.parsed.info;
-        return {
+        seen.set(key, {
           mint: (info.mint as string) ?? "",
           amount: (info.tokenAmount.amount as string) ?? "0",
           decimals: (info.tokenAmount.decimals as number) ?? 0,
-          account: v.pubkey.toBase58(),
-        };
-      });
+          account: key,
+        });
+      }
+      return [...seen.values()];
     });
   }
 }
@@ -295,3 +314,4 @@ function toParsedTokenBal(t: {
 }
 
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");

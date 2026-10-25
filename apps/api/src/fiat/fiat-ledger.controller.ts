@@ -3,7 +3,8 @@ import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { SecurityEventService } from "../security/security-event.service";
+import { FiatLedgerChainService } from "./fiat-ledger-chain.service";
+import { FiatLedgerEventsService } from "./fiat-ledger-events.service";
 import { FiatLedgerService } from "./fiat-ledger.service";
 import { DispatchEventsDto, LedgerAdjustDto, LedgerFreezeDto, LedgerTransferInquiryDto } from "./dto/ledger.dto";
 
@@ -19,7 +20,8 @@ import { DispatchEventsDto, LedgerAdjustDto, LedgerFreezeDto, LedgerTransferInqu
 export class FiatLedgerController {
   constructor(
     private readonly ledger: FiatLedgerService,
-    private readonly security: SecurityEventService,
+    private readonly chain: FiatLedgerChainService,
+    private readonly ledgerEvents: FiatLedgerEventsService,
   ) {}
 
   /** Current internal-credit balance (replayed, source labelled). */
@@ -39,11 +41,13 @@ export class FiatLedgerController {
   /**
    * Send step 1: inquiry only (moves no money). Phase-1 policy enforced.
    *
-   * INTENTIONAL app-token allowlist (ANT-233 F1-finding-1, decided explicitly):
-   * app backends initiate escrow releases through these routes — see
-   * docs/FIAT_LEDGER.md "Machine auth". The token is bound to the app owner's
-   * pid and spends only that owner's funds; stolen-secret blast radius is
-   * bounded by the 1h APP_TOKEN_TTL + (post-ANT-227) secret expiry. On-chain
+   * INTENTIONAL app-token allowlist (ANT-233 F1-finding-1, decided explicitly,
+   * narrowed by ANT-344 H3): app backends initiate escrow releases through
+   * these routes ONLY with a `scope: "fiat:transfer"` machine token —
+   * JwtAuthGuard + the service layer both reject unscoped/mis-scoped tokens
+   * fail-closed. See docs/FIAT_LEDGER.md "Machine auth". The token is bound
+   * to the app owner's pid and spends only that owner's funds; stolen-secret
+   * blast radius is bounded by the 1h APP_TOKEN_TTL + secret expiry. On-chain
    * wallet writes stay user-session-only (UserTokenGuard).
    */
   @Post("transfers/inquiry")
@@ -51,12 +55,6 @@ export class FiatLedgerController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   async inquiry(@CurrentUser() user: AuthenticatedUser, @Body() dto: LedgerTransferInquiryDto) {
-    // ANT-286b: unscoped legacy machine tokens still work (back-compat) but
-    // emit a migration signal; the service emits fiat.transfer.app_token on
-    // every app-token use (SOC anomaly signal for a leaked pidsk_).
-    if (user.app && !user.scope) {
-      await this.security.log(user.pid, "fiat.transfer.legacy_app_token", { app: user.app, route: "POST /v1/fiat/transfers/inquiry" }).catch(() => undefined);
-    }
     return this.ledger.transferInquiry(user.pid, dto, dto.clientId ?? user.app ?? null, { app: user.app, scope: user.scope });
   }
 
@@ -66,9 +64,6 @@ export class FiatLedgerController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard)
   async confirm(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    if (user.app && !user.scope) {
-      await this.security.log(user.pid, "fiat.transfer.legacy_app_token", { app: user.app, route: "POST /v1/fiat/transfers/:id/confirm" }).catch(() => undefined);
-    }
     return this.ledger.transferConfirm(user.pid, id, { app: user.app, scope: user.scope });
   }
 
@@ -134,14 +129,14 @@ export class FiatLedgerController {
   @Get("admin/chain")
   @UseGuards(JwtAuthGuard, AdminGuard)
   verifyChain() {
-    return this.ledger.verifyLedger();
+    return this.chain.verifyLedger();
   }
 
   /** Admin: current chain head (publish externally to make it tamper-proof). */
   @Get("admin/chain/head")
   @UseGuards(JwtAuthGuard, AdminGuard)
   chainHead() {
-    return this.ledger.chainHead();
+    return this.chain.chainHead();
   }
 
   /** Admin: chain posted rows that predate the chain (idempotent repair). */
@@ -150,7 +145,7 @@ export class FiatLedgerController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, AdminGuard)
   chainBackfill() {
-    return this.ledger.backfillChain();
+    return this.chain.backfillChain();
   }
 
   /** Admin: deliver due third-party callbacks (cron-driven). */
@@ -159,13 +154,13 @@ export class FiatLedgerController {
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, AdminGuard)
   dispatchEvents(@Body() dto: DispatchEventsDto) {
-    return this.ledger.dispatchEvents(dto);
+    return this.ledgerEvents.dispatchEvents(dto);
   }
 
   /** Admin: inspect the callback outbox. */
   @Get("admin/events")
   @UseGuards(JwtAuthGuard, AdminGuard)
   events(@Query("status") status?: string) {
-    return this.ledger.events(status);
+    return this.ledgerEvents.events(status);
   }
 }

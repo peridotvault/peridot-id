@@ -57,9 +57,9 @@ model Identity {
   pid       String         @id
   status    IdentityStatus @default(active)
   role      Role           @default(user)
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  deletedAt DateTime?
+  createdAt DateTime @db.Timestamptz(3)       @default(now())
+  updatedAt DateTime @db.Timestamptz(3)       @updatedAt
+  deletedAt DateTime? @db.Timestamptz(3)
 
   // Back-refs below are Prisma-mandatory declarations (a relation needs both
   // sides); they cost nothing at runtime. Convention: never `include` from
@@ -82,6 +82,14 @@ model Identity {
   fiatProviderAccounts     FiatProviderAccount[]
   fiatProviderTransactions FiatProviderTransaction[]
   fiatLedgerEntries    FiatLedgerEntry[]
+  // XP & Leveling (ANT-89 M1): derived state + append-only XP journal.
+  // Unlike money, XP is non-financial reputation — pid FKs below Cascade so
+  // account deletion cleans XP rows instead of blocking it (fiat Restricts).
+  xpState            UserXpState?
+  xpLedgerEntries    XpLedgerEntry[]
+  xpTaskCompletions  XpTaskCompletion[]
+  xpSuspiciousEvents XpSuspiciousActivity[]
+  xpOrgQuota         XpOrgQuota?
 
   @@map("identities")
 }
@@ -93,8 +101,8 @@ model Profile {
   displayName String?
   avatarUrl   String?
   locale      String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @db.Timestamptz(3) @default(now())
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
 
   @@map("profiles")
 }
@@ -111,8 +119,8 @@ model IdentityCredential {
   // email IS NOT NULL — Prisma cannot express it here. Claim flow maps the
   // P2002 violation to 409 (ANT-233 F3).
   email          String?
-  linkedAt       DateTime  @default(now())
-  lastLoginAt    DateTime?
+  linkedAt       DateTime @db.Timestamptz(3)  @default(now())
+  lastLoginAt    DateTime? @db.Timestamptz(3)
 
   @@unique([provider, providerUserId])
   @@index([pid])
@@ -128,8 +136,8 @@ model Device {
   // pre-existing rows, treated as "google" (shorter cap). Preserved across
   // refresh rotations, which keep the same device.
   authMethod String?
-  lastSeenAt DateTime  @default(now())
-  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime @db.Timestamptz(3)  @default(now())
+  createdAt  DateTime @db.Timestamptz(3)  @default(now())
   sessions   Session[]
 
   @@index([pid])
@@ -141,9 +149,9 @@ model Session {
   deviceId    String
   device      Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   rotatedFrom String?
-  revokedAt   DateTime?
-  expiresAt   DateTime
-  createdAt   DateTime  @default(now())
+  revokedAt   DateTime? @db.Timestamptz(3)
+  expiresAt   DateTime @db.Timestamptz(3)
+  createdAt   DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([deviceId])
   @@map("sessions")
@@ -164,9 +172,9 @@ model CredentialChallenge {
   challenge         String
   approvalChallenge String?
   isAdditional      Boolean   @default(false)
-  expiresAt         DateTime
-  consumedAt        DateTime?
-  createdAt         DateTime  @default(now())
+  expiresAt         DateTime @db.Timestamptz(3)
+  consumedAt        DateTime? @db.Timestamptz(3)
+  createdAt         DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([pid])
   @@map("credential_challenges")
@@ -189,8 +197,8 @@ model ChainAccount {
   status             ChainAccountStatus @default(inactivated)
   activationBalance  BigInt? // lamports detected at last poll (null = unpolled)
   activationRequired BigInt? // lamports needed to activate (rent+fee+margin)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  createdAt          DateTime @db.Timestamptz(3)           @default(now())
+  updatedAt          DateTime @db.Timestamptz(3)           @updatedAt
 
   feePayers    WalletFeePayer[]
   transactions Transaction[]
@@ -210,8 +218,8 @@ model Authority {
   publicKey    Bytes
   credentialId String?
   status       AuthorityStatus @default(active)
-  createdAt    DateTime        @default(now())
-  lastUsedAt   DateTime?
+  createdAt    DateTime @db.Timestamptz(3)        @default(now())
+  lastUsedAt   DateTime? @db.Timestamptz(3)
 
   @@index([pid])
   @@map("authorities")
@@ -224,7 +232,7 @@ model WalletFeePayer {
   chainAccount   ChainAccount   @relation(fields: [chainAccountId], references: [id], onDelete: Cascade)
   address        String
   status         IdentityStatus @default(active)
-  createdAt      DateTime       @default(now())
+  createdAt      DateTime @db.Timestamptz(3)       @default(now())
 
   @@unique([chainAccountId, address])
   @@map("wallet_fee_payers")
@@ -239,8 +247,8 @@ model Intent {
   type      String
   payload   Json
   status    IntentStatus @default(pending)
-  createdAt DateTime     @default(now())
-  expiresAt DateTime
+  createdAt DateTime @db.Timestamptz(3)     @default(now())
+  expiresAt DateTime @db.Timestamptz(3)
 
   transactions Transaction[]
 
@@ -269,8 +277,8 @@ model Transaction {
   // recordTransaction replay check is the UX-friendly 400 on top.
   txHash         String?         @unique
   status         TransactionStatus @default(prepared)
-  createdAt      DateTime          @default(now())
-  confirmedAt    DateTime?
+  createdAt      DateTime @db.Timestamptz(3)          @default(now())
+  confirmedAt    DateTime? @db.Timestamptz(3)
   errorCode      String?
   errorMessage   String?
 
@@ -288,7 +296,7 @@ model SecurityEvent {
   identity  Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
   eventType String
   metadata  Json
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@index([pid])
   @@map("security_events")
@@ -307,9 +315,9 @@ model ClaimTicket {
   avatarUrl      String?
   redirectTo     String?
   clientId       String?
-  consumedAt     DateTime?
-  expiresAt      DateTime
-  createdAt      DateTime  @default(now())
+  consumedAt     DateTime? @db.Timestamptz(3)
+  expiresAt      DateTime @db.Timestamptz(3)
+  createdAt      DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([expiresAt])
   @@map("claim_tickets")
@@ -323,11 +331,11 @@ model EmailOtp {
   id         String    @id @default(uuid())
   email      String
   codeHash   String
-  expiresAt  DateTime
+  expiresAt  DateTime @db.Timestamptz(3)
   attempts   Int       @default(0)
-  consumedAt DateTime?
+  consumedAt DateTime? @db.Timestamptz(3)
   requestIp  String?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([email])
   @@index([expiresAt])
@@ -337,7 +345,7 @@ model EmailOtp {
 // One-time, expiring authorization codes for cross-domain SSO (OAuth-like). Issued
 // after a successful Google/passkey login when a relying party (e.g. Live2Dev on a
 // different origin) asked to be returned to. The code rides in the redirect URL and is
-// exchanged server-to-server — no cookie sharing across sites. Single-use, ~5 min TTL.
+// exchanged server-to-server — no cookie sharing across sites. Single-use, 60s TTL.
 model SsoCode {
   id         String    @id @default(uuid())
   code       String    @unique
@@ -350,9 +358,9 @@ model SsoCode {
   // confidential-client flow with redirect_uri + client_secret binding).
   codeChallenge       String?
   codeChallengeMethod String?
-  consumedAt DateTime?
-  expiresAt  DateTime
-  createdAt  DateTime  @default(now())
+  consumedAt DateTime? @db.Timestamptz(3)
+  expiresAt  DateTime @db.Timestamptz(3)
+  createdAt  DateTime @db.Timestamptz(3)  @default(now())
 
   @@index([pid])
   @@map("sso_codes")
@@ -366,9 +374,9 @@ model SsoGrant {
   pid         String
   origin      String
   clientId    String?
-  firstSeenAt DateTime  @default(now())
-  lastUsedAt  DateTime  @default(now())
-  revokedAt   DateTime?
+  firstSeenAt DateTime @db.Timestamptz(3)  @default(now())
+  lastUsedAt  DateTime @db.Timestamptz(3)  @default(now())
+  revokedAt   DateTime? @db.Timestamptz(3)
 
   @@unique([pid, origin])
   @@map("sso_grants")
@@ -390,12 +398,13 @@ model Chain {
   logoUrl      String?
   isTestnet    Boolean  @default(true)
   isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @db.Timestamptz(3) @default(now())
+  updatedAt    DateTime @db.Timestamptz(3) @updatedAt
 
   contracts ChainContract[]
   accounts  ChainAccount[]
   evmRelayerKey EvmRelayerKey?
+  deployments TokenDeployment[]
 
   @@unique([namespace, reference])
   @@map("chains")
@@ -410,11 +419,52 @@ model ChainContract {
   versionLabel String?
   deployTxHash String?
   isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @db.Timestamptz(3) @default(now())
+  updatedAt    DateTime @db.Timestamptz(3) @updatedAt
 
   @@unique([chainId, type])
   @@map("chain_contracts")
+}
+
+// Token registry (admin-managed, curated like the chain registry). Token rows
+// hold GLOBAL metadata once (symbol/name/logo); per-chain rows live in
+// TokenDeployment (mint + decimals differ per chain — e.g. USDT on base, bnb,
+// solana). Wallets render only visible deployments, joined with active chains.
+// Unknown mints fall back to the short-mint display with no warning.
+model Token {
+  id         String   @id @default(uuid())
+  symbol     String   @unique
+  name       String
+  logoKey    String?
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
+  updatedAt  DateTime @db.Timestamptz(3) @updatedAt
+
+  deployments TokenDeployment[]
+
+  @@map("tokens")
+}
+
+// One token on one chain (chainId FK → chains.id, so the dashboard picks from
+// the chains table and dead chains can never be registered). `isPinned` rows
+// render even at zero balance; `isVisible=false` hides instantly. No delete —
+// hiding keeps history like chains.
+model TokenDeployment {
+  id          String   @id @default(uuid())
+  tokenId     String
+  token       Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  chainId     String
+  chain       Chain    @relation(fields: [chainId], references: [id], onDelete: Cascade)
+  mint        String
+  decimals    Int
+  isVisible   Boolean  @default(true)
+  isPinned    Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @db.Timestamptz(3) @default(now())
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
+
+  @@unique([tokenId, chainId])
+  @@unique([chainId, mint])
+  @@map("token_deployments")
 }
 
 // EVM auto-deploy relayer key per chain (replaces EVM_RELAYER_SECRET env,
@@ -427,8 +477,8 @@ model EvmRelayerKey {
   chainId   String   @unique
   chain     Chain    @relation(fields: [chainId], references: [id], onDelete: Cascade)
   secret    String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt
 
   @@map("evm_relayer_keys")
 }
@@ -468,11 +518,11 @@ model FiatProviderAccount {
   accountStatus      String    @default("creating")
   currency           String    @default("IDR")
   lastBalance        String?
-  lastBalanceAt      DateTime?
+  lastBalanceAt      DateTime? @db.Timestamptz(3)
   registerRef        String?   @unique
   providerResponse   Json?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime @db.Timestamptz(3)  @default(now())
+  updatedAt          DateTime @db.Timestamptz(3)  @updatedAt
 
   @@unique([pid, provider])
   @@index([providerAccountId])
@@ -568,8 +618,8 @@ model FiatProviderTransaction {
    * Extinguished rows never count toward outstanding, forever.
    */
   extinguished          Boolean  @default(false)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime @db.Timestamptz(3) @default(now())
+  updatedAt             DateTime @db.Timestamptz(3) @updatedAt
 
   @@index([pid])
   @@index([accountId])
@@ -586,7 +636,7 @@ model FiatWebhookEvent {
   eventType  String
   payload    Json
   status     String   @default("received")
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
 
   @@map("fiat_webhook_events")
 }
@@ -608,7 +658,7 @@ model FiatFeePolicy {
   /** PPN (VAT) on the PeridotID fee, basis points (1100 = 11%). */
   taxBps     Int      @default(1100)
   active     Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
 
   @@map("fiat_fee_policies")
 }
@@ -618,7 +668,7 @@ model FiatFeePolicy {
 model FiatTaxSetting {
   id         Int      @id @default(1)
   dokuTaxBps Int      @default(1100)
-  updatedAt  DateTime @updatedAt
+  updatedAt  DateTime @db.Timestamptz(3) @updatedAt
 
   @@map("fiat_tax_settings")
 }
@@ -650,7 +700,7 @@ model FiatLedgerEntry {
   prevHash         String?
   hash             String?
   hashSeq          BigInt?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime @db.Timestamptz(3) @default(now())
 
   @@index([pid])
   @@index([entryGroup])
@@ -676,10 +726,10 @@ model FiatLedgerEvent {
   /** pending | delivered | failed */
   status        String    @default("pending")
   attempts      Int       @default(0)
-  nextAttemptAt DateTime  @default(now())
+  nextAttemptAt DateTime @db.Timestamptz(3)  @default(now())
   lastError     String?
-  createdAt     DateTime  @default(now())
-  deliveredAt   DateTime?
+  createdAt     DateTime @db.Timestamptz(3)  @default(now())
+  deliveredAt   DateTime? @db.Timestamptz(3)
 
   @@index([status, nextAttemptAt])
   @@map("fiat_ledger_events")
@@ -706,26 +756,34 @@ model PidApp {
   // When set, code exchange requires the matching secret.
   clientSecretHash      String?
   clientSecretPrefix    String?
-  clientSecretCreatedAt DateTime?
+  clientSecretCreatedAt DateTime? @db.Timestamptz(3)
   // Rotation deadline: exchanges/token requests past this fail closed until
   // the owner rotates (ANT-227 item 5). Pre-policy NULL rows were backfilled
   // by 20261022_app_secret_expiry_backfill (ANT-233 F2); NULL now means
   // "no secret set" (public client), never "immortal secret".
-  clientSecretExpiresAt DateTime?
+  clientSecretExpiresAt DateTime? @db.Timestamptz(3)
   // Previous-hash grace window (ANT-283): rotation moves the replaced hash
   // here with a short overlap deadline (APP_CLIENT_SECRET_GRACE). Both hashes
   // verify until the previous deadline passes, then it is ignored. NULL =
   // no previous secret (never rotated, or grace already superseded).
   prevClientSecretHash      String?
-  prevClientSecretExpiresAt DateTime?
+  prevClientSecretExpiresAt DateTime? @db.Timestamptz(3)
   // Per-app callback endpoint + HMAC signing secret (set together). The
   // ledger posts signed events here (X-Pid-Signature). See docs/FIAT_LEDGER.md.
   webhookUrl            String?
   webhookSecret         String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  // XP & Leveling (ANT-89 M1): per-app XP permission. Verification alone
+  // grants nothing — event intake (M3) requires isVerified AND xpEnabled AND
+  // an approved event type. Admin-only writes (Role.admin); dev self-approval
+  // is impossible. Read API is open to all authorized apps incl. unverified.
+  xpEnabled           Boolean  @default(false)
+  approvedEventTypes  String[] @default([])
+  createdAt             DateTime @db.Timestamptz(3)  @default(now())
+  updatedAt             DateTime @db.Timestamptz(3)  @updatedAt
 
   fees PidAppFee[]
+  xpQuota XpQuota?
+  scopedTasks XpTask[]
 
   @@index([ownerPid])
   @@map("pid_apps")
@@ -744,8 +802,8 @@ model PidAppFee {
   minIdr     BigInt   @default(0)
   maxIdr     BigInt   @default(0)
   enabled    Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
+  updatedAt  DateTime @db.Timestamptz(3) @updatedAt
 
   @@unique([appId, operation])
   @@map("pid_app_fees")
@@ -765,8 +823,8 @@ model PaymentGatewayFeeRate {
   minIdr     BigInt   @default(0)
   maxIdr     BigInt   @default(0)
   enabled    Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
+  updatedAt  DateTime @db.Timestamptz(3) @updatedAt
 
   @@map("payment_gateway_fee_rates")
 }
@@ -779,7 +837,260 @@ model PaymentGatewayFeeRate {
 model BootstrapAdminLock {
   id        String   @id
   pid       String
-  createdAt DateTime @default(now())
+  createdAt DateTime @db.Timestamptz(3) @default(now())
 
   @@map("bootstrap_admin_locks")
+}
+
+// ---------------------------------------------------------------------------
+// XP & Leveling (ANT-89 M1). Centralized PeridotID authority: PeridotID alone
+// awards XP (M3 intake), all authorized apps read Level. The XP journal is
+// independent of the financial ledger. All Timestamptz(3) (ANT-317).
+//
+// Invariants (see plan rev 4, R1/R2/R4):
+// - Ledger XP totals are NEVER rewritten — only the level mapping changes
+//   across policy versions (UserXpState.policyVersionId stamps the computer).
+// - XpTaskCompletion uniqueness is composite (appId, eventId) (ANT-430 C1;
+//   plan rev 5 §13 supersedes rev-4 R1): no unique on (taskId,pid,periodKey);
+//   one-time tasks use partial unique indexes declared in raw SQL in the M1
+//   migration (Prisma cannot express them).
+// - Exactly one active policy version (partial unique index in migration).
+// ---------------------------------------------------------------------------
+
+model XpPolicyVersion {
+  id           String    @id @default(uuid())
+  version      Int       @unique
+  // { base: 100, exponent: 1.5, rounding: "floor" } — default formula
+  // xpToAdvance(L) = floor(base * L^exponent). R5 locks this as default.
+  formula      Json
+  // Nullable: NULL = uncapped. Default 100.
+  maxLevel     Int?      @default(100)
+  createdBy    String
+  createdAt    DateTime  @db.Timestamptz(3) @default(now())
+  activatedAt  DateTime? @db.Timestamptz(3)
+  supersededAt DateTime? @db.Timestamptz(3)
+
+  thresholds XpLevelThreshold[]
+  states     UserXpState[]
+  entries    XpLedgerEntry[]
+
+  @@map("xp_policy_versions")
+}
+
+model XpLevelThreshold {
+  policyVersionId String
+  policy          XpPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Cascade)
+  // Level this cumulative XP attains (level 1 starts at 0).
+  level           Int
+  cumulativeXp    BigInt
+
+  @@id([policyVersionId, level])
+  @@map("xp_level_thresholds")
+}
+
+model UserXpState {
+  // One row per PID; backfilled lazily on first read (genesis L1 / 0 XP).
+  pid             String          @id
+  identity        Identity        @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  totalXp         BigInt          @default(0)
+  level           Int             @default(1)
+  policyVersionId String
+  policy          XpPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  updatedAt       DateTime        @db.Timestamptz(3) @updatedAt
+
+  @@map("user_xp_states")
+}
+
+model XpTask {
+  id          String  @id @default(uuid())
+  key         String  @unique
+  name        String
+  description String?
+  xpReward    Int
+  // once | daily | weekly | monthly | unlimited
+  recurring   String  @default("once")
+  lifetimeLimit Int?
+  dailyLimit    Int?
+  weeklyLimit   Int?
+  monthlyLimit  Int?
+  cooldownSecs  Int?
+  availableFrom  DateTime? @db.Timestamptz(3)
+  availableUntil DateTime? @db.Timestamptz(3)
+  // draft | active | disabled | archived
+  status      String  @default("draft")
+  // Verification checker (R3): internal_state (PeridotID-observed rows) or
+  // backend_check (validated against PeridotID-owned records). Tasks without
+  // a reliable checker cannot be activated (enforced in admin API, M2).
+  verificationType    String  @default("internal_state")
+  verificationChecker String?
+  // NULL = ecosystem-wide; otherwise scoped to one app.
+  scopeAppId  String?
+  scopeApp    PidApp? @relation(fields: [scopeAppId], references: [id], onDelete: SetNull)
+  createdBy   String
+  createdAt   DateTime @db.Timestamptz(3) @default(now())
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
+
+  completions XpTaskCompletion[]
+  ledgerEntries XpLedgerEntry[]
+
+  @@index([status])
+  @@index([scopeAppId])
+  @@map("xp_tasks")
+}
+
+model XpTaskCompletion {
+  id             String   @id @default(uuid())
+  pid            String
+  identity       Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  taskId         String
+  task           XpTask   @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  // Accounting window label (e.g. "2026-10-22" / "2026-W43"), NOT a
+  // uniqueness key — repeatable tasks keep many valid completions per period
+  // up to configured caps (enforced by COUNT in the award transaction, R1).
+  periodKey      String
+  // Idempotency key, scoped per app (ANT-430 C1 / plan rev 5 §13):
+  // composite @@unique([appId, eventId]) — two apps may independently use
+  // the same event_id; only same-app + same-event_id is a duplicate.
+  // Denormalized once-flag + resource id for the partial one-time unique
+  // indexes declared in raw SQL in the M1 migration:
+  //   (taskId, pid) WHERE isOnce AND resourceId IS NULL
+  //   (taskId, pid, resourceId) WHERE isOnce AND resourceId IS NOT NULL
+  appId          String   @default("")
+  eventId        String
+  isOnce         Boolean  @default(false)
+  resourceId     String?
+  awardedEntryId String?  @unique
+  awardedEntry   XpLedgerEntry? @relation("CompletionAward", fields: [awardedEntryId], references: [id], onDelete: SetNull)
+  createdAt      DateTime @db.Timestamptz(3) @default(now())
+
+  @@unique([appId, eventId])
+  @@index([pid])
+  @@index([taskId, pid])
+  @@map("xp_task_completions")
+}
+
+model XpLedgerEntry {
+  id            String   @id @default(uuid())
+  pid           String
+  identity      Identity @relation(fields: [pid], references: [pid], onDelete: Cascade)
+  deltaXp       BigInt
+  balanceAfter  BigInt
+  levelAfter    Int
+  // task_award | manual_adjustment | reversal
+  kind          String
+  taskId        String?
+  task          XpTask?  @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  // Per-app idempotency key (informational here; enforced unique as the
+  // composite (appId, eventId) on XpTaskCompletion).
+  eventId       String?
+  appId         String?
+  reason        String?
+  actorAdminId  String?
+  policyVersionId String
+  policy          XpPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Restrict)
+  createdAt     DateTime @db.Timestamptz(3) @default(now())
+
+  completion XpTaskCompletion? @relation("CompletionAward")
+
+  @@index([pid, createdAt])
+  @@index([eventId])
+  @@map("xp_ledger_entries")
+}
+
+// Per-app award caps (M3 enforcement; admin-configured, never hardcoded).
+model XpQuota {
+  appId         String  // FK to PidApp.id; also the PK (one row per app).
+  app           PidApp  @relation(fields: [appId], references: [id], onDelete: Cascade)
+  dailyCap      Int?
+  weeklyCap     Int?
+  monthlyCap    Int?
+  suspended     Boolean @default(false)
+  suspendReason String?
+  updatedAt     DateTime @db.Timestamptz(3) @updatedAt
+
+  @@id([appId])
+  @@map("xp_quotas")
+}
+
+// Organization-level cap: aggregate across all apps of one developer org,
+// keyed by PidApp.ownerPid (R2 lock order: state → quota → org quota).
+model XpOrgQuota {
+  ownerPid    String   // FK to Identity.pid (the app owner's PID); also the PK.
+  owner       Identity @relation(fields: [ownerPid], references: [pid], onDelete: Cascade)
+  dailyCap    Int?
+  weeklyCap   Int?
+  monthlyCap  Int?
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
+
+  @@id([ownerPid])
+  @@map("xp_org_quotas")
+}
+
+model XpSuspiciousActivity {
+  id        String   @id @default(uuid())
+  pid       String?
+  identity  Identity? @relation(fields: [pid], references: [pid], onDelete: SetNull)
+  appId     String?
+  signal    String
+  detail    Json?
+  reviewed  Boolean  @default(false)
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+
+  @@index([reviewed, createdAt])
+  @@map("xp_suspicious_activities")
+}
+
+// ANT-456 — DB-driven configuration (SystemSetting table, plan §3.1).
+// One table for all future features: namespaced keys
+// (`<domain>.<area>.<field>`), JSONB values with a declared valueType,
+// optimistic locking via `version`. Every write appends a SecurityEvent
+// row (+ a SystemSettingHistory row for the diff view) in the same
+// transaction — reads never bypass the audit on the write path.
+model SystemSetting {
+  key         String   @id
+  value       Json
+  valueType   String
+  description String?
+  updatedBy   String
+  version     Int      @default(1)
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
+
+  @@map("system_settings")
+}
+
+// ANT-456 — per-write history for the admin diff view (spec §7 A2).
+// Append-only; written in the same transaction as the setting update.
+model SystemSettingHistory {
+  id        String   @id @default(uuid())
+  key       String
+  oldValue  Json?
+  newValue  Json
+  reason    String
+  version   Int
+  updatedBy String
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+
+  @@index([key, createdAt])
+  @@map("system_setting_history")
+}
+
+// ANT-456 — auditable backfill-run procedure (plan §3.5), replacing the
+// permanent PID_XP_MIGRATION_ENABLED env var. One row per requested run
+// (preview or execution): resumable via `cursor`, idempotent page
+// execution, run history is the audit trail (plus SecurityEvent rows).
+model BackfillRun {
+  id            String    @id @default(uuid())
+  policyId      String
+  policyVersion Int
+  status        String    @default("queued")
+  cursor        String?
+  dryRun        Boolean   @default(true)
+  processed     Int       @default(0)
+  updated       Int       @default(0)
+  actor         String
+  startedAt     DateTime  @db.Timestamptz(3) @default(now())
+  finishedAt    DateTime? @db.Timestamptz(3)
+
+  @@index([startedAt])
+  @@map("xp_backfill_runs")
 }

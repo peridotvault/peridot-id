@@ -61,14 +61,24 @@ describe("GoogleGuard.handleRequest", () => {
 });
 
 describe("GoogleGuard.getAuthenticateOptions (M3 signed state)", () => {
-  it("passes through without state when no returnTo is requested", () => {
-    const guard = new GoogleGuard(OPTS, configMock() as never);
+  it("binds first-party logins (no returnTo) to the wallet origin with a nonce cookie", () => {
+    const config = configMock();
+    const guard = new GoogleGuard(OPTS, config as never);
     const res = resMock();
 
     const options = guard.getAuthenticateOptions(contextWith({}, res));
 
-    expect(options).toEqual({ prompt: "select_account" });
-    expect(res.cookie).not.toHaveBeenCalled();
+    expect(typeof options.state).toBe("string");
+    // Nonce cookie: HttpOnly, 10-min TTL, auth paths.
+    expect(res.cookie).toHaveBeenCalledWith(
+      OAUTH_STATE_COOKIE,
+      expect.any(String),
+      expect.objectContaining({ httpOnly: true, path: "/v1/auth", maxAge: 10 * 60 * 1000 }),
+    );
+    const nonce = (res.cookie as jest.Mock).mock.calls[0][1] as string;
+    expect(verifyOAuthState(options.state as string, nonce, oauthStateSecret(config.get))).toEqual({
+      returnTo: "http://localhost:3302",
+    });
   });
 
   it("signs the state and binds it to an HttpOnly nonce cookie", () => {

@@ -2,7 +2,8 @@
 // relayer key (EvmRelayerKey, dashboard-managed since ANT-193) is write-only
 // via the admin API and read server-side only. Other relayer keys and RPC API
 // keys stay in env by design.
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from "class-validator";
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
 
 export class CreateChainDto {
   @IsIn(["solana", "eip155"])
@@ -122,4 +123,118 @@ export class UpsertContractDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+}
+
+export class CreateTokenDeploymentDto {
+  /** chains.id — the dashboard picks from the chains table. */
+  @IsUUID()
+  chainId!: string;
+
+  @IsString()
+  @Matches(/^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/, {
+    message: "mint must be an EVM 0x address or a base58 Solana mint",
+  })
+  mint!: string;
+
+  @IsInt()
+  @Min(0)
+  decimals!: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isVisible?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isPinned?: boolean;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  sortOrder?: number;
+}
+
+export class CreateTokenDto {
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{1,24}$/, { message: "symbol must be 1-24 letters/digits/_/-" })
+  symbol!: string;
+
+  @IsString()
+  @MaxLength(64)
+  name!: string;
+
+  @IsString()
+  @Matches(/^https:\/\/coin-images\.coingecko\.com\//, {
+    message: "logoSourceUrl must be a CoinGecko image URL from the preview step",
+  })
+  @MaxLength(512)
+  @IsOptional()
+  logoSourceUrl?: string;
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => CreateTokenDeploymentDto)
+  @IsOptional()
+  deployments?: CreateTokenDeploymentDto[];
+}
+
+export class UpdateTokenDto {
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{1,24}$/, { message: "symbol must be 1-24 letters/digits/_/-" })
+  @IsOptional()
+  symbol?: string;
+
+  @IsString()
+  @MaxLength(64)
+  @IsOptional()
+  name?: string;
+}
+
+export class UpdateTokenDeploymentDto {
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  decimals?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isVisible?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isPinned?: boolean;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  sortOrder?: number;
+}
+
+export class PreviewTokenDto {
+  @IsIn(["solana", "eip155"])
+  chainNamespace!: string;
+
+  @IsString()
+  @MaxLength(88)
+  chainReference!: string;
+
+  @IsString()
+  @Matches(/^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/, {
+    message: "mint must be an EVM 0x address or a base58 Solana mint",
+  })
+  mint!: string;
+}
+
+export class PreviewChainDto {
+  @IsIn(["solana", "eip155"])
+  chainNamespace!: string;
+
+  @IsString()
+  @MaxLength(88)
+  reference!: string;
+
+  @IsString()
+  @MaxLength(256)
+  rpcUrl!: string;
 }

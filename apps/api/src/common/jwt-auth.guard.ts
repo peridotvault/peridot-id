@@ -1,7 +1,11 @@
-import { ExecutionContext, ForbiddenException, Injectable, Logger } from "@nestjs/common";
+import { ExecutionContext, ForbiddenException, Injectable, Logger, Optional } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { AuthGuard } from "@nestjs/passport";
 import { Request } from "express";
 import { ACCESS_COOKIE, normalizeScope, scopeAccessCookie } from "./cookies";
+import { extractRequestOrigin, getVerifiedAppOrigins, hasSessionCookie } from "./csrf-origin.guard";
+import { isOriginAllowed, staticOriginsFor } from "./cors";
+import { PrismaService } from "../prisma/prisma.service";
 
 /**
  * Session cookie selection: a client app sends `x-pid-scope: <app>` and gets its
@@ -36,18 +40,48 @@ const READ_SCOPE_WRITE_ALLOW = [/^\/v1\/fiat\/deposits\/[^/]+\/sync\/?$/];
 export class JwtAuthGuard extends AuthGuard("jwt") {
   private readonly logger = new Logger(JwtAuthGuard.name);
 
-  constructor() {
+  constructor(
+    @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly prisma?: PrismaService,
+  ) {
     super({});
+  }
+
+  /**
+   * CSRF Origin allowlist (ANT-367): state-changing requests carrying a
+   * session cookie must present an allowlisted Origin (else Referer origin).
+   * Same allowlist as credentialed CORS — staticOriginsFor() ∪ verified
+   * per-app origins (shared TTL cache, never N+1). Safe methods and
+   * cookieless (Bearer) flows pass through untouched. Missing/mismatched
+   * Origin on a cookie request fails closed with 403. Skipped only when the
+   * guard was constructed without DI config (unit tests calling
+   * `new JwtAuthGuard()` directly) — production always injects ConfigService.
+   */
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<Request>();
+    if (this.config && req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") {
+      const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
+      if (hasSessionCookie(cookies)) {
+        const origin = extractRequestOrigin(req);
+        const allowed =
+          !!origin &&
+          isOriginAllowed(origin, staticOriginsFor(this.config), await getVerifiedAppOrigins(this.prisma));
+        if (!allowed) {
+          this.logger.warn(`rejected cookie-authed ${req.method} ${req.path}: origin not allowlisted`);
+          throw new ForbiddenException("Origin not allowed for cookie-authenticated request");
+        }
+      }
+    }
+    return (await super.canActivate(context)) as boolean;
   }
 
   /**
    * Tokens with `scope: "read"` (e.g. the SSO exchange token handed to a relying
    * party's backend) are limited to safe methods — they can read balance/ledger
    * but can never trigger a write (transfer, withdraw, credential, profile…).
-   * ANT-286b: machine tokens (`app` claim) carrying a scope other than
-   * `fiat:transfer` are 403 on `POST /v1/fiat/transfers/*` (fail closed —
-   * a mis-scoped credential never moves money). Unscoped legacy app tokens
-   * still pass (back-compat) but are logged so SOC can track migration.
+   * ANT-344 H3: machine tokens (`app` claim) on `POST /v1/fiat/transfers/*`
+   * must carry `scope: "fiat:transfer"` — unscoped legacy app tokens are
+   * rejected fail-closed (migration complete), as is any other scope.
    */
   handleRequest<TUser = unknown>(
     err: unknown,
@@ -66,14 +100,16 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     }
     const claims = authed as { app?: string; scope?: string } | null | undefined;
     if (authed && claims?.app) {
-      if (claims.scope === undefined) {
-        // Legacy unscoped machine token — allowed, but visible for migration.
-        this.logger.warn(`legacy app token without scope used: app=${claims.app}`);
-        return authed;
-      }
+      // ANT-344 H3: transfer power requires the explicit transfer scope.
+      // Legacy unscoped machine tokens are rejected here (no back-compat
+      // pass); the SOC signal is the 403 itself plus the service-level
+      // `fiat.transfer.app_token` event on allowed uses.
       if (claims.scope !== "fiat:transfer") {
         const req = context.switchToHttp().getRequest<Request>();
-        if (req.method === "POST" && /^\/v1\/fiat\/transfers(\/|$)/.test(req.path)) {
+        if (req.method !== "GET" && req.method !== "HEAD" && /^\/v1\/fiat\/transfers(\/|$)/.test(req.path)) {
+          if (claims.scope === undefined) {
+            this.logger.warn(`rejected legacy app token without scope: app=${claims.app}`);
+          }
           throw new ForbiddenException("Machine token scope not authorized for transfers");
         }
       }

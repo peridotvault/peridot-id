@@ -29,9 +29,11 @@ export class PermissionsService {
    * (mirrors `grantPermission` hygiene + `WHITEPAPER.md` §10 scope kinds) and
    * return the canonical permission id + owner challenge. Pure: no DB, no chain.
    *
-   * Ownership (ANT-284): there is NO server-side EVM submission path — the
+   * Ownership (ANT-284): there is NO server-side EVM submission path for grants — the
    * returned `grantPayload` must be signed by the owner passkey and lands
-   * on-chain via the client. The signature IS the pid→account binding: `account`
+   * on-chain via the client. (The account-scoped EVM relayer in
+   * `evm-activation.service.ts` only deploys account contracts, never submits
+   * grants.) The signature IS the pid→account binding: `account`
    * and `chainId` are part of the signed payload (`permissionId` binds both),
    * so a grant validated for account A can never execute as account B, and a
    * non-owner cannot produce a valid submission. Any future server relay MUST
