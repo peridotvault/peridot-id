@@ -6,11 +6,11 @@
 //   intent.rejected            pre-broadcast validation failure { entryPoint, chain, cause }
 //   quote.drift_rejected       submit-time fee drifted beyond 120% { entryPoint, chain, quoted, attested }
 //   relayer.reconciled         post-confirmation reconcile record (existing `{kind}.reconciled` kept)
-//   relayer.formula_mismatch   protocolFee != formula(networkFee) { attested, actual, expected, signature }
-//   relayer.over_attested      attested fee exceeds actual beyond drift { attested, actual, expected, signature }
+//   relayer.formula_mismatch   protocolFee != formula(networkFee) { signature, entryPoint, chain, attested, actual, expected }
+//   relayer.over_attested      attested fee exceeds actual beyond drift { signature, entryPoint, chain, attested, actual, expected }
 //   relayer.pnl                per-tx relayer P&L { absorbed, signature, entryPoint, chain }
 //   revocation.spike           revocations/min > 5x trailing-1h baseline { chain, recentPerMin, baselinePerMin }
-//   rotation.confirmed_latency rotation confirm latency { chain, latencyMs, attempts }
+//   rotation.confirmed_latency rotation confirm latency { chain, latencyMs, confirmed }
 //   credential.rotation.unconfirmed (existing) 15x1s bound hit, 503 path
 //   relayer.breaker.opened/closed  spend-rate circuit breaker transitions { chain, absorbedWindow, cap }
 //   broadcast.duplicate_suppressed same-signed-intent retry, no new broadcast { signature }
