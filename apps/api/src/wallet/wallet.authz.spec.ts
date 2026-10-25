@@ -346,11 +346,34 @@ describe("Wallet authorization & abuse cases (routes)", () => {
         amount: "1000000",
         nonce: "0",
         expiry: 4100000000,
-        feePolicyVersion: 1,
+        feePolicyVersion: 2,
         quotedNetworkFeeLamports: "7500",
+        maxTotalFeeLamports: "15000",
         assertion: { id: "cred-1", signature: "A".repeat(86), authenticatorData: "B".repeat(50), clientDataJSON: "C".repeat(60) },
       })
       .expect(404); // reaches the service; mock has no account → NotFound, not a validation 400.
+  });
+
+  it("returns 400 when the sponsored-withdraw body is missing maxTotalFee (no silent default)", async () => {
+    // Spec edge case 2: an intent without maxTotalFee is rejected, never defaulted.
+    state.identities.set("pid_a", "active");
+    const t = await token("pid_a");
+    const res = await request(app.getHttpServer())
+      .post("/v1/wallet/withdraw")
+      .set("Cookie", `pid_access=${t}`)
+      .set("Origin", "http://localhost:3302")
+      .send({
+        asset: "SOL",
+        to: "DeSt1111111111111111111111111111111111111",
+        amount: "1000000",
+        nonce: "0",
+        expiry: 4100000000,
+        feePolicyVersion: 2,
+        quotedNetworkFeeLamports: "7500",
+        assertion: { id: "cred-1", signature: "A".repeat(86), authenticatorData: "B".repeat(50), clientDataJSON: "C".repeat(60) },
+      })
+      .expect(400);
+    expect(JSON.stringify(res.body)).toMatch(/Max total fee/);
   });
 
   it("rejects rotate without an access cookie and validates the rotate body", async () => {

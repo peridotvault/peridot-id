@@ -8,6 +8,7 @@ import { useActivationGate } from "../../feat/chain/hooks/useActivationGate";
 import { useCopyAddress } from "../../feat/chain/hooks/useCopyAddress";
 import { DepositAddressCard } from "../../feat/chain/components/DepositAddressCard";
 import { ActivationStatusCard } from "../../feat/chain/components/ActivationStatusCard";
+import { ActivationFee } from "../../feat/chain/components/ActivationFee";
 import { flatten } from "../../shared/styles/stylesheet";
 
 export function Activation({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {
@@ -75,6 +76,8 @@ export function Activation({ onDone, goPasskey }: { onDone: () => void; goPasske
       {gate.activation && !gate.isActive && (
         <ActivationStatusCard status={gate.st} requiredSol={gate.requiredSol} balanceSol={gate.balanceSol} />
       )}
+
+      {gate.activation && !gate.isActive && <ActivationFee view={gate.activation} />}
 
       {gate.isActive && (
         <div className="flex flex-col gap-1 border border-success bg-[#28c84014] p-3.5">

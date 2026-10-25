@@ -25,7 +25,7 @@ function get(env: Record<string, string | undefined>) {
 describe("service-URL set (ANT-193: one set, everything derived)", () => {
   it("hardcodes the former PID/EVM/app-token knobs", () => {
     expect(PID_ACTIVATION_CONFIRM_ATTEMPTS).toBe(15);
-    expect(PID_FEE_POLICY_VERSION).toBe(1);
+    expect(PID_FEE_POLICY_VERSION).toBe(2); // ANT-544 FR-B: v2 = 50% leg + per-chain minima
     expect(PID_EVM_POLL_MS).toBe(30_000);
     expect(APP_TOKEN_TTL).toBe("1h");
   });

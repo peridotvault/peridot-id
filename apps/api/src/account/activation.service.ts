@@ -23,10 +23,13 @@ import { classifyActivation, requireActiveAuthority } from "../common/activation
 import { ACCOUNT_TYPE_SMART, SOLANA_DEVNET_REFERENCE, SOLANA_NAMESPACE, SOLANA_TESTNET_REFERENCE, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
+  chainMinBaseUnits,
+  exceedsMaxTotalFee,
   feePolicyVersion as configuredPolicyVersion,
+  platformFeeOf,
   protocolFeeBps,
-  protocolFeeOf,
   exceedsDriftBound,
+  QUOTE_TTL_SECS,
   relayerKeypair,
   solanaAdapter,
   treasuryPubkey,
@@ -66,6 +69,20 @@ export interface ActivationView {
   feePolicyVersion: number;
   /** Additive CAIP-2 echo of the active Solana chain (omitted when registry has none). */
   chain?: ChainEcho;
+  // --- Fee-policy v2 canonical quote fields (ANT-544 §4.1) ---
+  /** Canonical alias of networkFeeLamports (base units, decimal string). */
+  networkFee: string;
+  /** v2 platform fee: MAX(floor(networkFee×bps/10_000), chainMin) (base units). */
+  platformFee: string;
+  /** networkFee + platformFee at quote time (canonical). */
+  totalFee: string;
+  /** Offered user-approved upper bound for the V4 authorization (defaults to totalFee). */
+  maxTotalFee: string;
+  /** chainMin applied for this chain under the quoted policy version (base units). */
+  chainMinBaseUnits: string;
+  /** Quote timestamps (ISO-8601; `expiresAt − quotedAt` ≤ 300s, NFR-3). */
+  quotedAt: string;
+  expiresAt: string;
 }
 
 const POLL_ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
@@ -137,8 +154,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Realtime activation network-cost estimate (rent + message fee, no margin)
-   *  plus the protocol fee for the active policy. The protocol fee is a fixed
-   *  percentage of the network cost — never a margin on a total. */
+   *  plus the v2 platform fee for the active policy. The platform fee is
+   *  MAX(50%, chainMin) — never a margin on a total. */
   private async quotedFees(adapter: SolanaAdapter): Promise<{
     networkEst: bigint;
     protocolFee: bigint;
@@ -150,7 +167,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     const networkEst = cost.rentLamports + cost.feeLamports;
     const version = this.policyVersion();
     const bps = protocolFeeBps(version);
-    const protocolFee = protocolFeeOf(networkEst, bps);
+    const protocolFee = platformFeeOf(networkEst, "solana", version);
     return { networkEst, protocolFee, total: networkEst + protocolFee, version, bps };
   }
 
@@ -306,6 +323,12 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       expiry: number;
       feePolicyVersion: number;
       quotedNetworkFeeLamports: string;
+      /**
+       * User-approved upper bound on `networkFee + platformFee` carried by the
+       * passkey-signed V4 authorization (spec B5). Required — no silent default;
+       * enforced pre-broadcast, fail-closed (re-quote).
+       */
+      maxTotalFeeLamports: string;
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
     },
     selection?: SolanaSelection,
@@ -427,7 +450,23 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         });
         throw new ConflictException("Network fee moved — re-quote and try again");
       }
-      const protocolFee = protocolFeeOf(networkFee, quoted.bps);
+      const protocolFee = platformFeeOf(networkFee, "solana", quoted.version);
+      const totalFee = networkFee + protocolFee;
+
+      // V4 user bound (spec B5/B-AC5): `totalFee ≤ maxTotalFee` pre-broadcast.
+      if (!/^\d+$/.test(dto.maxTotalFeeLamports)) {
+        throw new BadRequestException("Max total fee must be a positive integer");
+      }
+      if (exceedsMaxTotalFee(totalFee, BigInt(dto.maxTotalFeeLamports))) {
+        await this.security.log(user.pid, "account.activation.max_total_exceeded", {
+          totalFee: totalFee.toString(),
+          maxTotalFee: dto.maxTotalFeeLamports,
+          networkFee: networkFee.toString(),
+          protocolFee: protocolFee.toString(),
+          feePolicyVersion: quoted.version,
+        });
+        throw new ConflictException("Total fee exceeds your authorized maximum — re-quote and try again");
+      }
 
       // H2: claim the (pid, expiry, chain) slot — the expiry is the
       // replay-protection scalar for activation. Identical retries reuse the
@@ -525,7 +564,6 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "active" } });
       // Activity history: account creation + exact network-cost reimbursement to the
       // relayer and the protocol fee to the revenue vault (split enforced on-chain).
-      const totalFee = networkFee + protocolFee;
       await this.prisma.transaction
         .create({
           data: {
@@ -599,6 +637,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       : this.classify(balance, required, chain.status);
 
     const solChain = await this.chains.solanaChain().catch(() => undefined);
+    const chainTime = await adapter.chainTime().catch(() => 0);
+    const quotedAt = new Date(chainTime * 1000);
+    const expiresAt = new Date(quotedAt.getTime() + QUOTE_TTL_SECS * 1000);
 
     return {
       pid: user.pid,
@@ -608,17 +649,24 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       requiredLamports: required,
       networkFeeLamports: Number(quoted.networkEst),
       protocolFeeBps: quoted.bps,
-      chainTime: await adapter.chainTime().catch(() => 0),
+      chainTime,
       treasury: this.treasury().toBase58(),
       feePolicyVersion: quoted.version,
       ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
+      networkFee: quoted.networkEst.toString(),
+      platformFee: quoted.protocolFee.toString(),
+      totalFee: quoted.total.toString(),
+      maxTotalFee: quoted.total.toString(),
+      chainMinBaseUnits: chainMinBaseUnits("solana", quoted.version).toString(),
+      quotedAt: quotedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
     };
   }
 
   /**
    * Post-confirmation reconciliation for activation: verify the program applied
-   * the canonical formula. Rent stays locked in the PDA (not paid to anyone),
-   * so only the fee split is checked here.
+   * the canonical v2 formula. Rent stays locked in the PDA (not paid to anyone),
+   * so only the fee split is checked here. Divergence fires a security event.
    */
   private async reconcileActivation(
     pid: string,
@@ -628,7 +676,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     protocolFee: bigint,
     version: number,
   ): Promise<void> {
-    const expectedProtocol = protocolFeeOf(networkFee, protocolFeeBps(version));
+    const expectedProtocol = platformFeeOf(networkFee, "solana", version);
+    const formulaDiverged = protocolFee !== expectedProtocol;
     const parsed = await adapter.parseTransaction(signature).catch(() => null);
     const actual = parsed?.fee != null ? BigInt(parsed.fee) : null;
     const absorbed = absorbedLoss(networkFee, actual);
@@ -639,6 +688,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       protocolFeeExpected: expectedProtocol.toString(),
       actualNetworkFee: actual?.toString() ?? "unknown",
       relayerAbsorbed: absorbed.toString(),
+      formulaDiverged,
     });
     await this.security.log(pid, RelayerEvents.pnl, {
       signature,
@@ -649,7 +699,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     await this.breaker.recordAbsorbed(pid, BROADCAST_CHAIN_SOLANA, absorbed).catch((err) =>
       this.logger.warn(`breaker record failed: ${(err as Error).message}`),
     );
-    if (protocolFee !== expectedProtocol) {
+    if (formulaDiverged) {
       await this.security.log(pid, RelayerEvents.formulaMismatch, {
         signature,
         entryPoint: "activate",
@@ -661,6 +711,13 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(
         `activation formula anomaly: ${signature} protocol=${protocolFee} expected=${expectedProtocol}`,
       );
+      await this.security.log(pid, "account.activation.fee_divergence", {
+        signature,
+        protocolFee: protocolFee.toString(),
+        protocolFeeExpected: expectedProtocol.toString(),
+        networkFee: networkFee.toString(),
+        feePolicyVersion: version,
+      });
     }
   }
 

@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsInt, IsObject, IsString, Max, Min, ValidateNested } from "class-validator";
+import { IsInt, IsObject, IsString, Matches, Max, Min, ValidateNested } from "class-validator";
 
 class ActivateAssertionDto {
   @IsString()
@@ -26,6 +26,14 @@ export class ActivateDto {
   /** The quoted network fee the client signed against (drift reference, not a cap). */
   @IsString()
   quotedNetworkFeeLamports!: string;
+
+  /**
+   * User-approved upper bound on `networkFee + platformFee` carried by the
+   * passkey-signed V4 authorization (spec B5). Required — no silent default
+   * (spec edge case 2); submit enforces `totalFee ≤ maxTotalFee` pre-broadcast.
+   */
+  @Matches(/^\d+$/, { message: "Max total fee must be an integer" })
+  maxTotalFeeLamports!: string;
 
   /** Signed fee-policy version (selects the protocol percentage; unknown versions rejected on-chain). */
   @IsInt()

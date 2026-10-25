@@ -6,6 +6,13 @@ import type { NftItem, ParsedTx, PasskeySigner, TokenBalance, TokenInfo, Transac
 import type { ApiError, Authority, Chain, ChainAccount, RegistryToken, WalletTransaction } from "@peridotvault/pid-types";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
+import {
+  FeeApprovalDeniedError,
+  normalizeFeeQuote,
+  type FeeApprovalHandler,
+  type FeeQuoteV2,
+  type NormalizedFeeQuote,
+} from "./fee-quote.js";
 
 export interface PeridotWalletOptions {
   feePayerStore?: SecretStore;
@@ -130,6 +137,20 @@ export interface ActivationView {
   feePolicyVersion: number;
   /** Optional chain echo (ANT-39/ANT-41): present when the registry has a Solana row. */
   chain?: ChainEcho;
+  /**
+   * Canonical fee-policy v2 fields (base-unit decimal strings) — present on
+   * v2 backends (ANT-555), absent on v1 (legacy path: `networkFeeLamports`
+   * above). Reads never break: old fields stay, new ones are additive.
+   */
+  networkFee?: string;
+  platformFee?: string;
+  totalFee?: string;
+  maxTotalFee?: string;
+  chainMinBaseUnits?: string;
+  quoteId?: string;
+  quotedAt?: string;
+  /** Quote expiry (ISO-8601; expiresAt − quotedAt ≤ 300s). Past it → re-quote, never submit. */
+  expiresAt?: string;
 }
 
 export interface RotateInput {
@@ -149,6 +170,34 @@ export interface FeeQuoteView {
   treasury: string;
   /** Optional chain echo (ANT-39/ANT-41): present when the registry has a Solana row. */
   chain?: ChainEcho;
+  /**
+   * Canonical fee-policy v2 fields (base-unit decimal strings) — present on
+   * v2 backends (ANT-555), absent on v1 (legacy path). Field names normative
+   * per ANT-544 §4.1. Reads never break: old fields stay, new ones additive.
+   */
+  /** Canonical alias of networkFeeLamports. */
+  networkFee?: string;
+  /** v2 platform fee: MAX(floor(networkFee×bps/10_000), chainMin). */
+  platformFee?: string;
+  /** Legacy alias of platformFee. */
+  protocolFeeLamports?: string;
+  /** networkFee + platformFee at quote time (canonical alias of totalFeeLamports). */
+  totalFee?: string;
+  /**
+   * Offered user-approved upper bound for the passkey-signed V4 authorization
+   * (defaults to totalFee; the client MAY offer a higher bound for drift
+   * headroom — submit enforces `totalFee ≤ maxTotalFee`, fail-closed).
+   */
+  maxTotalFee?: string;
+  /** Legacy alias of maxTotalFee. */
+  suggestedMaxTotalFee?: string;
+  /** chainMin applied for this chain under the quoted policy version. */
+  chainMinBaseUnits?: string;
+  /** Informational quote id (submit re-attests — the id is not replay-checked). */
+  quoteId?: string;
+  quotedAt?: string;
+  /** Quote expiry (ISO-8601; expiresAt − quotedAt ≤ 300s). Past it → re-quote, never submit. */
+  expiresAt?: string;
 }
 
 /** Input for POST /v1/wallet/transactions/submit (ANT-39/ANT-41, additive). */
@@ -331,8 +380,13 @@ export class PeridotWallet {
    * in full plus the on-chain-recomputed protocol fee. The client signs the intent plus
    * the fee policy (never amounts) and echoes the quoted network fee as the drift
    * reference; the server re-quotes once if fees moved beyond the drift bound.
+   *
+   * Fee-policy v2 (ANT-555): the submit carries the passkey-signed V4 bound
+   * `maxTotalFeeLamports` (offered `maxTotalFee`, defaults to the quoted
+   * totalFee — the client MAY raise it for drift headroom). Missing → 400;
+   * `totalFee ≤ maxTotalFee` is enforced pre-broadcast (409 → re-quote).
    */
-  async withdraw(input: WithdrawInput, opts?: { expectedPid?: string }): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
+  async withdraw(input: WithdrawInput, opts?: { expectedPid?: string; onQuote?: FeeApprovalHandler }): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
     if (!this.passkeySigner) return this.viaPopup("withdraw", input, opts);
     const pid = await this.pid();
     const amount = BigInt(input.amount);
@@ -340,22 +394,11 @@ export class PeridotWallet {
     const accountId = pidToSeed32(pid);
     const adapter = await this.solana();
 
-    const getQuote = async () => {
-      const quoteRes = await this.api.post<FeeQuoteView>(
-        "/v1/wallet/withdraw/quote",
-        { asset: input.asset },
-      );
-      if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
-      const quote = quoteRes.data as FeeQuoteView;
-      // Assert-on-2xx (ANT-41 AC9): mismatch discards the quote — never sign/broadcast.
-      // Missing echo → legacy path (proceed). Throws ClusterMismatchError on mismatch.
-      assertChainEcho(quote.chain, await this.selectedSolanaReference());
-      return quote;
-    };
+    const getQuote = async () => this.fetchWithdrawQuote(input.asset);
 
     const attempt = async (
       n: bigint,
-      quote: { networkFeeLamports: string; feePolicyVersion: number; chainTime: number },
+      quote: NormalizedFeeQuote,
     ): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> => {
       const expiry = Math.floor(quote.chainTime) + 300;
       const p =
@@ -378,7 +421,11 @@ export class PeridotWallet {
         nonce: n.toString(),
         expiry,
         feePolicyVersion: quote.feePolicyVersion,
-        quotedNetworkFeeLamports: quote.networkFeeLamports,
+        quotedNetworkFeeLamports: quote.networkFee,
+        // v2 user-authorized bound (spec B5): enforced pre-broadcast by Tyler's
+        // backend; stripped by the whitelist pipe on pre-v2 backends. V4
+        // passkey-signed enforcement is Troy/Tyler's contract-side deliverable.
+        maxTotalFeeLamports: quote.maxTotalFee,
         assertion: {
           id: a.credentialId,
           signature: b64url(a.signature),
@@ -395,6 +442,10 @@ export class PeridotWallet {
 
     const nonce = await adapter.getNonce(pid);
     const quote = await getQuote();
+    // Pre-approval gate (ANT-557): the UI shows this exact quote and the
+    // passkey ceremony runs only after the user approves it. Denial throws
+    // FeeApprovalDeniedError — nothing signed, nothing charged.
+    if (opts?.onQuote && !(await opts.onQuote(quote))) throw new FeeApprovalDeniedError();
     try {
       return await attempt(nonce, quote);
     } catch (e) {
@@ -407,6 +458,7 @@ export class PeridotWallet {
       // Network fee moved beyond the drift bound — re-quote once and sign fresh intent.
       if (/moved — re-quote|re-quote/i.test(e.message)) {
         const fresh = await getQuote();
+        if (opts?.onQuote && !(await opts.onQuote(fresh))) throw new FeeApprovalDeniedError();
         const freshNonce = await adapter.getNonce(pid);
         return attempt(freshNonce, fresh);
       }
@@ -415,12 +467,33 @@ export class PeridotWallet {
   }
 
   /**
+   * Fetch + normalize a withdraw fee quote WITHOUT signing (ANT-557).
+   * Powers pre-approval panels; `withdraw` signs only after `onQuote` approves.
+   */
+  async quoteWithdraw(asset: string): Promise<NormalizedFeeQuote> {
+    return this.fetchWithdrawQuote(asset);
+  }
+
+  private async fetchWithdrawQuote(asset: string): Promise<NormalizedFeeQuote> {
+    const quoteRes = await this.api.post<FeeQuoteView & FeeQuoteV2>(
+      "/v1/wallet/withdraw/quote",
+      { asset },
+    );
+    if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
+    const quote = quoteRes.data as FeeQuoteView & FeeQuoteV2;
+    // Assert-on-2xx (ANT-41 AC9): mismatch discards the quote — never sign/broadcast.
+    // Missing echo → legacy path (proceed). Throws ClusterMismatchError on mismatch.
+    assertChainEcho(quote.chain, await this.selectedSolanaReference());
+    return normalizeFeeQuote(quote);
+  }
+
+  /**
    * Relayer-sponsored generic execute (V3, disc 6) — wallet parity with the EVM
    * `execute`: one passkey-signed intent drives an arbitrary Solana call with
    * the PDA as signer. The client signs `call_hash` (target ‖ metas ‖ data) plus
    * the fee policy; the server re-quotes once if fees moved beyond the drift bound.
    */
-  async execute(input: ExecuteInput, opts?: { expectedPid?: string }): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
+  async execute(input: ExecuteInput, opts?: { expectedPid?: string; onQuote?: FeeApprovalHandler }): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
     if (!this.passkeySigner) return this.viaPopup("execute", input, opts);
     const pid = await this.pid();
     const accountId = pidToSeed32(pid);
@@ -429,21 +502,11 @@ export class PeridotWallet {
     const metas = input.metas.map((m) => ({ address: new PublicKey(m.address), writable: m.writable, signer: m.signer }));
     const data = b64urlToBytes(input.data);
 
-    const getQuote = async () => {
-      const quoteRes = await this.api.post<FeeQuoteView>(
-        "/v1/wallet/execute/quote",
-        { target: input.target, metas: input.metas, data: input.data },
-      );
-      if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
-      const quote = quoteRes.data as FeeQuoteView;
-      // Assert-on-2xx (ANT-41 AC9): mismatch discards the quote — never sign/broadcast.
-      assertChainEcho(quote.chain, await this.selectedSolanaReference());
-      return quote;
-    };
+    const getQuote = async () => this.fetchExecuteQuote(input);
 
     const attempt = async (
       n: bigint,
-      quote: { networkFeeLamports: string; feePolicyVersion: number; chainTime: number },
+      quote: NormalizedFeeQuote,
     ): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> => {
       const expiry = Math.floor(quote.chainTime) + 300;
       const callHash = await executeCallHash(target, metas, data);
@@ -456,7 +519,9 @@ export class PeridotWallet {
         nonce: n.toString(),
         expiry,
         feePolicyVersion: quote.feePolicyVersion,
-        quotedNetworkFeeLamports: quote.networkFeeLamports,
+        quotedNetworkFeeLamports: quote.networkFee,
+        // v2 user-authorized bound (spec B5; see withdraw for the full note).
+        maxTotalFeeLamports: quote.maxTotalFee,
         assertion: {
           id: a.credentialId,
           signature: b64url(a.signature),
@@ -473,6 +538,9 @@ export class PeridotWallet {
 
     const nonce = await adapter.getNonce(pid);
     const quote = await getQuote();
+    // Pre-approval gate (ANT-557): same contract as withdraw — nothing signs
+    // before the UI approves this exact quote.
+    if (opts?.onQuote && !(await opts.onQuote(quote))) throw new FeeApprovalDeniedError();
     try {
       return await attempt(nonce, quote);
     } catch (e) {
@@ -485,11 +553,32 @@ export class PeridotWallet {
       // Network fee moved beyond the drift bound — re-quote once and sign fresh intent.
       if (/moved — re-quote|re-quote/i.test(e.message)) {
         const fresh = await getQuote();
+        if (opts?.onQuote && !(await opts.onQuote(fresh))) throw new FeeApprovalDeniedError();
         const freshNonce = await adapter.getNonce(pid);
         return attempt(freshNonce, fresh);
       }
       throw e;
     }
+  }
+
+  /**
+   * Fetch + normalize an execute fee quote WITHOUT signing (ANT-557).
+   * Powers pre-approval panels; `execute` signs only after `onQuote` approves.
+   */
+  async quoteExecute(input: ExecuteInput): Promise<NormalizedFeeQuote> {
+    return this.fetchExecuteQuote(input);
+  }
+
+  private async fetchExecuteQuote(input: ExecuteInput): Promise<NormalizedFeeQuote> {
+    const quoteRes = await this.api.post<FeeQuoteView & FeeQuoteV2>(
+      "/v1/wallet/execute/quote",
+      { target: input.target, metas: input.metas, data: input.data },
+    );
+    if (!quoteRes.ok || "statusCode" in quoteRes.data) throw new Error("Failed to get a fee quote");
+    const quote = quoteRes.data as FeeQuoteView & FeeQuoteV2;
+    // Assert-on-2xx (ANT-41 AC9): mismatch discards the quote — never sign/broadcast.
+    assertChainEcho(quote.chain, await this.selectedSolanaReference());
+    return normalizeFeeQuote(quote);
   }
 
   async waitForConfirmation(signature: string, attempts = 8, intervalMs = 1000): Promise<"confirmed" | "failed" | "pending"> {
@@ -596,6 +685,10 @@ export class PeridotWallet {
       expiry,
       feePolicyVersion: viewRes.feePolicyVersion,
       quotedNetworkFeeLamports: viewRes.networkFeeLamports.toString(),
+      // V4 user bound (spec B5, backend ANT-555): required — missing → 400.
+      // v2 views carry the offered `maxTotalFee` (defaults to totalFee);
+      // legacy v1 views fall back to the network fee (v1 backends ignore it).
+      maxTotalFeeLamports: viewRes.maxTotalFee ?? viewRes.totalFee ?? viewRes.networkFeeLamports.toString(),
       assertion: {
         id: a.credentialId,
         signature: b64url(a.signature),
