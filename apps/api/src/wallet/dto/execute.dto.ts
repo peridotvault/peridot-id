@@ -76,6 +76,14 @@ export class SponsoredExecuteDto {
   @Matches(/^\d+$/, { message: "Quoted network fee must be an integer" })
   quotedNetworkFeeLamports!: string;
 
+  /**
+   * User-approved upper bound on `networkFee + platformFee` carried by the
+   * passkey-signed V4 authorization (spec B5). Required — no silent default
+   * (spec edge case 2); submit enforces `totalFee ≤ maxTotalFee` pre-broadcast.
+   */
+  @Matches(/^\d+$/, { message: "Max total fee must be an integer" })
+  maxTotalFeeLamports!: string;
+
   /** Signed fee-policy version (selects the protocol percentage; unknown versions rejected on-chain). */
   @IsInt()
   @Min(1)
