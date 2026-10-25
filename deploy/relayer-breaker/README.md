@@ -10,9 +10,13 @@ canonical in `docs/RELAYER_RUNBOOK.md` §4 — this file does not duplicate it.
 ## Config contract (for the ANT-581 mechanism)
 
 - The mechanism reads caps from env at startup, in **native base units**
-  (lamports / stroops / wei, integer strings): `BREAKER_CAP_SOLANA`,
-  `BREAKER_CAP_STELLAR`, `BREAKER_CAP_ETHEREUM`, `BREAKER_CAP_BASE`,
-  `BREAKER_CAP_BSC`. `breaker.config.example.json` is the documented source.
+  (lamports / stroops / wei, integer strings): `PID_RELAYER_BREAKER_CAP_LAMPORTS`
+  (default across chains; `0` = breaker disabled) with per-chain override
+  `PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN>` (chain key uppercased, e.g.
+  `_SOLANA`, `_EIP155:11155111`). See `circuit-breaker.service.ts capFor`.
+  `breaker.config.example.json` is the documented source; the alert check
+  (`relayer-h1-check.sh`) reads the SAME env names so the breaker and the
+  page can never disagree about the cap.
 - Rolling window: 1 h (`R-NFR-9`), summed from `relayer.pnl.absorbed` (+ legacy
   `*.reconciled.relayerAbsorbed`) — the same Q4 the alert check evaluates, so
   the breaker and the page can never disagree about the sum.

@@ -18,11 +18,12 @@
     "bsc": "0.002 BNB/hr; ~100x typical 21k-gas tx at 1 gwei"
   },
   "env": {
-    "solana": "BREAKER_CAP_SOLANA",
-    "stellar": "BREAKER_CAP_STELLAR",
-    "ethereum": "BREAKER_CAP_ETHEREUM",
-    "base": "BREAKER_CAP_BASE",
-    "bsc": "BREAKER_CAP_BSC"
+    "default": "PID_RELAYER_BREAKER_CAP_LAMPORTS",
+    "solana": "PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA",
+    "stellar": "PID_RELAYER_BREAKER_CAP_LAMPORTS_STELLAR",
+    "ethereum": "PID_RELAYER_BREAKER_CAP_LAMPORTS_ETHEREUM",
+    "base": "PID_RELAYER_BREAKER_CAP_LAMPORTS_BASE",
+    "bsc": "PID_RELAYER_BREAKER_CAP_LAMPORTS_BSC"
   },
   "receivers": {
     "page": "ALERT_PAGE_URL (on-call; formula_mismatch also pages Security/Tobias)",

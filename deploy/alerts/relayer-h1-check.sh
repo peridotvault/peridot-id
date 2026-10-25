@@ -21,16 +21,20 @@
 #   ALERT_WEBHOOK_URL (optional)       NOTIFY route (chat/channel). POSTs {"text": ...}.
 #   ALERT_PAGE_URL (optional)          PAGE route (PagerDuty/Opsgenie). Falls back to ALERT_WEBHOOK_URL.
 #   Per-query thresholds (defaults = initial tuning, see deploy/relayer-breaker/README.md):
-#   REVOCATION_FLOOR (default 5)                 Q1 absolute floor per chain / 10 min.
+#   REVOCATION_FLOOR (default 3)                 Q1 absolute floor per chain / 10 min (ANT-592 normative).
 #   REJECT_NOTIFY (default 10) REJECT_PAGE (default 50)          Q2 per bucket / 15 min.
 #   ROTATION_NOTIFY (default 3) ROTATION_PAGE (default 10)        Q5 per chain / 15 min.
 #   DRIFT_NOTIFY (default 20) DRIFT_PAGE (default 100)            Q7 per (chain,entryPoint) / 15 min.
-#   Per-chain absorbed-loss caps, native base units (defaults = OQ-3 proposal):
-#   BREAKER_CAP_SOLANA (default 1000000)          lamports / 1h
-#   BREAKER_CAP_STELLAR (default 1000000)         stroops / 1h
-#   BREAKER_CAP_ETHEREUM (default 20000000000000000)  wei / 1h (0.02 ETH)
-#   BREAKER_CAP_BASE (default 500000000000000)    wei / 1h (0.0005 ETH)
-#   BREAKER_CAP_BSC (default 2000000000000000)    wei / 1h (0.002 BNB)
+#   Per-chain absorbed-loss caps, native base units (defaults = OQ-3 proposal,
+#   env names match the ANT-581 mechanism exactly — circuit-breaker.service.ts
+#   reads PID_RELAYER_BREAKER_CAP_LAMPORTS with per-chain override
+#   PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN>; chain key uppercased):
+#   PID_RELAYER_BREAKER_CAP_LAMPORTS (default 1000000 — solana lamports / 1h;
+#     also the fallback for chains without an override)
+#   PID_RELAYER_BREAKER_CAP_LAMPORTS_STELLAR (default 1000000)    stroops / 1h
+#   PID_RELAYER_BREAKER_CAP_LAMPORTS_ETHEREUM (default 20000000000000000)  wei / 1h (0.02 ETH)
+#   PID_RELAYER_BREAKER_CAP_LAMPORTS_BASE (default 500000000000000)  wei / 1h (0.0005 ETH)
+#   PID_RELAYER_BREAKER_CAP_LAMPORTS_BSC (default 2000000000000000)  wei / 1h (0.002 BNB)
 #   Unknown-chain rows use the tightest cap (solana default) — fail toward paging.
 #
 # Rollback: remove the cron line (or delete these files). Nothing was written to
@@ -46,23 +50,26 @@ if ! command -v psql >/dev/null 2>&1; then
   exit 3
 fi
 
-REVOCATION_FLOOR="${REVOCATION_FLOOR:-5}"
+REVOCATION_FLOOR="${REVOCATION_FLOOR:-3}"
 REJECT_NOTIFY="${REJECT_NOTIFY:-10}"; REJECT_PAGE="${REJECT_PAGE:-50}"
 ROTATION_NOTIFY="${ROTATION_NOTIFY:-3}"; ROTATION_PAGE="${ROTATION_PAGE:-10}"
 DRIFT_NOTIFY="${DRIFT_NOTIFY:-20}"; DRIFT_PAGE="${DRIFT_PAGE:-100}"
-CAP_SOLANA="${BREAKER_CAP_SOLANA:-1000000}"
-CAP_STELLAR="${BREAKER_CAP_STELLAR:-1000000}"
-CAP_ETHEREUM="${BREAKER_CAP_ETHEREUM:-20000000000000000}"
-CAP_BASE="${BREAKER_CAP_BASE:-500000000000000}"
-CAP_BSC="${BREAKER_CAP_BSC:-2000000000000000}"
+# Cap env names mirror the mechanism (circuit-breaker.service.ts capFor):
+# base default + per-chain override PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN>.
+CAP_SOLANA="${PID_RELAYER_BREAKER_CAP_LAMPORTS:-1000000}"
+CAP_STELLAR="${PID_RELAYER_BREAKER_CAP_LAMPORTS_STELLAR:-1000000}"
+CAP_ETHEREUM="${PID_RELAYER_BREAKER_CAP_LAMPORTS_ETHEREUM:-20000000000000000}"
+CAP_BASE="${PID_RELAYER_BREAKER_CAP_LAMPORTS_BASE:-500000000000000}"
+CAP_BSC="${PID_RELAYER_BREAKER_CAP_LAMPORTS_BSC:-2000000000000000}"
 CAP_UNKNOWN="$CAP_SOLANA"
 
 Q1="SELECT COALESCE(se.metadata ->> 'chain', 'unknown'), COUNT(*) FILTER (WHERE se.\"createdAt\" > now() - interval '10 minutes'), COUNT(*) FILTER (WHERE se.\"createdAt\" <= now() - interval '10 minutes') FROM security_events se WHERE se.\"eventType\" IN ('credential.rotated', 'credential.revoked') AND se.\"createdAt\" > now() - interval '1 hour' GROUP BY 1;"
 Q2="SELECT COALESCE(se.metadata ->> 'chain', 'unknown') || '/' || COALESCE(se.metadata ->> 'entryPoint', 'unknown') || '/' || COALESCE(se.metadata ->> 'cause', 'unknown'), COUNT(*) FROM security_events se WHERE se.\"eventType\" = 'intent.rejected' AND se.\"createdAt\" > now() - interval '15 minutes' GROUP BY 1;"
-Q3="SELECT count(*) FROM security_events se WHERE se.\"createdAt\" > now() - interval '5 minutes' AND (se.\"eventType\" IN ('reconcile.formula_mismatch', 'reconcile.over_attested') OR (se.\"eventType\" LIKE '%.reconciled' AND (COALESCE((se.metadata ->> 'overAttested')::boolean, false) OR (se.metadata ->> 'protocolFee') IS DISTINCT FROM (se.metadata ->> 'protocolFeeExpected'))));"
+Q3="SELECT count(*) FROM security_events se WHERE se.\"createdAt\" > now() - interval '5 minutes' AND (se.\"eventType\" IN ('relayer.formula_mismatch', 'relayer.over_attested') OR (se.\"eventType\" LIKE '%.reconciled' AND (COALESCE((se.metadata ->> 'overAttested')::boolean, false) OR (se.metadata ->> 'protocolFee') IS DISTINCT FROM (se.metadata ->> 'protocolFeeExpected'))));"
 Q4="SELECT s.chain, COALESCE(SUM(s.absorbed), 0)::bigint, EXISTS (SELECT 1 FROM security_events b WHERE b.\"eventType\" = 'relayer.breaker.opened' AND COALESCE(b.metadata ->> 'chain', 'unknown') = s.chain AND b.\"createdAt\" > now() - interval '1 hour') FROM (SELECT COALESCE(se.metadata ->> 'chain', 'unknown') AS chain, COALESCE(NULLIF(se.metadata ->> 'absorbed', ''), NULLIF(se.metadata ->> 'relayerAbsorbed', ''), '0')::numeric AS absorbed FROM security_events se WHERE (se.\"eventType\" = 'relayer.pnl' OR se.\"eventType\" LIKE '%.reconciled') AND se.\"createdAt\" > now() - interval '1 hour') s GROUP BY 1;"
 Q5="SELECT COALESCE(se.metadata ->> 'chain', 'unknown'), COUNT(*) FROM security_events se WHERE se.\"eventType\" IN ('credential.rotation.unconfirmed', 'rotation.unconfirmed') AND se.\"createdAt\" > now() - interval '15 minutes' GROUP BY 1;"
-Q6="SELECT count(*) FROM security_events se WHERE se.\"eventType\" = 'relay.parked_unreadable' AND se.\"createdAt\" > now() - interval '15 minutes';"
+Q6="SELECT count(*) FROM security_events se WHERE se.\"eventType\" = 'broadcast.parked_unreadable' AND se.\"createdAt\" > now() - interval '15 minutes';"
+Q6C="SELECT count(*) FROM security_events se WHERE se.\"eventType\" = 'broadcast.conflicting_bytes_rejected' AND se.\"createdAt\" > now() - interval '15 minutes';"
 Q7="SELECT COALESCE(se.metadata ->> 'chain', 'unknown') || '/' || COALESCE(se.metadata ->> 'entryPoint', 'unknown'), COUNT(*) FROM security_events se WHERE se.\"eventType\" = 'quote.drift_rejected' AND se.\"createdAt\" > now() - interval '15 minutes' GROUP BY 1;"
 
 run_q() {
@@ -149,6 +156,13 @@ if [[ "$PARKED" =~ ^[0-9]+$ ]]; then
   if (( PARKED > 0 )); then PAGES+=("resolve-then-act parked-unreadable: $PARKED intent(s)/15min need operator review (runbook §6)"); fi
 else echo "CRITICAL: unexpected Q6 output: $PARKED" >&2; exit 3; fi
 
+# Q6c: conflicting-bytes-rejected → always page (DIFFERENT bytes under the SAME
+# nonce is forbidden; any occurrence is a client bug or an attack probe).
+CONFLICTING="$(run_q "$Q6C" | tr -d '[:space:]')"
+if [[ "$CONFLICTING" =~ ^[0-9]+$ ]]; then
+  if (( CONFLICTING > 0 )); then PAGES+=("conflicting-bytes-rejected: $CONFLICTING event(s)/15min — forbidden nonce-reuse path hit (runbook §6)"); fi
+else echo "CRITICAL: unexpected Q6c output: $CONFLICTING" >&2; exit 3; fi
+
 # Q7: drift spikes.
 while IFS=' ' read -r bucket n; do
   [[ -z "$bucket" ]] && continue
@@ -161,7 +175,7 @@ while IFS=' ' read -r bucket n; do
 done <<< "$(run_q "$Q7")"
 
 if (( ${#PAGES[@]} == 0 && ${#NOTIFIES[@]} == 0 )); then
-  echo "OK: relayer H1 within thresholds (rev-spike/reject/divergence/pnl/rotation/park/drift checked)"
+  echo "OK: relayer H1 within thresholds (rev-spike/reject/divergence/pnl/rotation/park/conflict/drift checked)"
   exit 0
 fi
 

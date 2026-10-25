@@ -200,20 +200,23 @@ confirmation (ANT-287 OQ-1).
 ### What it watches
 
 `security_events` rows for the relayer hardening event contract (canonical
-names + legacy shapes, see `relayer-h1-detected.sql` header and
-`docs/RELAYER_DASHBOARDS.md` §1): revocations, intent rejections by cause,
-reconciliation divergences, absorbed P&L, drift rejections, rotation
-unconfirmed, parked-unreadable, per-chain absorbed sums.
+names per ANT-592 normative catalog + legacy shapes, see
+`relayer-h1-detected.sql` header and `docs/RELAYER_DASHBOARDS.md` §1):
+revocations, intent rejections by cause (11-cause taxonomy), reconciliation
+divergences (`relayer.formula_mismatch` / `relayer.over_attested`), absorbed
+P&L, drift rejections, rotation latency + unconfirmed, resolve-then-act
+outcomes (`broadcast.*`), broadcast dedup/conflict feed, per-chain absorbed
+sums vs breaker caps.
 
 Thresholds (initials; all env-overridable in the script; breaker caps are
 OQ-3 = Trevor+CTO, see `deploy/relayer-breaker/README.md`):
 revocation spike per chain `recent_10m > prior_50m` (exactly 5× trailing
-baseline) with floor `REVOCATION_FLOOR=5` → PAGE; rejections
+baseline) with floor `REVOCATION_FLOOR=3` (ANT-592 normative) → PAGE; rejections
 `REJECT_NOTIFY=10`/`REJECT_PAGE=50` per bucket/15min; ANY divergence/5min →
 PAGE (R-NFR-6); absorbed ≥80% cap → NOTIFY, ≥100% → PAGE (R-NFR-9, with a
 MECHANISM-GAP note when no `relayer.breaker.opened` exists); rotation stuck
 `ROTATION_NOTIFY=3`/`ROTATION_PAGE=10`; ANY parked-unreadable/15min → PAGE;
-drift `DRIFT_NOTIFY=20`/`DRIFT_PAGE=100`.
+ANY conflicting-bytes-rejected/15min → PAGE; drift `DRIFT_NOTIFY=20`/`DRIFT_PAGE=100`.
 
 ### Files
 
@@ -222,10 +225,15 @@ drift `DRIFT_NOTIFY=20`/`DRIFT_PAGE=100`.
   exits 0/2 (3 = config/query failure). `ALERT_PAGE_URL` (P1, falls back to
   `ALERT_WEBHOOK_URL`) + `ALERT_WEBHOOK_URL` (P2) POST `{"text": ...}`.
 
-### Enable (needs VPS/deploy access — not done from this branch)
+### Enable (ANT-385: automatic)
+
+`deploy/alerts/install.sh` writes the `relayer-h1-check.sh` cron line (every
+5 min, scoped per stack via `run-with-infisical.sh`; rollback = remove the
+cron line). Manual equivalent (VPS, secrets via Infisical at runtime — never
+paste `DATABASE_URL` into crontab):
 
 ```cron
-*/5 * * * *  DATABASE_URL='postgresql://...' ALERT_PAGE_URL='...' ALERT_WEBHOOK_URL='...' /opt/peridot-id/deploy/alerts/relayer-h1-check.sh
+*/5 * * * *  ALERT_ENV=production /path/to/repo/deploy/alerts/run-with-infisical.sh main relayer-h1-check.sh #peridot-alert
 ```
 
 Secrets/thresholds/caps are injected at runtime via env — never baked into
@@ -255,6 +263,18 @@ note; parked-unreadable → PAGE; 12 rejections → NOTIFY; 4 unconfirmed →
 NOTIFY; 25 drifts → NOTIFY; exit 2;
 T5 — `relayer.breaker.opened` present → GAP note clears; unset
 `DATABASE_URL` → exit 3.
+
+Recorded run 2026-10-25 ANT-592 normative-catalog alignment (scratch
+Postgres 17, same harness): T1 quiet → `OK`, exit 0; T2 canonical
+`relayer.formula_mismatch` → PAGE divergence + 3 recent solana revocations
+(prior 1) → PAGE spike under the normative floor `REVOCATION_FLOOR=3`
+(quiet under the old floor of 5 — the change is load-bearing), exit 2;
+T3 stale `reconcile.formula_mismatch` correctly ignored (0 divergence),
+`broadcast.parked_unreadable` → PAGE, `broadcast.conflicting_bytes_rejected`
+→ PAGE (new Q6c), Q4 GAP note clears with `relayer.breaker.opened`
+`{chain,absorbedWindow,cap}` present, Q6b + `rotation.confirmed_latency` P6
+queries return rows, exit 2; T4 2 recent stellar stay quiet (below floor 3),
+exit 0; T5 unset `DATABASE_URL` → exit 3.
 
 ### Rollback
 

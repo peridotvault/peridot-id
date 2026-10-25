@@ -32,12 +32,12 @@ to on-call. Every breach also writes a `security.log` event (backend, ANT-581).
 
 | # | Signal (H1) | Severity | Receiver | Threshold (initial; env-overridable) | Example query |
 |---|---|---|---|---|---|
-| A1 | Revocation spike (R-NFR-5) | P1 | on-call | per chain: `recent_10m > prior_50m` (= 5× trailing baseline) AND `recent_10m ≥ 5` | `SELECT COALESCE(metadata->>'chain','unknown'), COUNT(*) FILTER (WHERE "createdAt" > now()-interval'10m'), COUNT(*) FILTER (WHERE "createdAt" <= now()-interval'10m') FROM security_events WHERE "eventType" IN ('credential.rotated','credential.revoked') AND "createdAt" > now()-interval'1h' GROUP BY 1;` |
-| A2 | Intent rejections by cause | P2 ≥10 / P1 ≥50 per (chain,entryPoint,cause)/15min | on-call (P1) / #relayer-ops (P2) | `REJECT_NOTIFY=10`, `REJECT_PAGE=50` | `SELECT metadata->>'cause', COUNT(*) FROM security_events WHERE "eventType"='intent.rejected' AND "createdAt" > now()-interval'15m' GROUP BY 1;` — cause ∈ `stale-nonce\|expired\|drift\|policy-unknown\|insufficient-funds\|unauthorized` |
-| A3 | Reconciliation divergence (R-NFR-6) | **P1** (any event/5min) | on-call **+ Security** for `formula_mismatch`; on-call for `over_attested` | any `formula_mismatch`/`over_attested` (or legacy `*.reconciled` with `overAttested=true` or `protocolFee≠protocolFeeExpected`) in 5 min | `SELECT "eventType", metadata->>'chain', metadata FROM security_events WHERE "createdAt" > now()-interval'5m' AND ("eventType" IN ('reconcile.formula_mismatch','reconcile.over_attested') OR ("eventType" LIKE '%.reconciled' AND (COALESCE((metadata->>'overAttested')::boolean,false) OR (metadata->>'protocolFee') IS DISTINCT FROM (metadata->>'protocolFeeExpected'))));` |
-| A4 | Relayer absorbed loss vs breaker cap (R-NFR-9) | P2 at 80% of cap; **P1** at 100% | on-call | rolling-1h `SUM(absorbed)` per chain vs `BREAKER_CAP_*` (§4) | Q4 in `relayer-h1-detected.sql`. A P1 **without** a `relayer.breaker.opened` row for the chain in the window is a MECHANISM GAP — treat as P1 + file a bug on the breaker (backend, ANT-581 mechanism) |
+| A1 | Revocation spike (R-NFR-5) | P1 | on-call | per chain: `recent_10m > prior_50m` (= 5× trailing baseline) AND `recent_10m ≥ 3` (ANT-592 normative floor) | `SELECT COALESCE(metadata->>'chain','unknown'), COUNT(*) FILTER (WHERE "createdAt" > now()-interval'10m'), COUNT(*) FILTER (WHERE "createdAt" <= now()-interval'10m') FROM security_events WHERE "eventType" IN ('credential.rotated','credential.revoked') AND "createdAt" > now()-interval'1h' GROUP BY 1;` |
+| A2 | Intent rejections by cause | P2 ≥10 / P1 ≥50 per (chain,entryPoint,cause)/15min | on-call (P1) / #relayer-ops (P2) | `REJECT_NOTIFY=10`, `REJECT_PAGE=50` | `SELECT metadata->>'cause', COUNT(*) FROM security_events WHERE "eventType"='intent.rejected' AND "createdAt" > now()-interval'15m' GROUP BY 1;` — cause ∈ `stale-nonce\|expired\|over-ttl\|drift\|policy-unknown\|insufficient-funds\|unauthorized\|conflicting-nonce-reuse\|breaker-open\|not-ready\|relayer-unfunded` (ANT-592 normative taxonomy) |
+| A3 | Reconciliation divergence (R-NFR-6) | **P1** (any event/5min) | on-call **+ Security** for `formula_mismatch`; on-call for `over_attested` | any `formula_mismatch`/`over_attested` (or legacy `*.reconciled` with `overAttested=true` or `protocolFee≠protocolFeeExpected`) in 5 min | `SELECT "eventType", metadata->>'chain', metadata FROM security_events WHERE "createdAt" > now()-interval'5m' AND ("eventType" IN ('relayer.formula_mismatch','relayer.over_attested') OR ("eventType" LIKE '%.reconciled' AND (COALESCE((metadata->>'overAttested')::boolean,false) OR (metadata->>'protocolFee') IS DISTINCT FROM (metadata->>'protocolFeeExpected'))));` |
+| A4 | Relayer absorbed loss vs breaker cap (R-NFR-9) | P2 at 80% of cap; **P1** at 100% | on-call | rolling-1h `SUM(absorbed)` per chain vs `PID_RELAYER_BREAKER_CAP_LAMPORTS*` (§4) | Q4 in `relayer-h1-detected.sql`. A P1 **without** a `relayer.breaker.opened` row for the chain in the window is a MECHANISM GAP — treat as P1 + file a bug on the breaker (backend, ANT-581 mechanism) |
 | A5 | Rotation stuck (`rotation.unconfirmed`) | P2 ≥3 / P1 ≥10 per chain/15min | on-call (P1) / #relayer-ops (P2) | `ROTATION_NOTIFY=3`, `ROTATION_PAGE=10` | `SELECT metadata->>'chain', COUNT(*) FROM security_events WHERE "eventType" IN ('credential.rotation.unconfirmed','rotation.unconfirmed') AND "createdAt" > now()-interval'15m' GROUP BY 1;` |
-| A6 | Resolve-then-act `parked-unreadable` | **P1** (any event/15min; never auto-clears) | on-call | any | `SELECT metadata->>'chain', metadata->>'entryPoint', metadata->>'nonce', metadata->>'signature' FROM security_events WHERE "eventType"='relay.parked_unreadable' AND "createdAt" > now()-interval'15m';` |
+| A6 | Resolve-then-act `parked-unreadable` | **P1** (any event/15min; never auto-clears) | on-call | any | `SELECT metadata->>'chain', metadata->>'entryPoint', metadata->>'nonce', metadata->>'signature' FROM security_events WHERE "eventType"='broadcast.parked_unreadable' AND "createdAt" > now()-interval'15m';` |
 | A7 | Quote-drift spike (`quote.drift_rejected`) | P2 ≥20 / P1 ≥100 per (chain,entryPoint)/15min | on-call (P1) / #relayer-ops (P2) | `DRIFT_NOTIFY=20`, `DRIFT_PAGE=100` | `SELECT metadata->>'chain', metadata->>'entryPoint', COUNT(*) FROM security_events WHERE "eventType"='quote.drift_rejected' AND "createdAt" > now()-interval'15m' GROUP BY 1,2;` |
 
 Cron latency note: the check runs every 5 min; worst-case detection latency ≈
@@ -107,7 +107,7 @@ Two sub-cases, different severity:
   P1: persistent over-attestation at volume is economically equivalent to a
   drain (see §4 caps).
 
-## 4. Circuit-breaker open/close procedure
+## 4. Circuit-breaker open/close procedure (H4.4 — resume ownership confirmed ANT-592)
 
 Mechanism (backend, ANT-581): per-chain spend-rate breaker on absorbed-loss
 rolling window; opens fail-closed (sponsored broadcasts pause, re-quote path
@@ -153,6 +153,14 @@ ever sponsors whitelisted entry points; it holds no user assets.)
 
 ## 6. Post-incident reconcile verification
 
+**`broadcast.conflicting_bytes_rejected` triage (Q6c page):** DIFFERENT bytes
+under the SAME nonce is forbidden — the request was rejected, no conflicting
+submission exists. (1) Pull the row (`metadata` carries `entryPoint`, `chain`,
+`nonce`, `status`); (2) client bug (stale quote re-signed under an old nonce)
+→ hand the pid + nonce to Backend with the row; (3) repeated hits from one
+pid or many pids in a burst → treat as an attack probe, page Security
+(Tobias) and watch A2 `conflicting-nonce-reuse` for the companion surge.
+
 No incident closes without this:
 
 1. Re-run reconciliation over the incident window per chain:
@@ -163,7 +171,7 @@ No incident closes without this:
    WHERE "createdAt" BETWEEN '<incident-start>' AND '<incident-end>'
      AND (metadata->>'chain' = '<chain>' OR '<chain>' = 'all')
      AND ("eventType" LIKE '%.reconciled' OR "eventType" IN
-          ('relayer.pnl','reconcile.formula_mismatch','reconcile.over_attested'))
+          ('relayer.pnl','relayer.formula_mismatch','relayer.over_attested'))
    GROUP BY 1;
    ```
    plus the resolve-then-act outcome breakdown (Q6b in `relayer-h1-detected.sql`):
