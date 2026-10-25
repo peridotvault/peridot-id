@@ -39,9 +39,9 @@ describe("fee policy v2 — spec B3 worked examples (normative)", () => {
   });
 
   it("Base: network 0.0000002 ETH → platform 0.00000075 ETH → total 0.00000095 ETH (floor wins)", () => {
-    const network = 200_000_000n; // wei
-    expect(platformFeeOf(network, "base", 2)).toBe(750_000_000n);
-    expect(totalFeeOf(network, "base", 2)).toBe(950_000_000n);
+    const network = 200_000_000_000n; // wei
+    expect(platformFeeOf(network, "base", 2)).toBe(750_000_000_000n);
+    expect(totalFeeOf(network, "base", 2)).toBe(950_000_000_000n);
   });
 
   it("BSC: network 0.0000021 BNB → platform 0.0000023 BNB → total 0.0000044 BNB (floor wins)", () => {
@@ -55,8 +55,8 @@ describe("fee policy v2 — per-chain minima table (spec B2)", () => {
   it("pins the B2 minima in native base units", () => {
     expect(CHAIN_MIN_FEE_V2.stellar).toBe(100_000n);
     expect(CHAIN_MIN_FEE_V2.solana).toBe(17_000n);
-    expect(CHAIN_MIN_FEE_V2.ethereum).toBe(750_000_000n);
-    expect(CHAIN_MIN_FEE_V2.base).toBe(750_000_000n);
+    expect(CHAIN_MIN_FEE_V2.ethereum).toBe(750_000_000_000n);
+    expect(CHAIN_MIN_FEE_V2.base).toBe(750_000_000_000n);
     expect(CHAIN_MIN_FEE_V2.bsc).toBe(2_300_000_000_000n);
   });
 
@@ -68,13 +68,13 @@ describe("fee policy v2 — per-chain minima table (spec B2)", () => {
 
 describe("fee policy v2 — floor-wins vs 50%-wins legs (spec B-AC2/B-AC3)", () => {
   it("percentage leg wins when 50% exceeds the chain minimum (B-AC2)", () => {
-    // 0.000021 ETH: floor(50%) = 10500000000000 > 750000000.
+    // 0.000021 ETH: floor(50%) = 10500000000000 > 750000000000.
     expect(platformFeeOf(21_000_000_000_000n, "ethereum", 2)).toBe(10_500_000_000_000n);
   });
 
   it("floor leg wins when 50% is below the chain minimum (B-AC3)", () => {
-    // Base 0.0000002 ETH: floor(50%) = 100000000 < 750000000.
-    expect(platformFeeOf(200_000_000n, "base", 2)).toBe(750_000_000n);
+    // Base 0.0000002 ETH: floor(50%) = 100000000000 < 750000000000.
+    expect(platformFeeOf(200_000_000_000n, "base", 2)).toBe(750_000_000_000n);
   });
 
   it("floors the percentage leg user-favorably (dust falls to the minimum leg)", () => {

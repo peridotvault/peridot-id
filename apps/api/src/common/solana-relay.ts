@@ -31,9 +31,9 @@ export const CHAIN_MIN_FEE_V2: Readonly<Record<FeeChain, bigint>> = Object.freez
   stellar: 100_000n,
   // 0.000017 SOL (17_000 lamports).
   solana: 17_000n,
-  // 0.00000075 ETH (750_000_000 wei). Base shares Ethereum's minimum.
-  ethereum: 750_000_000n,
-  base: 750_000_000n,
+  // 0.00000075 ETH (750_000_000_000 wei = 750 gwei). Base shares Ethereum's minimum.
+  ethereum: 750_000_000_000n,
+  base: 750_000_000_000n,
   // 0.0000023 BNB (2_300_000_000_000 wei, 18 decimals).
   bsc: 2_300_000_000_000n,
 });
