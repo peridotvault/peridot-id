@@ -25,6 +25,7 @@ function baseDto(): GrantPermissionDto {
   d.to = ZERO;
   d.perTxCap = "0";
   d.totalLimit = "0";
+  d.feeLimit = "0";
   d.nftId = "0";
   d.sessionX = SX;
   d.sessionY = SY;
@@ -44,8 +45,8 @@ describe("PermissionsService", () => {
 
   it("pins the canonical permission id + grant challenge (forge vectors)", () => {
     const v = svc.validateGrant(baseDto(), NOW);
-    expect(v.permissionId).toBe("0xb4c008c91489c0d39b391924fad92b9d272cec1be7c2dee6a12c49fe450eb934");
-    expect(v.grantPayload).toBe("0x02e91a87b3b3df96dc99198b06401110fe64b0b5a89de6f1efc99cd80a51424b");
+    expect(v.permissionId).toBe("0xc784645c040b76e83a9b7b9120e927affce3367fcf74bd0bcb9626dccc95ebac");
+    expect(v.grantPayload).toBe("0xce5e7350e54d92a6933d005835260a97540e9a2cbfbe694126244ac1d70654f1");
   });
 
   it("pins the canonical perm-exec challenge (forge vector)", () => {
@@ -54,16 +55,17 @@ describe("PermissionsService", () => {
       buildPermExecPayload({
         chainId: 31337,
         account: ACCOUNT,
-        permissionId: B("0xb4c008c91489c0d39b391924fad92b9d272cec1be7c2dee6a12c49fe450eb934"),
+        permissionId: B("0xc784645c040b76e83a9b7b9120e927affce3367fcf74bd0bcb9626dccc95ebac"),
         seq: 0,
         target: TARGET,
         value: 0,
         dataHash: keccak256(data),
         deadline: NOW + 300,
         feePolicyVersion: 1,
+        maxTotalFee: 0,
       }),
     );
-    expect(got).toBe("0x550858b9d3150b036b8825365d6dba05a242be37337f8cbe8f0334d3444cc6f1");
+    expect(got).toBe("0x811f61eae26c979c660f36490b0e4097296bbea28308d889c90310ce574f6c63");
   });
 
   it("rejects a financial selector on a nonfinancial grant", () => {
@@ -87,27 +89,32 @@ describe("PermissionsService", () => {
     expect(() => svc.validateGrant(d2, NOW)).toThrow(/600s/);
   });
 
-  it("rejects inverted caps on financial grants", () => {
-    const d = baseDto();
-    d.kind = 3;
-    d.token = "0x0000000000000000000000000000000000000bee";
-    d.to = "0x000000000000000000000000000000000000beef";
-    d.perTxCap = "200";
-    d.totalLimit = "100";
-    expect(() => svc.validateGrant(d, NOW)).toThrow(/perTxCap/);
+  it("rejects financial kinds 2-5 (ANT-556 Option A)", () => {
+    for (const kind of [2, 3, 4, 5]) {
+      const d = baseDto();
+      d.kind = kind;
+      d.token = "0x0000000000000000000000000000000000000bee";
+      d.to = "0x000000000000000000000000000000000000beef";
+      d.perTxCap = "200";
+      d.totalLimit = "100";
+      expect(() => svc.validateGrant(d, NOW)).toThrow(/only kind 1|removed/);
+    }
   });
 
-  it("accepts a bounded ERC-20 grant", () => {
+  it("requires an explicit feeLimit (no zero default)", () => {
     const d = baseDto();
-    d.kind = 3;
-    d.target = ZERO;
-    d.selector = "0x00000000";
-    d.token = "0x0000000000000000000000000000000000000bee";
-    d.to = "0x000000000000000000000000000000000000beef";
-    d.perTxCap = "100";
-    d.totalLimit = "250";
+    // @ts-expect-error missing feeLimit must fail closed
+    delete d.feeLimit;
+    expect(() => svc.validateGrant(d, NOW)).toThrow(/feeLimit/);
+  });
+
+  it("binds a non-zero feeLimit into the grant payload", () => {
+    const d = baseDto();
+    d.feeLimit = "1000000000000000";
     const v = svc.validateGrant(d, NOW);
-    expect(v.permissionId).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(v.permissionId).toBe("0xc784645c040b76e83a9b7b9120e927affce3367fcf74bd0bcb9626dccc95ebac");
+    expect(v.grantPayload).not.toBe("0xce5e7350e54d92a6933d005835260a97540e9a2cbfbe694126244ac1d70654f1");
+    expect(v.grantPayload).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
   it("exposes the on-chain denied-selector list", () => {

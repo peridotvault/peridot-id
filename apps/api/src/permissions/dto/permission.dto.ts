@@ -5,12 +5,14 @@ const HEX4 = /^0x[0-9a-fA-F]{8}$/;
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
 const UINT = /^\d+$/;
 
-/** Owner-signed permission grant (mirrors `PeridotAccount.GrantArgs`; see WHITEPAPER.md §10). */
+/** Owner-signed permission grant (mirrors `PeridotAccount.GrantArgs`; see WHITEPAPER.md §10).
+ * ANT-556 Option A: sessions are NONFINANCIAL-only (kind 1). Kinds 2-5 were
+ * removed on-chain and are rejected here (defense in depth). */
 export class GrantPermissionDto {
-  /** 1 = nonfinancial, 2 = ETH, 3 = ERC-20, 4 = ERC-721, 5 = ERC-1155. */
+  /** 1 = nonfinancial (only). Kinds 2-5 (ETH/ERC-20/721/1155) were removed (ANT-556 Option A). */
   @IsInt()
   @Min(1)
-  @Max(5)
+  @Max(1)
   kind!: number;
 
   /** Nonfinancial: exact allowed target. Must be nonzero (and never the account/factory — checked in service). */
@@ -36,6 +38,11 @@ export class GrantPermissionDto {
   /** Financial: lifetime cap in the same units. */
   @Matches(UINT, { message: "totalLimit must be a uint string" })
   totalLimit!: string;
+
+  /** Owner-approved lifetime session-fee cap (raw wei; ANT-556 Security condition).
+   * REQUIRED: 0n means only zero-fee executions pass on-chain. Must be explicit. */
+  @Matches(UINT, { message: "feeLimit must be a uint string" })
+  feeLimit!: string;
 
   /** ERC-721/1155: token id. */
   @Matches(UINT, { message: "nftId must be a uint string" })

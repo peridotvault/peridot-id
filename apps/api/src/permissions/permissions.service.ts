@@ -43,8 +43,12 @@ export class PermissionsService {
    */
   validateGrant(dto: GrantPermissionDto, nowSec = Math.floor(Date.now() / 1000)): ValidatedGrant {
     const { kind, target, selector, token, to } = dto;
+    if (dto.feeLimit == null || !/^\d+$/.test(dto.feeLimit)) {
+      throw new BadRequestException("feeLimit is required (uint string; 0 = only zero-fee execs pass)");
+    }
     const perTxCap = BigInt(dto.perTxCap);
     const totalLimit = BigInt(dto.totalLimit);
+    const feeLimit = BigInt(dto.feeLimit);
     if (dto.validUntil <= nowSec) throw new BadRequestException("validUntil must be in the future");
     if (dto.validUntil <= dto.validAfter) throw new BadRequestException("validUntil must exceed validAfter");
     if (dto.validUntil - nowSec > MAX_PERMISSION_TTL) {
@@ -58,30 +62,25 @@ export class PermissionsService {
     }
     const account = dto.account.toLowerCase();
     const factory = dto.factory.toLowerCase();
-    if (kind === 1) {
-      if (isZeroAddress(target) || target.toLowerCase() === account || target.toLowerCase() === factory) {
-        throw new BadRequestException("nonfinancial target must be a third-party contract");
-      }
-      if (selector === "0x00000000") throw new BadRequestException("selector must be set");
-      if ((DENIED_SELECTORS as readonly string[]).includes(selector.toLowerCase())) {
-        throw new BadRequestException(`selector ${selector} is financial and needs a financial grant`);
-      }
-      if (!isZeroAddress(token) || !isZeroAddress(to)) {
-        throw new BadRequestException("nonfinancial grants must leave token/to unset");
-      }
-    } else if (kind === 2) {
-      if (!isZeroAddress(token)) throw new BadRequestException("ETH grants must leave token unset");
-      if (isZeroAddress(to) || to.toLowerCase() === account) {
-        throw new BadRequestException("ETH grants need an explicit third-party recipient");
-      }
-    } else {
-      if (isZeroAddress(token) || token.toLowerCase() === account) {
-        throw new BadRequestException("token grants need an explicit token contract");
-      }
-      if (isZeroAddress(to)) throw new BadRequestException("token grants need an explicit recipient");
+    // ANT-556 Option A: NONFINANCIAL-only. Kinds 2-5 are removed on-chain;
+    // reject here (defense in depth) — no kind-2/token branches remain.
+    if (kind !== 1) {
+      throw new BadRequestException("financial permission kinds were removed (ANT-556 Option A): only kind 1 allowed");
     }
-    if (kind !== 1 && (perTxCap <= 0n || totalLimit < perTxCap)) {
-      throw new BadRequestException("financial grants need 0 < perTxCap <= totalLimit");
+    if (isZeroAddress(target) || target.toLowerCase() === account || target.toLowerCase() === factory) {
+      throw new BadRequestException("nonfinancial target must be a third-party contract");
+    }
+    if (selector === "0x00000000") throw new BadRequestException("selector must be set");
+    if ((DENIED_SELECTORS as readonly string[]).includes(selector.toLowerCase())) {
+      throw new BadRequestException(`selector ${selector} is financial and needs a financial grant`);
+    }
+    if (!isZeroAddress(token) || !isZeroAddress(to)) {
+      throw new BadRequestException("nonfinancial grants must leave token/to unset");
+    }
+    // NONFINANCIAL grants carry no value caps: perTxCap/totalLimit/nftId must be zero.
+    // (Contract enforces `perTxCap == 0 && totalLimit == 0 && nftId == 0` — fail closed here too.)
+    if (perTxCap !== 0n || totalLimit !== 0n || BigInt(dto.nftId) !== 0n) {
+      throw new BadRequestException("nonfinancial grants must leave perTxCap/totalLimit/nftId unset (zero)");
     }
     const scope = {
       sessionX: hexToBytes(dto.sessionX),
@@ -96,6 +95,8 @@ export class PermissionsService {
       salt: hexToBytes(dto.salt),
     };
     const permissionId = buildPermissionId(dto.chainId, dto.account, scope);
+    // ANT-556: feeLimit is REQUIRED (no default). 0n is explicit (only zero-fee
+    // execs pass on-chain) — the DTO guarantees presence; pass through as-is.
     const payload = buildGrantPayload({
       chainId: dto.chainId,
       account: dto.account,
@@ -103,6 +104,7 @@ export class PermissionsService {
       scope,
       perTxCap,
       totalLimit,
+      feeLimit,
       validAfter: dto.validAfter,
       nonce: BigInt(dto.nonce),
       deadline: dto.deadline,
