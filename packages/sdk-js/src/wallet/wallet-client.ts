@@ -137,6 +137,20 @@ export interface ActivationView {
   feePolicyVersion: number;
   /** Optional chain echo (ANT-39/ANT-41): present when the registry has a Solana row. */
   chain?: ChainEcho;
+  /**
+   * Canonical fee-policy v2 fields (base-unit decimal strings) — present on
+   * v2 backends (ANT-555), absent on v1 (legacy path: `networkFeeLamports`
+   * above). Reads never break: old fields stay, new ones are additive.
+   */
+  networkFee?: string;
+  platformFee?: string;
+  totalFee?: string;
+  maxTotalFee?: string;
+  chainMinBaseUnits?: string;
+  quoteId?: string;
+  quotedAt?: string;
+  /** Quote expiry (ISO-8601; expiresAt − quotedAt ≤ 300s). Past it → re-quote, never submit. */
+  expiresAt?: string;
 }
 
 export interface RotateInput {
@@ -156,6 +170,34 @@ export interface FeeQuoteView {
   treasury: string;
   /** Optional chain echo (ANT-39/ANT-41): present when the registry has a Solana row. */
   chain?: ChainEcho;
+  /**
+   * Canonical fee-policy v2 fields (base-unit decimal strings) — present on
+   * v2 backends (ANT-555), absent on v1 (legacy path). Field names normative
+   * per ANT-544 §4.1. Reads never break: old fields stay, new ones additive.
+   */
+  /** Canonical alias of networkFeeLamports. */
+  networkFee?: string;
+  /** v2 platform fee: MAX(floor(networkFee×bps/10_000), chainMin). */
+  platformFee?: string;
+  /** Legacy alias of platformFee. */
+  protocolFeeLamports?: string;
+  /** networkFee + platformFee at quote time (canonical alias of totalFeeLamports). */
+  totalFee?: string;
+  /**
+   * Offered user-approved upper bound for the passkey-signed V4 authorization
+   * (defaults to totalFee; the client MAY offer a higher bound for drift
+   * headroom — submit enforces `totalFee ≤ maxTotalFee`, fail-closed).
+   */
+  maxTotalFee?: string;
+  /** Legacy alias of maxTotalFee. */
+  suggestedMaxTotalFee?: string;
+  /** chainMin applied for this chain under the quoted policy version. */
+  chainMinBaseUnits?: string;
+  /** Informational quote id (submit re-attests — the id is not replay-checked). */
+  quoteId?: string;
+  quotedAt?: string;
+  /** Quote expiry (ISO-8601; expiresAt − quotedAt ≤ 300s). Past it → re-quote, never submit. */
+  expiresAt?: string;
 }
 
 /** Input for POST /v1/wallet/transactions/submit (ANT-39/ANT-41, additive). */
@@ -338,6 +380,11 @@ export class PeridotWallet {
    * in full plus the on-chain-recomputed protocol fee. The client signs the intent plus
    * the fee policy (never amounts) and echoes the quoted network fee as the drift
    * reference; the server re-quotes once if fees moved beyond the drift bound.
+   *
+   * Fee-policy v2 (ANT-555): the submit carries the passkey-signed V4 bound
+   * `maxTotalFeeLamports` (offered `maxTotalFee`, defaults to the quoted
+   * totalFee — the client MAY raise it for drift headroom). Missing → 400;
+   * `totalFee ≤ maxTotalFee` is enforced pre-broadcast (409 → re-quote).
    */
   async withdraw(input: WithdrawInput, opts?: { expectedPid?: string; onQuote?: FeeApprovalHandler }): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
     if (!this.passkeySigner) return this.viaPopup("withdraw", input, opts);
@@ -638,6 +685,10 @@ export class PeridotWallet {
       expiry,
       feePolicyVersion: viewRes.feePolicyVersion,
       quotedNetworkFeeLamports: viewRes.networkFeeLamports.toString(),
+      // V4 user bound (spec B5, backend ANT-555): required — missing → 400.
+      // v2 views carry the offered `maxTotalFee` (defaults to totalFee);
+      // legacy v1 views fall back to the network fee (v1 backends ignore it).
+      maxTotalFeeLamports: viewRes.maxTotalFee ?? viewRes.totalFee ?? viewRes.networkFeeLamports.toString(),
       assertion: {
         id: a.credentialId,
         signature: b64url(a.signature),
