@@ -65,3 +65,19 @@ alerts + float monitoring). Bootstrap errs toward tight; the 7-day re-tune
 absorbed `1,200,000` vs cap `1,000,000` (solana) → PAGE with sum; with a
 `relayer.breaker.opened` row present the MECHANISM-GAP note clears; below-cap
 sums stay quiet. Full matrix in the ANT-582 thread.
+
+## USD lens (ANT-602 · OQ-3 condition 3)
+
+USD-equivalent caps live in `prices.config.example.json` (same window, same
+ownership, same tuning loop — derived from the native caps at documented
+reference rates). Runtime conversion uses `relayer_price_rates` (DDL:
+`deploy/alerts/relayer-price-rates-ddl.sql`, refreshed every 5 min, API key via
+`PRICE_API_KEY` at runtime), never the reference rates. Staleness fails closed:
+rate older than `PRICE_STALE_AFTER_SEC` (default 900 s) → A8 pages on staleness
+and the USD burn eval is skipped for that chain; native Q4/A4 keep paging.
+Alert check `deploy/alerts/relayer-usd-check.sh` (cron 5 min, installed by
+`deploy/alerts/install.sh`); dashboard panel P9; playbook `docs/RELAYER_RUNBOOK.md`
+§7; contract `docs/RELAYER_DASHBOARDS.md` §4. Verified 2026-10-26 on scratch
+Postgres 18: over-cap USD pages (with/without MECHANISM-GAP note), 80% band
+notifies, stale/missing/`unknown`-chain rates page fail-closed, missing table
+exits 3 (never OK). Full matrix in the ANT-602 thread.

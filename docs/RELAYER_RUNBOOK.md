@@ -8,8 +8,8 @@
 
 | Surface | Pointer |
 |---|---|
-| Alert SQL (canonical) | `deploy/alerts/relayer-h1-detected.sql` |
-| Alert check (cron, 5 min) | `deploy/alerts/relayer-h1-check.sh` (exit 0/2/3; `PAGE:`/`NOTIFY:` stdout split) |
+| Alert SQL (canonical) | `deploy/alerts/relayer-h1-detected.sql` (+ USD lens `relayer-usd-detected.sql`, §7) |
+| Alert check (cron, 5 min) | `deploy/alerts/relayer-h1-check.sh` (exit 0/2/3; `PAGE:`/`NOTIFY:` stdout split) + `relayer-usd-check.sh` (same convention, USD lens + staleness gate, §7) |
 | Dashboard queries + panel map | `docs/RELAYER_DASHBOARDS.md` (+ importable `deploy/dashboards/relayer-h1.json`) |
 | Breaker caps + tuning | `deploy/relayer-breaker/` (`breaker.config.example.json`, `README.md`) |
 | Event contract (backend emits) | `docs/RELAYER_DASHBOARDS.md` §1 (implemented under ANT-581) |
@@ -39,6 +39,7 @@ to on-call. Every breach also writes a `security.log` event (backend, ANT-581).
 | A5 | Rotation stuck (`rotation.unconfirmed`) | P2 ≥3 / P1 ≥10 per chain/15min | on-call (P1) / #relayer-ops (P2) | `ROTATION_NOTIFY=3`, `ROTATION_PAGE=10` | `SELECT metadata->>'chain', COUNT(*) FROM security_events WHERE "eventType" IN ('credential.rotation.unconfirmed','rotation.unconfirmed') AND "createdAt" > now()-interval'15m' GROUP BY 1;` |
 | A6 | Resolve-then-act `parked-unreadable` | **P1** (any event/15min; never auto-clears) | on-call | any | `SELECT metadata->>'chain', metadata->>'entryPoint', metadata->>'nonce', metadata->>'signature' FROM security_events WHERE "eventType"='relay.parked_unreadable' AND "createdAt" > now()-interval'15m';` |
 | A7 | Quote-drift spike (`quote.drift_rejected`) | P2 ≥20 / P1 ≥100 per (chain,entryPoint)/15min | on-call (P1) / #relayer-ops (P2) | `DRIFT_NOTIFY=20`, `DRIFT_PAGE=100` | `SELECT metadata->>'chain', metadata->>'entryPoint', COUNT(*) FROM security_events WHERE "eventType"='quote.drift_rejected' AND "createdAt" > now()-interval'15m' GROUP BY 1,2;` |
+| A8 | Relayer absorbed loss in USD + price-feed staleness (R-NFR-9 USD lens, ANT-602) | P2 at 80% of USD cap; **P1** at 100%; **P1** on stale/missing rate for any chain with 1h traffic | on-call (staleness pages on-call only, never Security) | rolling-1h absorbed-USD per chain vs `USD_CAP_*`; rate age vs `PRICE_STALE_AFTER_SEC` (default 900 s) | Q8 in `relayer-usd-detected.sql` (check: `relayer-usd-check.sh`). Same MECHANISM-GAP note as A4. Stale = fail-closed page + USD eval skipped (native A4 still paging) |
 
 Cron latency note: the check runs every 5 min; worst-case detection latency ≈
 interval + runtime, inside the R-NFR-5/6 ≤ 5 min bound. If cron stalls > 10 min,
@@ -174,6 +175,42 @@ No incident closes without this:
    window (dashboard P&L panel). Unexplained delta → re-open at P1.
 3. Update the runbook appendix (below) with the incident date, signal, cause,
    and any threshold change. Threshold changes need CTO sign-off (OQ-3 owners).
+
+## 7. USD burn + price-feed staleness playbook (A8, ANT-602)
+
+Two sub-cases, different first actions. In BOTH cases the native-unit A4 keeps
+paging underneath — the USD lens never gates the breaker.
+
+- **USD burn page (loss ≥ 100% of `USD_CAP_*`, rate fresh):** treat exactly like
+  an A4 page (§4): the dollar lens caught what the native lens also sees (or a
+  price spike repriced the same base-unit loss over the cap). Same breaker
+  open/close procedure, same evidence bar, same MECHANISM-GAP rule (a USD page
+  without a `relayer.breaker.opened` row = P1 + breaker bug filed). Close-out
+  per §6, quoting BOTH the native sum and the USD sum in the incident thread.
+- **Staleness page (no/missing-old rate for a chain WITH 1h traffic):**
+  fail-closed triage, not a loss event — yet:
+  1. Confirm: `SELECT chain, asof, now() − asof AS age, source FROM
+     relayer_price_rates;` + check the price-refresh job log (5-min cron).
+     Note which chains are stale and whether ANY chain is affected (all-stale
+     = feed or key outage; single-chain = vendor symbol/rate-limit issue).
+  2. Blast radius: the USD lens is blind for the stale chains; native A4 is
+     the backstop — verify A4 is quiet-or-handled for those chains before
+     doing anything else. Never "estimate" the USD loss by hand-pricing;
+     quote the native sum only.
+  3. Fix the feed first: check `PRICE_API_KEY` rotation/expiry and vendor
+     status; re-run the refresh job; confirm `asof` advances and the A8 page
+     clears on the next 5-min tick. Do NOT silence A8 while the feed is down
+     (the page IS the monitoring while blind).
+  4. Secrets hygiene: the key lives in Infisical `/apps/api` as `PRICE_API_KEY`
+     (runtime-injected, same path as the alert checks). Paste secret *names*
+     only in the incident thread — never values.
+  5. MTTR note: three missed refreshes (15 min) is the page bound. If the feed
+     cannot recover within the hour, escalate to P1 with the native A4 sums as
+     the loss evidence and treat USD blindness as a monitoring incident.
+- **Refresh-job ownership:** the 5-min price refresh is operator-owned (Trevor);
+  vendor failover (second feed as `source`) is a follow-up, not this change.
+  Until failover exists, any single-vendor outage pages — that is the intended
+  fail-closed behavior, not noise to tune away.
 
 ### Appendix: incident log
 

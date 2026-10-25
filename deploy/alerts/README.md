@@ -221,6 +221,16 @@ drift `DRIFT_NOTIFY=20`/`DRIFT_PAGE=100`.
 - `relayer-h1-check.sh` — cron wrapper: prints `PAGE:`/`NOTIFY:`/`OK:` lines,
   exits 0/2 (3 = config/query failure). `ALERT_PAGE_URL` (P1, falls back to
   `ALERT_WEBHOOK_URL`) + `ALERT_WEBHOOK_URL` (P2) POST `{"text": ...}`.
+- USD lens (ANT-602, OQ-3 condition 3): `relayer-price-rates-ddl.sql` (apply
+  ONCE per DB — the checks never create schema), `relayer-usd-detected.sql`
+  (Q8 USD burn + Q9 staleness audit), `relayer-usd-check.sh` (same
+  `PAGE:`/`NOTIFY:`/`OK:` + 0/2/3 convention; exits 3 with the DDL pointer
+  when the price table is missing). Caps in
+  `deploy/relayer-breaker/prices.config.example.json`; staleness bound
+  `PRICE_STALE_AFTER_SEC=900`; price API key via `PRICE_API_KEY` at runtime
+  (Infisical `/apps/api`), never in repo. Fail-closed: stale/missing rate
+  for a chain with 1h traffic → PAGE on staleness, USD eval skipped, native
+  Q4 still paging. Cron line in `install.sh` (same 5-min tick).
 
 ### Enable (needs VPS/deploy access — not done from this branch)
 
@@ -236,8 +246,8 @@ data changes.
 
 Runbook: `docs/RELAYER_RUNBOOK.md` (§1 alert catalog with per-signal example
 queries; §2 revocation-spike; §3 divergence; §4 breaker; §5 relayer-key
-rotation; §6 post-incident reconcile). Dashboards: `docs/RELAYER_DASHBOARDS.md`
-(+ `deploy/dashboards/relayer-h1.json`).
+rotation; §6 post-incident reconcile; §7 USD burn + staleness). Dashboards: `docs/RELAYER_DASHBOARDS.md`
+(§4 USD contract + `deploy/dashboards/relayer-h1.json` P9).
 
 ### Verify
 
