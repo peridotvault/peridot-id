@@ -1,43 +1,84 @@
-// Relayer hardening (ANT-575 FR-H, board-accepted spec rev 3) — H1 observability
-// vocabulary + H3 pure helpers. Field/event names are normative for Trevor's
-// dashboards (ANT-582); any rename must be coordinated with DevOps first.
+// Canonical H1/H2/H3 security-event vocabulary for the relayer (ANT-589).
 //
-// Event-name catalog (all breaches ALSO write `security.log` events):
-//   intent.rejected            pre-broadcast validation failure { entryPoint, chain, cause }
-//   quote.drift_rejected       submit-time fee drifted beyond 120% { entryPoint, chain, quoted, attested }
-//   relayer.reconciled         post-confirmation reconcile record (existing `{kind}.reconciled` kept)
-//   relayer.formula_mismatch   protocolFee != formula(networkFee) { signature, entryPoint, chain, attested, actual, expected }
-//   relayer.over_attested      attested fee exceeds actual beyond drift { signature, entryPoint, chain, attested, actual, expected }
-//   relayer.pnl                per-tx relayer P&L { absorbed, signature, entryPoint, chain }
-//   revocation.spike           revocations/min > 5x trailing-1h baseline { chain, recentPerMin, baselinePerMin }
-//   rotation.confirmed_latency rotation confirm latency { chain, latencyMs, confirmed }
-//   credential.rotation.unconfirmed (existing) 15x1s bound hit, 503 path
-//   relayer.breaker.opened/closed  spend-rate circuit breaker transitions { chain, absorbedWindow, cap }
-//   broadcast.duplicate_suppressed same-signed-intent retry, no new broadcast { signature }
-//   broadcast.rebroadcast      ONE identical-bytes rebroadcast after provable pre-confirm failure
-//   broadcast.conflicting_bytes_rejected DIFFERENT bytes under SAME nonce — FORBIDDEN { }
-//   broadcast.resolved_landed | broadcast.resolved_not_landed_rebroadcast | broadcast.parked_unreadable
-//   relayer.parked             intent parked for operator review { reason }
+// Normative contract (ops half, ANT-582): docs/RELAYER_DASHBOARDS.md §1 event
+// table, alert queries in deploy/alerts/relayer-h1-detected.sql, breaker env
+// contract in deploy/relayer-breaker/README.md, resume procedure in
+// docs/RELAYER_RUNBOOK.md §4.
+//
+// Rules (the alert SQL matches on these byte-for-byte):
+// - exact event names + metadata keys — never rename unilaterally (a rename
+//   must land here + in the dashboards doc + the alert SQL + the check script
+//   in the SAME PR; contract changes are atomic across both halves).
+// - money fields are strings in native base units (lamports / stroops / wei),
+//   never floats. No secrets, pids, or amounts in label keys; signatures travel
+//   as metadata only where the contract requires them.
+// - every breach ALSO writes through the existing security.log path (the
+//   SecurityEventService below) — that IS the security_events write.
+//
+// Rebase note (ANT-598): this file supersedes the PR #107 draft vocabulary
+// (`relayer.*` divergence names, `broadcast.*` resolve names,
+// `rotation.confirmed_latency`, 11-cause taxonomy, PID_RELAYER_* env). The
+// ops revert 56c0adf made this file's names normative; the draft names had
+// no monitoring home and are intentionally NOT re-exported. Pure helpers
+// from #107 (backoff, oracle fallback, spike predicate) are kept below —
+// they carry no event names and remain covered by their specs.
 
-/** Sponsored entry points covered by H1 (per chain + per entry point). */
+/** Fee chains with sponsored relayer flows (FeeChain; missing → 'unknown'). */
+export const FEE_CHAINS = ["solana", "stellar", "ethereum", "base", "bsc"] as const;
+export type FeeChain = (typeof FEE_CHAINS)[number];
+
+export function normalizeFeeChain(value: unknown): FeeChain | "unknown" {
+  return typeof value === "string" && (FEE_CHAINS as readonly string[]).includes(value)
+    ? (value as FeeChain)
+    : "unknown";
+}
+
+/** EVM decimal chain-id reference → FeeChain (registry references are ids). */
+export function evmReferenceToFeeChain(reference: string): FeeChain | "unknown" {
+  switch (reference) {
+    case "1":
+      return "ethereum";
+    case "8453":
+      return "base";
+    case "56":
+      return "bsc";
+    default:
+      return "unknown";
+  }
+}
+
+/** Sponsored entry points covered per (chain × entryPoint). */
 export const SPONSORED_ENTRY_POINTS = ["withdraw", "execute", "rotate", "activate"] as const;
 export type SponsoredEntryPoint = (typeof SPONSORED_ENTRY_POINTS)[number];
 
-/** Typed intent-rejection causes (H1.ii + H-AC6 taxonomy). */
+/** Typed intent-rejection causes (H1.ii) — closed set, exactly as the alerts match. */
 export const INTENT_REJECTION_CAUSES = [
   "stale-nonce",
   "expired",
-  "over-ttl",
   "drift",
   "policy-unknown",
   "insufficient-funds",
   "unauthorized",
-  "conflicting-nonce-reuse",
-  "breaker-open",
-  "not-ready",
-  "relayer-unfunded",
 ] as const;
 export type IntentRejectionCause = (typeof INTENT_REJECTION_CAUSES)[number];
+
+/** Canonical security_events eventType names (H1 i–vi, H2, H3). */
+export const RelayerH1Events = {
+  credentialRevoked: "credential.revoked",
+  credentialRotated: "credential.rotated",
+  intentRejected: "intent.rejected",
+  formulaMismatch: "reconcile.formula_mismatch",
+  overAttested: "reconcile.over_attested",
+  pnl: "relayer.pnl",
+  driftRejected: "quote.drift_rejected",
+  rotationConfirmed: "rotation.confirmed",
+  rotationUnconfirmed: "credential.rotation.unconfirmed",
+  resolveLanded: "relay.resolve_landed",
+  resolveNotLandedRebroadcast: "relay.resolve_not_landed_rebroadcast",
+  parkedUnreadable: "relay.parked_unreadable",
+  breakerOpened: "relayer.breaker.opened",
+  breakerClosed: "relayer.breaker.closed",
+} as const;
 
 /** Resolve-then-act outcome labels (H2.v, dashboarded per pid/nonce/chain). */
 export const RESOLVE_OUTCOMES = [
@@ -47,25 +88,23 @@ export const RESOLVE_OUTCOMES = [
 ] as const;
 export type ResolveOutcome = (typeof RESOLVE_OUTCOMES)[number];
 
-export const RelayerEvents = {
-  intentRejected: "intent.rejected",
-  quoteDriftRejected: "quote.drift_rejected",
-  formulaMismatch: "relayer.formula_mismatch",
-  overAttested: "relayer.over_attested",
-  pnl: "relayer.pnl",
-  revocationSpike: "revocation.spike",
-  rotationLatency: "rotation.confirmed_latency",
-  rotationUnconfirmed: "credential.rotation.unconfirmed",
-  breakerOpened: "relayer.breaker.opened",
-  breakerClosed: "relayer.breaker.closed",
-  duplicateSuppressed: "broadcast.duplicate_suppressed",
-  rebroadcast: "broadcast.rebroadcast",
-  conflictingBytesRejected: "broadcast.conflicting_bytes_rejected",
-  resolvedLanded: "broadcast.resolved_landed",
-  resolvedNotLandedRebroadcast: "broadcast.resolved_not_landed_rebroadcast",
-  parkedUnreadable: "broadcast.parked_unreadable",
-  parked: "relayer.parked",
-} as const;
+/** Rolling absorbed-loss window for the breaker (R-NFR-9). */
+export const BREAKER_WINDOW = "1h";
+
+/** Base-unit money formatting: bigint → decimal string, never a float. */
+export function fmtBaseUnits(value: bigint): string {
+  return value.toString();
+}
+
+/**
+ * Relayer P&L per sponsored tx: absorbed = max(0, actual − attested).
+ * Negative absorption (relayer profit) is never booked — healthy systems sit
+ * near zero; any sustained positive sum is mis-attestation or drain.
+ */
+export function absorbedLoss(attested: bigint, actual: bigint | null): bigint {
+  if (actual == null) return 0n;
+  return actual > attested ? actual - attested : 0n;
+}
 
 /** R-NFR-5: revocation spike = recent rate > 5x trailing-1h baseline per chain.
  * The MIN_RECENT floor keeps one or two isolated revocations on a quiet chain
@@ -77,12 +116,6 @@ export function isRevocationSpike(recentPerMin: number, baselinePerMin: number, 
   if (recentCount < REVOCATION_SPIKE_MIN_RECENT) return false;
   if (baselinePerMin <= 0) return true;
   return recentPerMin > REVOCATION_SPIKE_RATIO * baselinePerMin;
-}
-
-/** Relayer P&L per tx: absorbed = max(0, actual − attested). Negative absorption is never booked. */
-export function absorbedLoss(attested: bigint, actual: bigint | null): bigint {
-  if (actual == null) return 0n;
-  return actual > attested ? actual - attested : 0n;
 }
 
 /**

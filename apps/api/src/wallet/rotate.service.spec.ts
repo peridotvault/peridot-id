@@ -131,8 +131,8 @@ describe("RotateService", () => {
     await expect(service.rotate(IDENTITY_ID, base)).rejects.toThrow(/not confirmed on-chain yet/);
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
-      "rotation.confirmed_latency",
-      expect.objectContaining({ confirmed: false }),
+      "rotation.confirmed",
+      expect.objectContaining({ signature: "sig-rotate" }),
     );
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,

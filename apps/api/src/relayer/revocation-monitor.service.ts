@@ -7,7 +7,7 @@
 
 import { Injectable, Logger } from "@nestjs/common";
 import { SecurityEventService } from "../security/security-event.service";
-import { RelayerEvents, isRevocationSpike } from "./relayer-events";
+import { isRevocationSpike } from "./relayer-events";
 
 /** R-NFR-5: 10-min recent window vs trailing-1h baseline. */
 export const SPIKE_RECENT_WINDOW_MS = 10 * 60 * 1000;
@@ -36,12 +36,10 @@ export class RevocationMonitor {
     const recentPerMin = recent / 10;
     const baselinePerMin = kept.length / 60;
     const spike = isRevocationSpike(recentPerMin, baselinePerMin, recent);
+    // No revocation.spike emission: the canonical contract derives the spike
+    // from revocation counts (dashboards P1 / alert A1), so there is no spike
+    // event to emit. The error log below is the operator trail.
     if (spike) {
-      await this.security.log(pid, RelayerEvents.revocationSpike, {
-        chain,
-        recentPerMin,
-        baselinePerMin,
-      });
       this.logger.error(`revocation spike on ${chain}: ${recentPerMin}/min vs baseline ${baselinePerMin}/min`);
     }
     return { chain, recentPerMin, baselinePerMin, spike };

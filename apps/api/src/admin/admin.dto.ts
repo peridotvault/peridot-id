@@ -250,3 +250,15 @@ export class CloseBreakerDto {
   @MaxLength(500)
   evidence!: string;
 }
+
+export class OpenRelayerBreakerDto {
+  @IsString()
+  @MaxLength(500)
+  reason!: string;
+}
+
+export class CloseRelayerBreakerDto {
+  @IsString()
+  @MaxLength(2000)
+  evidence!: string;
+}

@@ -477,7 +477,7 @@ describe("SponsoredWithdrawService", () => {
     expect(res.status).toBe("confirmed");
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
-      "relayer.over_attested",
+      "reconcile.over_attested",
       expect.objectContaining({ entryPoint: "withdraw", attested: "5000", actual: "1000" }),
     );
     expect(security.log).toHaveBeenCalledWith(

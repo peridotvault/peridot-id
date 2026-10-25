@@ -11,14 +11,14 @@ function breakerSetup(cap?: string) {
   const security = mockSecurity();
   const config = {
     get: jest.fn((key: string, def?: unknown) => {
-      if (key === "PID_RELAYER_BREAKER_CAP_LAMPORTS") return cap ?? "0";
+      if (key === "BREAKER_CAP_SOLANA") return cap ?? "0";
       return def;
     }),
     getOrThrow: jest.fn(() => {
       throw new Error("Missing config");
     }),
   };
-  const service = new CircuitBreakerService(config as never, {} as never, security as never);
+  const service = new CircuitBreakerService(config as never, security as never);
   return { service, security };
 }
 
@@ -27,7 +27,7 @@ describe("CircuitBreakerService", () => {
     const { service, security } = breakerSetup("1000000");
     const snap = await service.recordAbsorbed(PID, "solana", 1000n);
     expect(snap.open).toBe(false);
-    expect(snap.absorbedWindow).toBe("1000");
+    expect(snap.absorbedSum).toBe("1000");
     expect(security.log).not.toHaveBeenCalledWith(PID, "relayer.breaker.opened", expect.anything());
   });
 
@@ -40,9 +40,9 @@ describe("CircuitBreakerService", () => {
     expect(security.log).toHaveBeenCalledWith(
       PID,
       "relayer.breaker.opened",
-      expect.objectContaining({ chain: "solana", absorbedWindow: "5500", cap: "5000" }),
+      expect.objectContaining({ chain: "solana", absorbedSum: "5500", cap: "5000" }),
     );
-    await expect(service.requireClosed(PID, "solana", "withdraw")).rejects.toBeInstanceOf(
+    await expect(service.requireClosed("solana", "withdraw")).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
     // Re-quote path is unaffected: only sponsored broadcasts gate here.
@@ -55,13 +55,13 @@ describe("CircuitBreakerService", () => {
     expect(service.isOpen("solana")).toBe(true);
     const snap = await service.closeBreaker(PID, "solana", "operator reviewed incident #1");
     expect(snap.open).toBe(false);
-    expect(snap.absorbedWindow).toBe("0");
+    expect(snap.absorbedSum).toBe("0");
     expect(security.log).toHaveBeenCalledWith(
       PID,
       "relayer.breaker.closed",
       expect.objectContaining({ evidence: "operator reviewed incident #1" }),
     );
-    await expect(service.requireClosed(PID, "solana", "withdraw")).resolves.toBeUndefined();
+    await expect(service.requireClosed("solana", "withdraw")).resolves.toBeUndefined();
   });
 
   it("parks after bounded attempts instead of storming (R-NFR-7)", async () => {
@@ -73,7 +73,7 @@ describe("CircuitBreakerService", () => {
     expect(fn).toHaveBeenCalledTimes(3);
     expect(security.log).toHaveBeenCalledWith(
       PID,
-      "relayer.parked",
+      "relay.parked_unreadable",
       expect.objectContaining({ op: "getNonce", reason: "retry-bound-exhausted" }),
     );
   });
@@ -99,11 +99,9 @@ describe("RevocationMonitor", () => {
       snap = await monitor.recordRevocation(PID, "solana", t0 + i * 60_000);
     }
     expect(snap.spike).toBe(true);
-    expect(security.log).toHaveBeenCalledWith(
-      PID,
-      "revocation.spike",
-      expect.objectContaining({ chain: "solana" }),
-    );
+    // No revocation.spike row: the spike is derived from revocation counts
+    // (P1/A1), so the monitor stays silent and only flags.
+    expect(security.log).not.toHaveBeenCalled();
   });
 
   it("stays quiet on isolated revocations", async () => {

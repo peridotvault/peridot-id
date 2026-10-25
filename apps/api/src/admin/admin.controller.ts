@@ -4,7 +4,7 @@ import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CreateChainDto, CreateTokenDto, PreviewChainDto, PreviewTokenDto, SetEvmRelayerDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto, VerifyAppDto, CloseBreakerDto } from "./admin.dto";
+import { CloseBreakerDto, CloseRelayerBreakerDto, CreateChainDto, CreateTokenDto, OpenRelayerBreakerDto, PreviewChainDto, PreviewTokenDto, SetEvmRelayerDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto, VerifyAppDto } from "./admin.dto";
 import { AdminService } from "./admin.service";
 import { ChainPreviewService } from "./chain-preview.service";
 import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
@@ -87,6 +87,31 @@ export class AdminController {
   @UseGuards(JwtAuthGuard, AdminGuard)
   closeBreaker(@CurrentUser() user: AuthenticatedUser, @Body() dto: CloseBreakerDto) {
     return this.breaker.closeBreaker(user.pid, dto.chain, dto.evidence);
+  }
+
+  /** H3 freeze path (runbook §2/§3): manually open the breaker with a reason. */
+  @Post("relayer-breaker/:chain/open")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  openRelayerBreaker(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("chain") chain: string,
+    @Body() dto: OpenRelayerBreakerDto,
+  ) {
+    return this.adminService.openRelayerBreaker(user.pid, chain, dto.reason);
+  }
+
+  /** H3 resume path (runbook §4) via the admin service (adds the admin audit row). */
+  @Post("relayer-breaker/:chain/close")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  closeRelayerBreaker(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("chain") chain: string,
+    @Body() dto: CloseRelayerBreakerDto,
+  ) {
+    return this.adminService.closeRelayerBreaker(user.pid, chain, dto.evidence);
+  }
   }
 
   @Post("chains/:id/logo")

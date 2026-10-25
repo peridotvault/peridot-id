@@ -28,9 +28,9 @@ import {
   BROADCAST_CHAIN_SOLANA,
   RelayerIdempotencyService,
 } from "../relayer/relayer-idempotency.service";
-import { RelayerEvents, absorbedLoss } from "../relayer/relayer-events";
 import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
 import { RevocationMonitor } from "../relayer/revocation-monitor.service";
+import { IntentRejectionCause, RelayerH1Events, absorbedLoss } from "../relayer/relayer-events";
 import type { RotateAuthorityResult } from "./dto/rotate.dto";
 
 @Injectable()
@@ -62,6 +62,17 @@ export class RotateService {
     return solanaAdapter(this.pidSolana, rpcUrl, programId);
   }
 
+  /** H1.ii: semantic intent rejections emit intent.rejected (chain/entryPoint/cause/nonce). */
+  private async reject(pid: string, nonce: string, cause: IntentRejectionCause, err: Error): Promise<never> {
+    await this.security.log(pid, RelayerH1Events.intentRejected, {
+      chain: "solana",
+      entryPoint: "rotate",
+      cause,
+      nonce,
+    });
+    throw err;
+  }
+
   async rotate(
     pid: string,
     dto: {
@@ -74,10 +85,20 @@ export class RotateService {
     selection?: SolanaSelection,
   ): Promise<RotateAuthorityResult> {
     if (dto.oldCredentialId === dto.newCredentialId) {
-      throw new BadRequestException("Replacement credential must differ from the current one");
+      return this.reject(
+        pid,
+        dto.nonce,
+        "policy-unknown",
+        new BadRequestException("Replacement credential must differ from the current one"),
+      );
     }
     if (dto.assertion.id !== dto.oldCredentialId) {
-      throw new BadRequestException("Assertion must come from the current authority credential");
+      return this.reject(
+        pid,
+        dto.nonce,
+        "unauthorized",
+        new BadRequestException("Assertion must come from the current authority credential"),
+      );
     }
     const adapter = await this.adapter(selection);
     const smart = await this.prisma.chainAccount.findFirst({
@@ -89,23 +110,39 @@ export class RotateService {
     }
 
     // H3: fail-closed while the per-chain spend-rate breaker is open.
-    await this.breaker.requireClosed(pid, BROADCAST_CHAIN_SOLANA, "rotate");
+    await this.breaker.requireClosed(BROADCAST_CHAIN_SOLANA, "rotate");
 
     const [oldCred, newCred] = await Promise.all([
       this.prisma.authority.findFirst({ where: { pid, credentialId: dto.oldCredentialId, status: "active" } }),
       this.prisma.authority.findFirst({ where: { pid, credentialId: dto.newCredentialId, status: "active" } }),
     ]);
-    if (!oldCred) throw new BadRequestException("Unknown or inactive current credential");
-    if (!newCred) throw new BadRequestException("Replacement credential is not registered and active");
+    if (!oldCred) {
+      return this.reject(pid, dto.nonce, "unauthorized", new BadRequestException("Unknown or inactive current credential"));
+    }
+    if (!newCred) {
+      return this.reject(pid, dto.nonce, "unauthorized", new BadRequestException("Replacement credential is not registered and active"));
+    }
 
     const chainNonce = BigInt(await adapter.getNonce(pid));
     if (BigInt(dto.nonce) !== chainNonce) {
-      throw new ConflictException("Authorization is stale — please try again (a newer nonce is active)");
+      return this.reject(
+        pid,
+        dto.nonce,
+        "stale-nonce",
+        new ConflictException("Authorization is stale — please try again (a newer nonce is active)"),
+      );
     }
     const chainTime = await adapter.chainTime().catch(() => 0);
-    if (dto.expiry <= chainTime) throw new BadRequestException("Authorization expired — please try again");
+    if (dto.expiry <= chainTime) {
+      return this.reject(pid, dto.nonce, "expired", new BadRequestException("Authorization expired — please try again"));
+    }
     if (dto.expiry - chainTime > MAX_TTL_SECS) {
-      throw new BadRequestException("Authorization lifetime exceeds 600 seconds — please try again");
+      return this.reject(
+        pid,
+        dto.nonce,
+        "expired",
+        new BadRequestException("Authorization lifetime exceeds 600 seconds — please try again"),
+      );
     }
 
     const currentKey = coseToCompressedSecp256r1(Buffer.from(oldCred.publicKey));
@@ -202,8 +239,9 @@ export class RotateService {
     });
     const signature = out.signature;
     if (!signature) {
-      await this.security.log(pid, RelayerEvents.rotationUnconfirmed, {
+      await this.security.log(pid, RelayerH1Events.rotationUnconfirmed, {
         chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "rotate",
         nonce: dto.nonce,
         unattributed: true,
       });
@@ -211,22 +249,34 @@ export class RotateService {
         "Rotation was submitted but not confirmed on-chain yet. Your current credential still works — please try again in a moment.",
       );
     }
-
-    // Confirm the chain actually rotated before touching DB state.
+    // H2: resolve-then-act outcome for the sponsored rotation.
+    await this.security.log(pid, RelayerH1Events.resolveLanded, {
+      chain: BROADCAST_CHAIN_SOLANA,
+      entryPoint: "rotate",
+      nonce: dto.nonce,
+      signature,
+    });
+    // H1.vi: rotation confirm latency (chain + signature + latencyMs).
     const started = Date.now();
     const confirmed = await this.confirmRotation(adapter, pid, Buffer.from(newKey).toString("hex"));
-    await this.security.log(pid, RelayerEvents.rotationLatency, {
+    await this.security.log(pid, RelayerH1Events.rotationConfirmed, {
       chain: BROADCAST_CHAIN_SOLANA,
-      latencyMs: Date.now() - started,
-      confirmed,
+      entryPoint: "rotate",
+      signature,
+      nonce: dto.nonce,
+      latencyMs: (Date.now() - started).toString(),
     });
     if (!confirmed) {
-      await this.security.log(pid, RelayerEvents.rotationUnconfirmed, { signature });
+      await this.security.log(pid, RelayerH1Events.rotationUnconfirmed, {
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "rotate",
+        nonce: dto.nonce,
+        signature,
+      });
       throw new ServiceUnavailableException(
         "Rotation was submitted but not confirmed on-chain yet. Your current credential still works — please try again in a moment.",
       );
     }
-
     await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "rotate", "confirmed", signature);
     await this.prisma.authority.update({
       where: { id: oldCredId },
@@ -237,6 +287,7 @@ export class RotateService {
       this.logger.warn(`revocation record failed: ${(err as Error).message}`),
     );
     await this.security.log(pid, "credential.rotated", {
+      chain: "solana",
       signature,
       from: dto.oldCredentialId,
       to: dto.newCredentialId,
@@ -271,6 +322,7 @@ export class RotateService {
       await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "rotate", "confirmed", signature);
     }
     await this.security.log(pid, "credential.rotated", {
+      chain: "solana",
       signature,
       from: dto.oldCredentialId,
       to: dto.newCredentialId,
@@ -286,12 +338,15 @@ export class RotateService {
     signature: string,
   ): Promise<void> {
     const parsed = await adapter.parseTransaction(signature).catch(() => null);
-    const absorbed = parsed?.fee != null ? absorbedLoss(0n, BigInt(parsed.fee)) : 0n;
-    await this.security.log(pid, RelayerEvents.pnl, {
-      signature,
-      entryPoint: "rotate",
+    const actual = parsed?.fee != null ? BigInt(parsed.fee) : 0n;
+    const absorbed = absorbedLoss(0n, actual);
+    await this.security.log(pid, RelayerH1Events.pnl, {
       chain: BROADCAST_CHAIN_SOLANA,
+      entryPoint: "rotate",
+      signature,
       absorbed: absorbed.toString(),
+      attested: "0",
+      actual: actual.toString(),
     });
     await this.breaker.recordAbsorbed(pid, BROADCAST_CHAIN_SOLANA, absorbed).catch((err) =>
       this.logger.warn(`breaker record failed: ${(err as Error).message}`),
