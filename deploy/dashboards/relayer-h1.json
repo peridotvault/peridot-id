@@ -118,7 +118,18 @@
           "format": "time_series"
         }
       ]
+    },
+    {
+      "id": 9, "title": "P9 relayer absorbed USD/min per chain vs USD cap (H1-iv USD lens, ANT-602)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('minute',se.\"createdAt\") AS time, COALESCE(se.metadata->>'chain','unknown') AS metric, SUM(COALESCE(NULLIF(se.metadata->>'absorbed',''),NULLIF(se.metadata->>'relayerAbsorbed',''),'0')::numeric / CASE COALESCE(se.metadata->>'chain','unknown') WHEN 'solana' THEN 1000000000 WHEN 'stellar' THEN 10000000 ELSE 1000000000000000000 END * r.usd_per_native) AS absorbed_usd FROM security_events se JOIN relayer_price_rates r ON r.chain = COALESCE(se.metadata->>'chain','unknown') WHERE (se.\"eventType\"='relayer.pnl' OR se.\"eventType\" LIKE '%.reconciled') AND r.asof > now() - interval '15 minutes' AND $__timeFilter(\"createdAt\") GROUP BY 1,2 ORDER BY 1;",
+          "format": "time_series"
+        }
+      ]
     }
   ],
-  "notes": "Import: Grafana -> Dashboards -> New -> Import, paste this file. Select the Postgres datasource serving the app DB (read-only user). Panels mirror docs/RELAYER_DASHBOARDS.md; alerts live in deploy/alerts/relayer-h1-check.sh (cron 5m), not in Grafana."
+  "notes": "Import: Grafana -> Dashboards -> New -> Import, paste this file. Select the Postgres datasource serving the app DB (read-only user). Panels mirror docs/RELAYER_DASHBOARDS.md; alerts live in deploy/alerts/relayer-h1-check.sh (cron 5m) for native units plus relayer-usd-check.sh (cron 5m) for the USD lens, not in Grafana. P9 needs the relayer_price_rates table (relayer-price-rates-ddl.sql); its INNER JOIN + 15-min freshness predicate mean stale-price chains drop off the panel instead of plotting old rates — treat a vanished chain line as a feed outage (A8 pages), not as zero loss."
 }
