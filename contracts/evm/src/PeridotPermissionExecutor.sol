@@ -16,6 +16,10 @@ interface IPeridotExecutorAccount {
         external
         payable
         returns (bytes[] memory returnData);
+    function executeFromExecutorV2(bytes32 mode, bytes calldata executionCalldata)
+        external
+        payable
+        returns (bytes[] memory returnData);
 }
 
 contract PeridotPermissionExecutor {
@@ -47,5 +51,18 @@ contract PeridotPermissionExecutor {
     {
         if (mode != MODE_SINGLE_DEFAULT) revert UnsupportedExecutionMode();
         return IPeridotExecutorAccount(account).executeFromExecutor{value: msg.value}(mode, executionCalldata);
+    }
+
+    /// @notice v2 forwarder (ANT-556): routes fee-capped permission executions.
+    /// `executionCalldata` = `abi.encode(permissionId, target, value, data,
+    /// deadline, seq, feePolicyVersion, maxTotalFee, networkFee, feeRecipient,
+    /// authenticatorData, clientDataJSON, r, s)`.
+    function executeViaPermissionV2(address payable account, bytes32 mode, bytes calldata executionCalldata)
+        external
+        payable
+        returns (bytes[] memory)
+    {
+        if (mode != MODE_SINGLE_DEFAULT) revert UnsupportedExecutionMode();
+        return IPeridotExecutorAccount(account).executeFromExecutorV2{value: msg.value}(mode, executionCalldata);
     }
 }

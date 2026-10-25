@@ -37,38 +37,6 @@ contract MockERC20 {
     }
 }
 
-contract MockERC721 {
-    mapping(uint256 => address) public ownerOf;
-
-    function mint(address to, uint256 id) external {
-        ownerOf[id] = to;
-    }
-
-    function transferFrom(address f, address t, uint256 id) external {
-        require(ownerOf[id] == f, "owner");
-        ownerOf[id] = t;
-    }
-
-    function safeTransferFrom(address f, address t, uint256 id) external {
-        require(ownerOf[id] == f, "owner");
-        ownerOf[id] = t;
-    }
-}
-
-contract MockERC1155 {
-    mapping(uint256 => mapping(address => uint256)) public balanceOf;
-
-    function mint(address to, uint256 id, uint256 amt) external {
-        balanceOf[id][to] += amt;
-    }
-
-    function safeTransferFrom(address f, address t, uint256 id, uint256 amt, bytes calldata) external {
-        require(balanceOf[id][f] >= amt, "bal");
-        balanceOf[id][f] -= amt;
-        balanceOf[id][t] += amt;
-    }
-}
-
 /// @dev Fully adversarial target: runs attacker-chosen reentry on every call.
 contract EvilTarget {
     address public account;
@@ -99,6 +67,11 @@ contract EvilTarget {
 }
 
 /// @notice V4 permission-layer + ERC-7579 tests, incl. the adversarial suite.
+/// ANT-556 (Option A): sessions are NONFINANCIAL-only. The four
+/// `test_Perm*Bounded` financial tests are replaced by tests that FAIL on the
+/// old code: financial grants revert at grant time, and session-driven
+/// ETH/ERC20/721/1155 movement reverts `ScopeMismatch` on every path.
+///
 /// Owner key = P-256 privkey 1 (pubkey = generator G, same as V3 vectors).
 /// Session key = P-256 privkey 2 (pubkey SX/SY below) — same curve as the
 /// owner, so OWNER vs PERMISSION separation rests entirely on the
@@ -113,10 +86,20 @@ contract PeridotPermissionTest is Test {
     uint256 constant P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
 
     bytes constant DOMAIN_V3 = "PID|EVM|SMART_ACCOUNT|v3";
-    bytes constant DOMAIN_PERM = "PID|EVM|PERMISSION|v1";
+    bytes constant DOMAIN_V4 = "PID|EVM|SMART_ACCOUNT|v4";
+    bytes constant DOMAIN_PERM_V1 = "PID|EVM|PERMISSION|v1";
+    bytes constant DOMAIN_PERM_V2 = "PID|EVM|PERMISSION|v2";
 
     uint64 constant DEADLINE = 1_000_300;
-    uint16 constant POLICY = 1;
+    uint16 constant POLICY_V1 = 1;
+    uint16 constant POLICY_V2 = 2;
+
+    // v2 chain-minimum rows asserted by the formula tests (ANT-544 B2, native units).
+    // NOTE: 0.00000075 ETH = 750_000_000_000 wei (the spec's base-units column
+    // reads 750_000_000 — a 1000× typo against its own B3 totals; see contract
+    // `_chainMinV2` + Theo courier).
+    uint256 constant CHAINMIN_ETH_BASE = 750_000_000_000;
+    uint256 constant CHAINMIN_BSC = 2_300_000_000_000;
 
     bytes32 constant VEC_ACT_R = 0xe833d5ba603d6a180091a10e6cc56ae051abce1624970cbe8bf278d8e6858636;
     bytes32 constant VEC_ACT_S = 0x6a961eb397aa853a23248b4af0d4d84c3d103a4451959793117939d73bf69a30;
@@ -143,7 +126,7 @@ contract PeridotPermissionTest is Test {
         account = PeridotAccount(
             payable(
                 factory.deployAndInit(
-                    SALT, GX, GY, POLICY, DEADLINE, 0.002 ether, _authData(), _clientData(_actPayload()),
+                    SALT, GX, GY, POLICY_V1, DEADLINE, 0.002 ether, _authData(), _clientData(_actPayload()),
                     VEC_ACT_R, VEC_ACT_S
                 )
             )
@@ -190,7 +173,7 @@ contract PeridotPermissionTest is Test {
 
     function _actPayload() internal view returns (bytes32) {
         return keccak256(
-            abi.encodePacked(DOMAIN_V3, uint8(0x05), SALT, GX, GY, POLICY, DEADLINE, block.chainid, address(factory))
+            abi.encodePacked(DOMAIN_V3, uint8(0x05), SALT, GX, GY, POLICY_V1, DEADLINE, block.chainid, address(factory))
         );
     }
 
@@ -208,7 +191,7 @@ contract PeridotPermissionTest is Test {
     ) internal view returns (bytes32) {
         return keccak256(
             abi.encodePacked(
-                DOMAIN_PERM, block.chainid, address(account), sx, sy, kind, target, selector, token, to, nftId,
+                DOMAIN_PERM_V2, block.chainid, address(account), sx, sy, kind, target, selector, token, to, nftId,
                 validUntil, salt
             )
         );
@@ -225,6 +208,7 @@ contract PeridotPermissionTest is Test {
         address to,
         uint256 perTxCap,
         uint256 totalLimit,
+        uint256 feeLimit,
         uint256 nftId,
         uint64 validAfter,
         uint64 validUntil,
@@ -233,13 +217,33 @@ contract PeridotPermissionTest is Test {
     ) internal view returns (bytes32) {
         return keccak256(
             abi.encodePacked(
-                DOMAIN_PERM, uint8(0x10), block.chainid, address(account), pid, sx, sy, kind, target, selector, token,
-                to, perTxCap, totalLimit, nftId, validAfter, validUntil, nonce_, deadline
+                DOMAIN_PERM_V2, uint8(0x10), block.chainid, address(account), pid, sx, sy, kind, target, selector,
+                token, to, perTxCap, totalLimit, feeLimit, nftId, validAfter, validUntil, nonce_, deadline
             )
         );
     }
 
+    /// @dev v2 session-execution payload (session signs maxTotalFee).
     function _execPayload(
+        bytes32 pid,
+        uint64 seq,
+        address target,
+        uint256 value,
+        bytes memory data,
+        uint64 deadline,
+        uint16 policy,
+        uint256 maxTotalFee
+    ) internal view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(
+                DOMAIN_PERM_V2, uint8(0x12), block.chainid, address(account), pid, seq, target, value,
+                keccak256(data), deadline, policy, maxTotalFee
+            )
+        );
+    }
+
+    /// @dev Frozen v1 session-execution payload (legacy sunset path only).
+    function _execPayloadV1(
         bytes32 pid,
         uint64 seq,
         address target,
@@ -250,30 +254,23 @@ contract PeridotPermissionTest is Test {
     ) internal view returns (bytes32) {
         return keccak256(
             abi.encodePacked(
-                DOMAIN_PERM, uint8(0x12), block.chainid, address(account), pid, seq, target, value, keccak256(data),
-                deadline, policy
+                DOMAIN_PERM_V1, uint8(0x12), block.chainid, address(account), pid, seq, target, value,
+                keccak256(data), deadline, policy
             )
         );
     }
 
-    // ---- grant/exec one-liners ----
+    // ---- grant/exec one-liners (v2) ----
 
-    function _grant(
-        uint8 kind,
-        address target,
-        bytes4 selector,
-        address token,
-        address to,
-        uint256 perTxCap,
-        uint256 totalLimit,
-        uint256 nftId
-    ) internal returns (bytes32 pid) {
+    /// @dev Grant a NONFINANCIAL permission (v2). perTxCap/totalLimit/nftId must
+    /// be 0 under Option A hygiene; feeLimit caps lifetime session fees.
+    function _grant(address target, bytes4 selector, uint256 feeLimit) internal returns (bytes32 pid) {
         uint64 validAfter = 1_000_000;
         uint64 validUntil = 1_000_000 + 7 days;
-        bytes32 salt = keccak256(abi.encode(kind, target, token, to, nftId, block.timestamp, account.nonce()));
-        pid = _pid(SX, SY, kind, target, selector, token, to, nftId, validUntil, salt);
+        bytes32 salt = keccak256(abi.encode(target, selector, feeLimit, block.timestamp, account.nonce()));
+        pid = _pid(SX, SY, 1, target, selector, address(0), address(0), 0, validUntil, salt);
         bytes32 payload = _grantPayload(
-            pid, SX, SY, kind, target, selector, token, to, perTxCap, totalLimit, nftId, validAfter, validUntil,
+            pid, SX, SY, 1, target, selector, address(0), address(0), 0, 0, feeLimit, 0, validAfter, validUntil,
             account.nonce(), DEADLINE
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
@@ -282,14 +279,15 @@ contract PeridotPermissionTest is Test {
                 permissionId: pid,
                 sessionX: SX,
                 sessionY: SY,
-                kind: kind,
+                kind: 1,
                 target: target,
                 selector: selector,
-                token: token,
-                to: to,
-                perTxCap: perTxCap,
-                totalLimit: totalLimit,
-                nftId: nftId,
+                token: address(0),
+                to: address(0),
+                perTxCap: 0,
+                totalLimit: 0,
+                feeLimit: feeLimit,
+                nftId: 0,
                 validAfter: validAfter,
                 validUntil: validUntil,
                 salt: salt,
@@ -302,10 +300,75 @@ contract PeridotPermissionTest is Test {
         );
     }
 
+    /// @dev Attempt a grant with an explicit kind; assert it reverts with `err`.
+    /// Used for the financial-kind removal gate (fails on old code: grant succeeds).
+    function _grantReverts(
+        bytes4 err,
+        uint8 kind,
+        address target,
+        bytes4 selector,
+        address token,
+        address to,
+        uint256 feeLimit
+    ) internal {
+        uint64 validAfter = 1_000_000;
+        uint64 validUntil = 1_000_000 + 7 days;
+        bytes32 salt = keccak256(abi.encode(kind, target, token, to, block.timestamp, account.nonce()));
+        bytes32 pid = _pid(SX, SY, kind, target, selector, token, to, 0, validUntil, salt);
+        bytes32 payload = _grantPayload(
+            pid, SX, SY, kind, target, selector, token, to, 0, 0, feeLimit, 0, validAfter, validUntil,
+            account.nonce(), DEADLINE
+        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        try account.grantPermission(
+            PeridotAccount.GrantArgs({
+                permissionId: pid,
+                sessionX: SX,
+                sessionY: SY,
+                kind: kind,
+                target: target,
+                selector: selector,
+                token: token,
+                to: to,
+                perTxCap: 0,
+                totalLimit: 0,
+                feeLimit: feeLimit,
+                nftId: 0,
+                validAfter: validAfter,
+                validUntil: validUntil,
+                salt: salt,
+                deadline: DEADLINE
+            }),
+            auth,
+            client,
+            r,
+            s
+        ) {
+            fail("expected revert");
+        } catch (bytes memory ret) {
+            assertEq(bytes4(ret), err, "wrong revert selector");
+        }
+    }
+
+    /// @dev Zero-fee v2 execution (POLICY_V1 row, maxTotalFee 0 — boundary `0 ≤ 0`).
     function _exec(bytes32 pid, address target, uint256 value, bytes memory data, uint64 seq) internal {
-        bytes32 payload = _execPayload(pid, seq, target, value, data, DEADLINE, POLICY);
+        _execFull(pid, target, value, data, seq, POLICY_V1, 0, 0);
+    }
+
+    /// @dev Full v2 execution with explicit policy/cap/fee.
+    function _execFull(
+        bytes32 pid,
+        address target,
+        uint256 value,
+        bytes memory data,
+        uint64 seq,
+        uint16 policy,
+        uint256 maxTotalFee,
+        uint256 netFee
+    ) internal {
+        bytes32 payload = _execPayload(pid, seq, target, value, data, DEADLINE, policy, maxTotalFee);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
-        account.executeWithPermission(pid, target, value, data, DEADLINE, seq, POLICY, 0, auth, client, r, s);
+        account.executeWithPermission(pid, target, value, data, DEADLINE, seq, policy, maxTotalFee, netFee, auth, client, r, s);
     }
 
     /// @dev `vm.expectRevert` cannot precede helpers (the cheatcode signing call
@@ -313,115 +376,414 @@ contract PeridotPermissionTest is Test {
     function _execReverts(bytes4 err, bytes32 pid, address target, uint256 value, bytes memory data, uint64 seq)
         internal
     {
-        bytes32 payload = _execPayload(pid, seq, target, value, data, DEADLINE, POLICY);
+        _execFullReverts(err, pid, target, value, data, seq, POLICY_V1, 0, 0);
+    }
+
+    function _execFullReverts(
+        bytes4 err,
+        bytes32 pid,
+        address target,
+        uint256 value,
+        bytes memory data,
+        uint64 seq,
+        uint16 policy,
+        uint256 maxTotalFee,
+        uint256 netFee
+    ) internal {
+        bytes32 payload = _execPayload(pid, seq, target, value, data, DEADLINE, policy, maxTotalFee);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
-        try account.executeWithPermission(pid, target, value, data, DEADLINE, seq, POLICY, 0, auth, client, r, s) {
+        try account.executeWithPermission(pid, target, value, data, DEADLINE, seq, policy, maxTotalFee, netFee, auth, client, r, s) {
             fail("expected revert");
         } catch (bytes memory ret) {
             assertEq(bytes4(ret), err, "wrong revert selector");
         }
     }
 
-    // ---- happy paths ----
+    /// @dev Fabricate a pre-removal permission record directly in proxy storage
+    /// (no grant path mints these anymore). Storage packing: nonce + initialized
+    /// + factory share slot 2, so `_permissions` lives at slot 3; slot+2 packs
+    /// validAfter/validUntil/seq/kind/revoked. Proves the sunset path: legacy
+    /// records keep v1 semantics, financial ones stay dead.
+    function _fabricateRecord(bytes32 pid, uint8 kind, address target, bytes4 selector) internal {
+        bytes32 base = keccak256(abi.encode(pid, uint256(3)));
+        vm.store(address(account), base, SX);
+        vm.store(address(account), bytes32(uint256(base) + 1), SY);
+        uint64 validAfter = 1_000_000;
+        uint64 validUntil = 1_000_000 + 7 days;
+        uint256 packed = uint256(validAfter) | (uint256(validUntil) << 64) | (uint256(kind) << 192);
+        vm.store(address(account), bytes32(uint256(base) + 2), bytes32(packed));
+        uint256 scopeWord = uint256(uint160(target)) | (uint256(uint32(selector)) << 160);
+        vm.store(address(account), bytes32(uint256(base) + 3), bytes32(scopeWord));
+    }
+
+    // ---- happy paths (non-financial only) ----
 
     function test_PermNonfinancialHappyPath() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         _exec(pid, address(evil), 0, abi.encodeCall(EvilTarget.poke, (42)), 0);
+        assertEq(evil.number(), 42);
+        assertEq(account.getPermission(pid).seq, 1);
+        assertEq(account.getPermission(pid).feeSpent, 0);
+    }
+
+    // ---- Option A removal gate (FAIL on old code) ----
+
+    /// @dev Financial-kind grants must die at grant time. On old code every one
+    /// of these grants succeeds → this test fails there.
+    function test_PermFinancialGrantsRevert() public {
+        address to = address(0xBEEF);
+        // KIND_ETH (2): native transfer grant.
+        _grantReverts(PeridotAccount.ScopeMismatch.selector, 2, address(0), bytes4(0), address(0), to, 1 ether);
+        // KIND_ERC20 (3).
+        MockERC20 token = new MockERC20();
+        _grantReverts(PeridotAccount.ScopeMismatch.selector, 3, address(0), bytes4(0), address(token), to, 1 ether);
+        // KIND_ERC721 (4) / KIND_ERC1155 (5): unknown kind ids stay rejected too.
+        _grantReverts(PeridotAccount.ScopeMismatch.selector, 4, address(0), bytes4(0), address(token), to, 1 ether);
+        _grantReverts(PeridotAccount.ScopeMismatch.selector, 5, address(0), bytes4(0), address(token), to, 1 ether);
+        _grantReverts(PeridotAccount.ScopeMismatch.selector, 6, address(0), bytes4(0), address(token), to, 1 ether);
+        assertEq(account.nonce(), 0, "failed grants must not consume owner nonce");
+    }
+
+    /// @dev A pre-removal ETH grant still in storage cannot move value — not via
+    /// the frozen v1 entrypoint, not via v2. On old code the v1 exec succeeds
+    /// and moves ETH → this test fails there.
+    function test_PermLegacyEthExecReverts() public {
+        address to = address(0xBEEF);
+        bytes32 pid = keccak256("legacy-eth-grant");
+        _fabricateRecord(pid, 2, address(0), bytes4(0));
+        vm.deal(address(account), 2 ether);
+        assertEq(account.getPermission(pid).kind, 2);
+        // Frozen v1 path (legacy sunset entrypoint).
+        bytes32 payload = _execPayloadV1(pid, 0, to, 0.3 ether, "", DEADLINE, POLICY_V1);
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
+        try account.executeWithPermission(pid, to, 0.3 ether, "", DEADLINE, 0, POLICY_V1, 0, auth, client, r, s) {
+            fail("expected revert");
+        } catch (bytes memory ret) {
+            assertEq(bytes4(ret), PeridotAccount.ScopeMismatch.selector, "wrong revert selector");
+        }
+        assertEq(to.balance, 0, "no value may move");
+        // v2 path (no v2 grant can exist for kind 2, but the record must stay dead here too).
+        bytes32 payload2 = _execPayload(pid, 0, to, 0.3 ether, "", DEADLINE, POLICY_V1, 1 ether);
+        (bytes memory a2, bytes memory c2, bytes32 r2, bytes32 s2) = _sigSession(payload2);
+        try account.executeWithPermission(pid, to, 0.3 ether, "", DEADLINE, 0, POLICY_V1, 1 ether, 0, a2, c2, r2, s2) {
+            fail("expected revert");
+        } catch (bytes memory ret) {
+            assertEq(bytes4(ret), PeridotAccount.ScopeMismatch.selector, "wrong revert selector");
+        }
+        assertEq(to.balance, 0, "no value may move");
+    }
+
+    /// @dev Same death certificate for token-kind records (ERC20/721/1155).
+    /// `_enforceScope` reverts on the kind check before touching any token.
+    function test_PermLegacyTokenExecsRevert() public {
+        MockERC20 token = new MockERC20();
+        token.mint(address(account), 1000);
+        address to = address(0xBEEF);
+        uint8[3] memory kinds = [uint8(3), uint8(4), uint8(5)];
+        for (uint256 i = 0; i < kinds.length; i++) {
+            bytes32 pid = keccak256(abi.encode("legacy-token-grant", kinds[i]));
+            _fabricateRecord(pid, kinds[i], address(token), bytes4(0));
+            bytes memory data = abi.encodeCall(MockERC20.transfer, (to, 100));
+            _execFullReverts(
+                PeridotAccount.ScopeMismatch.selector, pid, address(token), 0, data, 0, POLICY_V1, 1 ether, 0
+            );
+        }
+        assertEq(token.balanceOf(to), 0, "no tokens may move");
+        // Sneaked `approve` through a legacy token record dies the same way.
+        bytes32 pid4 = keccak256(abi.encode("legacy-token-grant", uint8(3)));
+        bytes memory evil = abi.encodeCall(MockERC20.approve, (to, 1000));
+        _execFullReverts(
+            PeridotAccount.ScopeMismatch.selector, pid4, address(token), 0, evil, 0, POLICY_V1, 1 ether, 0
+        );
+        assertEq(token.allowance(address(account), to), 0);
+    }
+
+    /// @dev The frozen v1 entrypoint keeps serving legacy NONFINANCIAL grants
+    /// (natural sunset): v1-signed exec succeeds, seq advances, v1 fee semantics.
+    function test_PermLegacyNonfinancialSunsetsNaturally() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = keccak256("legacy-nonfinancial-grant");
+        _fabricateRecord(pid, 1, address(evil), EvilTarget.poke.selector);
+        bytes memory data = abi.encodeCall(EvilTarget.poke, (42));
+        bytes32 payload = _execPayloadV1(pid, 0, address(evil), 0, data, DEADLINE, POLICY_V1);
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
+        account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 0, POLICY_V1, 0, auth, client, r, s);
         assertEq(evil.number(), 42);
         assertEq(account.getPermission(pid).seq, 1);
     }
 
-    function test_PermEthBounded() public {
-        address to = address(0xBEEF);
-        bytes32 pid = _grant(2, address(0), bytes4(0), address(0), to, 0.4 ether, 1 ether, 0);
-        vm.deal(address(account), 2 ether);
-        _exec(pid, to, 0.3 ether, "", 0);
-        assertEq(to.balance, 0.3 ether);
-        assertEq(account.getPermission(pid).spent, 0.3 ether);
-        // Over per-tx cap fails; further in-cap spends work until the total is exhausted.
-        _execReverts(PeridotAccount.LimitExceeded.selector, pid, to, 0.8 ether, "", 1);
-        _exec(pid, to, 0.4 ether, "", 1);
-        _exec(pid, to, 0.3 ether, "", 2);
-        assertEq(account.getPermission(pid).spent, 1 ether);
-        _execReverts(PeridotAccount.LimitExceeded.selector, pid, to, 1 wei, "", 3);
+    // ---- fee caps (Security condition + ANT-544 B5) ----
+
+    function test_PermFeeLimitEnforced() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        // One execution costs 0.0015 (0.001 network + 0.0005 protocol at POLICY_V1).
+        uint256 feeLimit = 0.002 ether;
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, feeLimit);
+        vm.deal(address(account), 1 ether);
+        bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
+        _execFull(pid, address(evil), 0, data, 0, POLICY_V1, 0.0015 ether, 0.001 ether);
+        assertEq(account.getPermission(pid).feeSpent, 0.0015 ether);
+        // Second identical execution would push lifetime fees to 0.003 > 0.002.
+        _execFullReverts(
+            PeridotAccount.LimitExceeded.selector, pid, address(evil), 0, data, 1, POLICY_V1, 0.0015 ether,
+            0.001 ether
+        );
+        assertEq(account.getPermission(pid).seq, 1, "reverted exec must not advance seq");
     }
 
-    function test_PermErc20Bounded() public {
-        MockERC20 token = new MockERC20();
-        address to = address(0xBEEF);
-        token.mint(address(account), 1000);
-        bytes32 pid = _grant(3, address(0), bytes4(0), address(token), to, 150, 250, 0);
-        _exec(pid, address(token), 0, abi.encodeCall(MockERC20.transfer, (to, 100)), 0);
-        assertEq(token.balanceOf(to), 100);
-        _execReverts(
-            PeridotAccount.LimitExceeded.selector, pid, address(token), 0, abi.encodeCall(MockERC20.transfer, (to, 200)),
-            1
+    function test_PermMaxTotalFeeEnforced() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 1 ether);
+        vm.deal(address(account), 1 ether);
+        bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
+        // Attested total 0.0015 (POLICY_V1) against a 0.0014 bound → FeeExceedsMax, nothing moves.
+        _execFullReverts(
+            PeridotAccount.FeeExceedsMax.selector, pid, address(evil), 0, data, 0, POLICY_V1, 0.0014 ether,
+            0.001 ether
         );
-        _exec(pid, address(token), 0, abi.encodeCall(MockERC20.transfer, (to, 150)), 1);
-        assertEq(token.balanceOf(to), 250);
+        assertEq(evil.number(), 0);
+        assertEq(account.getPermission(pid).seq, 0);
+        // Exact boundary `total == maxTotalFee` passes (`≤`).
+        _execFull(pid, address(evil), 0, data, 0, POLICY_V1, 0.0015 ether, 0.001 ether);
+        assertEq(evil.number(), 1);
     }
 
-    function test_PermErc721SingleId() public {
-        MockERC721 nft = new MockERC721();
-        address to = address(0xBEEF);
-        nft.mint(address(account), 7);
-        nft.mint(address(account), 8);
-        bytes32 pid = _grant(4, address(0), bytes4(0), address(nft), to, 1, 1, 7);
-        _exec(pid, address(nft), 0, abi.encodeCall(MockERC721.transferFrom, (address(account), to, 7)), 0);
-        assertEq(nft.ownerOf(7), to);
-        // Wrong id fails; correct id is already spent.
-        _execReverts(
-            PeridotAccount.ScopeMismatch.selector, pid, address(nft), 0,
-            abi.encodeCall(MockERC721.transferFrom, (address(account), to, 8)), 1
-        );
+    function test_PermUnknownPolicyReverts() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 1 ether);
+        bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
+        // Version gate runs before signature verification: even a wrong-key
+        // signature over an unknown version reverts UnknownFeePolicy.
+        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, 99, 1 ether);
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        try account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 0, 99, 1 ether, 0, auth, client, r, s) {
+            fail("expected revert");
+        } catch (bytes memory ret) {
+            assertEq(bytes4(ret), PeridotAccount.UnknownFeePolicy.selector, "wrong revert selector");
+        }
     }
 
-    function test_PermErc1155Capped() public {
-        MockERC1155 m = new MockERC1155();
-        address to = address(0xBEEF);
-        m.mint(address(account), 9, 100);
-        bytes32 pid = _grant(5, address(0), bytes4(0), address(m), to, 40, 100, 9);
-        _exec(
-            pid, address(m), 0,
-            abi.encodeCall(MockERC1155.safeTransferFrom, (address(account), to, 9, 40, bytes(""))), 0
+    // ---- v2 fee formula vectors (ANT-544 B3, byte-exact) ----
+
+    function _execV4Owner(address target, bytes memory data, uint16 policy, uint256 maxTotalFee, uint256 netFee)
+        internal
+    {
+        uint64 n = account.nonce();
+        bytes32 payload = keccak256(
+            abi.encodePacked(
+                DOMAIN_V4, uint8(0x01), block.chainid, address(account), n, target, uint256(0), keccak256(data),
+                DEADLINE, policy, maxTotalFee
+            )
         );
-        assertEq(m.balanceOf(9, to), 40);
-        _execReverts(
-            PeridotAccount.LimitExceeded.selector, pid, address(m), 0,
-            abi.encodeCall(MockERC1155.safeTransferFrom, (address(account), to, 9, 61, bytes(""))), 1
-        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        account.executeV4(target, 0, data, DEADLINE, policy, maxTotalFee, netFee, auth, client, r, s);
     }
 
-    function test_PermExecutorPath() public {
+    /// @dev Ethereum row: network 0.000021 ETH → 50% leg wins (0.0000105).
+    function test_FeeV2EthPercentLegWins() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        vm.deal(address(account), 1 ether);
+        uint256 relayerBefore = address(this).balance;
+        uint256 factoryBefore = address(factory).balance;
+        uint256 netFee = 0.000021 ether;
+        uint256 protocol = 0.0000105 ether;
+        _execV4Owner(address(evil), abi.encodeCall(EvilTarget.poke, (1)), POLICY_V2, netFee + protocol, netFee);
+        assertEq(evil.number(), 1);
+        assertEq(address(this).balance, relayerBefore + netFee, "relayer gets exact network fee");
+        assertEq(address(factory).balance, factoryBefore + protocol, "vault gets 50% protocol fee");
+    }
+
+    /// @dev Base row: network 0.0000002 ETH → floor leg wins (0.00000075).
+    /// Total 0.00000095 ETH — the ANT-544 B3 worked example, unit-exact.
+    function test_FeeV2BaseFloorLegWins() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        vm.deal(address(account), 1 ether);
+        uint256 relayerBefore = address(this).balance;
+        uint256 factoryBefore = address(factory).balance;
+        uint256 netFee = 200_000_000_000; // 0.0000002 ETH
+        _execV4Owner(address(evil), abi.encodeCall(EvilTarget.poke, (1)), POLICY_V2, 950_000_000_000, netFee);
+        assertEq(address(factory).balance, factoryBefore + CHAINMIN_ETH_BASE, "vault gets chain floor");
+        assertEq(address(this).balance, relayerBefore + netFee, "relayer gets exact network fee");
+    }
+
+    /// @dev BSC row (chainid 56): network 0.0000021 BNB → floor 0.0000023 wins,
+    /// total 0.0000044 — the ANT-544 B3 worked example, unit-exact.
+    function test_FeeV2BscFloorLegWins() public {
+        vm.chainId(56);
+        EvilTarget evil = new EvilTarget(address(account));
+        vm.deal(address(account), 1 ether);
+        uint256 relayerBefore = address(this).balance;
+        uint256 factoryBefore = address(factory).balance;
+        uint256 netFee = 2_100_000_000_000;
+        _execV4Owner(address(evil), abi.encodeCall(EvilTarget.poke, (1)), POLICY_V2, 4_400_000_000_000, netFee);
+        assertEq(address(factory).balance, factoryBefore + CHAINMIN_BSC, "vault gets BSC floor");
+        assertEq(address(this).balance, relayerBefore + netFee, "relayer gets exact network fee");
+        vm.chainId(31337);
+    }
+
+    /// @dev Unlisted chainids fall back to the percentage leg (no invented floor).
+    function test_FeeV2UnlistedChainPercentOnly() public {
+        vm.chainId(10); // Optimism: no B2 row → percentage leg only.
+        EvilTarget evil = new EvilTarget(address(account));
+        vm.deal(address(account), 1 ether);
+        uint256 factoryBefore = address(factory).balance;
+        uint256 netFee = 0.0000002 ether;
+        _execV4Owner(address(evil), abi.encodeCall(EvilTarget.poke, (1)), POLICY_V2, netFee + 0.0000001 ether, netFee);
+        assertEq(address(factory).balance, factoryBefore + 0.0000001 ether, "no floor on unlisted chains");
+        vm.chainId(31337);
+    }
+
+    function test_ExecV4MaxTotalFeeReverts() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        vm.deal(address(account), 1 ether);
+        uint64 n = account.nonce();
+        bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
+        uint256 netFee = 0.001 ether;
+        uint256 protocol = 0.0005 ether; // POLICY_V1 row under V4 also supported.
+        bytes32 payload = keccak256(
+            abi.encodePacked(
+                DOMAIN_V4, uint8(0x01), block.chainid, address(account), n, address(evil), uint256(0),
+                keccak256(data), DEADLINE, POLICY_V1, netFee + protocol - 1
+            )
+        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        vm.expectRevert(PeridotAccount.FeeExceedsMax.selector);
+        account.executeV4(address(evil), 0, data, DEADLINE, POLICY_V1, netFee + protocol - 1, netFee, auth, client, r, s);
+        assertEq(account.nonce(), n, "reverted exec must not consume nonce");
+    }
+
+    // ---- rotation → address stability (G6 pin) ----
+
+    function test_RotateKeepsAddressAndMovesAuthority() public {
+        address before = factory.predict(SALT);
+        assertEq(before, address(account), "counterfactual address mismatch");
+        uint64 n = account.nonce();
+        bytes32 payload = keccak256(
+            abi.encodePacked(DOMAIN_V3, uint8(0x03), block.chainid, address(account), n, SX, SY, DEADLINE)
+        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        account.updateAuthority(SX, SY, DEADLINE, auth, client, r, s);
+        // Address derives from factory+impl+salt only — rotation cannot move it.
+        assertEq(factory.predict(SALT), before, "rotation moved the address");
+        assertEq(account.authorityX(), SX);
+        assertEq(account.authorityY(), SY);
+        // New key executes (owner path, fresh nonce).
+        bytes32 execPayload = keccak256(
+            abi.encodePacked(
+                DOMAIN_V3, uint8(0x01), block.chainid, address(account), n + 1, address(0x1234), uint256(0),
+                keccak256(""), DEADLINE, POLICY_V1
+            )
+        );
+        (bytes memory a2, bytes memory c2, bytes32 r2, bytes32 s2) = _sigSession(execPayload);
+        account.execute(address(0x1234), 0, "", DEADLINE, POLICY_V1, 0, a2, c2, r2, s2);
+        // Old-key replay over FRESH bytes (current nonce) fails on the key, not
+        // the nonce: the old key no longer verifies.
+        bytes32 execPayload2 = keccak256(
+            abi.encodePacked(
+                DOMAIN_V3, uint8(0x01), block.chainid, address(account), n + 2, address(0x1234), uint256(0),
+                keccak256(""), DEADLINE, POLICY_V1
+            )
+        );
+        (bytes memory a3, bytes memory c3, bytes32 r3, bytes32 s3) = _sigOwner(execPayload2);
+        vm.expectRevert(PeridotAccount.Unauthorized.selector);
+        account.execute(address(0x1234), 0, "", DEADLINE, POLICY_V1, 0, a3, c3, r3, s3);
+    }
+
+    // ---- V4 activation (fee-capped, factory V4 path) ----
+
+    function test_ActivateV4HappyPath() public {
+        bytes32 salt9 = bytes32(uint256(9));
+        address predicted = factory.predict(salt9);
+        vm.deal(predicted, 0.01 ether);
+        uint256 maxTotalFee = 0.003 ether;
+        uint256 netFee = 0.002 ether;
+        bytes32 payload = keccak256(
+            abi.encodePacked(
+                DOMAIN_V4, uint8(0x05), salt9, GX, GY, POLICY_V1, maxTotalFee, DEADLINE, block.chainid,
+                address(factory)
+            )
+        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        uint256 factoryBefore = address(factory).balance;
+        PeridotAccount fresh = PeridotAccount(
+            payable(
+                factory.deployAndInitV4(salt9, GX, GY, POLICY_V1, maxTotalFee, DEADLINE, netFee, auth, client, r, s)
+            )
+        );
+        assertTrue(fresh.initialized());
+        assertEq(fresh.authorityX(), GX);
+        // POLICY_V1 row: protocol = 50% of 0.002.
+        assertEq(address(factory).balance, factoryBefore + 0.001 ether);
+    }
+
+    function test_ActivateV4MaxTotalFeeReverts() public {
+        bytes32 salt10 = bytes32(uint256(10));
+        address predicted = factory.predict(salt10);
+        vm.deal(predicted, 0.01 ether);
+        uint256 netFee = 0.002 ether;
+        bytes32 payload = keccak256(
+            abi.encodePacked(
+                DOMAIN_V4, uint8(0x05), salt10, GX, GY, POLICY_V1, netFee, DEADLINE, block.chainid, address(factory)
+            )
+        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        vm.expectRevert(PeridotFactory.InitFailed.selector);
+        factory.deployAndInitV4(salt10, GX, GY, POLICY_V1, netFee, DEADLINE, netFee, auth, client, r, s);
+    }
+
+    // ---- executor + 7579 paths ----
+
+    /// @dev Frozen v1 executor entrypoint keeps serving legacy NONFINANCIAL
+    /// grants (13-tuple calldata, v1 payload): install module, fabricate the
+    /// pre-removal record, forward through the executor → executes, seq advances.
+    function test_PermExecutorPathFrozenV1() public {
         PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
         _installModule(2, address(executor));
         assertTrue(account.isModuleInstalled(2, address(executor), ""));
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = keccak256("legacy-executor-grant");
+        _fabricateRecord(pid, 1, address(evil), EvilTarget.poke.selector);
         bytes memory data = abi.encodeCall(EvilTarget.poke, (7));
-        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY);
+        bytes32 payload = _execPayloadV1(pid, 0, address(evil), 0, data, DEADLINE, POLICY_V1);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
         bytes memory execCalldata = abi.encode(
-            pid, address(evil), uint256(0), data, DEADLINE, uint64(0), POLICY, uint256(0), address(this), auth, client,
-            r, s
+            pid, address(evil), uint256(0), data, DEADLINE, uint64(0), POLICY_V1, uint256(0), address(this), auth,
+            client, r, s
         );
         executor.executeViaPermission(payable(address(account)), bytes32(0), execCalldata);
         assertEq(evil.number(), 7);
+        assertEq(account.getPermission(pid).seq, 1);
+    }
+
+    function test_PermExecutorPathV2() public {
+        PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
+        _installModule(2, address(executor));
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
+        bytes memory data = abi.encodeCall(EvilTarget.poke, (7));
+        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY_V1, 0);
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
+        bytes memory execCalldata = abi.encode(
+            pid, address(evil), uint256(0), data, DEADLINE, uint64(0), POLICY_V1, uint256(0), uint256(0),
+            address(this), auth, client, r, s
+        );
+        executor.executeViaPermissionV2(payable(address(account)), bytes32(0), execCalldata);
+        assertEq(evil.number(), 7);
+        assertEq(account.getPermission(pid).seq, 1);
     }
 
     function test_PermFeeSettlement() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 1 ether);
         vm.deal(address(account), 1 ether);
         uint256 relayerBefore = address(this).balance;
         uint256 factoryBefore = address(factory).balance;
         bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
-        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY);
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
-        account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 0, POLICY, 0.001 ether, auth, client, r, s);
+        _execFull(pid, address(evil), 0, data, 0, POLICY_V1, 0.0015 ether, 0.001 ether);
         assertEq(address(this).balance, relayerBefore + 0.001 ether);
         assertEq(address(factory).balance, factoryBefore + 0.0005 ether);
+        assertEq(account.getPermission(pid).feeSpent, 0.0015 ether);
     }
 
     function test_7579ExecuteHappyPath() public {
@@ -430,13 +792,49 @@ contract PeridotPermissionTest is Test {
         uint64 n = account.nonce();
         bytes32 payload = keccak256(
             abi.encodePacked(
-                DOMAIN_PERM, uint8(0x15), block.chainid, address(account), n, address(evil), uint256(0),
-                keccak256(data), DEADLINE, POLICY
+                DOMAIN_PERM_V2, uint8(0x15), block.chainid, address(account), n, address(evil), uint256(0),
+                keccak256(data), DEADLINE, POLICY_V1
             )
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
-        account.execute(bytes32(0), abi.encode(address(evil), uint256(0), data, DEADLINE, POLICY, uint256(0), auth, client, r, s));
+        account.execute(bytes32(0), abi.encode(address(evil), uint256(0), data, DEADLINE, POLICY_V1, uint256(0), auth, client, r, s));
         assertEq(evil.number(), 11);
+        assertEq(account.nonce(), n + 1);
+    }
+
+    function test_7579ExecuteV4HappyPath() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        vm.deal(address(account), 1 ether);
+        bytes memory data = abi.encodeCall(EvilTarget.poke, (11));
+        uint64 n = account.nonce();
+        uint256 netFee = 0.001 ether;
+        uint256 protocol = 0.0005 ether;
+        bytes32 payload = keccak256(
+            abi.encodePacked(
+                DOMAIN_PERM_V2, uint8(0x15), block.chainid, address(account), n, address(evil), uint256(0),
+                keccak256(data), DEADLINE, POLICY_V1, netFee + protocol
+            )
+        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        account.executeV4(
+            bytes32(0),
+            abi.encode(address(evil), uint256(0), data, DEADLINE, POLICY_V1, netFee + protocol, netFee, auth, client, r, s)
+        );
+        assertEq(evil.number(), 11);
+        assertEq(account.nonce(), n + 1);
+        // Under-cap bound reverts without consuming nonce.
+        bytes32 payload2 = keccak256(
+            abi.encodePacked(
+                DOMAIN_PERM_V2, uint8(0x15), block.chainid, address(account), n + 1, address(evil), uint256(0),
+                keccak256(data), DEADLINE, POLICY_V1, netFee + protocol - 1
+            )
+        );
+        (bytes memory a2, bytes memory c2, bytes32 r2, bytes32 s2) = _sigOwner(payload2);
+        vm.expectRevert(PeridotAccount.FeeExceedsMax.selector);
+        account.executeV4(
+            bytes32(0),
+            abi.encode(address(evil), uint256(0), data, DEADLINE, POLICY_V1, netFee + protocol - 1, netFee, a2, c2, r2, s2)
+        );
         assertEq(account.nonce(), n + 1);
     }
 
@@ -444,13 +842,13 @@ contract PeridotPermissionTest is Test {
 
     function test_AdvCannotSendEthOnNonfinancial() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         vm.deal(address(account), 1 ether);
         bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
-        bytes32 payload = _execPayload(pid, 0, address(evil), 0.5 ether, data, DEADLINE, POLICY);
+        bytes32 payload = _execPayload(pid, 0, address(evil), 0.5 ether, data, DEADLINE, POLICY_V1, 1 ether);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
         vm.expectRevert(PeridotAccount.ScopeMismatch.selector);
-        account.executeWithPermission(pid, address(evil), 0.5 ether, data, DEADLINE, 0, POLICY, 0, auth, client, r, s);
+        account.executeWithPermission(pid, address(evil), 0.5 ether, data, DEADLINE, 0, POLICY_V1, 1 ether, 0, auth, client, r, s);
     }
 
     function test_AdvCannotGrantApproveSelector() public {
@@ -461,7 +859,7 @@ contract PeridotPermissionTest is Test {
         bytes4 sel = MockERC20.approve.selector;
         bytes32 pid = _pid(SX, SY, 1, address(evil), sel, address(0), address(0), 0, validUntil, salt);
         bytes32 payload = _grantPayload(
-            pid, SX, SY, 1, address(evil), sel, address(0), address(0), 0, 0, 0, validAfter, validUntil,
+            pid, SX, SY, 1, address(evil), sel, address(0), address(0), 0, 0, 0, 0, validAfter, validUntil,
             account.nonce(), DEADLINE
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
@@ -478,6 +876,7 @@ contract PeridotPermissionTest is Test {
                 to: address(0),
                 perTxCap: 0,
                 totalLimit: 0,
+                feeLimit: 0,
                 nftId: 0,
                 validAfter: validAfter,
                 validUntil: validUntil,
@@ -491,37 +890,11 @@ contract PeridotPermissionTest is Test {
         );
     }
 
-    function test_AdvCannotSneakApproveThroughTransferGrant() public {
-        MockERC20 token = new MockERC20();
-        token.mint(address(account), 1000);
-        address to = address(0xBEEF);
-        bytes32 pid = _grant(3, address(0), bytes4(0), address(token), to, 100, 100, 0);
-        bytes memory evil = abi.encodeCall(MockERC20.approve, (to, 1000));
-        bytes32 payload = _execPayload(pid, 0, address(token), 0, evil, DEADLINE, POLICY);
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
-        vm.expectRevert(PeridotAccount.ScopeMismatch.selector);
-        account.executeWithPermission(pid, address(token), 0, evil, DEADLINE, 0, POLICY, 0, auth, client, r, s);
-        assertEq(token.allowance(address(account), to), 0);
-    }
-
-    function test_AdvCannotTransferToUnlistedRecipient() public {
-        MockERC20 token = new MockERC20();
-        token.mint(address(account), 1000);
-        bytes32 pid = _grant(3, address(0), bytes4(0), address(token), address(0xBEEF), 100, 100, 0);
-        address attacker = address(0xBAD);
-        bytes memory evil = abi.encodeCall(MockERC20.transfer, (attacker, 100));
-        bytes32 payload = _execPayload(pid, 0, address(token), 0, evil, DEADLINE, POLICY);
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
-        vm.expectRevert(PeridotAccount.ScopeMismatch.selector);
-        account.executeWithPermission(pid, address(token), 0, evil, DEADLINE, 0, POLICY, 0, auth, client, r, s);
-        assertEq(token.balanceOf(attacker), 0);
-    }
-
     // ---- adversarial: no escalation to owner authority ----
 
     function test_AdvCannotTargetSelf() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         bytes memory evilCall = abi.encodeWithSignature(
             "updateAuthority(bytes32,bytes32,uint64,bytes,bytes,bytes32,bytes32)",
             bytes32(uint256(1)),
@@ -532,16 +905,16 @@ contract PeridotPermissionTest is Test {
             bytes32(0),
             bytes32(0)
         );
-        bytes32 payload = _execPayload(pid, 0, address(account), 0, evilCall, DEADLINE, POLICY);
+        bytes32 payload = _execPayload(pid, 0, address(account), 0, evilCall, DEADLINE, POLICY_V1, 0);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
         vm.expectRevert(PeridotAccount.InvalidTarget.selector);
-        account.executeWithPermission(pid, address(account), 0, evilCall, DEADLINE, 0, POLICY, 0, auth, client, r, s);
+        account.executeWithPermission(pid, address(account), 0, evilCall, DEADLINE, 0, POLICY_V1, 0, 0, auth, client, r, s);
         assertEq(account.authorityX(), GX);
     }
 
     function test_AdvReentryIntoRotateFails() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         evil.setReenter(
             abi.encodeWithSignature(
                 "updateAuthority(bytes32,bytes32,uint64,bytes,bytes,bytes32,bytes32)",
@@ -561,21 +934,22 @@ contract PeridotPermissionTest is Test {
 
     function test_AdvReentryIntoPermExecFails() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
-        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY);
+        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY_V1, 0);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
         // Inner call replays the exact same (valid-once) execution while the outer holds the lock.
         evil.setReenter(
             abi.encodeWithSignature(
-                "executeWithPermission(bytes32,address,uint256,bytes,uint64,uint64,uint16,uint256,bytes,bytes,bytes32,bytes32)",
+                "executeWithPermission(bytes32,address,uint256,bytes,uint64,uint64,uint16,uint256,uint256,bytes,bytes,bytes32,bytes32)",
                 pid,
                 address(evil),
                 uint256(0),
                 data,
                 DEADLINE,
                 uint64(0),
-                POLICY,
+                POLICY_V1,
+                uint256(0),
                 uint256(0),
                 auth,
                 client,
@@ -591,7 +965,7 @@ contract PeridotPermissionTest is Test {
     function test_AdvReentryIntoInstallFails() public {
         PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         evil.setReenter(
             abi.encodeWithSignature(
                 "installModule(uint256,address,bytes,uint64,bytes,bytes,bytes32,bytes32)",
@@ -614,7 +988,7 @@ contract PeridotPermissionTest is Test {
 
     function test_AdvReplaySameSeqFails() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         _exec(pid, address(evil), 0, abi.encodeCall(EvilTarget.poke, (1)), 0);
         _execReverts(
             PeridotAccount.BadSeq.selector, pid, address(evil), 0, abi.encodeCall(EvilTarget.poke, (2)), 0
@@ -632,7 +1006,7 @@ contract PeridotPermissionTest is Test {
         bytes32 salt = keccak256("short");
         bytes32 pid = _pid(SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, validUntil, salt);
         bytes32 payload = _grantPayload(
-            pid, SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0, validAfter,
+            pid, SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0, 0, validAfter,
             validUntil, account.nonce(), DEADLINE
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
@@ -648,6 +1022,7 @@ contract PeridotPermissionTest is Test {
                 to: address(0),
                 perTxCap: 0,
                 totalLimit: 0,
+                feeLimit: 0,
                 nftId: 0,
                 validAfter: validAfter,
                 validUntil: validUntil,
@@ -663,29 +1038,29 @@ contract PeridotPermissionTest is Test {
         bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
         // Fresh short deadline at the new timestamp.
         uint64 dl = uint64(block.timestamp + 100);
-        bytes32 ep = _execPayload(pid, 0, address(evil), 0, data, dl, POLICY);
+        bytes32 ep = _execPayload(pid, 0, address(evil), 0, data, dl, POLICY_V1, 0);
         (bytes memory a2, bytes memory c2, bytes32 r2, bytes32 s2) = _sigSession(ep);
         vm.expectRevert(PeridotAccount.PermissionExpired.selector);
-        account.executeWithPermission(pid, address(evil), 0, data, dl, 0, POLICY, 0, a2, c2, r2, s2);
+        account.executeWithPermission(pid, address(evil), 0, data, dl, 0, POLICY_V1, 0, 0, a2, c2, r2, s2);
     }
 
     function test_AdvLongTtlRejected() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
         uint64 longDl = uint64(block.timestamp + 601);
-        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, longDl, POLICY);
+        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, longDl, POLICY_V1, 0);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
         vm.expectRevert(PeridotAccount.Expired.selector);
-        account.executeWithPermission(pid, address(evil), 0, data, longDl, 0, POLICY, 0, auth, client, r, s);
+        account.executeWithPermission(pid, address(evil), 0, data, longDl, 0, POLICY_V1, 0, 0, auth, client, r, s);
     }
 
     function test_AdvRevokeIsImmediateAndOwnerOnly() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         // Session-signed revoke (over the owner payload shape) must not verify as owner.
         bytes32 revokePayload = keccak256(
-            abi.encodePacked(DOMAIN_PERM, uint8(0x11), block.chainid, address(account), pid, account.nonce(), DEADLINE)
+            abi.encodePacked(DOMAIN_PERM_V2, uint8(0x11), block.chainid, address(account), pid, account.nonce(), DEADLINE)
         );
         (bytes memory a2, bytes memory c2, bytes32 r2, bytes32 s2) = _sigSession(revokePayload);
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
@@ -701,13 +1076,13 @@ contract PeridotPermissionTest is Test {
 
     function test_AdvCrossChainReplayFails() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
-        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY);
+        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY_V1, 0);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
         vm.chainId(999);
         vm.expectRevert(PeridotAccount.InvalidChallenge.selector);
-        account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 0, POLICY, 0, auth, client, r, s);
+        account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 0, POLICY_V1, 0, 0, auth, client, r, s);
         vm.chainId(31337);
         _exec(pid, address(evil), 0, data, 0);
     }
@@ -716,13 +1091,13 @@ contract PeridotPermissionTest is Test {
 
     function test_AdvOwnerSigInvalidOnPermPath() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         // Owner signs the PERM payload, but the stored session key differs → Unauthorized.
         bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
-        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY);
+        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY_V1, 0);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
-        account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 0, POLICY, 0, auth, client, r, s);
+        account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 0, POLICY_V1, 0, 0, auth, client, r, s);
     }
 
     function test_AdvSessionSigInvalidOnOwnerPaths() public {
@@ -731,12 +1106,12 @@ contract PeridotPermissionTest is Test {
         bytes32 payload = keccak256(
             abi.encodePacked(
                 DOMAIN_V3, uint8(0x01), block.chainid, address(account), account.nonce(), to, uint256(0),
-                keccak256(""), DEADLINE, POLICY
+                keccak256(""), DEADLINE, POLICY_V1
             )
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
-        account.execute(to, 0, "", DEADLINE, POLICY, 0, auth, client, r, s);
+        account.execute(to, 0, "", DEADLINE, POLICY_V1, 0, auth, client, r, s);
     }
 
     function test_AdvGrantNeedsOwnerSig() public {
@@ -746,7 +1121,7 @@ contract PeridotPermissionTest is Test {
         bytes32 salt = keccak256("selfgrant");
         bytes32 pid = _pid(SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, validUntil, salt);
         bytes32 payload = _grantPayload(
-            pid, SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0, validAfter,
+            pid, SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0, 0, validAfter,
             validUntil, account.nonce(), DEADLINE
         );
         // Session key signs its own grant → must fail (only the owner grants).
@@ -764,6 +1139,7 @@ contract PeridotPermissionTest is Test {
                 to: address(0),
                 perTxCap: 0,
                 totalLimit: 0,
+                feeLimit: 0,
                 nftId: 0,
                 validAfter: validAfter,
                 validUntil: validUntil,
@@ -800,125 +1176,11 @@ contract PeridotPermissionTest is Test {
         // A permission-execution clientData reused as a 1271 signature → invalid
         // (different challenge domain/fields).
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
         bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
-        bytes32 ep = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY);
+        bytes32 ep = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY_V1, 0);
         (bytes memory a3, bytes memory c3, bytes32 r3, bytes32 s3) = _sigSession(ep);
         assertEq(account.isValidSignature(keccak256(data), abi.encode(a3, c3, r3, s3)), MAGIC_INVALID);
-    }
-
-    function test_Adv1271NoCrossAccountReplay() public {
-        bytes32 salt2 = bytes32(uint256(8));
-        address predicted2 = factory.predict(salt2);
-        vm.deal(predicted2, 0.01 ether);
-        uint64 n = account.nonce();
-        bytes32 actPayload = keccak256(
-            abi.encodePacked(DOMAIN_V3, uint8(0x05), salt2, GX, GY, POLICY, DEADLINE, block.chainid, address(factory))
-        );
-        (bytes memory auth0, bytes memory client0, bytes32 r0, bytes32 s0) = _sigOwner(actPayload);
-        PeridotAccount account2 = PeridotAccount(
-            payable(factory.deployAndInit(salt2, GX, GY, POLICY, DEADLINE, 0.002 ether, auth0, client0, r0, s0))
-        );
-        assertEq(account.nonce(), n); // sanity: deploying B consumed no nonce on A
-        bytes32 hash = keccak256("replay me");
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sig1271(hash, 1);
-        bytes memory sig = abi.encode(auth, client, r, s);
-        assertEq(account.isValidSignature(hash, sig), MAGIC_1271);
-        assertEq(account2.isValidSignature(hash, sig), MAGIC_INVALID);
-    }
-
-    // ---- adversarial: module + mode boundaries ----
-
-    function _installModule(uint256 moduleTypeId, address module) internal {
-        uint64 n = account.nonce();
-        bytes32 payload = keccak256(
-            abi.encodePacked(
-                DOMAIN_PERM, uint8(0x13), block.chainid, address(account), moduleTypeId, module, keccak256(""), n,
-                DEADLINE
-            )
-        );
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
-        account.installModule(moduleTypeId, module, "", DEADLINE, auth, client, r, s);
-    }
-
-    function test_AdvModuleTypeBoundaries() public {
-        PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
-        // Fallback + hook modules permanently unsupported.
-        uint64 n = account.nonce();
-        bytes32 payload = keccak256(
-            abi.encodePacked(
-                DOMAIN_PERM, uint8(0x13), block.chainid, address(account), uint256(3), address(executor),
-                keccak256(""), n, DEADLINE
-            )
-        );
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
-        vm.expectRevert(PeridotAccount.UnsupportedModuleType.selector);
-        account.installModule(3, address(executor), "", DEADLINE, auth, client, r, s);
-        // Install needs the owner signature.
-        bytes32 payload2 = keccak256(
-            abi.encodePacked(
-                DOMAIN_PERM, uint8(0x13), block.chainid, address(account), uint256(2), address(executor),
-                keccak256(""), n, DEADLINE
-            )
-        );
-        (bytes memory a2, bytes memory c2, bytes32 r2, bytes32 s2) = _sigSession(payload2);
-        vm.expectRevert(PeridotAccount.Unauthorized.selector);
-        account.installModule(2, address(executor), "", DEADLINE, a2, c2, r2, s2);
-        // Double install fails.
-        _installModule(2, address(executor));
-        {
-            uint64 n2 = account.nonce();
-            bytes32 p3 = keccak256(
-                abi.encodePacked(
-                    DOMAIN_PERM, uint8(0x13), block.chainid, address(account), uint256(2), address(executor),
-                    keccak256(""), n2, DEADLINE
-                )
-            );
-            (bytes memory a3, bytes memory c3, bytes32 r3, bytes32 s3) = _sigOwner(p3);
-            try account.installModule(2, address(executor), "", DEADLINE, a3, c3, r3, s3) {
-                fail("expected revert");
-            } catch (bytes memory ret) {
-                assertEq(bytes4(ret), PeridotAccount.AlreadyInstalled.selector);
-            }
-        }
-    }
-
-    function test_AdvExecutorCallNeedsModule() public {
-        PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
-        EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
-        bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
-        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY);
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
-        bytes memory execCalldata = abi.encode(
-            pid, address(evil), uint256(0), data, DEADLINE, uint64(0), POLICY, uint256(0), address(this), auth, client,
-            r, s
-        );
-        // Not installed → NotModule (also covers direct account.executeFromExecutor calls).
-        vm.expectRevert(PeridotAccount.NotModule.selector);
-        executor.executeViaPermission(payable(address(account)), bytes32(0), execCalldata);
-        vm.expectRevert(PeridotAccount.NotModule.selector);
-        account.executeFromExecutor(bytes32(0), execCalldata);
-    }
-
-    function test_AdvDelegatecallAndBatchModesRejected() public {
-        assertFalse(account.supportsExecutionMode(bytes32(uint256(1))));
-        assertFalse(
-            account.supportsExecutionMode(
-                bytes32(hex"0100000000000000000000000000000000000000000000000000000000000000")
-            )
-        );
-        assertTrue(account.supportsExecutionMode(bytes32(0)));
-        assertTrue(account.supportsModule(1));
-        assertTrue(account.supportsModule(2));
-        assertFalse(account.supportsModule(3));
-        assertFalse(account.supportsModule(4));
-        vm.expectRevert(PeridotAccount.UnsupportedExecutionMode.selector);
-        account.execute(bytes32(uint256(1)), "");
-        PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
-        _installModule(2, address(executor));
-        vm.expectRevert(PeridotAccount.UnsupportedExecutionMode.selector);
-        account.executeFromExecutor(bytes32(uint256(1)), "");
     }
 
     function test_AdvNoDelegatecallInImplementation() public {
@@ -948,7 +1210,7 @@ contract PeridotPermissionTest is Test {
         // permissionId that does not match the scope → BadPermissionId.
         bytes32 payload = _grantPayload(
             bytes32(uint256(1234)), SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0,
-            0, validAfter, validUntil, account.nonce(), DEADLINE
+            0, 0, validAfter, validUntil, account.nonce(), DEADLINE
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
         vm.expectRevert(PeridotAccount.BadPermissionId.selector);
@@ -964,6 +1226,7 @@ contract PeridotPermissionTest is Test {
                 to: address(0),
                 perTxCap: 0,
                 totalLimit: 0,
+                feeLimit: 0,
                 nftId: 0,
                 validAfter: validAfter,
                 validUntil: validUntil,
@@ -984,7 +1247,7 @@ contract PeridotPermissionTest is Test {
         bytes32 salt = keccak256("long");
         bytes32 pid = _pid(SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, validUntil, salt);
         bytes32 payload = _grantPayload(
-            pid, SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0, validAfter,
+            pid, SX, SY, 1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0, 0, validAfter,
             validUntil, account.nonce(), DEADLINE
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
@@ -1001,6 +1264,7 @@ contract PeridotPermissionTest is Test {
                 to: address(0),
                 perTxCap: 0,
                 totalLimit: 0,
+                feeLimit: 0,
                 nftId: 0,
                 validAfter: validAfter,
                 validUntil: validUntil,
@@ -1016,13 +1280,108 @@ contract PeridotPermissionTest is Test {
 
     function test_AdvFeeSanityOnPermPath() public {
         EvilTarget evil = new EvilTarget(address(account));
-        bytes32 pid = _grant(1, address(evil), EvilTarget.poke.selector, address(0), address(0), 0, 0, 0);
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 1000 ether);
         vm.deal(address(account), 200 ether);
         bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
-        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY);
+        // Cap checks pass (attested total 150 ≤ 200 cap, lifetime 150 ≤ 1000
+        // limit) so the full-frame gas-sanity bound is what reverts.
+        _execFullReverts(
+            PeridotAccount.GasAnomaly.selector, pid, address(evil), 0, data, 0, POLICY_V1, 200 ether, 100 ether
+        );
+    }
+
+    // ---- adversarial: module + mode boundaries ----
+
+    function _installModule(uint256 moduleTypeId, address module) internal {
+        uint64 n = account.nonce();
+        bytes32 payload = keccak256(
+            abi.encodePacked(
+                DOMAIN_PERM_V2, uint8(0x13), block.chainid, address(account), moduleTypeId, module, keccak256(""), n,
+                DEADLINE
+            )
+        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        account.installModule(moduleTypeId, module, "", DEADLINE, auth, client, r, s);
+    }
+
+    function test_AdvModuleTypeBoundaries() public {
+        PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
+        // Fallback + hook modules permanently unsupported.
+        uint64 n = account.nonce();
+        bytes32 payload = keccak256(
+            abi.encodePacked(
+                DOMAIN_PERM_V2, uint8(0x13), block.chainid, address(account), uint256(3), address(executor),
+                keccak256(""), n, DEADLINE
+            )
+        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        vm.expectRevert(PeridotAccount.UnsupportedModuleType.selector);
+        account.installModule(3, address(executor), "", DEADLINE, auth, client, r, s);
+        // Install needs the owner signature.
+        bytes32 payload2 = keccak256(
+            abi.encodePacked(
+                DOMAIN_PERM_V2, uint8(0x13), block.chainid, address(account), uint256(2), address(executor),
+                keccak256(""), n, DEADLINE
+            )
+        );
+        (bytes memory a2, bytes memory c2, bytes32 r2, bytes32 s2) = _sigSession(payload2);
+        vm.expectRevert(PeridotAccount.Unauthorized.selector);
+        account.installModule(2, address(executor), "", DEADLINE, a2, c2, r2, s2);
+        // Double install fails.
+        _installModule(2, address(executor));
+        {
+            uint64 n2 = account.nonce();
+            bytes32 p3 = keccak256(
+                abi.encodePacked(
+                    DOMAIN_PERM_V2, uint8(0x13), block.chainid, address(account), uint256(2), address(executor),
+                    keccak256(""), n2, DEADLINE
+                )
+            );
+            (bytes memory a3, bytes memory c3, bytes32 r3, bytes32 s3) = _sigOwner(p3);
+            try account.installModule(2, address(executor), "", DEADLINE, a3, c3, r3, s3) {
+                fail("expected revert");
+            } catch (bytes memory ret) {
+                assertEq(bytes4(ret), PeridotAccount.AlreadyInstalled.selector);
+            }
+        }
+    }
+
+    function test_AdvExecutorCallNeedsModule() public {
+        PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
+        bytes memory data = abi.encodeCall(EvilTarget.poke, (1));
+        bytes32 payload = _execPayload(pid, 0, address(evil), 0, data, DEADLINE, POLICY_V1, 0);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
-        vm.expectRevert(PeridotAccount.GasAnomaly.selector);
-        account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 0, POLICY, 100 ether, auth, client, r, s);
+        bytes memory execCalldata = abi.encode(
+            pid, address(evil), uint256(0), data, DEADLINE, uint64(0), POLICY_V1, uint256(0), uint256(0),
+            address(this), auth, client, r, s
+        );
+        // Not installed → NotModule (also covers direct account.executeFromExecutorV2 calls).
+        vm.expectRevert(PeridotAccount.NotModule.selector);
+        executor.executeViaPermissionV2(payable(address(account)), bytes32(0), execCalldata);
+        vm.expectRevert(PeridotAccount.NotModule.selector);
+        account.executeFromExecutorV2(bytes32(0), execCalldata);
+    }
+
+    function test_AdvDelegatecallAndBatchModesRejected() public {
+        assertFalse(account.supportsExecutionMode(bytes32(uint256(1))));
+        assertFalse(
+            account.supportsExecutionMode(
+                bytes32(hex"0100000000000000000000000000000000000000000000000000000000000000")
+            )
+        );
+        assertTrue(account.supportsExecutionMode(bytes32(0)));
+        assertTrue(account.supportsModule(1));
+        assertTrue(account.supportsModule(2));
+        assertFalse(account.supportsModule(3));
+        assertFalse(account.supportsModule(4));
+        vm.expectRevert(PeridotAccount.UnsupportedExecutionMode.selector);
+        account.execute(bytes32(uint256(1)), "");
+        PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
+        _installModule(2, address(executor));
+        vm.expectRevert(PeridotAccount.UnsupportedExecutionMode.selector);
+        account.executeFromExecutorV2(bytes32(uint256(1)), "");
     }
 
     // --- base64url (mirrors the V3 suite) ---
