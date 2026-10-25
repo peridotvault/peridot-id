@@ -6,6 +6,11 @@ This document is the **single canonical spec**: V3 authorization + fee schema
 (§2), both account implementations (§3–§7), the EVM permission layer (§10),
 and the SVM session layer (§11), with verification and audit status (§9, §12).
 
+See also: [`docs/business_model-onchain.md`](../docs/business_model-onchain.md) —
+business-facing pricing policy (per-chain minimums, revenue scenarios). This
+whitepaper is the technical fee-schema spec; the business doc is policy, not
+on-chain enforcement.
+
 ## 1. Shared model
 
 - Authority = secp256r1 (P-256) WebAuthn passkey. 1 PID = 1 account. Rotation never moves the address.
