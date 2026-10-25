@@ -3042,7 +3042,7 @@ components:
 
     ActivationView:
       type: object
-      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports, networkFeeLamports, protocolFeeBps, chainTime, treasury, feePolicyVersion, rpIdHash]
+      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports, networkFeeLamports, protocolFeeBps, chainTime, treasury, feePolicyVersion, rpIdHash, networkFee, platformFee, totalFee, maxTotalFee, chainMinBaseUnits, quotedAt, expiresAt]
       properties:
         pid:
           type: string
@@ -3077,7 +3077,7 @@ components:
 
     EvmActivationView:
       type: object
-      required: [pid, chainReference, status, smartAccountAddress, deployed, balanceWei, requiredWei, networkFeeWei, protocolFeeBps]
+      required: [pid, chainReference, status, smartAccountAddress, deployed, balanceWei, requiredWei, networkFeeWei, protocolFeeBps, networkFee, platformFee, totalFee, maxTotalFee, feePolicyVersion, chainMinBaseUnits, quotedAt, expiresAt]
       properties:
         pid:
           type: string
@@ -3101,6 +3101,31 @@ components:
         protocolFeeBps:
           type: integer
           description: "Fixed protocol percentage in bps for the quoted policy version"
+        networkFee:
+          type: string
+          description: "Canonical alias of networkFeeWei (base units, decimal string)"
+        platformFee:
+          type: string
+          description: "v2 platform fee: MAX(floor(networkFee*bps/10000), chainMin) (base units)"
+        totalFee:
+          type: string
+          description: "networkFee + platformFee at quote time (canonical)"
+        maxTotalFee:
+          type: string
+          description: "Offered user-approved upper bound for the V4 authorization (defaults to totalFee)"
+        feePolicyVersion:
+          type: integer
+          description: "Fee-policy version the quote was computed under (must be signed)"
+        chainMinBaseUnits:
+          type: string
+          description: "chainMin applied for this chain under the quoted policy version (base units)"
+        quotedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: "expiresAt - quotedAt <= 300s (NFR-3)"
 
     Authority:
       type: object
@@ -3201,7 +3226,7 @@ components:
 
     Activate:
       type: object
-      required: [expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      required: [expiry, feePolicyVersion, quotedNetworkFeeLamports, maxTotalFeeLamports, assertion]
       properties:
         expiry:
           type: integer
@@ -3212,12 +3237,15 @@ components:
         quotedNetworkFeeLamports:
           type: string
           description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        maxTotalFeeLamports:
+          type: string
+          description: "User-approved upper bound on networkFee + platformFee (V4 authorization; totalFee <= maxTotalFee enforced pre-broadcast)"
         assertion:
           $ref: "#/components/schemas/PasskeyAssertion"
 
     EvmActivate:
       type: object
-      required: [quotedNetworkFeeWei, feePolicyVersion, deadline, assertion]
+      required: [quotedNetworkFeeWei, feePolicyVersion, deadline, maxTotalFeeWei, assertion]
       properties:
         quotedNetworkFeeWei:
           type: string
@@ -3228,6 +3256,9 @@ components:
         deadline:
           type: integer
           description: "Authorization deadline (unix seconds, TTL ≤ 600s)"
+        maxTotalFeeWei:
+          type: string
+          description: "User-approved upper bound on networkFee + platformFee in wei (V4 authorization; totalFee <= maxTotalFee enforced pre-broadcast)"
         assertion:
           type: object
           required: [id, r, s, authenticatorData, clientDataJSON]
@@ -3369,7 +3400,7 @@ components:
 
     WithdrawQuote:
       type: object
-      required: [networkFeeLamports, protocolFeeBps, feePolicyVersion, totalFeeLamports, chainTime, treasury]
+      required: [networkFeeLamports, protocolFeeBps, feePolicyVersion, totalFeeLamports, chainTime, treasury, networkFee, platformFee, totalFee, maxTotalFee, chainMinBaseUnits, quotedAt, expiresAt]
       properties:
         networkFeeLamports:
           type: string
@@ -3388,10 +3419,41 @@ components:
         treasury:
           type: string
           description: "Canonical revenue vault (informational — enforced on-chain)"
+        networkFee:
+          type: string
+          description: "Canonical alias of networkFeeLamports (base units, decimal string)"
+        platformFee:
+          type: string
+          description: "v2 platform fee: MAX(floor(networkFee*bps/10000), chainMin) (base units)"
+        protocolFeeLamports:
+          type: string
+          description: "Legacy alias of platformFee (lamports)"
+        totalFee:
+          type: string
+          description: "networkFee + platformFee at quote time (canonical)"
+        maxTotalFee:
+          type: string
+          description: "Offered user-approved upper bound for the passkey-signed V4 authorization (defaults to totalFee)"
+        suggestedMaxTotalFee:
+          type: string
+          description: "Legacy alias of maxTotalFee (lamports)"
+        chainMinBaseUnits:
+          type: string
+          description: "chainMin applied for this chain under the quoted policy version (base units)"
+        quoteId:
+          type: string
+          description: "Informational quote id (submit re-attests — not replay-checked)"
+        quotedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: "expiresAt - quotedAt <= 300s (NFR-3)"
 
     SponsoredWithdraw:
       type: object
-      required: [asset, to, amount, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      required: [asset, to, amount, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, maxTotalFeeLamports, assertion]
       properties:
         asset:
           type: string
@@ -3411,6 +3473,9 @@ components:
         quotedNetworkFeeLamports:
           type: string
           description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        maxTotalFeeLamports:
+          type: string
+          description: "User-approved upper bound on networkFee + platformFee (V4 authorization; totalFee <= maxTotalFee enforced pre-broadcast)"
         assertion:
           $ref: "#/components/schemas/PasskeyAssertion"
 
@@ -3920,7 +3985,7 @@ components:
 
     SponsoredExecute:
       type: object
-      required: [target, metas, data, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      required: [target, metas, data, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, maxTotalFeeLamports, assertion]
       properties:
         target:
           type: string
@@ -3945,6 +4010,9 @@ components:
         quotedNetworkFeeLamports:
           type: string
           description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        maxTotalFeeLamports:
+          type: string
+          description: "User-approved upper bound on networkFee + platformFee (V4 authorization; totalFee <= maxTotalFee enforced pre-broadcast)"
         assertion:
           $ref: "#/components/schemas/PasskeyAssertion"
 

@@ -33,8 +33,8 @@ export const PID_ACTIVATION_POLL_MS = 10_000;
 export const PID_ACTIVATION_CONFIRM_INTERVAL_MS = 1_000;
 /** Max confirmation rounds for Solana activation (was PID_ACTIVATION_CONFIRM_ATTEMPTS). */
 export const PID_ACTIVATION_CONFIRM_ATTEMPTS = 15;
-/** Signed fee-policy version (was PID_FEE_POLICY_VERSION; V1 = fixed 50% protocol fee). */
-export const PID_FEE_POLICY_VERSION = 1;
+/** Signed fee-policy version (was PID_FEE_POLICY_VERSION; V2 = 50% leg + per-chain minima, ANT-544 FR-B). */
+export const PID_FEE_POLICY_VERSION = 2;
 /** EVM activation poll interval (was PID_EVM_POLL_MS). */
 export const PID_EVM_POLL_MS = 30_000;
 /** Machine (client-credentials) token TTL for app backends (was APP_TOKEN_TTL). */

@@ -47,7 +47,7 @@ export class WalletController {
     return this.walletService.create(user.pid, dto.address);
   }
 
-  /** Attested fee + policy + chain time for the client to sign a drift-bound authorization (submit attested fee must be ≤120% of quoted; not a maxFee cap). */
+  /** Attested fee + v2 policy + offered maxTotalFee bound for the client to passkey-sign (V4 authorization; submit attested fee must be ≤120% of quoted AND totalFee ≤ maxTotalFee). */
   @Post("withdraw/quote")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 60, ttl: 60000 } })
@@ -83,6 +83,7 @@ export class WalletController {
         expiry: dto.expiry,
         feePolicyVersion: dto.feePolicyVersion,
         quotedNetworkFeeLamports: dto.quotedNetworkFeeLamports,
+        maxTotalFeeLamports: dto.maxTotalFeeLamports,
         assertion: dto.assertion as never,
       },
       await this.selection(chainRefHeader, chainRefQuery),
@@ -110,6 +111,7 @@ export class WalletController {
         expiry: dto.expiry,
         feePolicyVersion: dto.feePolicyVersion,
         quotedNetworkFeeLamports: dto.quotedNetworkFeeLamports,
+        maxTotalFeeLamports: dto.maxTotalFeeLamports,
         assertion: dto.assertion as never,
       },
       await this.selection(chainRefHeader, chainRefQuery),

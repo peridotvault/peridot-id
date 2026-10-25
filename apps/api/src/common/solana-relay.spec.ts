@@ -47,12 +47,13 @@ describe("quote drift bound (120.00% integer ratio, no floats)", () => {
 });
 
 describe("protocol fee math", () => {
-  it("resolves the v1 policy to 5000 bps", () => {
+  it("resolves the v1/v2 policies to 5000 bps", () => {
     expect(protocolFeeBps(1)).toBe(5000);
+    expect(protocolFeeBps(2)).toBe(5000);
   });
 
   it("rejects unknown policy versions", () => {
-    expect(() => protocolFeeBps(2)).toThrow();
+    expect(() => protocolFeeBps(3)).toThrow();
     expect(() => protocolFeeBps(0)).toThrow();
   });
 
