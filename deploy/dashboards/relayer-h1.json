@@ -1,0 +1,124 @@
+{
+  "title": "PeridotID Relayer H1 (ANT-582)",
+  "uid": "perotid-relayer-h1",
+  "timezone": "utc",
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "postgres",
+        "current": {},
+        "label": "Postgres"
+      },
+      {
+        "name": "chain",
+        "type": "custom",
+        "query": "solana,stellar,ethereum,base,bsc",
+        "includeAll": true,
+        "multi": true,
+        "current": {}
+      },
+      {
+        "name": "entryPoint",
+        "type": "custom",
+        "query": "withdraw,execute,rotate,activate",
+        "includeAll": true,
+        "multi": true,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "title": "P1 revocations/min per chain (H1-i)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('minute',\"createdAt\") AS time, COALESCE(metadata->>'chain','unknown') AS metric, COUNT(*) AS revocations FROM security_events WHERE \"eventType\" IN ('credential.rotated','credential.revoked') AND $__timeFilter(\"createdAt\") GROUP BY 1,2 ORDER BY 1;",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 2, "title": "P2 intent rejections by cause (H1-ii)",
+      "type": "barchart",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(metadata->>'cause','unknown') AS cause, COUNT(*) AS rejections FROM security_events WHERE \"eventType\"='intent.rejected' AND $__timeFilter(\"createdAt\") GROUP BY 1;",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 3, "title": "P3 divergence feed (H1-iii)",
+      "type": "table",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT \"createdAt\" AS time, \"eventType\", COALESCE(metadata->>'chain','unknown') AS chain, metadata FROM security_events WHERE $__timeFilter(\"createdAt\") AND (\"eventType\" IN ('reconcile.formula_mismatch','reconcile.over_attested') OR (\"eventType\" LIKE '%.reconciled' AND (COALESCE((metadata->>'overAttested')::boolean,false) OR (metadata->>'protocolFee') IS DISTINCT FROM (metadata->>'protocolFeeExpected')))) ORDER BY 1 DESC LIMIT 50;",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 4, "title": "P4 relayer absorbed/min per chain vs cap (H1-iv)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('minute',\"createdAt\") AS time, COALESCE(metadata->>'chain','unknown') AS metric, SUM(COALESCE(NULLIF(metadata->>'absorbed',''),NULLIF(metadata->>'relayerAbsorbed',''),'0')::numeric) AS absorbed FROM security_events WHERE (\"eventType\"='relayer.pnl' OR \"eventType\" LIKE '%.reconciled') AND $__timeFilter(\"createdAt\") GROUP BY 1,2 ORDER BY 1;",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 5, "title": "P5 quote-drift rejections (H1-v)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('minute',\"createdAt\") AS time, COALESCE(metadata->>'chain','unknown')||'/'||COALESCE(metadata->>'entryPoint','unknown') AS metric, COUNT(*) AS drifts FROM security_events WHERE \"eventType\"='quote.drift_rejected' AND $__timeFilter(\"createdAt\") GROUP BY 1,2 ORDER BY 1;",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 6, "title": "P6 rotation latency p50/p95 + unconfirmed (H1-vi)",
+      "type": "stat",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(metadata->>'chain','unknown') AS chain, percentile_cont(0.5) WITHIN GROUP (ORDER BY (metadata->>'latencyMs')::numeric) AS p50_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY (metadata->>'latencyMs')::numeric) AS p95_ms, COUNT(*) AS n FROM security_events WHERE \"eventType\"='rotation.confirmed' AND $__timeFilter(\"createdAt\") GROUP BY 1;",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 7, "title": "P7 resolve-then-act outcomes (H2)",
+      "type": "piechart",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT \"eventType\" AS outcome, COUNT(*) AS events FROM security_events WHERE \"eventType\" IN ('relay.resolve_landed','relay.resolve_not_landed_rebroadcast','relay.parked_unreadable') AND $__timeFilter(\"createdAt\") GROUP BY 1;",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 8, "title": "P8 breaker state (H3)",
+      "type": "state-timeline",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "targets": [
+        {
+          "rawSql": "SELECT \"createdAt\" AS time, COALESCE(metadata->>'chain','unknown') AS metric, CASE WHEN \"eventType\"='relayer.breaker.opened' THEN 1 ELSE 0 END AS open FROM security_events WHERE \"eventType\" IN ('relayer.breaker.opened','relayer.breaker.closed') AND $__timeFilter(\"createdAt\") ORDER BY 1;",
+          "format": "time_series"
+        }
+      ]
+    }
+  ],
+  "notes": "Import: Grafana -> Dashboards -> New -> Import, paste this file. Select the Postgres datasource serving the app DB (read-only user). Panels mirror docs/RELAYER_DASHBOARDS.md; alerts live in deploy/alerts/relayer-h1-check.sh (cron 5m), not in Grafana."
+}

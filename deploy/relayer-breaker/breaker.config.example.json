@@ -1,0 +1,31 @@
+{
+  "title": "PeridotID relayer absorbed-loss breaker caps (OQ-3 proposal, ANT-582)",
+  "window": "1h",
+  "unit": "native base units, integer strings (lamports | stroops | wei)",
+  "method": "bootstrap = ~100x p99 single-tx network fee per chain; re-tune after 7 days of sustained traffic (cap = 100 x p99 single-tx absorbed, then CTO sign-off)",
+  "caps": {
+    "solana": "1000000",
+    "stellar": "1000000",
+    "ethereum": "20000000000000000",
+    "base": "500000000000000",
+    "bsc": "2000000000000000"
+  },
+  "notes": {
+    "solana": "0.001 SOL/hr; typical fee 5-10k lamports -> ~100-200x single tx",
+    "stellar": "0.1 XLM/hr; base fee 100 stroops -> ~100x loaded-tx fee",
+    "ethereum": "0.02 ETH/hr; ~30x typical 21k-gas mainnet tx at 30 gwei",
+    "base": "0.0005 ETH/hr; ~100x typical L2 tx",
+    "bsc": "0.002 BNB/hr; ~100x typical 21k-gas tx at 1 gwei"
+  },
+  "env": {
+    "solana": "BREAKER_CAP_SOLANA",
+    "stellar": "BREAKER_CAP_STELLAR",
+    "ethereum": "BREAKER_CAP_ETHEREUM",
+    "base": "BREAKER_CAP_BASE",
+    "bsc": "BREAKER_CAP_BSC"
+  },
+  "receivers": {
+    "page": "ALERT_PAGE_URL (on-call; formula_mismatch also pages Security/Tobias)",
+    "notify": "ALERT_WEBHOOK_URL (#relayer-ops)"
+  }
+}

@@ -192,3 +192,80 @@ of deploy access; until then the rule is versioned + verified but not live.
 `FAUCET_SOURCE` must match the backend's shipped `source` string (courier
 issue to ANT-289 owner carries the contract); thresholds await CTO
 confirmation (ANT-287 OQ-1).
+
+---
+
+## Alert: relayer H1 signals (ANT-582, signals from ANT-575 FR-H H1)
+
+### What it watches
+
+`security_events` rows for the relayer hardening event contract (canonical
+names + legacy shapes, see `relayer-h1-detected.sql` header and
+`docs/RELAYER_DASHBOARDS.md` §1): revocations, intent rejections by cause,
+reconciliation divergences, absorbed P&L, drift rejections, rotation
+unconfirmed, parked-unreadable, per-chain absorbed sums.
+
+Thresholds (initials; all env-overridable in the script; breaker caps are
+OQ-3 = Trevor+CTO, see `deploy/relayer-breaker/README.md`):
+revocation spike per chain `recent_10m > prior_50m` (exactly 5× trailing
+baseline) with floor `REVOCATION_FLOOR=5` → PAGE; rejections
+`REJECT_NOTIFY=10`/`REJECT_PAGE=50` per bucket/15min; ANY divergence/5min →
+PAGE (R-NFR-6); absorbed ≥80% cap → NOTIFY, ≥100% → PAGE (R-NFR-9, with a
+MECHANISM-GAP note when no `relayer.breaker.opened` exists); rotation stuck
+`ROTATION_NOTIFY=3`/`ROTATION_PAGE=10`; ANY parked-unreadable/15min → PAGE;
+drift `DRIFT_NOTIFY=20`/`DRIFT_PAGE=100`.
+
+### Files
+
+- `relayer-h1-detected.sql` — the canonical SELECT-only alert queries.
+- `relayer-h1-check.sh` — cron wrapper: prints `PAGE:`/`NOTIFY:`/`OK:` lines,
+  exits 0/2 (3 = config/query failure). `ALERT_PAGE_URL` (P1, falls back to
+  `ALERT_WEBHOOK_URL`) + `ALERT_WEBHOOK_URL` (P2) POST `{"text": ...}`.
+
+### Enable (needs VPS/deploy access — not done from this branch)
+
+```cron
+*/5 * * * *  DATABASE_URL='postgresql://...' ALERT_PAGE_URL='...' ALERT_WEBHOOK_URL='...' /opt/peridot-id/deploy/alerts/relayer-h1-check.sh
+```
+
+Secrets/thresholds/caps are injected at runtime via env — never baked into
+these files. The check opens a read-only SELECT session; no app, schema, or
+data changes.
+
+### Triage
+
+Runbook: `docs/RELAYER_RUNBOOK.md` (§1 alert catalog with per-signal example
+queries; §2 revocation-spike; §3 divergence; §4 breaker; §5 relayer-key
+rotation; §6 post-incident reconcile). Dashboards: `docs/RELAYER_DASHBOARDS.md`
+(+ `deploy/dashboards/relayer-h1.json`).
+
+### Verify
+
+Scratch-DB verification (no prod touch), re-runnable: minimal
+`security_events` table on scratch Postgres 17, seed rows, run the script.
+
+Recorded run 2026-10-25 (scratch Postgres 17, production column names):
+T1 — 1 rotation 30m ago + 1 clean reconciled row → `OK`, exit 0;
+T2 — 6 recent solana rotations (prior 1) → PAGE revocation spike, exit 2;
+2 recent stellar (below floor) stay quiet;
+T3 — legacy `withdraw.reconciled` with `protocolFee≠protocolFeeExpected` →
+PAGE divergence, exit 2 (backward-compat path works);
+T4 — absorbed 1,200,000 ≥ cap 1,000,000 (solana) → PAGE with MECHANISM GAP
+note; parked-unreadable → PAGE; 12 rejections → NOTIFY; 4 unconfirmed →
+NOTIFY; 25 drifts → NOTIFY; exit 2;
+T5 — `relayer.breaker.opened` present → GAP note clears; unset
+`DATABASE_URL` → exit 3.
+
+### Rollback
+
+Remove the cron line (or delete `relayer-h1-*`). Nothing was written to the
+DB, so there is nothing to undo there.
+
+### Residual
+
+Cron enablement on the VPS + webhook target selection are pending a holder
+of deploy access; until then the rule is versioned + verified but not live.
+Canonical event emission lands under ANT-581 (Tyler) per the contract in
+`docs/RELAYER_DASHBOARDS.md` §1 — until then the legacy-shape CTEs carry
+`credential.rotated`, `*.reconciled`, and `credential.rotation.unconfirmed`
+rows. Breaker cap values await CTO confirmation (OQ-3, proposed on ANT-582).
