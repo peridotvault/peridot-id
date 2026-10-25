@@ -37,6 +37,7 @@ const adapterMock = {
     marginLamports: BigInt(0),
   })),
   activateV3: jest.fn(async () => "sig1"),
+  parseTransaction: jest.fn(async () => ({ signature: "sig1", fee: NETWORK })),
   chainTime: jest.fn(async () => 1000000000),
   getStatus: jest.fn(async () => ({ confirmed: true, error: undefined, signature: "sig1" })) as jest.Mock<Promise<{ confirmed: boolean; error?: string; signature: string }>>,
 };

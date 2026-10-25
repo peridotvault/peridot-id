@@ -112,7 +112,6 @@ export class AdminController {
   ) {
     return this.adminService.closeRelayerBreaker(user.pid, chain, dto.evidence);
   }
-  }
 
   @Post("chains/:id/logo")
   @Throttle({ default: { limit: 10, ttl: 60000 } })
