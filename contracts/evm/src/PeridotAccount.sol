@@ -348,6 +348,10 @@ contract PeridotAccount {
     /// (which stays frozen): the activation authorization binds `maxTotalFee`
     /// under DOMAIN_V4, and the contract enforces `networkFee + protocolFee ≤
     /// maxTotalFee` (FeeExceedsMax) with the v2 MAX formula before any payout.
+    /// @dev `nonReentrant` for uniformity (ANT-563 note): not exploitable
+    /// without it (`msg.sender == _factory`, payouts only to factory-trusted
+    /// targets, `initialized` set before calls), but every other external-call
+    /// path carries the lock — so does this one.
     function initializeV4(
         bytes32 salt,
         bytes32 x,
@@ -362,7 +366,7 @@ contract PeridotAccount {
         bytes calldata clientDataJSON,
         bytes32 r,
         bytes32 s
-    ) external {
+    ) external nonReentrant {
         if (initialized) revert AlreadyInitialized();
         if (x == 0 && y == 0) revert ZeroAuthority();
         if (msg.sender != _factory) revert Unauthorized();
