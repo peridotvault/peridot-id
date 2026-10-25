@@ -133,3 +133,17 @@ export function PeridotWalletEmbed(props: PeridotWalletEmbedProps) {
 
 export { PeridotLevelBadge, PeridotLevelBadgeView, formatBadgeXp, isLevelApiError, levelErrorMessage } from "./level-badge.js";
 export type { PeridotLevelBadgeProps, LevelBadgeClient, LevelBadgeState } from "./level-badge.js";
+export { FeeQuoteSummary, formatFeeCountdown } from "./fee-summary.js";
+export type { FeeQuoteSummaryProps } from "./fee-summary.js";
+// Fee-transparency UI surface (ANT-557): hosts render the same quote shape,
+// taxonomy copy, and formatting the wallet enforces.
+export {
+  classifyFeeFailure,
+  coversBalance,
+  formatFeeAmount,
+  normalizeFeeQuote,
+  shortfallBaseUnits,
+  shortfallMessage,
+  ttlRemainingMs,
+} from "@peridotvault/pid-sdk-js";
+export type { FeeFailure, FeeFailureAction, FeeQuoteV2, NormalizedFeeQuote } from "@peridotvault/pid-sdk-js";
