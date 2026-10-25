@@ -94,7 +94,13 @@ console.log("activate OK", account);
 await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: "0x" + (2n * 10n ** 18n).toString(16) }]);
 
 // --- grant NONFINANCIAL (owner signs; local payload + calldata builders) ---
+// ANT-556: v2 grant carries owner-approved feeLimit; v2 exec carries the
+// session-signed maxTotalFee cap. The payload binds policy + cap but NOT the
+// attested networkFee, so the estimate→attest dance below needs no re-signing
+// as long as the final total fits the signed cap.
 const now = Math.floor(Date.now() / 1000);
+const FEE_LIMIT = 100_000_000_000_000_000n; // 0.1 ether lifetime session fees
+const MAX_TOTAL = 10_000_000_000_000_000n; // 0.01 ether per-execution cap
 const scope = {
   sessionX: B(session.x), sessionY: B(session.y),
   kind: 1, target: "0x0000000000000000000000000000000000001234",
@@ -106,14 +112,14 @@ const scope = {
 const pid = permissionId({ chainId: CHAINID, account, scope });
 const grantP = grantPayload({
   chainId: CHAINID, account, permissionId: pid, scope, perTxCap: 0, totalLimit: 0,
-  validAfter: now - 60, nonce: 0, deadline,
+  feeLimit: FEE_LIMIT, validAfter: now - 60, nonce: 0, deadline,
 });
 const g = assertion(owner, grantP);
 const grantData = grantPermissionData({
   grant: {
     permissionId: pid, sessionX: scope.sessionX, sessionY: scope.sessionY, kind: scope.kind,
     target: scope.target, selector: scope.selector, token: scope.token, to: scope.to,
-    perTxCap: 0n, totalLimit: 0n, nftId: 0n, validAfter: now - 60, validUntil: scope.validUntil,
+    perTxCap: 0n, totalLimit: 0n, feeLimit: FEE_LIMIT, nftId: 0n, validAfter: now - 60, validUntil: scope.validUntil,
     salt: scope.salt, deadline,
   },
   authData: g.authData, clientDataJSON: g.clientDataJSON, r: g.r, s: g.s,
@@ -128,22 +134,22 @@ console.log("grant OK pid", hex(pid));
 const callData = B("12345678" + "00".repeat(32));
 const execP = permExecPayload({
   chainId: CHAINID, account, permissionId: pid, seq: 0, target: scope.target, value: 0n,
-  dataHash: keccak(callData), deadline, feePolicyVersion: 1,
+  dataHash: keccak(callData), deadline, feePolicyVersion: 1, maxTotalFee: MAX_TOTAL,
 });
 const e = assertion(session, execP);
 // Post-ANT-206 the on-chain GasAnomaly bound measures the full execute
 // frame, so honest estimate x price attestation passes (same pattern as
 // anvil-v3-e2e.mjs). Draft with zero fee, estimate, rebuild — the PERM
-// payload binds policy only, so no re-signing is needed.
+// payload binds policy + cap only, so no re-signing is needed.
 const draftExec = executeWithPermissionData({
   permissionId: pid, target: scope.target, value: 0n, data: callData, deadline, seq: 0,
-  feePolicyVersion: 1, networkFee: 0n,
+  feePolicyVersion: 1, maxTotalFee: MAX_TOTAL, networkFee: 0n,
   authenticatorData: e.authData, clientDataJSON: e.clientDataJSON, r: e.r, s: e.s,
 });
 const execFee = BigInt(await rpc("eth_estimateGas", [{ from: RELAYER, to: account, data: draftExec }])) * GAS_PRICE;
 const execData = executeWithPermissionData({
   permissionId: pid, target: scope.target, value: 0n, data: callData, deadline, seq: 0,
-  feePolicyVersion: 1, networkFee: execFee,
+  feePolicyVersion: 1, maxTotalFee: MAX_TOTAL, networkFee: execFee,
   authenticatorData: e.authData, clientDataJSON: e.clientDataJSON, r: e.r, s: e.s,
 });
 const execTopic = hex(keccak(Buffer.from("PermissionExecuted(bytes32,uint64,address,uint256)", "ascii")));
@@ -157,7 +163,9 @@ const replayRcpt = await sendTx({ from: RELAYER, to: account, data: execData });
 assert.equal(replayRcpt.status, "0x0", "seq replay reverts");
 console.log("replay rejected OK");
 
-// --- bounded ETH financial grant → session moves funds within caps ---
+// --- ANT-556 Option A: financial grant (kind 2) reverts at grant time ---
+// A session key can never be granted asset movement again — the removal gate,
+// live against real contracts.
 const recipient = "0x000000000000000000000000000000000000dEaD";
 const scope2 = {
   sessionX: scope.sessionX, sessionY: scope.sessionY, kind: 2,
@@ -169,7 +177,7 @@ const pid2 = permissionId({ chainId: CHAINID, account, scope: scope2 });
 const perTx = 200_000_000_000_000_000n;
 const grant2P = grantPayload({
   chainId: CHAINID, account, permissionId: pid2, scope: scope2, perTxCap: perTx, totalLimit: perTx,
-  validAfter: now - 60, nonce: 1, deadline,
+  feeLimit: FEE_LIMIT, validAfter: now - 60, nonce: 1, deadline,
 });
 const g2 = assertion(owner, grant2P);
 const grant2Rcpt = await sendTx({
@@ -178,58 +186,33 @@ const grant2Rcpt = await sendTx({
     grant: {
       permissionId: pid2, sessionX: scope2.sessionX, sessionY: scope2.sessionY, kind: 2,
       target: scope2.target, selector: scope2.selector, token: scope2.token, to: recipient,
-      perTxCap: perTx, totalLimit: perTx, nftId: 0n, validAfter: now - 60, validUntil: scope2.validUntil,
+      perTxCap: perTx, totalLimit: perTx, feeLimit: FEE_LIMIT, nftId: 0n, validAfter: now - 60, validUntil: scope2.validUntil,
       salt: scope2.salt, deadline,
     },
     authData: g2.authData, clientDataJSON: g2.clientDataJSON, r: g2.r, s: g2.s,
   }),
 });
-assert.equal(grant2Rcpt.status, "0x1", "eth grant");
-const emptyHash = keccak(new Uint8Array(0));
-const exec2P = permExecPayload({
-  chainId: CHAINID, account, permissionId: pid2, seq: 0, target: recipient, value: perTx,
-  dataHash: emptyHash, deadline, feePolicyVersion: 1,
+assert.equal(grant2Rcpt.status, "0x0", "financial grant reverts (Option A)");
+console.log("financial grant rejected OK");
+
+// --- maxTotalFee enforcement: cap below the attested total reverts ---
+const tinyCapP = permExecPayload({
+  chainId: CHAINID, account, permissionId: pid, seq: 1, target: scope.target, value: 0n,
+  dataHash: keccak(callData), deadline, feePolicyVersion: 1, maxTotalFee: 1n,
 });
-const e2 = assertion(session, exec2P);
-// Honest estimate-based attestation (post-ANT-206 full-frame bound); the
-// draft/estimate dance fits comfortably inside 2x the whole-tx cost.
-const exec2Draft = executeWithPermissionData({
-  permissionId: pid2, target: recipient, value: perTx, data: new Uint8Array(0), deadline, seq: 0,
-  feePolicyVersion: 1, networkFee: 0n,
-  authenticatorData: e2.authData, clientDataJSON: e2.clientDataJSON, r: e2.r, s: e2.s,
-});
-const exec2Fee = BigInt(await rpc("eth_estimateGas", [{ from: RELAYER, to: account, data: exec2Draft }])) * GAS_PRICE;
-const balBefore = BigInt(await rpc("eth_getBalance", [recipient, "latest"]));
-const exec2Rcpt = await sendTx({
+const tc = assertion(session, tinyCapP);
+const tinyCapRcpt = await sendTx({
   from: RELAYER, to: account,
   data: executeWithPermissionData({
-    permissionId: pid2, target: recipient, value: perTx, data: new Uint8Array(0), deadline, seq: 0,
-    feePolicyVersion: 1, networkFee: exec2Fee,
-    authenticatorData: e2.authData, clientDataJSON: e2.clientDataJSON, r: e2.r, s: e2.s,
+    permissionId: pid, target: scope.target, value: 0n, data: callData, deadline, seq: 1,
+    feePolicyVersion: 1, maxTotalFee: 1n, networkFee: execFee,
+    authenticatorData: tc.authData, clientDataJSON: tc.clientDataJSON, r: tc.r, s: tc.s,
   }),
 });
-assert.equal(exec2Rcpt.status, "0x1", "eth session transfer");
-assert.equal(BigInt(await rpc("eth_getBalance", [recipient, "latest"])) - balBefore, perTx, "recipient got exactly perTx");
-console.log("bounded eth OK");
+assert.equal(tinyCapRcpt.status, "0x0", "under-cap exec reverts");
+console.log("maxTotalFee rejected OK");
 
-// --- over-cap session spend reverts ---
-const overP = permExecPayload({
-  chainId: CHAINID, account, permissionId: pid2, seq: 1, target: recipient, value: perTx + 1n,
-  dataHash: emptyHash, deadline, feePolicyVersion: 1,
-});
-const eo = assertion(session, overP);
-const overRcpt = await sendTx({
-  from: RELAYER, to: account,
-  data: executeWithPermissionData({
-    permissionId: pid2, target: recipient, value: perTx + 1n, data: new Uint8Array(0), deadline, seq: 1,
-    feePolicyVersion: 1, networkFee: 0n,
-    authenticatorData: eo.authData, clientDataJSON: eo.clientDataJSON, r: eo.r, s: eo.s,
-  }),
-});
-assert.equal(overRcpt.status, "0x0", "over-cap reverts");
-console.log("over-cap rejected OK");
-
-// --- owner revokes (nonce 2); session exec reverts ---
+// --- owner revokes (nonce 1 — the reverted grant consumed nothing); session exec reverts ---
 const revokeP = revokePayload({ chainId: CHAINID, account, permissionId: pid, nonce: 2, deadline });
 const rv = assertion(owner, revokeP);
 const revokeRcpt = await sendTx({
@@ -242,14 +225,14 @@ const revokeRcpt = await sendTx({
 assert.equal(revokeRcpt.status, "0x1", "revoke");
 const exec3P = permExecPayload({
   chainId: CHAINID, account, permissionId: pid, seq: 1, target: scope.target, value: 0n,
-  dataHash: keccak(callData), deadline, feePolicyVersion: 1,
+  dataHash: keccak(callData), deadline, feePolicyVersion: 1, maxTotalFee: MAX_TOTAL,
 });
 const e3 = assertion(session, exec3P);
 const postRevoke = await sendTx({
   from: RELAYER, to: account,
   data: executeWithPermissionData({
     permissionId: pid, target: scope.target, value: 0n, data: callData, deadline, seq: 1,
-    feePolicyVersion: 1, networkFee: 0n,
+    feePolicyVersion: 1, maxTotalFee: MAX_TOTAL, networkFee: 0n,
     authenticatorData: e3.authData, clientDataJSON: e3.clientDataJSON, r: e3.r, s: e3.s,
   }),
 });

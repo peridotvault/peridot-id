@@ -372,4 +372,98 @@ describe("EvmActivationService", () => {
       },
     })).rejects.toThrow(BadRequestException);
   });
+
+  it("viewOf quotes V4 policy 2 with fee floor and suggested maxTotalFee (B5)", async () => {
+    const { service } = setup();
+    const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
+    expect(view.feePolicyVersion).toBe(2);
+    // 350k gas × 1 gwei = 350_000_000_000_000 network; 50% = 175e12 wins over 2.3e12 floor.
+    expect(view.networkFeeWei).toBe("350000000000000");
+    expect(view.totalFeeWei).toBe("525000000000000");
+    expect(view.maxTotalFeeWei).toBe(view.totalFeeWei);
+    expect(view.requiredWei).toBe(view.totalFeeWei);
+  });
+
+  it("activate with policy 2 deploys via V4 and enforces maxTotalFee (B6)", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service, prisma } = setup("0x" + "11".repeat(32));
+    let deployed = false;
+    let calldata = "";
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = jest.fn(async (_ref: string, _sec: string, data: string) => {
+      deployed = true;
+      calldata = data;
+      return { hash: "0xdeployV4", from: "0xrelayer", costWei: "100000000000000", l1FeeWei: "0" };
+    });
+    (global as unknown as { fetch: unknown }).fetch = jest.fn(async (_url: unknown, opts: unknown) => {
+      const { method, params } = JSON.parse((opts as { body: string }).body) as {
+        method: string;
+        params?: Array<{ data?: string }>;
+      };
+      const result =
+        method === "eth_getCode"
+          ? deployed
+            ? "0x6080604052"
+            : "0x"
+          : method === "eth_getBalance"
+            ? balance
+            : method === "eth_getBlockByNumber"
+              ? { timestamp: "0x3b9aca00" }
+              : method === "eth_call"
+                ? defaultView(params?.[0]?.data ?? "")
+                : gasPrice;
+      return { ok: true, json: async () => ({ result }) };
+    });
+    const view = await service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    });
+    expect(view.status).toBe("active");
+    // deployAndInitV4 selector (fee-capped activation), not V3.
+    expect(calldata.slice(0, 10).toLowerCase()).not.toBe("0x00000000");
+    expect(prisma.transaction.create).toHaveBeenCalled();
+  });
+
+  it("activate with policy 2 requires maxTotalFeeWei", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    await expect(service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 2,
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    })).rejects.toThrow(/maxTotalFee/i);
+  });
+
+  it("activate with policy 2 rejects total above maxTotalFee (FeeExceedsMax)", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    await expect(service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "1",
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    })).rejects.toThrow(/maxTotalFee/i);
+  });
 });

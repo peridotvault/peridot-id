@@ -3250,13 +3250,13 @@ components:
 
     GrantPermission:
       type: object
-      required: [kind, target, selector, token, to, perTxCap, totalLimit, nftId, sessionX, sessionY, validAfter, validUntil, salt, deadline, chainId, account, nonce, factory]
+      required: [kind, target, selector, token, to, perTxCap, totalLimit, feeLimit, nftId, sessionX, sessionY, validAfter, validUntil, salt, deadline, chainId, account, nonce, factory]
       properties:
         kind:
           type: integer
           minimum: 1
-          maximum: 5
-          description: "1 = nonfinancial, 2 = ETH, 3 = ERC-20, 4 = ERC-721, 5 = ERC-1155"
+          maximum: 1
+          description: "1 = nonfinancial (only; kinds 2-5 removed ANT-556 Option A)"
         target:
           type: string
           description: "Nonfinancial: exact allowed target (never the account/factory)"
@@ -3265,19 +3265,22 @@ components:
           description: "Nonfinancial: exact allowed selector (0x + 8 hex chars, never denylisted)"
         token:
           type: string
-          description: "Financial: token contract (zero address = native ETH)"
+          description: "Must be zero address (nonfinancial-only)"
         to:
           type: string
-          description: "Financial: explicit recipient"
+          description: "Must be zero address (nonfinancial-only)"
         perTxCap:
           type: string
-          description: "Financial: max per execution, raw units"
+          description: "Must be zero (nonfinancial-only; no value caps)"
         totalLimit:
           type: string
-          description: "Financial: lifetime cap in the same units"
+          description: "Must be zero (nonfinancial-only; no value caps)"
+        feeLimit:
+          type: string
+          description: "Owner-approved lifetime session-fee cap (wei, REQUIRED; 0 = only zero-fee execs pass)"
         nftId:
           type: string
-          description: "ERC-721/1155: token id"
+          description: "Must be zero (nonfinancial-only)"
         sessionX:
           type: string
           description: "Session P-256 key x (0x + 64 hex chars)"

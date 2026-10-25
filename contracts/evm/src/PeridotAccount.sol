@@ -34,10 +34,17 @@ contract PeridotAccount {
 
     /// @dev Fee policy v1: 50% protocol fee (5000 bps of the attested network fee).
     /// Never hardcoded at call sites; new versions arrive via contract upgrade,
-    /// never via per-call fields.
+    /// never via per-call fields. FROZEN: v1 semantics never change (ANT-544 B-AC9).
     uint16 internal constant FEE_POLICY_V1 = 1;
     uint256 internal constant PROTOCOL_FEE_BPS_V1 = 5000;
     uint256 internal constant MAX_PROTOCOL_FEE_BPS = 5000;
+
+    /// @dev Fee policy v2 (ANT-544 FR-B, ANT-556): percentage leg unchanged
+    /// (5000 bps) plus a per-chain native-unit floor:
+    /// `protocolFee = MAX(floor(networkFee × bps / 10_000), chainMin)`.
+    /// Rows are immutable once published; new minima ship as a new version.
+    uint16 internal constant FEE_POLICY_V2 = 2;
+    uint256 internal constant PROTOCOL_FEE_BPS_V2 = 5000;
 
     /// @dev Sanity-bound multiplier: attested networkFee must fit within 2× the
     /// measured execution cost. A bound, not pricing — covers verification/payout
@@ -51,7 +58,19 @@ contract PeridotAccount {
     /// @dev Permission domain. Deliberately DIFFERENT from DOMAIN_V3 so an owner
     /// signature can never verify as a permission signature and vice versa —
     /// this is the load-bearing OWNER vs PERMISSION distinction (both use P-256).
-    bytes public constant DOMAIN_PERM = "PID|EVM|PERMISSION|v1";
+    /// @dev v2 (ANT-556 Option A): new grants are issued under DOMAIN_PERM_V2.
+    /// Pre-existing v1 grants keep executing through the frozen v1 entrypoint
+    /// until their `validUntil`/revocation (≤30d MAX_PERMISSION_TTL natural
+    /// sunset); no stored-struct migration. `DOMAIN_PERM` always names the
+    /// canonical (latest) domain for new grants.
+    bytes public constant DOMAIN_PERM_V1 = "PID|EVM|PERMISSION|v1";
+    bytes public constant DOMAIN_PERM_V2 = "PID|EVM|PERMISSION|v2";
+    bytes public constant DOMAIN_PERM = "PID|EVM|PERMISSION|v2";
+
+    /// @dev V4 owner-execution domain (ANT-544 B5, ANT-556): fee-capped owner
+    /// authorization family. Disjoint from DOMAIN_V3 (frozen) and both PERM
+    /// domains, so V4 signatures can never verify as V3/permission ones.
+    bytes public constant DOMAIN_V4 = "PID|EVM|SMART_ACCOUNT|v4";
 
     uint8 internal constant OP_GRANT = 0x10;
     uint8 internal constant OP_REVOKE = 0x11;
@@ -62,11 +81,11 @@ contract PeridotAccount {
     uint8 internal constant OP_1271 = 0x16;
 
     /// @dev Permission kinds. 0 = empty slot (no permission).
+    /// ANT-556 Option A: sessions are NONFINANCIAL-only. Financial kinds 2–5
+    /// (ETH/ERC20/ERC721/ERC1155) are REMOVED — a session key alone can never
+    /// move value again. Numeric values 2–5 are never reused (history would
+    /// otherwise reinterpret); any grant carrying them reverts `ScopeMismatch`.
     uint8 internal constant KIND_NONFINANCIAL = 1;
-    uint8 internal constant KIND_ETH = 2;
-    uint8 internal constant KIND_ERC20 = 3;
-    uint8 internal constant KIND_ERC721 = 4;
-    uint8 internal constant KIND_ERC1155 = 5;
 
     /// @dev Longest permission lifetime (seconds): 30 days. Bounds standing authority;
     /// every execution additionally carries a ≤600s deadline (MAX_TTL).
@@ -133,6 +152,7 @@ contract PeridotAccount {
     error ScopeMismatch();
     error DeniedSelector();
     error LimitExceeded();
+    error FeeExceedsMax();
     error BadPermissionId();
     error PermissionTTLExceeded();
     error UnsupportedExecutionMode();
@@ -154,7 +174,14 @@ contract PeridotAccount {
     /// @dev Scoped capability granted by the owner to a P-256 session key.
     /// A permission is NEVER a second wallet: every execution is checked against
     /// this exact record, single-call-only, with owner-initiated revocation.
-    /// `spent` tracks value units (ETH/ERC-20/1155-amount) or 0/1 for ERC-721.
+    /// `spent` tracks value units (legacy financial grants only — always 0 for
+    /// NONFINANCIAL; retained so stored records keep their layout).
+    /// `feeLimit`/`feeSpent` (ANT-556 Security condition, Tobias-mandated):
+    /// every v2 execution debits `networkFee + protocolFee` from the account,
+    /// so lifetime session-attributable drain is capped by
+    /// `feeSpent + networkFee + protocolFee ≤ feeLimit`, accounted pre-call.
+    /// Appended fields only — existing records read 0 for both (legacy = the
+    /// frozen v1 entrypoint semantics, sunsetting naturally).
     struct Permission {
         bytes32 sessionX;
         bytes32 sessionY;
@@ -171,9 +198,13 @@ contract PeridotAccount {
         uint256 totalLimit;
         uint256 spent;
         uint256 nftId;
+        uint256 feeLimit;
+        uint256 feeSpent;
     }
 
     /// @dev Owner-signed grant arguments (calldata struct to stay under stack limit).
+    /// v2 (ANT-556): adds owner-approved `feeLimit`; granted only under
+    /// DOMAIN_PERM_V2 with `kind == KIND_NONFINANCIAL`.
     struct GrantArgs {
         bytes32 permissionId;
         bytes32 sessionX;
@@ -185,6 +216,7 @@ contract PeridotAccount {
         address to;
         uint256 perTxCap;
         uint256 totalLimit;
+        uint256 feeLimit;
         uint256 nftId;
         uint64 validAfter;
         uint64 validUntil;
@@ -195,6 +227,9 @@ contract PeridotAccount {
     /// @dev Permission-execution arguments (single struct to stay under stack limit).
     /// Flat-tuple ABI compatible: `executeFromExecutor` decodes its
     /// `executionCalldata` directly into this struct.
+    /// v2 (ANT-556): adds session-signed `maxTotalFee` (user-approved bound on
+    /// `networkFee + protocolFee` for THIS execution; 0 on the frozen v1 path
+    /// where no bound was signed and none is enforced).
     struct PermExecArgs {
         bytes32 permissionId;
         address target;
@@ -203,6 +238,7 @@ contract PeridotAccount {
         uint64 deadline;
         uint64 seq;
         uint16 feePolicyVersion;
+        uint256 maxTotalFee;
         uint256 networkFee;
         address feeRecipient;
         bytes authenticatorData;
@@ -212,12 +248,14 @@ contract PeridotAccount {
     }
 
     /// @dev ERC-7579 owner-execution arguments (decoded from `executionCalldata`).
+    /// v2 (ANT-556): adds owner-signed `maxTotalFee` (0 on the frozen path).
     struct Exec7579Args {
         address target;
         uint256 value;
         bytes data;
         uint64 deadline;
         uint16 feePolicyVersion;
+        uint256 maxTotalFee;
         uint256 networkFee;
         bytes authenticatorData;
         bytes clientDataJSON;
@@ -305,6 +343,70 @@ contract PeridotAccount {
         emit Initialized(x, y, networkFee, protocolFee);
     }
 
+    /// @notice Fee-capped one-time setup (v2, ANT-556), called atomically by the
+    /// factory's passkey-bound `deployAndInitV4`. V4 sibling of `initialize`
+    /// (which stays frozen): the activation authorization binds `maxTotalFee`
+    /// under DOMAIN_V4, and the contract enforces `networkFee + protocolFee ≤
+    /// maxTotalFee` (FeeExceedsMax) with the v2 MAX formula before any payout.
+    /// @dev `nonReentrant` for uniformity (ANT-563 note): not exploitable
+    /// without it (`msg.sender == _factory`, payouts only to factory-trusted
+    /// targets, `initialized` set before calls), but every other external-call
+    /// path carries the lock — so does this one.
+    function initializeV4(
+        bytes32 salt,
+        bytes32 x,
+        bytes32 y,
+        uint16 feePolicyVersion,
+        uint256 maxTotalFee,
+        uint64 deadline,
+        uint256 networkFee,
+        address _factory,
+        address payer,
+        bytes calldata authenticatorData,
+        bytes calldata clientDataJSON,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant {
+        if (initialized) revert AlreadyInitialized();
+        if (x == 0 && y == 0) revert ZeroAuthority();
+        if (msg.sender != _factory) revert Unauthorized();
+        if (block.timestamp > deadline) revert Expired();
+        if (deadline - block.timestamp > MAX_TTL) revert Expired();
+        (uint256 bps, uint256 chainMin) = _policyV2Row(feePolicyVersion);
+        bytes32 expected = keccak256(
+            abi.encodePacked(
+                DOMAIN_V4,
+                OP_ACTIVATE,
+                salt,
+                x,
+                y,
+                feePolicyVersion,
+                maxTotalFee,
+                deadline,
+                block.chainid,
+                _factory
+            )
+        );
+        _verifyWithKey(x, y, expected, authenticatorData, clientDataJSON, r, s);
+        authorityX = x;
+        authorityY = y;
+        uint256 protocolFee = _protocolFeeV2(networkFee, bps, chainMin);
+        uint256 totalFee_ = networkFee + protocolFee;
+        if (totalFee_ > maxTotalFee) revert FeeExceedsMax();
+        factory = _factory;
+        initialized = true;
+        if (address(this).balance < totalFee_) revert InsufficientFunds();
+        if (networkFee > 0) {
+            (bool ok, ) = payer.call{value: networkFee}("");
+            if (!ok) revert CallFailed();
+        }
+        if (protocolFee > 0) {
+            (bool ok, ) = _factory.call{value: protocolFee}("");
+            if (!ok) revert CallFailed();
+        }
+        emit Initialized(x, y, networkFee, protocolFee);
+    }
+
     receive() external payable {}
 
     /// @notice Execute a call authorized by the passkey.
@@ -349,6 +451,66 @@ contract PeridotAccount {
         // bound covers the whole execution (ANT-206). A pre-call check only
         // sees the verify prefix and rejects honest estimate-based
         // attestation. Revert rolls the call + payouts back atomically.
+        _checkGasSanity(startGas, networkFee);
+        emit Executed(to, value, networkFee, protocolFee, nonce - 1);
+    }
+
+    /// @notice Execute a call authorized by the passkey (v2, ANT-556).
+    /// @dev V4 authorization family (`DOMAIN_V4`, frozen-V3 sibling): the owner
+    /// signs `maxTotalFee` (user-approved bound on `networkFee + protocolFee`);
+    /// the contract recomputes `protocolFee` with the v2 MAX formula and
+    /// enforces `totalFee ≤ maxTotalFee` (FeeExceedsMax) before any value moves.
+    /// The frozen V3 `execute` above is untouched (ANT-544 B-AC9).
+    function executeV4(
+        address to,
+        uint256 value,
+        bytes calldata data,
+        uint64 deadline,
+        uint16 feePolicyVersion,
+        uint256 maxTotalFee,
+        uint256 networkFee,
+        bytes calldata authenticatorData,
+        bytes calldata clientDataJSON,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant {
+        uint256 startGas = gasleft();
+        if (!initialized) revert NotInitialized();
+        if (to == address(this)) revert InvalidTarget();
+        if (block.timestamp > deadline) revert Expired();
+        if (deadline - block.timestamp > MAX_TTL) revert Expired();
+        (uint256 bps, uint256 chainMin) = _policyV2Row(feePolicyVersion);
+        bytes32 expected = keccak256(
+            abi.encodePacked(
+                DOMAIN_V4,
+                OP_EXECUTE,
+                block.chainid,
+                address(this),
+                nonce,
+                to,
+                value,
+                keccak256(data),
+                deadline,
+                feePolicyVersion,
+                maxTotalFee
+            )
+        );
+        _verify(expected, authenticatorData, clientDataJSON, r, s);
+        uint256 protocolFee = _protocolFeeV2(networkFee, bps, chainMin);
+        uint256 totalFee_ = networkFee + protocolFee;
+        if (totalFee_ > maxTotalFee) revert FeeExceedsMax();
+        if (address(this).balance < value + totalFee_) revert InsufficientFunds();
+        nonce++;
+        (bool ok, ) = to.call{value: value}(data);
+        if (!ok) revert CallFailed();
+        if (networkFee > 0) {
+            (ok, ) = msg.sender.call{value: networkFee}("");
+            if (!ok) revert CallFailed();
+        }
+        if (protocolFee > 0) {
+            (ok, ) = factory.call{value: protocolFee}("");
+            if (!ok) revert CallFailed();
+        }
         _checkGasSanity(startGas, networkFee);
         emit Executed(to, value, networkFee, protocolFee, nonce - 1);
     }
@@ -412,8 +574,54 @@ contract PeridotAccount {
 
     /// @dev protocolFee = floor(networkFee × bps / 10_000). Floor favors the user;
     /// relayerFee is exactly networkFee, so the split never loses dust.
+    /// FROZEN v1 helper (legacy paths keep byte-identical behavior).
     function _protocolFee(uint256 networkFee, uint256 bps) internal pure returns (uint256) {
         return (networkFee * bps) / 10000;
+    }
+
+    /// @dev Fee-policy v2 row (ANT-544 B1/B2, ANT-556): `(bps, chainMin)`.
+    /// v1 keeps its frozen semantics `(5000, 0)`; v2 adds the per-chain floor.
+    /// Unknown versions revert identically for every caller (safe pre-verify).
+    function _policyV2Row(uint16 feePolicyVersion) internal view returns (uint256 bps, uint256 chainMin) {
+        if (feePolicyVersion == FEE_POLICY_V1) return (PROTOCOL_FEE_BPS_V1, 0);
+        if (feePolicyVersion != FEE_POLICY_V2) revert UnknownFeePolicy();
+        bps = PROTOCOL_FEE_BPS_V2;
+        if (bps > MAX_PROTOCOL_FEE_BPS) revert ExceedsMaxBps();
+        return (bps, _chainMinV2());
+    }
+
+    /// @dev v2 protocol fee: `MAX(floor(networkFee × bps / 10_000), chainMin)`.
+    /// Floor division favors the user; the floor leg guarantees protocol
+    /// revenue on tiny-fee chains (ANT-544 B2 table).
+    function _protocolFeeV2(uint256 networkFee, uint256 bps, uint256 chainMin)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 pct = (networkFee * bps) / 10000;
+        return pct > chainMin ? pct : chainMin;
+    }
+
+    /// @dev Immutable v2 chain-minimum table (native wei, ANT-544 B2).
+    /// Listed rows are exact in NATIVE units; unlisted chainids return 0
+    /// (percentage leg only) so testnets and future chains fail OPEN on
+    /// revenue but never overcharge the user — onboarding a mainnet floor
+    /// ships as a new policy version.
+    /// @dev ANT-556 correction: ANT-544 B2's "In base units" column lists
+    /// 750_000_000 wei for 0.00000075 ETH — off by 1000× (0.00000075 ETH =
+    /// 750_000_000_000 wei; the B3 worked-example totals only reconcile with
+    /// the ETH-denominated values). This table implements the self-consistent
+    /// ETH values (750 gwei); flagged to Theo (spec owner) for a spec corrigendum.
+    /// Flagged for Tobias review (audit-surface).
+    function _chainMinV2() internal view returns (uint256) {
+        uint256 cid = block.chainid;
+        // Ethereum + Base (mainnet, sepolia) + local anvil (Eth-like default).
+        if (cid == 1 || cid == 11155111 || cid == 8453 || cid == 84532 || cid == 31337) {
+            return 750_000_000_000;
+        }
+        // BSC mainnet + testnet.
+        if (cid == 56 || cid == 97) return 2_300_000_000_000;
+        return 0;
     }
 
     /// @dev Sanity-bound the attested networkFee against the FULL execution
@@ -576,6 +784,9 @@ contract PeridotAccount {
     /// @notice Grant a scoped permission to a P-256 session key. Owner-only.
     /// Consumes the owner nonce (ordered with execute/rotate). Revocation is a
     /// separate owner-signed state flip — never needs session cooperation.
+    /// @dev v2 (ANT-556 Option A): grants are NONFINANCIAL-only and issued
+    /// under DOMAIN_PERM_V2. `feeLimit` is owner-approved in the signed payload
+    /// and caps lifetime session-attributable fees (Security condition).
     function grantPermission(
         GrantArgs calldata g,
         bytes calldata authenticatorData,
@@ -585,7 +796,8 @@ contract PeridotAccount {
     ) external {
         if (!initialized) revert NotInitialized();
         if (g.sessionX == 0 && g.sessionY == 0) revert ZeroAuthority();
-        if (g.kind < KIND_NONFINANCIAL || g.kind > KIND_ERC1155) revert ScopeMismatch();
+        // Option A: financial kinds 2–5 are gone; only NONFINANCIAL grants.
+        if (g.kind != KIND_NONFINANCIAL) revert ScopeMismatch();
         if (block.timestamp > g.deadline) revert Expired();
         if (g.deadline - block.timestamp > MAX_TTL) revert Expired();
         if (g.validUntil <= block.timestamp) revert PermissionExpired();
@@ -596,21 +808,14 @@ contract PeridotAccount {
         );
         if (pid != g.permissionId) revert BadPermissionId();
         if (_permissions[pid].sessionX != 0 || _permissions[pid].sessionY != 0) revert AlreadyInstalled();
-        // Kind-specific scope hygiene (enforced again at execution).
-        if (g.kind == KIND_NONFINANCIAL) {
-            if (g.target == address(0) || g.target == address(this) || g.target == factory) revert InvalidTarget();
-            if (g.selector == bytes4(0) || _deniedSelector(g.selector)) revert DeniedSelector();
-            if (g.token != address(0) || g.to != address(0)) revert ScopeMismatch();
-        } else if (g.kind == KIND_ETH) {
-            if (g.token != address(0) || g.to == address(0) || g.to == address(this)) revert ScopeMismatch();
-            if (g.perTxCap == 0 || g.totalLimit < g.perTxCap) revert LimitExceeded();
-        } else {
-            if (g.token == address(0) || g.token == address(this) || g.to == address(0)) revert ScopeMismatch();
-            if (g.perTxCap == 0 || g.totalLimit < g.perTxCap) revert LimitExceeded();
-        }
+        // NONFINANCIAL scope hygiene (enforced again at execution).
+        if (g.target == address(0) || g.target == address(this) || g.target == factory) revert InvalidTarget();
+        if (g.selector == bytes4(0) || _deniedSelector(g.selector)) revert DeniedSelector();
+        if (g.token != address(0) || g.to != address(0)) revert ScopeMismatch();
+        if (g.perTxCap != 0 || g.totalLimit != 0 || g.nftId != 0) revert ScopeMismatch();
         bytes32 expected = keccak256(
             abi.encodePacked(
-                DOMAIN_PERM,
+                DOMAIN_PERM_V2,
                 OP_GRANT,
                 block.chainid,
                 address(this),
@@ -624,6 +829,7 @@ contract PeridotAccount {
                 g.to,
                 g.perTxCap,
                 g.totalLimit,
+                g.feeLimit,
                 g.nftId,
                 g.validAfter,
                 g.validUntil,
@@ -647,7 +853,9 @@ contract PeridotAccount {
             perTxCap: g.perTxCap,
             totalLimit: g.totalLimit,
             spent: 0,
-            nftId: g.nftId
+            nftId: g.nftId,
+            feeLimit: g.feeLimit,
+            feeSpent: 0
         });
         nonce++;
         emit PermissionGranted(pid, g.sessionX, g.sessionY, g.kind);
@@ -679,6 +887,10 @@ contract PeridotAccount {
 
     /// @notice Execute one scoped call authorized by a session key.
     /// Single call only (no batch): every execution is fully checked.
+    /// @dev FROZEN v1 entrypoint (ANT-556): verifies the v1 payload for
+    /// pre-existing v1 grants sunsetting naturally (≤30d). No `maxTotalFee`
+    /// was signed on this path so none is enforced; v1 fee semantics preserved.
+    /// Financial-kind records still revert via the shared `_enforceScope`.
     function executeWithPermission(
         bytes32 permissionId,
         address target,
@@ -702,19 +914,63 @@ contract PeridotAccount {
                 deadline: deadline,
                 seq: seq,
                 feePolicyVersion: feePolicyVersion,
+                maxTotalFee: 0,
                 networkFee: networkFee,
                 feeRecipient: msg.sender,
                 authenticatorData: authenticatorData,
                 clientDataJSON: clientDataJSON,
                 r: r,
                 s: s
-            })
+            }),
+            false
+        );
+    }
+
+    /// @notice Execute one scoped call authorized by a session key (v2).
+    /// v2 (ANT-556): the session signs `maxTotalFee` (user-approved bound on
+    /// `networkFee + protocolFee` for THIS execution) under DOMAIN_PERM_V2;
+    /// lifetime fees are additionally capped by the grant's `feeLimit`.
+    function executeWithPermission(
+        bytes32 permissionId,
+        address target,
+        uint256 value,
+        bytes calldata data,
+        uint64 deadline,
+        uint64 seq,
+        uint16 feePolicyVersion,
+        uint256 maxTotalFee,
+        uint256 networkFee,
+        bytes calldata authenticatorData,
+        bytes calldata clientDataJSON,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant {
+        _executePermission(
+            PermExecArgs({
+                permissionId: permissionId,
+                target: target,
+                value: value,
+                data: data,
+                deadline: deadline,
+                seq: seq,
+                feePolicyVersion: feePolicyVersion,
+                maxTotalFee: maxTotalFee,
+                networkFee: networkFee,
+                feeRecipient: msg.sender,
+                authenticatorData: authenticatorData,
+                clientDataJSON: clientDataJSON,
+                r: r,
+                s: s
+            }),
+            true
         );
     }
 
     /// @dev Shared permission-execution core (direct + ERC-7579 executor paths).
-    /// Order: checks → effects (seq/spent) → untrusted call → fee payouts.
-    function _executePermission(PermExecArgs memory a) internal {
+    /// Order: checks → effects (seq/feeSpent) → untrusted call → fee payouts.
+    /// `isV2` selects the v2 payload shape + fee-cap enforcement; the frozen
+    /// v1 shape keeps legacy semantics (no cap fields were signed).
+    function _executePermission(PermExecArgs memory a, bool isV2) internal {
         uint256 startGas = gasleft();
         if (!initialized) revert NotInitialized();
         if (a.target == address(this) || a.target == factory) revert InvalidTarget();
@@ -722,32 +978,77 @@ contract PeridotAccount {
         if (block.timestamp > a.deadline) revert Expired();
         if (a.deadline - block.timestamp > MAX_TTL) revert Expired();
         if (a.feeRecipient == address(0)) revert ZeroAuthority();
-        uint256 bps = _policyProtocolBps(a.feePolicyVersion);
+        // Version gate before signature verification: unknown policies revert
+        // identically for every caller and reveal nothing about the key.
+        // v1 keeps its frozen row; v2 resolves (bps, chainMin) for the MAX formula.
+        uint256 bps;
+        uint256 chainMin;
+        if (isV2) {
+            (bps, chainMin) = _policyV2Row(a.feePolicyVersion);
+        } else {
+            bps = _policyProtocolBps(a.feePolicyVersion);
+            chainMin = 0;
+        }
         Permission storage p = _permissions[a.permissionId];
         if (p.sessionX == 0 && p.sessionY == 0) revert PermissionNotFound();
         if (p.revoked) revert AlreadyRevoked();
         if (block.timestamp < p.validAfter || block.timestamp > p.validUntil) revert PermissionExpired();
         if (a.seq != p.seq) revert BadSeq();
-        bytes32 expected = keccak256(
-            abi.encodePacked(
-                DOMAIN_PERM,
-                OP_PERM_EXEC,
-                block.chainid,
-                address(this),
-                a.permissionId,
-                a.seq,
-                a.target,
-                a.value,
-                keccak256(a.data),
-                a.deadline,
-                a.feePolicyVersion
-            )
-        );
+        bytes32 expected;
+        if (isV2) {
+            expected = keccak256(
+                abi.encodePacked(
+                    DOMAIN_PERM_V2,
+                    OP_PERM_EXEC,
+                    block.chainid,
+                    address(this),
+                    a.permissionId,
+                    a.seq,
+                    a.target,
+                    a.value,
+                    keccak256(a.data),
+                    a.deadline,
+                    a.feePolicyVersion,
+                    a.maxTotalFee
+                )
+            );
+        } else {
+            expected = keccak256(
+                abi.encodePacked(
+                    DOMAIN_PERM_V1,
+                    OP_PERM_EXEC,
+                    block.chainid,
+                    address(this),
+                    a.permissionId,
+                    a.seq,
+                    a.target,
+                    a.value,
+                    keccak256(a.data),
+                    a.deadline,
+                    a.feePolicyVersion
+                )
+            );
+        }
         _verifyWithKey(p.sessionX, p.sessionY, expected, a.authenticatorData, a.clientDataJSON, a.r, a.s);
         _enforceScope(p, a.target, a.value, a.data);
         p.seq = a.seq + 1;
-        uint256 protocolFee = _protocolFee(a.networkFee, bps);
-        if (address(this).balance < a.value + a.networkFee + protocolFee) revert InsufficientFunds();
+        uint256 protocolFee;
+        uint256 totalFee_;
+        if (isV2) {
+            protocolFee = _protocolFeeV2(a.networkFee, bps, chainMin);
+            totalFee_ = a.networkFee + protocolFee;
+            // User-approved per-execution bound (ANT-544 B5): revert before any
+            // value moves when the attested total exceeds what was authorized.
+            if (totalFee_ > a.maxTotalFee) revert FeeExceedsMax();
+            // Lifetime session-attributable fee cap (Security condition): a
+            // compromised session key cannot grief fees past the grant.
+            if (p.feeSpent + totalFee_ > p.feeLimit) revert LimitExceeded();
+            p.feeSpent += totalFee_;
+        } else {
+            protocolFee = _protocolFee(a.networkFee, bps);
+            totalFee_ = a.networkFee + protocolFee;
+        }
+        if (address(this).balance < a.value + totalFee_) revert InsufficientFunds();
         (bool ok, bytes memory result) = a.target.call{value: a.value}(a.data);
         if (!ok) revert CallFailed();
         if (a.networkFee > 0) {
@@ -775,95 +1076,16 @@ contract PeridotAccount {
         }
     }
 
-    /// @dev `data[4:]` copy for `abi.decode` (memory has no range slices).
-    function _suffix(bytes memory data) internal pure returns (bytes memory out) {
-        out = new bytes(data.length - 4);
-        uint256 len = out.length;
-        uint256 src;
-        uint256 dest;
-        assembly ("memory-safe") {
-            src := add(add(data, 32), 4)
-            dest := add(out, 32)
-        }
-        for (uint256 i = 0; i < len; i += 32) {
-            uint256 w;
-            assembly ("memory-safe") {
-                w := mload(add(src, i))
-            }
-            assembly ("memory-safe") {
-                mstore(add(dest, i), w)
-            }
-        }
-    }
-
-    /// @dev Kind-specific scope enforcement + spend accounting (effects, before the call).
+    /// @dev Scope enforcement + fee accounting (effects, before the call).
+    /// ANT-556 Option A: NONFINANCIAL-only. Any record whose kind is not
+    /// NONFINANCIAL — including pre-removal financial grants still in storage —
+    /// reverts `ScopeMismatch`, on both the frozen v1 and the v2 paths.
     function _enforceScope(Permission storage p, address target, uint256 value, bytes memory data) internal {
-        if (p.kind == KIND_NONFINANCIAL) {
-            if (value != 0) revert ScopeMismatch();
-            if (target != p.target) revert ScopeMismatch();
-            if (data.length < 4 || _sel(data) != p.selector) revert ScopeMismatch();
-            if (_deniedSelector(p.selector)) revert DeniedSelector();
-        } else if (p.kind == KIND_ETH) {
-            if (data.length != 0 || target != p.to) revert ScopeMismatch();
-            if (value == 0 || value > p.perTxCap || p.spent + value > p.totalLimit) revert LimitExceeded();
-            p.spent += value;
-        } else if (p.kind == KIND_ERC20) {
-            uint256 amount = _checkErc20Call(p, target, value, data);
-            if (amount == 0 || amount > p.perTxCap || p.spent + amount > p.totalLimit) revert LimitExceeded();
-            p.spent += amount;
-        } else if (p.kind == KIND_ERC721) {
-            _checkErc721Call(p, target, value, data);
-            if (p.spent != 0) revert LimitExceeded();
-            p.spent = 1;
-        } else if (p.kind == KIND_ERC1155) {
-            uint256 amount = _checkErc1155Call(p, target, value, data);
-            if (amount == 0 || amount > p.perTxCap || p.spent + amount > p.totalLimit) revert LimitExceeded();
-            p.spent += amount;
-        } else {
-            revert ScopeMismatch();
-        }
-    }
-
-    /// @dev Verify `data` is exactly `transfer(to, amount)` on the granted token. Returns amount.
-    function _checkErc20Call(Permission storage p, address target, uint256 value, bytes memory data)
-        internal
-        view
-        returns (uint256 amount)
-    {
-        if (value != 0 || target != p.token) revert ScopeMismatch();
-        if (data.length != 68 || _sel(data) != 0xa9059cbb) revert ScopeMismatch();
-        address to;
-        (to, amount) = abi.decode(_suffix(data), (address, uint256));
-        if (to != p.to) revert ScopeMismatch();
-    }
-
-    /// @dev Verify `data` moves exactly the granted NFT id from this account to `to`.
-    /// Accepts `transferFrom` and 3-arg `safeTransferFrom`; the bytes overload is v1-rejected.
-    function _checkErc721Call(Permission storage p, address target, uint256 value, bytes memory data)
-        internal
-        view
-    {
-        if (value != 0 || target != p.token) revert ScopeMismatch();
-        bytes4 sel = _sel(data);
-        if (data.length != 100 || (sel != 0x23b872dd && sel != 0x42842e0e)) revert ScopeMismatch();
-        (address from, address to, uint256 id) = abi.decode(_suffix(data), (address, address, uint256));
-        if (from != address(this) || to != p.to || id != p.nftId) revert ScopeMismatch();
-    }
-
-    /// @dev Verify 1155 `safeTransferFrom(this, to, id, amount, "")` (empty data only, v1).
-    function _checkErc1155Call(Permission storage p, address target, uint256 value, bytes memory data)
-        internal
-        view
-        returns (uint256 amount)
-    {
-        if (value != 0 || target != p.token) revert ScopeMismatch();
-        if (data.length < 4 || _sel(data) != 0xf242432a) revert ScopeMismatch();
-        address from;
-        address to;
-        uint256 id;
-        bytes memory extra;
-        (from, to, id, amount, extra) = abi.decode(_suffix(data), (address, address, uint256, uint256, bytes));
-        if (from != address(this) || to != p.to || id != p.nftId || extra.length != 0) revert ScopeMismatch();
+        if (p.kind != KIND_NONFINANCIAL) revert ScopeMismatch();
+        if (value != 0) revert ScopeMismatch();
+        if (target != p.target) revert ScopeMismatch();
+        if (data.length < 4 || _sel(data) != p.selector) revert ScopeMismatch();
+        if (_deniedSelector(p.selector)) revert DeniedSelector();
     }
 
     // ---- ERC-7579 module management + execution ----
@@ -963,6 +1185,9 @@ contract PeridotAccount {
     /// (the standard leaves validator selection to the account):
     /// `abi.encode(target, value, data, deadline, feePolicyVersion, networkFee,
     /// authenticatorData, clientDataJSON, r, s)`. Single-call mode only.
+    /// @dev ANT-556: keeps its ABI and v1 fee semantics (no cap); verifies
+    /// under the canonical PERM domain (now v2 — the owner re-signs pending
+    /// intents). The V3-domain paths are the byte-frozen ones.
     function execute(bytes32 mode, bytes calldata executionCalldata) external payable nonReentrant {
         if (mode != MODE_SINGLE_DEFAULT) revert UnsupportedExecutionMode();
         // Scoped decode: the 10 locals die here so only `a` stays live.
@@ -983,7 +1208,8 @@ contract PeridotAccount {
                 executionCalldata, (address, uint256, bytes, uint64, uint16, uint256, bytes, bytes, bytes32, bytes32)
             );
             a = Exec7579Args(
-                target, value, data, deadline, feePolicyVersion, networkFee, authenticatorData, clientDataJSON, r, s
+                target, value, data, deadline, feePolicyVersion, 0, networkFee, authenticatorData, clientDataJSON, r,
+                s
             );
         }
         uint256 startGas = gasleft();
@@ -1018,10 +1244,73 @@ contract PeridotAccount {
         emit Executed(a.target, a.value, a.networkFee, protocolFee, nonce - 1);
     }
 
+    /// @notice ERC-7579 owner execution (v2, ANT-556).
+    /// `abi.encode(target, value, data, deadline, feePolicyVersion, maxTotalFee,
+    /// networkFee, authenticatorData, clientDataJSON, r, s)`. The owner signs
+    /// `maxTotalFee`; the contract enforces `networkFee + protocolFee ≤
+    /// maxTotalFee` (FeeExceedsMax) with the v2 MAX fee formula. Single-call only.
+    function executeV4(bytes32 mode, bytes calldata executionCalldata) external payable nonReentrant {
+        if (mode != MODE_SINGLE_DEFAULT) revert UnsupportedExecutionMode();
+        Exec7579Args memory a;
+        {
+            (
+                address target,
+                uint256 value,
+                bytes memory data,
+                uint64 deadline,
+                uint16 feePolicyVersion,
+                uint256 maxTotalFee,
+                uint256 networkFee,
+                bytes memory authenticatorData,
+                bytes memory clientDataJSON,
+                bytes32 r,
+                bytes32 s
+            ) = abi.decode(
+                executionCalldata,
+                (address, uint256, bytes, uint64, uint16, uint256, uint256, bytes, bytes, bytes32, bytes32)
+            );
+            a = Exec7579Args(
+                target, value, data, deadline, feePolicyVersion, maxTotalFee, networkFee, authenticatorData,
+                clientDataJSON, r, s
+            );
+        }
+        uint256 startGas = gasleft();
+        if (!initialized) revert NotInitialized();
+        if (a.target == address(this)) revert InvalidTarget();
+        if (block.timestamp > a.deadline) revert Expired();
+        if (a.deadline - block.timestamp > MAX_TTL) revert Expired();
+        (uint256 bps, uint256 chainMin) = _policyV2Row(a.feePolicyVersion);
+        bytes32 expected = keccak256(
+            abi.encodePacked(
+                DOMAIN_PERM_V2, OP_EXEC7579, block.chainid, address(this), nonce, a.target, a.value,
+                keccak256(a.data), a.deadline, a.feePolicyVersion, a.maxTotalFee
+            )
+        );
+        _verify(expected, a.authenticatorData, a.clientDataJSON, a.r, a.s);
+        uint256 protocolFee = _protocolFeeV2(a.networkFee, bps, chainMin);
+        uint256 totalFee_ = a.networkFee + protocolFee;
+        if (totalFee_ > a.maxTotalFee) revert FeeExceedsMax();
+        if (address(this).balance < a.value + totalFee_) revert InsufficientFunds();
+        nonce++;
+        (bool ok, ) = a.target.call{value: a.value}(a.data);
+        if (!ok) revert CallFailed();
+        if (a.networkFee > 0) {
+            (ok, ) = msg.sender.call{value: a.networkFee}("");
+            if (!ok) revert CallFailed();
+        }
+        if (protocolFee > 0) {
+            (ok, ) = factory.call{value: protocolFee}("");
+            if (!ok) revert CallFailed();
+        }
+        _checkGasSanity(startGas, a.networkFee);
+        emit Executed(a.target, a.value, a.networkFee, protocolFee, nonce - 1);
+    }
+
     /// @notice ERC-7579 executor path. ONLY installed executor modules.
     /// `executionCalldata` = `abi.encode(permissionId, target, value, data,
     /// deadline, seq, feePolicyVersion, networkFee, feeRecipient,
     /// authenticatorData, clientDataJSON, r, s)`.
+    /// @dev FROZEN v1 path (ANT-556): v1 payload, legacy semantics.
     /// All permission checks run inside the account (single audit point); the
     /// executor is a thin forwarder and enforces nothing by itself.
     function executeFromExecutor(bytes32 mode, bytes calldata executionCalldata)
@@ -1057,11 +1346,57 @@ contract PeridotAccount {
                 )
             );
             a = PermExecArgs(
-                permissionId, target, value, data, deadline, seq, feePolicyVersion, networkFee, feeRecipient,
+                permissionId, target, value, data, deadline, seq, feePolicyVersion, 0, networkFee, feeRecipient,
                 authenticatorData, clientDataJSON, r, s
             );
         }
-        _executePermission(a);
+        _executePermission(a, false);
+        returnData = new bytes[](1);
+        returnData[0] = _lastResult;
+    }
+
+    /// @notice ERC-7579 executor path (v2, ANT-556). ONLY installed executor modules.
+    /// `executionCalldata` = `abi.encode(permissionId, target, value, data,
+    /// deadline, seq, feePolicyVersion, maxTotalFee, networkFee, feeRecipient,
+    /// authenticatorData, clientDataJSON, r, s)`.
+    function executeFromExecutorV2(bytes32 mode, bytes calldata executionCalldata)
+        external
+        payable
+        nonReentrant
+        returns (bytes[] memory returnData)
+    {
+        if (mode != MODE_SINGLE_DEFAULT) revert UnsupportedExecutionMode();
+        if (!_modules[MODULE_TYPE_EXECUTOR][msg.sender]) revert NotModule();
+        PermExecArgs memory a;
+        {
+            (
+                bytes32 permissionId,
+                address target,
+                uint256 value,
+                bytes memory data,
+                uint64 deadline,
+                uint64 seq,
+                uint16 feePolicyVersion,
+                uint256 maxTotalFee,
+                uint256 networkFee,
+                address feeRecipient,
+                bytes memory authenticatorData,
+                bytes memory clientDataJSON,
+                bytes32 r,
+                bytes32 s
+            ) = abi.decode(
+                executionCalldata,
+                (
+                    bytes32, address, uint256, bytes, uint64, uint64, uint16, uint256, uint256, address, bytes, bytes,
+                    bytes32, bytes32
+                )
+            );
+            a = PermExecArgs(
+                permissionId, target, value, data, deadline, seq, feePolicyVersion, maxTotalFee, networkFee,
+                feeRecipient, authenticatorData, clientDataJSON, r, s
+            );
+        }
+        _executePermission(a, true);
         returnData = new bytes[](1);
         returnData[0] = _lastResult;
     }

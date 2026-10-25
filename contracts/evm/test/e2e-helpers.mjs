@@ -94,7 +94,10 @@ export async function makeRpc(anvilUrl) {
 /// policy u16 ‖ deadline u64 ‖ chainid u256 ‖ factory (all BE, packed) ---
 
 export const DOMAIN_V3 = Buffer.from("PID|EVM|SMART_ACCOUNT|v3", "ascii");
-const DOMAIN_PERM = Buffer.from("PID|EVM|PERMISSION|v1", "ascii");
+// ANT-556: canonical permission domain is v2 (new grants); v1 kept for legacy sunset tooling.
+export const DOMAIN_PERM_V2 = Buffer.from("PID|EVM|PERMISSION|v2", "ascii");
+const DOMAIN_PERM_V1 = Buffer.from("PID|EVM|PERMISSION|v1", "ascii");
+const DOMAIN_PERM = DOMAIN_PERM_V2;
 
 export function actPayloadV3({ salt, x, y, feePolicyVersion, deadline, chainId, factory }) {
   return keccak(Buffer.concat([
@@ -154,24 +157,24 @@ export function permissionId({ chainId, account, scope }) {
   ]));
 }
 
-export function grantPayload({ chainId, account, permissionId: pid, scope, perTxCap, totalLimit, validAfter, nonce, deadline }) {
+export function grantPayload({ chainId, account, permissionId: pid, scope, perTxCap, totalLimit, feeLimit, validAfter, nonce, deadline }) {
   return keccak(Buffer.concat([
     DOMAIN_PERM, Buffer.from([0x10]),
     u8(chainId, 32), addrBuf(account), b32(pid),
     b32(scope.sessionX), b32(scope.sessionY), Buffer.from([scope.kind & 0xff]),
     addrBuf(scope.target), Buffer.from(scope.selector),
     addrBuf(scope.token), addrBuf(scope.to),
-    u8(perTxCap, 32), u8(totalLimit, 32), u8(scope.nftId, 32),
+    u8(perTxCap, 32), u8(totalLimit, 32), u8(feeLimit ?? 0n, 32), u8(scope.nftId, 32),
     u8(validAfter, 8), u8(scope.validUntil, 8), u8(nonce, 8), u8(deadline, 8),
   ]));
 }
 
-export function permExecPayload({ chainId, account, permissionId: pid, seq, target, value, dataHash, deadline, feePolicyVersion }) {
+export function permExecPayload({ chainId, account, permissionId: pid, seq, target, value, dataHash, deadline, feePolicyVersion, maxTotalFee }) {
   return keccak(Buffer.concat([
     DOMAIN_PERM, Buffer.from([0x12]),
     u8(chainId, 32), addrBuf(account), b32(pid),
     u8(seq, 8), addrBuf(target), u8(value, 32), b32(dataHash),
-    u8(deadline, 8), u8(feePolicyVersion, 2),
+    u8(deadline, 8), u8(feePolicyVersion, 2), u8(maxTotalFee ?? 0n, 32),
   ]));
 }
 
@@ -185,9 +188,9 @@ export function revokePayload({ chainId, account, permissionId: pid, nonce, dead
 
 export function grantPermissionData({ grant, authData, clientDataJSON, r, s }) {
   const g = grant;
-  const tuple = `(${hx(g.permissionId)},${hx(g.sessionX)},${hx(g.sessionY)},${g.kind},${g.target},0x${Buffer.from(g.selector).toString("hex")},${g.token},${g.to},${g.perTxCap},${g.totalLimit},${g.nftId},${g.validAfter},${g.validUntil},${hx(g.salt)},${g.deadline})`;
+  const tuple = `(${hx(g.permissionId)},${hx(g.sessionX)},${hx(g.sessionY)},${g.kind},${g.target},0x${Buffer.from(g.selector).toString("hex")},${g.token},${g.to},${g.perTxCap},${g.totalLimit},${g.feeLimit ?? 0n},${g.nftId},${g.validAfter},${g.validUntil},${hx(g.salt)},${g.deadline})`;
   return execSync(
-    `${CAST} calldata "grantPermission((bytes32,bytes32,bytes32,uint8,address,bytes4,address,address,uint256,uint256,uint256,uint64,uint64,bytes32,uint64),bytes,bytes,bytes32,bytes32)" ` +
+    `${CAST} calldata "grantPermission((bytes32,bytes32,bytes32,uint8,address,bytes4,address,address,uint256,uint256,uint256,uint256,uint64,uint64,bytes32,uint64),bytes,bytes,bytes32,bytes32)" ` +
     `"${tuple}" ${hx(authData)} ${hx(clientDataJSON)} ${hx(r)} ${hx(s)}`,
     { encoding: "utf8", maxBuffer: 1 << 20 },
   ).trim();
@@ -195,8 +198,8 @@ export function grantPermissionData({ grant, authData, clientDataJSON, r, s }) {
 
 export function executeWithPermissionData(a) {
   return execSync(
-    `${CAST} calldata "executeWithPermission(bytes32,address,uint256,bytes,uint64,uint64,uint16,uint256,bytes,bytes,bytes32,bytes32)" ` +
-    `${hx(a.permissionId)} ${a.target} ${a.value} ${hx(a.data)} ${a.deadline} ${a.seq} ${a.feePolicyVersion} ${a.networkFee} ${hx(a.authenticatorData)} ${hx(a.clientDataJSON)} ${hx(a.r)} ${hx(a.s)}`,
+    `${CAST} calldata "executeWithPermission(bytes32,address,uint256,bytes,uint64,uint64,uint16,uint256,uint256,bytes,bytes,bytes32,bytes32)" ` +
+    `${hx(a.permissionId)} ${a.target} ${a.value} ${hx(a.data)} ${a.deadline} ${a.seq} ${a.feePolicyVersion} ${a.maxTotalFee ?? 0n} ${a.networkFee} ${hx(a.authenticatorData)} ${hx(a.clientDataJSON)} ${hx(a.r)} ${hx(a.s)}`,
     { encoding: "utf8", maxBuffer: 1 << 20 },
   ).trim();
 }

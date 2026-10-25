@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsInt, IsObject, IsString, Matches, Max, Min, ValidateNested } from "class-validator";
+import { IsInt, IsObject, IsOptional, IsString, Matches, Max, Min, ValidateNested } from "class-validator";
 
 class EvmActivateAssertionDto {
   @IsString()
@@ -27,11 +27,18 @@ export class EvmActivateDto {
   @Matches(/^\d+$/, { message: "Quoted network fee must be wei (positive integer)" })
   quotedNetworkFeeWei!: string;
 
-  /** Signed fee-policy version (selects the protocol percentage; unknown versions revert). */
+  /** Signed fee-policy version (1 = legacy 50% no-floor sunset; 2 = V4 MAX(50%, chainMin)). */
   @IsInt()
   @Min(1)
-  @Max(65535)
+  @Max(2)
   feePolicyVersion!: number;
+
+  /** User-approved bound on `networkFee + protocolFee` for THIS activation (wei, V4 B5/B6).
+   * REQUIRED when feePolicyVersion == 2; the contract reverts FeeExceedsMax when
+   * the attested total exceeds it. Ignored (must be absent or zero) for policy 1. */
+  @IsOptional()
+  @Matches(/^\d+$/, { message: "maxTotalFee must be wei (positive integer)" })
+  maxTotalFeeWei?: string;
 
   /** Authorization deadline (unix seconds, TTL ≤ 600s enforced). */
   @IsInt()

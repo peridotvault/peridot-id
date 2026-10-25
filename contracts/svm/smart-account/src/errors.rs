@@ -29,8 +29,11 @@ pub enum PeridotError {
     InvalidChallenge = 10,
     /// The caller is not the authorized backend (creation paths only).
     Forbidden = 11,
-    /// Retired in V3 (no user-signed amount caps). Slot intentionally unused.
-    RetiredFeeExceedsMax = 12,
+    /// V4 fee-cap family (ANT-544 B5, ANT-556): the attested
+    /// `network_fee + protocol_fee` exceeded the user-approved `max_total_fee`.
+    /// Reintroduced at the retired slot — discriminant 12 preserved, so old SDK
+    /// decoders keep working. V3 verifiers never emit this (no cap was signed).
+    FeeExceedsMax = 12,
     /// The fee-policy version is unknown or unsupported.
     UnknownFeePolicy = 13,
     /// A policy percentage exceeds the protocol maximum.
@@ -55,6 +58,12 @@ pub enum PeridotError {
     /// fee-bearing sponsored-creation path). Additive-only: existing
     /// discriminants are untouched so old SDK decoders keep working.
     InitializeDeprecated = 23,
+    /// C3 session spend bound (ANT-544 C3, ANT-556): a gameplay execution
+    /// decreased the session PDA's lamports. The session PDA holds the
+    /// rent-exempt minimum only; per-execution net outflow is capped at zero —
+    /// a compromised session or hostile game cannot drain session rent/fees.
+    /// Additive-only (new discriminant 24).
+    SessionSpendExceeded = 24,
 }
 
 impl From<PeridotError> for ProgramError {

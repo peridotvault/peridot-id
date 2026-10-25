@@ -29,7 +29,13 @@ export const OP_EVM = {
 } as const;
 
 /** V4 permission domain (canonical). Disjoint from all SMART_ACCOUNT domains. */
-export const DOMAIN_EVM_PERM = fromAscii("PID|EVM|PERMISSION|v1");
+export const DOMAIN_EVM_PERM_V1 = fromAscii("PID|EVM|PERMISSION|v1");
+export const DOMAIN_EVM_PERM_V2 = fromAscii("PID|EVM|PERMISSION|v2");
+/** Canonical permission domain (latest = v2). New grants use v2. */
+export const DOMAIN_EVM_PERM = DOMAIN_EVM_PERM_V2;
+
+/** V4 owner-execution domain (ANT-544 B5, ANT-556): fee-capped authorization. */
+export const DOMAIN_EVM_V4 = fromAscii("PID|EVM|SMART_ACCOUNT|v4");
 
 /** V4 permission operation tags — first payload byte after the permission domain. */
 export const OP_PERM = {
@@ -42,14 +48,62 @@ export const OP_PERM = {
   sign1271: 0x16,
 } as const;
 
-/** V4 permission kinds (match the contract's KIND_* constants). */
+/** V4 permission kinds (match the contract's KIND_* constants).
+ * ANT-556 Option A: sessions are NONFINANCIAL-only. Financial kinds 2-5 are
+ * removed on-chain; the SDK rejects them at grant time (defense in depth).
+ */
 export const PERM_KIND = {
   nonfinancial: 1,
+} as const;
+
+/** Removed financial kinds (never granted; any grant carrying them reverts on-chain). */
+export const PERM_KIND_REMOVED = {
   eth: 2,
   erc20: 3,
   erc721: 4,
   erc1155: 5,
 } as const;
+
+/** SDK-side grant gate: throws on any financial (removed) kind. */
+export function assertNonfinancialKind(kind: number): void {
+  if (kind !== PERM_KIND.nonfinancial) {
+    throw new Error(`financial permission kinds were removed (ANT-556 Option A): got kind ${kind}`);
+  }
+}
+
+/** Fee-policy v2 (match the contract): 5000 bps + per-chain floor (ANT-544 B2). */
+export const EVM_FEE_POLICY_V2 = 2;
+export const EVM_PROTOCOL_FEE_BPS_V2 = 5000;
+/**
+ * v2 chain-minimum table (native wei, match `_chainMinV2` exactly).
+ * NOTE: 0.00000075 ETH = 750_000_000_000 wei (the spec's base-units column
+ * reads 750_000_000 — a 1000× typo against its own B3 totals; the ETH values
+ * rule). Unlisted chains → 0n (percentage leg only).
+ */
+export function evmChainMinV2(chainId: bigint | number): bigint {
+  const cid = BigInt(chainId);
+  if (cid === 1n || cid === 11155111n || cid === 8453n || cid === 84532n || cid === 31337n) {
+    return 750_000_000_000n;
+  }
+  if (cid === 56n || cid === 97n) return 2_300_000_000_000n;
+  return 0n;
+}
+
+/**
+ * EVM fee-policy v2 split (mirrors `_protocolFeeV2` exactly):
+ * `protocolFee = MAX(floor(networkFee × bps / 10_000), chainMin)`.
+ */
+export function splitEvmFeeV2(
+  networkFee: bigint,
+  chainId: bigint | number,
+  bps: number = EVM_PROTOCOL_FEE_BPS_V2,
+): { relayerFee: bigint; protocolFee: bigint; totalFee: bigint } {
+  if (networkFee < 0n) throw new Error("networkFee must be non-negative");
+  const pct = (networkFee * BigInt(bps)) / 10_000n;
+  const chainMin = evmChainMinV2(chainId);
+  const protocolFee = pct > chainMin ? pct : chainMin;
+  return { relayerFee: networkFee, protocolFee, totalFee: networkFee + protocolFee };
+}
 
 /** ERC-7579 module type ids. */
 export const MODULE_TYPE = { validator: 1, executor: 2, fallback: 3, hook: 4 } as const;
@@ -178,9 +232,18 @@ export function beUint(value: bigint | number, bytes: number): Uint8Array {
   return out;
 }
 
-/** V4 permission payload hash: `keccak256(DOMAIN_EVM_PERM ‖ opTag ‖ parts…)`. */
-export function buildEvmPermissionPayload(opTag: number, parts: Uint8Array[]): Uint8Array {
-  return keccak256(concat(DOMAIN_EVM_PERM, new Uint8Array([opTag & 0xff]), ...parts));
+/** V4 owner-execution payload hash: `keccak256(DOMAIN_EVM_V4 ‖ opTag ‖ parts…)` (ANT-556). */
+export function buildEvmAuthorizationPayloadV4(opTag: number, parts: Uint8Array[]): Uint8Array {
+  return keccak256(concat(DOMAIN_EVM_V4, new Uint8Array([opTag & 0xff]), ...parts));
+}
+
+/** V4 permission payload hash: `keccak256(domain ‖ opTag ‖ parts…)` (domain defaults to v2). */
+export function buildEvmPermissionPayload(
+  opTag: number,
+  parts: Uint8Array[],
+  domain: Uint8Array = DOMAIN_EVM_PERM_V2,
+): Uint8Array {
+  return keccak256(concat(domain, new Uint8Array([opTag & 0xff]), ...parts));
 }
 
 export interface PermissionScope {
@@ -200,14 +263,22 @@ function addrBytes(address: string): Uint8Array {
   return addressToBytes(address);
 }
 
-/** Canonical permission id (field-for-field match of `_permissionId`). */
-export function buildPermissionId(chainId: bigint | number, account: string, scope: PermissionScope): Uint8Array {
+/** Canonical permission id (field-for-field match of `_permissionId`).
+ * ANT-556: defaults to the v2 domain (new grants). Pass `DOMAIN_EVM_PERM_V1`
+ * explicitly only to recompute pre-removal ids for audit/revocation tooling.
+ */
+export function buildPermissionId(
+  chainId: bigint | number,
+  account: string,
+  scope: PermissionScope,
+  domain: Uint8Array = DOMAIN_EVM_PERM_V2,
+): Uint8Array {
   if (scope.sessionX.length !== 32 || scope.sessionY.length !== 32) throw new Error("session key must be 32+32 bytes");
   if (scope.selector.length !== 4) throw new Error("selector must be 4 bytes");
   if (scope.salt.length !== 32) throw new Error("salt must be 32 bytes");
   return keccak256(
     concat(
-      DOMAIN_EVM_PERM,
+      domain,
       beUint(chainId, 32),
       addrBytes(account),
       scope.sessionX,
@@ -224,7 +295,11 @@ export function buildPermissionId(chainId: bigint | number, account: string, sco
   );
 }
 
-/** Owner-signed grant payload (what the passkey signs as the WebAuthn challenge). */
+/** Owner-signed grant payload (what the passkey signs as the WebAuthn challenge).
+ * ANT-556 v2: includes the owner-approved `feeLimit` (defaults to 0n for
+ * source-compat — callers SHOULD pass an explicit bound; feeLimit 0 means only
+ * zero-fee executions pass). Rejects financial kinds (Option A gate).
+ */
 export function buildGrantPayload(args: {
   chainId: bigint | number;
   account: string;
@@ -232,10 +307,12 @@ export function buildGrantPayload(args: {
   scope: PermissionScope;
   perTxCap: bigint | number;
   totalLimit: bigint | number;
+  feeLimit?: bigint | number;
   validAfter: bigint | number;
   nonce: bigint | number;
   deadline: bigint | number;
 }): Uint8Array {
+  assertNonfinancialKind(args.scope.kind);
   return buildEvmPermissionPayload(OP_PERM.grant, [
     beUint(args.chainId, 32),
     addrBytes(args.account),
@@ -249,6 +326,7 @@ export function buildGrantPayload(args: {
     addrBytes(args.scope.to),
     beUint(args.perTxCap, 32),
     beUint(args.totalLimit, 32),
+    beUint(args.feeLimit ?? 0n, 32),
     beUint(args.scope.nftId, 32),
     beUint(args.validAfter, 8),
     beUint(args.scope.validUntil, 8),
@@ -274,7 +352,10 @@ export function buildRevokePayload(args: {
   ]);
 }
 
-/** Session-signed permission-execution payload. */
+/** Session-signed permission-execution payload (v2: binds `maxTotalFee`).
+ * `maxTotalFee` defaults to 0n for source-compat (only zero-fee executions
+ * pass with a zero bound — the frozen-v1 equivalent).
+ */
 export function buildPermExecPayload(args: {
   chainId: bigint | number;
   account: string;
@@ -285,6 +366,7 @@ export function buildPermExecPayload(args: {
   dataHash: Uint8Array;
   deadline: bigint | number;
   feePolicyVersion: number;
+  maxTotalFee?: bigint | number;
 }): Uint8Array {
   return buildEvmPermissionPayload(OP_PERM.permExec, [
     beUint(args.chainId, 32),
@@ -296,10 +378,43 @@ export function buildPermExecPayload(args: {
     args.dataHash,
     beUint(args.deadline, 8),
     beUint(args.feePolicyVersion, 2),
+    beUint(args.maxTotalFee ?? 0n, 32),
   ]);
 }
 
-/** Owner-signed ERC-7579 `execute` payload (auth travels inside `executionCalldata`). */
+/** Frozen v1 session-execution payload (legacy sunset verification only). */
+export function buildPermExecPayloadV1(args: {
+  chainId: bigint | number;
+  account: string;
+  permissionId: Uint8Array;
+  seq: bigint | number;
+  target: string;
+  value: bigint | number;
+  dataHash: Uint8Array;
+  deadline: bigint | number;
+  feePolicyVersion: number;
+}): Uint8Array {
+  return buildEvmPermissionPayload(
+    OP_PERM.permExec,
+    [
+      beUint(args.chainId, 32),
+      addrBytes(args.account),
+      args.permissionId,
+      beUint(args.seq, 8),
+      addrBytes(args.target),
+      beUint(args.value, 32),
+      args.dataHash,
+      beUint(args.deadline, 8),
+      beUint(args.feePolicyVersion, 2),
+    ],
+    DOMAIN_EVM_PERM_V1,
+  );
+}
+
+/** Owner-signed ERC-7579 `execute` payload (auth travels inside `executionCalldata`).
+ * ANT-556: verifies under the canonical PERM domain (now v2 — re-sign pending
+ * intents). For fee-capped execution use `buildExec7579PayloadV4`.
+ */
 export function buildExec7579Payload(args: {
   chainId: bigint | number;
   account: string;
@@ -319,6 +434,81 @@ export function buildExec7579Payload(args: {
     args.dataHash,
     beUint(args.deadline, 8),
     beUint(args.feePolicyVersion, 2),
+  ]);
+}
+
+/** Owner-signed ERC-7579 `executeV4` payload: as above plus `maxTotalFee`. */
+export function buildExec7579PayloadV4(args: {
+  chainId: bigint | number;
+  account: string;
+  nonce: bigint | number;
+  target: string;
+  value: bigint | number;
+  dataHash: Uint8Array;
+  deadline: bigint | number;
+  feePolicyVersion: number;
+  maxTotalFee: bigint | number;
+}): Uint8Array {
+  return buildEvmPermissionPayload(OP_PERM.exec7579, [
+    beUint(args.chainId, 32),
+    addrBytes(args.account),
+    beUint(args.nonce, 8),
+    addrBytes(args.target),
+    beUint(args.value, 32),
+    args.dataHash,
+    beUint(args.deadline, 8),
+    beUint(args.feePolicyVersion, 2),
+    beUint(args.maxTotalFee, 32),
+  ]);
+}
+
+/** Owner-signed V4 `executeV4` payload: `DOMAIN_V4 ‖ OP_EXECUTE ‖ … ‖ maxTotalFee`. */
+export function buildExecuteV4Payload(args: {
+  chainId: bigint | number;
+  account: string;
+  nonce: bigint | number;
+  target: string;
+  value: bigint | number;
+  dataHash: Uint8Array;
+  deadline: bigint | number;
+  feePolicyVersion: number;
+  maxTotalFee: bigint | number;
+}): Uint8Array {
+  return buildEvmAuthorizationPayloadV4(OP_EVM.execute, [
+    beUint(args.chainId, 32),
+    addrBytes(args.account),
+    beUint(args.nonce, 8),
+    addrBytes(args.target),
+    beUint(args.value, 32),
+    args.dataHash,
+    beUint(args.deadline, 8),
+    beUint(args.feePolicyVersion, 2),
+    beUint(args.maxTotalFee, 32),
+  ]);
+}
+
+/** Owner-signed V4 `initializeV4` payload (fee-capped activation). */
+export function buildActivateV4Payload(args: {
+  salt: Uint8Array;
+  x: Uint8Array;
+  y: Uint8Array;
+  feePolicyVersion: number;
+  maxTotalFee: bigint | number;
+  deadline: bigint | number;
+  chainId: bigint | number;
+  factory: string;
+}): Uint8Array {
+  if (args.salt.length !== 32) throw new Error("salt must be 32 bytes");
+  if (args.x.length !== 32 || args.y.length !== 32) throw new Error("authority coordinates must be 32+32 bytes");
+  return buildEvmAuthorizationPayloadV4(OP_EVM.activate, [
+    args.salt,
+    args.x,
+    args.y,
+    beUint(args.feePolicyVersion, 2),
+    beUint(args.maxTotalFee, 32),
+    beUint(args.deadline, 8),
+    beUint(args.chainId, 32),
+    addrBytes(args.factory),
   ]);
 }
 

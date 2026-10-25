@@ -20,6 +20,8 @@ export const DOMAIN = fromAscii("PID|SOLANA|SMART_ACCOUNT|v1");
 export const DOMAIN_V2 = fromAscii("PID|SOLANA|SMART_ACCOUNT|v2");
 /** V3 domain (canonical). V2 payloads can never verify as V3. */
 export const DOMAIN_V3 = fromAscii("PID|SOLANA|SMART_ACCOUNT|v3");
+/** V4 domain (ANT-544 B5, ANT-556): V3 semantics plus the user-approved `max_total_fee` bound. */
+export const DOMAIN_V4 = fromAscii("PID|SOLANA|SMART_ACCOUNT|v4");
 
 /** V2 operation tags — first payload byte after the domain (match program discriminators). */
 export const OP = {
@@ -42,6 +44,27 @@ export const IX = {
   activate: 5,
   execute: 6,
 } as const;
+
+/** V4 fee-capped discriminators (must match `src/instructions/mod.rs` 11-14). */
+export const IX_V4 = {
+  withdrawSol: 11,
+  withdrawToken: 12,
+  execute: 13,
+  activate: 14,
+} as const;
+
+/** V4 operation tags — equal to the V4 discriminators (auth.rs convention). */
+export const OP_V4 = {
+  withdrawSol: 11,
+  withdrawToken: 12,
+  execute: 13,
+  activate: 14,
+} as const;
+
+/** Fee-policy v2 (must match `fee.rs`): 5000 bps + 17_000-lamport floor. */
+export const FEE_POLICY_V2 = 2;
+export const PROTOCOL_FEE_BPS_V2 = 5000;
+export const CHAIN_MIN_LAMPORTS_V2 = 17_000n;
 
 /** Execute meta flags (bit 0 = writable, bit 1 = signer) — match `execute.rs`. */
 export const EXECUTE_FLAG = { writable: 1, signer: 2 } as const;
@@ -358,6 +381,101 @@ export async function buildExecutePayloadV3(
   if (callHash32.length !== 32) throw new Error("callHash32 must be 32 bytes");
   return buildAuthorizationPayloadV3(OP.execute, [
     accountId32, u64le(nonce), i64le(expiry), u16le(feePolicyVersion), callHash32,
+  ]);
+}
+
+// ================= Fee policy v2 + V4 authorization (ANT-544 B1/B5, ANT-556) =================
+//
+// V4 payloads mirror V3 plus the trailing user-approved `max_total_fee`
+// (u64 LE, base units). Layouts MUST match
+// `contracts/svm/smart-account/src/instructions/*_v4.rs` byte-for-byte:
+// the SDK serializes once and the program verifies the same bytes.
+
+/** Domain-separated V4 payload hash: `sha256(DOMAIN_V4 ‖ opTag ‖ parts…)`. */
+export async function buildAuthorizationPayloadV4(opTag: number, parts: Uint8Array[]): Promise<Uint8Array> {
+  return hashSha256(concat(DOMAIN_V4, new Uint8Array([opTag & 0xff]), ...parts));
+}
+
+/**
+ * Fee-policy v2 split (mirrors `fee::split_attested_fee_v2` exactly):
+ * `protocolFee = MAX(floor(networkFee × bps / 10_000), chainMin)`,
+ * all-bigint, floor division (user-favoring), no floats.
+ */
+export function splitAttestedFeeV2(
+  networkFee: bigint,
+  bps: number,
+  chainMin: bigint,
+): { relayerFee: bigint; protocolFee: bigint; totalFee: bigint } {
+  if (networkFee < 0n || chainMin < 0n) throw new Error("fees must be non-negative");
+  const pct = (networkFee * BigInt(bps)) / 10_000n;
+  const protocolFee = pct > chainMin ? pct : chainMin;
+  return { relayerFee: networkFee, protocolFee, totalFee: networkFee + protocolFee };
+}
+
+/** Solana v2 row: `(5000 bps, 17_000 lamports)` — match `fee.rs`. */
+export function solanaFeeV2Row(): { bps: number; chainMin: bigint } {
+  return { bps: PROTOCOL_FEE_BPS_V2, chainMin: CHAIN_MIN_LAMPORTS_V2 };
+}
+
+/** V4 WITHDRAW_SOL payload: op-tag ‖ account ‖ nonce ‖ amount ‖ destination ‖ expiry ‖ policy ‖ max_total_fee. */
+export async function buildWithdrawSolPayloadV4(args: {
+  accountId32: Uint8Array;
+  nonce: bigint;
+  amount: bigint;
+  destination: PublicKey;
+  expiry: number;
+  feePolicyVersion: number;
+  maxTotalFee: bigint;
+}): Promise<Uint8Array> {
+  return buildAuthorizationPayloadV4(OP_V4.withdrawSol, [
+    args.accountId32, u64le(args.nonce), u64le(args.amount), args.destination.toBytes(),
+    i64le(args.expiry), u16le(args.feePolicyVersion), u64le(args.maxTotalFee),
+  ]);
+}
+
+/** V4 WITHDRAW_TOKEN payload: as above + destination_ata, then source_ata (matches program order). */
+export async function buildWithdrawTokenPayloadV4(args: {
+  accountId32: Uint8Array;
+  nonce: bigint;
+  amount: bigint;
+  destinationAta: PublicKey;
+  expiry: number;
+  feePolicyVersion: number;
+  maxTotalFee: bigint;
+  sourceAta: PublicKey;
+}): Promise<Uint8Array> {
+  return buildAuthorizationPayloadV4(OP_V4.withdrawToken, [
+    args.accountId32, u64le(args.nonce), u64le(args.amount), args.destinationAta.toBytes(),
+    i64le(args.expiry), u16le(args.feePolicyVersion), u64le(args.maxTotalFee), args.sourceAta.toBytes(),
+  ]);
+}
+
+/** V4 EXECUTE payload: op-tag ‖ account ‖ nonce ‖ expiry ‖ policy ‖ max_total_fee ‖ call_hash. */
+export async function buildExecutePayloadV4(
+  accountId32: Uint8Array,
+  nonce: bigint,
+  expiry: number,
+  feePolicyVersion: number,
+  maxTotalFee: bigint,
+  callHash32: Uint8Array,
+): Promise<Uint8Array> {
+  if (callHash32.length !== 32) throw new Error("callHash32 must be 32 bytes");
+  return buildAuthorizationPayloadV4(OP_V4.execute, [
+    accountId32, u64le(nonce), i64le(expiry), u16le(feePolicyVersion), u64le(maxTotalFee), callHash32,
+  ]);
+}
+
+/** V4 ACTIVATE payload: op-tag ‖ account ‖ authority ‖ policy ‖ max_total_fee ‖ expiry. */
+export async function buildActivatePayloadV4(
+  accountId32: Uint8Array,
+  authorityCompressed: Uint8Array,
+  feePolicyVersion: number,
+  maxTotalFee: bigint,
+  expiry: number,
+): Promise<Uint8Array> {
+  if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
+  return buildAuthorizationPayloadV4(OP_V4.activate, [
+    accountId32, authorityCompressed, u16le(feePolicyVersion), u64le(maxTotalFee), i64le(expiry),
   ]);
 }
 

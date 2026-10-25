@@ -162,6 +162,52 @@ contract PeridotFactory {
         emit Deployed(account, salt);
     }
 
+    /// @notice Deploy + passkey-bound initialize atomically (v2, ANT-556).
+    /// V4 sibling of `deployAndInit` (frozen): forwards to the account's
+    /// fee-capped `initializeV4`, so the activation authorization carries the
+    /// user-approved `maxTotalFee`. Gas sanity is enforced on this frame exactly
+    /// as in `deployAndInit`.
+    function deployAndInitV4(
+        bytes32 salt,
+        bytes32 x,
+        bytes32 y,
+        uint16 feePolicyVersion,
+        uint256 maxTotalFee,
+        uint64 deadline,
+        uint256 networkFee,
+        bytes calldata authenticatorData,
+        bytes calldata clientDataJSON,
+        bytes32 r,
+        bytes32 s
+    ) external returns (address account) {
+        uint256 startGas = gasleft();
+        if (msg.sender != relayer) revert Unauthorized();
+        account = Clones.cloneDeterministic(implementation, salt);
+        (bool ok, ) = account.call(
+            abi.encodeCall(
+                PeridotAccount.initializeV4,
+                (
+                    salt,
+                    x,
+                    y,
+                    feePolicyVersion,
+                    maxTotalFee,
+                    deadline,
+                    networkFee,
+                    address(this),
+                    msg.sender,
+                    authenticatorData,
+                    clientDataJSON,
+                    r,
+                    s
+                )
+            )
+        );
+        if (!ok) revert InitFailed();
+        if (networkFee > (startGas - gasleft()) * tx.gasprice * 2) revert GasAnomaly();
+        emit Deployed(account, salt);
+    }
+
     /// @notice Counterfactual address for `salt` (matches `deriveEvmSmartAccountAddress`).
     function predict(bytes32 salt) external view returns (address) {
         return Clones.predictDeterministicAddress(implementation, salt);

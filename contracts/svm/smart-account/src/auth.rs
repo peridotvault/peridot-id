@@ -39,6 +39,12 @@ pub const DOMAIN_V2: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v2";
 /// V2 signatures can never verify as V3: the domain differs. V3 drops all
 /// amount fields from payloads — only the fee-policy version is bound.
 pub const DOMAIN_V3: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v3";
+/// Domain separator for the V4 signed authorization payload (ANT-544 B5,
+/// ANT-556): V3 semantics plus the user-approved `max_total_fee` bound on
+/// `network_fee + protocol_fee`. V3 payloads can never verify as V4 (the
+/// domain differs AND every V4 payload carries the extra `max_total_fee`
+/// field); V3 verifiers are untouched and never enforce the cap.
+pub const DOMAIN_V4: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v4";
 /// Domain separator for session-grant payloads (WHITEPAPER.md §11). Disjoint from every
 /// `SMART_ACCOUNT` domain so an owner signature can never verify as a session
 /// grant and vice versa — the same separation the EVM `DOMAIN_PERM` provides.
@@ -58,6 +64,14 @@ pub const OP_REGISTER_SESSION: u8 = 7;
 pub const OP_SESSION_EXECUTE: u8 = 8;
 pub const OP_REVOKE_SESSION: u8 = 9;
 pub const OP_CLOSE_SESSION: u8 = 10;
+/// V4 fee-capped spend paths (discriminators 11-14) under [`DOMAIN_V4`].
+/// Each mirrors its V3 counterpart's layout plus a trailing `max_total_fee`
+/// u64 and binds it in the signed payload. Op-tags equal discriminators, so a
+/// signature for one operation (or one version) can never authorize another.
+pub const OP_WITHDRAW_SOL_V4: u8 = 11;
+pub const OP_WITHDRAW_TOKEN_V4: u8 = 12;
+pub const OP_EXECUTE_V4: u8 = 13;
+pub const OP_ACTIVATE_V4: u8 = 14;
 
 /// Maximum authorization lifetime in seconds, enforced on-chain alongside expiry.
 /// Bounds cross-cluster replay: the same PDA exists on every cluster by design,
@@ -94,6 +108,15 @@ pub fn payload_hash_v2(parts: &[&[u8]]) -> [u8; 32] {
 /// the fee-policy version but no amounts: network costs float with gas by design.
 pub fn payload_hash_v3(parts: &[&[u8]]) -> [u8; 32] {
     hash_with_domain(DOMAIN_V3, parts)
+}
+
+/// Domain-separated V4 authorization payload hash: `sha256(DOMAIN_V4 ‖ parts...)`.
+/// Same shape as V3 plus the trailing `max_total_fee` (u64 LE) part — the
+/// user-approved upper bound on `network_fee + protocol_fee`, enforced
+/// on-chain (`FeeExceedsMax`). The first part MUST be the one-byte V4
+/// operation tag (`OP_*_V4`, equal to the instruction discriminator).
+pub fn payload_hash_v4(parts: &[&[u8]]) -> [u8; 32] {
+    hash_with_domain(DOMAIN_V4, parts)
 }
 
 /// Domain-separated session-grant payload hash: `sha256(DOMAIN_SESSION ‖ parts...)`.
@@ -351,6 +374,33 @@ mod tests {
         buf.extend_from_slice(&account_id);
         buf.extend_from_slice(&nonce);
         assert_eq!(h_v3, sha256(&buf));
+    }
+
+    #[test]
+    fn payload_hash_v4_binds_cap_and_separates() {
+        // V4 op-tags equal the new discriminators (11-14).
+        assert_eq!(OP_WITHDRAW_SOL_V4, 11);
+        assert_eq!(OP_WITHDRAW_TOKEN_V4, 12);
+        assert_eq!(OP_EXECUTE_V4, 13);
+        assert_eq!(OP_ACTIVATE_V4, 14);
+        let account_id = [0x22u8; 32];
+        let nonce = 7u64.to_le_bytes();
+        let cap = 22_000u64.to_le_bytes();
+        let h_v4 = payload_hash_v4(&[&[OP_WITHDRAW_SOL_V4], &account_id, &nonce, &cap]);
+        // Same fields under V3 must differ (domain separation).
+        let h_v3 = payload_hash_v3(&[&[OP_WITHDRAW_SOL], &account_id, &nonce]);
+        assert_ne!(h_v4, h_v3);
+        // Same V4 fields with a different cap must differ (cap is bound).
+        let other = payload_hash_v4(&[&[OP_WITHDRAW_SOL_V4], &account_id, &nonce, &22_001u64.to_le_bytes()]);
+        assert_ne!(h_v4, other);
+        // Reference computation: sha256(DOMAIN_V4 ‖ parts).
+        let mut buf = Vec::new();
+        buf.extend_from_slice(DOMAIN_V4);
+        buf.extend_from_slice(&[OP_WITHDRAW_SOL_V4]);
+        buf.extend_from_slice(&account_id);
+        buf.extend_from_slice(&nonce);
+        buf.extend_from_slice(&cap);
+        assert_eq!(h_v4, sha256(&buf));
     }
 
     #[test]

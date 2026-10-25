@@ -4,9 +4,11 @@
 
 import {
   pidToSalt32,
+  assertNonfinancialKind,
   buildEvmAuthorizationPayload,
   buildEvmAuthorizationPayloadV2,
   buildEvmAuthorizationPayloadV3,
+  buildEvmAuthorizationPayloadV4,
   deriveEvmSmartAccountAddress,
   fromAscii,
   fromHex,
@@ -400,7 +402,11 @@ export class EvmAdapter {
     return buildViewCalldata();
   }
 
-  /** V4 `grantPermission` calldata (GrantArgs tuple is all-static). */
+  /** V4 `grantPermission` calldata (ANT-556: GrantArgs gains `feeLimit`).
+   * SDK-side Option A gate: financial kinds throw before encoding.
+   * Selector changes with the tuple — legacy v1 grant calldata is undecodable
+   * on the new contract (fail-closed); pending v1 intents must be re-signed.
+   */
   buildGrantPermissionData(args: {
     grant: {
       permissionId: Bytes;
@@ -413,6 +419,7 @@ export class EvmAdapter {
       to: string;
       perTxCap: bigint | number;
       totalLimit: bigint | number;
+      feeLimit?: bigint | number;
       nftId: bigint | number;
       validAfter: bigint | number;
       validUntil: bigint | number;
@@ -424,8 +431,9 @@ export class EvmAdapter {
     r: Bytes;
     s: Bytes;
   }): string {
-    const sel = "0x" + toHex(selector("grantPermission((bytes32,bytes32,bytes32,uint8,address,bytes4,address,address,uint256,uint256,uint256,uint64,uint64,bytes32,uint64),bytes,bytes,bytes32,bytes32)"));
+    const sel = "0x" + toHex(selector("grantPermission((bytes32,bytes32,bytes32,uint8,address,bytes4,address,address,uint256,uint256,uint256,uint256,uint64,uint64,bytes32,uint64),bytes,bytes,bytes32,bytes32)"));
     const g = args.grant;
+    assertNonfinancialKind(g.kind);
     mustBytes(g.permissionId, 32, "permissionId");
     mustBytes(g.sessionX, 32, "sessionX");
     mustBytes(g.sessionY, 32, "sessionY");
@@ -446,6 +454,7 @@ export class EvmAdapter {
           { t: "address", value: g.to },
           { t: "uint", bytes: 32, value: g.perTxCap },
           { t: "uint", bytes: 32, value: g.totalLimit },
+          { t: "uint", bytes: 32, value: g.feeLimit ?? 0n },
           { t: "uint", bytes: 32, value: g.nftId },
           { t: "uint", bytes: 8, value: g.validAfter },
           { t: "uint", bytes: 8, value: g.validUntil },
@@ -481,7 +490,10 @@ export class EvmAdapter {
     ]);
   }
 
-  /** V4 `executeWithPermission` calldata. */
+  /** V4 `executeWithPermission` calldata (frozen v1 overload: 12 args, no cap).
+   * Serves legacy sunset executions only; new executions use
+   * `buildExecuteWithPermissionDataV2`.
+   */
   buildExecuteWithPermissionData(args: {
     permissionId: Bytes;
     target: string;
@@ -514,6 +526,149 @@ export class EvmAdapter {
     ]);
   }
 
+  /** V4 `executeWithPermission` calldata (v2 overload: 13 args, `maxTotalFee` after `feePolicyVersion`). */
+  buildExecuteWithPermissionDataV2(args: {
+    permissionId: Bytes;
+    target: string;
+    value: bigint | number;
+    data: Bytes;
+    deadline: bigint | number;
+    seq: bigint | number;
+    feePolicyVersion: number;
+    maxTotalFee: bigint | number;
+    networkFee: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const sel = "0x" + toHex(selector("executeWithPermission(bytes32,address,uint256,bytes,uint64,uint64,uint16,uint256,uint256,bytes,bytes,bytes32,bytes32)"));
+    mustBytes(args.permissionId, 32, "permissionId");
+    return sel + abiEncodeCall([
+      { t: "bytes32", value: args.permissionId },
+      { t: "address", value: args.target },
+      { t: "uint", bytes: 32, value: args.value },
+      { t: "bytes", value: args.data },
+      { t: "uint", bytes: 8, value: args.deadline },
+      { t: "uint", bytes: 8, value: args.seq },
+      { t: "uint", bytes: 2, value: args.feePolicyVersion },
+      { t: "uint", bytes: 32, value: args.maxTotalFee },
+      { t: "uint", bytes: 32, value: args.networkFee },
+      { t: "bytes", value: args.authenticatorData },
+      { t: "bytes", value: args.clientDataJSON },
+      { t: "bytes32", value: args.r },
+      { t: "bytes32", value: args.s },
+    ]);
+  }
+
+  /** V4 `deployAndInitV4` calldata (fee-capped activation). */
+  buildDeployAndInitDataV4(args: {
+    salt: Bytes | string;
+    x: Bytes;
+    y: Bytes;
+    feePolicyVersion: number;
+    maxTotalFee: bigint | number;
+    deadline: bigint | number;
+    networkFee: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const saltHex = typeof args.salt === "string" ? args.salt : "0x" + toHex(args.salt);
+    const sel = "0x" + toHex(selector("deployAndInitV4(bytes32,bytes32,bytes32,uint16,uint256,uint64,uint256,bytes,bytes,bytes32,bytes32)"));
+    const head = [
+      pad32(saltHex),
+      pad32("0x" + toHex(args.x)),
+      pad32("0x" + toHex(args.y)),
+      pad32("0x" + toHex(ube(args.feePolicyVersion, 2))),
+      pad32("0x" + toHex(ube(args.maxTotalFee, 32))),
+      pad32("0x" + toHex(ube(args.deadline, 8))),
+      pad32("0x" + toHex(ube(args.networkFee, 32))),
+    ];
+    const staticSize = 11 * 32;
+    const authData = args.authenticatorData;
+    const clientData = args.clientDataJSON;
+    constCoderCheck(authData, clientData, args.r, args.s);
+    const off0 = staticSize;
+    const off1 = off0 + paddedLen(authData.length);
+    const tail = [
+      pad32("0x" + toHex(ube(off0, 32))),
+      pad32("0x" + toHex(ube(off1, 32))),
+      encBytes32(args.r),
+      encBytes32(args.s),
+      encodeBytes(authData),
+      encodeBytes(clientData),
+    ];
+    return sel + head.join("") + tail.join("");
+  }
+
+  /** V4 owner `executeV4` authorization payload (binds `maxTotalFee`). */
+  buildExecutePayloadV4(args: {
+    chainId: bigint | number;
+    account: string;
+    nonce: bigint | number;
+    to: string;
+    value: bigint | number;
+    dataHash: Bytes;
+    deadline: bigint | number;
+    feePolicyVersion: number;
+    maxTotalFee: bigint | number;
+  }): Uint8Array {
+    return buildEvmAuthorizationPayloadV4(OP_EVM.execute, [
+      ube(args.chainId, 32),
+      hexBytes(args.account, 20),
+      ube(args.nonce, 8),
+      hexBytes(args.to, 20),
+      ube(args.value, 32),
+      args.dataHash,
+      ube(args.deadline, 8),
+      ube(args.feePolicyVersion, 2),
+      ube(args.maxTotalFee, 32),
+    ]);
+  }
+
+  /** V4 owner `executeV4` calldata. */
+  buildExecuteDataV4(args: {
+    to: string;
+    value: bigint | number;
+    data: Bytes;
+    deadline: bigint | number;
+    feePolicyVersion: number;
+    maxTotalFee: bigint | number;
+    networkFee: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const sel = "0x" + toHex(selector("executeV4(address,uint256,bytes,uint64,uint16,uint256,uint256,bytes,bytes,bytes32,bytes32)"));
+    const head = [encodeAddress(args.to), pad32("0x" + toHex(ube(args.value, 32)))];
+    const staticSize = 11 * 32;
+    const callData = args.data;
+    const authData = args.authenticatorData;
+    const clientData = args.clientDataJSON;
+    constCoderCheck(authData, clientData, args.r, args.s);
+    const offData = staticSize;
+    const offAuth = offData + paddedLen(callData.length);
+    const offClient = offAuth + paddedLen(authData.length);
+    const tail = [
+      pad32("0x" + toHex(ube(offData, 32))),
+      pad32("0x" + toHex(ube(args.deadline, 8))),
+      pad32("0x" + toHex(ube(args.feePolicyVersion, 2))),
+      pad32("0x" + toHex(ube(args.maxTotalFee, 32))),
+      pad32("0x" + toHex(ube(args.networkFee, 32))),
+      pad32("0x" + toHex(ube(offAuth, 32))),
+      pad32("0x" + toHex(ube(offClient, 32))),
+      encBytes32(args.r),
+      encBytes32(args.s),
+      encodeBytes(callData),
+      encodeBytes(authData),
+      encodeBytes(clientData),
+    ];
+    return sel + head.join("") + tail.join("");
+  }
+
   /** ERC-7579 `execute(bytes32,bytes)` calldata (auth packed inside per Exec7579Args). */
   build7579ExecuteData(args: { mode: Bytes; exec: Exec7579Tuple }): string {
     const sel = "0x" + toHex(selector("execute(bytes32,bytes)"));
@@ -521,11 +676,25 @@ export class EvmAdapter {
     return sel + abiEncodeCall([{ t: "bytes32", value: args.mode }, { t: "tuple", fields: exec7579Fields(args.exec) }]);
   }
 
-  /** ERC-7579 `executeFromExecutor(bytes32,bytes)` calldata (PermExecArgs tuple). */
+  /** ERC-7579 `executeV4(bytes32,bytes)` calldata (Exec7579Args + `maxTotalFee`). */
+  build7579ExecuteDataV4(args: { mode: Bytes; exec: Exec7579TupleV4 }): string {
+    const sel = "0x" + toHex(selector("executeV4(bytes32,bytes)"));
+    mustBytes(args.mode, 32, "mode");
+    return sel + abiEncodeCall([{ t: "bytes32", value: args.mode }, { t: "tuple", fields: exec7579FieldsV4(args.exec) }]);
+  }
+
+  /** ERC-7579 `executeFromExecutor(bytes32,bytes)` calldata (PermExecArgs tuple, frozen v1). */
   buildExecuteFromExecutorData(args: { mode: Bytes; exec: PermExecTuple }): string {
     const sel = "0x" + toHex(selector("executeFromExecutor(bytes32,bytes)"));
     mustBytes(args.mode, 32, "mode");
     return sel + abiEncodeCall([{ t: "bytes32", value: args.mode }, { t: "tuple", fields: permExecFields(args.exec) }]);
+  }
+
+  /** ERC-7579 `executeFromExecutorV2(bytes32,bytes)` calldata (PermExecArgs + `maxTotalFee`). */
+  buildExecuteFromExecutorDataV2(args: { mode: Bytes; exec: PermExecTupleV2 }): string {
+    const sel = "0x" + toHex(selector("executeFromExecutorV2(bytes32,bytes)"));
+    mustBytes(args.mode, 32, "mode");
+    return sel + abiEncodeCall([{ t: "bytes32", value: args.mode }, { t: "tuple", fields: permExecFieldsV2(args.exec) }]);
   }
 
   /** ERC-7579 `installModule` / `uninstallModule` calldata (owner assertion appended). */
@@ -740,6 +909,16 @@ export interface PermExecTuple extends Exec7579Tuple {
   feeRecipient: string;
 }
 
+/** V4 permission-execution tuple (adds the session-signed `maxTotalFee`). */
+export interface PermExecTupleV2 extends PermExecTuple {
+  maxTotalFee: bigint | number;
+}
+
+/** V4 owner-7579 tuple (adds the owner-signed `maxTotalFee`). */
+export interface Exec7579TupleV4 extends Exec7579Tuple {
+  maxTotalFee: bigint | number;
+}
+
 function exec7579Fields(e: Exec7579Tuple): AbiValue[] {
   return [
     { t: "address", value: e.target },
@@ -747,6 +926,22 @@ function exec7579Fields(e: Exec7579Tuple): AbiValue[] {
     { t: "bytes", value: e.data },
     { t: "uint", bytes: 8, value: e.deadline },
     { t: "uint", bytes: 2, value: e.feePolicyVersion },
+    { t: "uint", bytes: 32, value: e.networkFee },
+    { t: "bytes", value: e.authenticatorData },
+    { t: "bytes", value: e.clientDataJSON },
+    { t: "bytes32", value: e.r },
+    { t: "bytes32", value: e.s },
+  ];
+}
+
+function exec7579FieldsV4(e: Exec7579TupleV4): AbiValue[] {
+  return [
+    { t: "address", value: e.target },
+    { t: "uint", bytes: 32, value: e.value },
+    { t: "bytes", value: e.data },
+    { t: "uint", bytes: 8, value: e.deadline },
+    { t: "uint", bytes: 2, value: e.feePolicyVersion },
+    { t: "uint", bytes: 32, value: e.maxTotalFee },
     { t: "uint", bytes: 32, value: e.networkFee },
     { t: "bytes", value: e.authenticatorData },
     { t: "bytes", value: e.clientDataJSON },
@@ -764,6 +959,25 @@ function permExecFields(e: PermExecTuple): AbiValue[] {
     { t: "uint", bytes: 8, value: e.deadline },
     { t: "uint", bytes: 8, value: e.seq },
     { t: "uint", bytes: 2, value: e.feePolicyVersion },
+    { t: "uint", bytes: 32, value: e.networkFee },
+    { t: "address", value: e.feeRecipient },
+    { t: "bytes", value: e.authenticatorData },
+    { t: "bytes", value: e.clientDataJSON },
+    { t: "bytes32", value: e.r },
+    { t: "bytes32", value: e.s },
+  ];
+}
+
+function permExecFieldsV2(e: PermExecTupleV2): AbiValue[] {
+  return [
+    { t: "bytes32", value: e.permissionId },
+    { t: "address", value: e.target },
+    { t: "uint", bytes: 32, value: e.value },
+    { t: "bytes", value: e.data },
+    { t: "uint", bytes: 8, value: e.deadline },
+    { t: "uint", bytes: 8, value: e.seq },
+    { t: "uint", bytes: 2, value: e.feePolicyVersion },
+    { t: "uint", bytes: 32, value: e.maxTotalFee },
     { t: "uint", bytes: 32, value: e.networkFee },
     { t: "address", value: e.feeRecipient },
     { t: "bytes", value: e.authenticatorData },
