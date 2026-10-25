@@ -1,8 +1,8 @@
 import { useState } from "react";
 import type { AccountView } from "@peridotvault/pid-types";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { deliverLoginCode, rejectLogin, type LoginContext } from "../popup-login";
-import { withDenied, withPidCode, type SsoRequest } from "../sso";
+import { deliverLoginCode, rejectLogin, type LoginContext } from "../utils/popup-login";
+import { withDenied, withPidCode, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "./useLoginSession";
 
 export function useConsentActions(

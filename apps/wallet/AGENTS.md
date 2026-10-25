@@ -8,21 +8,30 @@ screens communicate via callback props (`onDone`, `goSend`, …), never imports.
 ```
 App.tsx               # shell/composer — wires screens + providers + TabBar
 src/
-  screens/            # 21 screens, FLAT (no subfolders, no screen→screen imports)
+  screens/            # 23 screens, FLAT (no subfolders, no screen→screen imports)
   shared/             # highest reusable layer: usable by >1 feature AND by shell
     theme.ts          # brand theme (colors/fonts/shared styles)
     AppContext.tsx    # SDK client provider + usePeridot()
     icons.ts          # lucide barrel (deep per-icon imports only)
     currency.ts       # IDR/USD pref (localStorage) + CoinGecko rates
     config.ts         # API_BASE_URL
+    api-cache.ts      # cachedRead/invalidate/clearApiCache (screens + feats)
+    network-mode.ts   # testnet store (view: hooks/useNetworkMode.ts)
+    openExternal.ts   # openExternalUrl (guards via safeUrl.ts)
+    safeUrl.ts        # assertSafeExternalUrl (shared→shared only)
+    styles.ts         # StyleSheet + flatten helpers (Phase 4 exceptions)
     fiat-ensure.ts    # post-auth provisioning check (shell routing)
     fiat.ts           # FiatItem/FiatLedgerItem + status labels + sumIdr
     shims.ts          # Buffer/global bootstrap — imported first by main.tsx,
                       # runs before any Solana module (top-level Buffer use)
     components/       # UIButton, AsciiRidges(*), AccountSwitcherModal,
-                      # LoadingScreen, TabBar
-    hooks/  utils/    # future shared extractions land here
-  feat/<domain>/      # auth | wallet | fiat | activity | identity
+                      # LoadingScreen, TabBar, AppColumn, BackButton,
+                      # BottomSheet, Modal, Pressable, PushHeader,
+                      # ScrollArea, TextField
+    hooks/            # session bootstrap/sync, startup gate, network-mode
+                      # view, wide layout, window dimensions
+  feat/<domain>/      # auth | wallet | fiat | activity | identity | embed
+                      # (each: components/ hooks/ utils/ — no loose files)
   modules.d.ts        # ambient type shims (stays at src/ root)
 ```
 
@@ -45,11 +54,12 @@ src/
 ## Screen → domain map (logical; screens stay flat in `screens/`)
 
 - `auth`: Login, Provisioning, Approve
-- `wallet`: Home, Send, Receive, Swap, Activation
+- `wallet`: Home, Send, Receive, Swap, Activation, FiatAccount
 - `fiat`: Topup, FiatTransfer, FiatDetail, FiatLedgerDetail
 - `activity`: Activity, ActivityDetail
 - `identity`: Profile, EditProfile, ConnectedAccounts, Passkey,
   Sessions, AppConnections, Settings (profile+settings+security merged)
+- `embed`: EmbedConnect (iframe entry, shell-routed — not in tab nav)
 
 ## Guards (CI, `rg`-style like the other repo guards)
 
@@ -60,7 +70,7 @@ rg "from\s+['\"][^'\"]*(screens|feat)/" $W/src/shared && exit 1
 # screens must not import sibling screens
 rg "from\s+['\"]\./" $W/src/screens && exit 1
 # no cross-feat imports (one line per feat)
-for f in auth wallet fiat activity identity; do
+for f in auth wallet fiat activity identity embed; do
   rg "from\s+['\"][^'\"]*feat/" $W/src/feat/$f \
     | rg -v "feat/$f/" && exit 1
 done
@@ -101,7 +111,7 @@ done
   components/PopupReview}` + `feat/fiat/hooks/useFiatPrepare`.
 - Login → `feat/auth/{hooks/useAppVerified,useLoginSession,usePidClaim,
   useSignInMethods,useConsentActions,utils/parseOAuthError,
-  components/PidClaimForm,LoginOptions}` (+`finishSso` lives in `sso.ts`).
+  components/PidClaimForm,LoginOptions}` (+`finishSso` lives in `utils/sso.ts`).
 - Deliberately duplicated (not unified): Home vs Activity `TabButton`
   variants, modal vs explainer activation copy.
 
@@ -147,3 +157,13 @@ done
   selection callbacks. The `Screen` type lives with the session hook;
   `loginContext` is typed `unknown` there (only truthiness matters —
   keeps the shared→feat guard green).
+
+## Done (Phase 6 — foldering resync)
+
+- `feat/embed/` is a sixth domain (guard loop covers it now): Screen lives
+  in `screens/EmbedConnectScreen.tsx`, bridge in `hooks/useEmbedBridge.ts`,
+  client in `utils/embed-client.ts` — no loose files at feat roots.
+- `feat/auth/popup-login.ts` + `sso.ts` moved to `feat/auth/utils/`
+  (were loose at the feat root); all importers updated.
+- `shared/utils/` (empty, only `.gitkeep`) deleted. Rule 5 still holds:
+  new shared code lands as a named top-level module, not a utils pile.

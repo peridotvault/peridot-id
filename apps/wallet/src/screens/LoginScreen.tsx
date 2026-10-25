@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePeridot } from "../shared/AppContext";
-import { readLoginContext, type LoginContext } from "../feat/auth/popup-login";
-import { readSsoParams, ssoOrigin } from "../feat/auth/sso";
+import { readLoginContext, type LoginContext } from "../feat/auth/utils/popup-login";
+import { readSsoParams, ssoOrigin } from "../feat/auth/utils/sso";
 import { LoadingScreen } from "../shared/components/LoadingScreen";
 import { AccountSwitcherModal } from "../shared/components/AccountSwitcherModal";
 import { SsoConsentModal } from "../feat/auth/components/SsoConsentModal";

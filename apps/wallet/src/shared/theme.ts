@@ -33,6 +33,8 @@ export const theme = {
     sansBold: "Geist, system-ui, -apple-system, sans-serif",
     serif: "'Source Serif 4', Georgia, serif",
     mono: "'JetBrains Mono', ui-monospace, monospace",
+    // Game-badge face (local NTBrickSans.ttf): level chip + level numerals only.
+    level: "'NT Brick Sans', Geist, system-ui, -apple-system, sans-serif",
   },
 };
 

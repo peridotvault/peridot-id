@@ -112,7 +112,7 @@ export function ProfileScreen({
           aria-label={`Level ${profile.level.level}, ${xpProgressLabel(profile.level)}`}
         >
           <div style={{ flexDirection: "row" }} className="flex flex-col items-baseline justify-between">
-            <span className="font-sans text-base font-medium text-foreground">Level {profile.level.level}</span>
+            <span className="font-sans text-base font-medium text-foreground">Level <span className="font-level text-lg leading-none">{profile.level.level}</span></span>
             <span className="font-sans text-sm text-muted-foreground">{xpProgressLabel(profile.level)}</span>
           </div>
           <div className="flex flex-col h-1.5 w-full overflow-hidden rounded-full bg-muted">

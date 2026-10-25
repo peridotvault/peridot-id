@@ -1,6 +1,6 @@
 
-import { styles as s } from "../../shared/theme";
-import { UIButton } from "../../shared/components/UIButton";
+import { styles as s } from "../shared/theme";
+import { UIButton } from "../shared/components/UIButton";
 
 /**
  * Embedded wallet entry: shown inside the iframe before the parent hands over a
