@@ -88,8 +88,6 @@ export class RotateService {
       throw new ConflictException("Wallet must be activated before rotating authority");
     }
 
-    // H2.iv double-rotation guard: no second rotation while one may confirm.
-    await this.idempotency.assertNoInflightRotation(pid, BROADCAST_CHAIN_SOLANA);
     // H3: fail-closed while the per-chain spend-rate breaker is open.
     await this.breaker.requireClosed(pid, BROADCAST_CHAIN_SOLANA, "rotate");
 
@@ -145,10 +143,35 @@ export class RotateService {
         claim.signature,
       );
       if (done) return done;
-      // Slot claimed but chain does not show the new authority: fall through to
-      // resolve-then-act (rebroadcast identical bytes ONLY on proven non-landing).
+      // This IS the in-flight slot and the chain does not confirm: run
+      // resolve-then-act for this exact slot (guard skipped -- blocking our
+      // own slot would brick retries, F1).
+      return this.submitAndConfirm(adapter, pid, dto, chainNonce, currentKey, newKey, assertion, oldCred.id, claim.signature);
     }
+    // H2.iv double-rotation guard on fresh claims only: no second rotation
+    // while a DIFFERENT slot may still confirm (self-healing: stale slots
+    // are released as expired, F1).
+    await this.idempotency.assertNoInflightRotation(pid, BROADCAST_CHAIN_SOLANA, chainNonce);
 
+    return this.submitAndConfirm(adapter, pid, dto, chainNonce, currentKey, newKey, assertion, oldCred.id, claim.signature);
+  }
+
+  /**
+   * Shared broadcast + confirm + revoke tail (F1): both the duplicate-slot
+   * resolve path and the fresh-claim path converge here. Post-confirmation
+   * failures alert, never rebroadcast.
+   */
+  private async submitAndConfirm(
+    adapter: SolanaAdapter,
+    pid: string,
+    dto: { oldCredentialId: string; newCredentialId: string; nonce: string; expiry: number },
+    chainNonce: bigint,
+    currentKey: Uint8Array,
+    newKey: Uint8Array,
+    assertion: PasskeyAssertion,
+    oldCredId: string,
+    slotSignature: string | null,
+  ): Promise<RotateAuthorityResult> {
     const out = await this.idempotency.broadcastWithResolveThenAct({
       pid,
       nonce: dto.nonce,
@@ -169,11 +192,11 @@ export class RotateService {
       resolveState: async () => {
         const onChain = await adapter.getAuthority(pid).catch(() => null);
         if (onChain && Buffer.from(onChain).toString("hex") === Buffer.from(newKey).toString("hex")) {
-          return { landed: true as const, signature: claim.signature };
+          return { landed: true as const, signature: slotSignature };
         }
         const nonceNow = await adapter.getNonce(pid).catch(() => null);
         if (nonceNow == null) return { unreadable: true as const };
-        if (nonceNow !== chainNonce) return { landed: true as const, signature: claim.signature };
+        if (nonceNow !== chainNonce) return { landed: true as const, signature: slotSignature };
         return { landed: false as const };
       },
     });
@@ -204,9 +227,9 @@ export class RotateService {
       );
     }
 
-    await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "confirmed", signature);
+    await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "rotate", "confirmed", signature);
     await this.prisma.authority.update({
-      where: { id: oldCred.id },
+      where: { id: oldCredId },
       data: { status: "revoked" },
     });
     // H1.i: rotation revokes count toward the per-chain revocation spike rate.
@@ -245,7 +268,7 @@ export class RotateService {
       this.logger.warn(`revocation record failed: ${(err as Error).message}`),
     );
     if (signature) {
-      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "confirmed", signature);
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "rotate", "confirmed", signature);
     }
     await this.security.log(pid, "credential.rotated", {
       signature,

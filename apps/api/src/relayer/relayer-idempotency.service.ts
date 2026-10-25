@@ -13,6 +13,7 @@
 
 import { ConflictException, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { isP2002 } from "../prisma/prisma-error";
 import { SecurityEventService } from "../security/security-event.service";
 import { RelayerEvents, ResolveOutcome, SponsoredEntryPoint, backoffWithJitter } from "./relayer-events";
 
@@ -24,6 +25,7 @@ export type BroadcastStatus =
   | "submitted"
   | "confirmed"
   | "failed"
+  | "expired"
   | "rebroadcast"
   | "resolved-landed"
   | "resolved-not-landed-rebroadcast"
@@ -48,9 +50,12 @@ export function isDeterministicBroadcastError(err: unknown): boolean {
   );
 }
 
-/** R-NFR-11: chain-state re-read bound for resolve-then-act. */
+/** R-NFR-11: chain-state resolve bound: at most 5 resolve attempts. Each attempt may do up to ~2 RPC reads (e.g. nonce + history), so ~10 reads worst-case. No per-attempt timeout yet, so the 30s budget is advisory and a hung RPC can blow it; attempts are still bounded. */
 export const RESOLVE_MAX_ATTEMPTS = 5;
 export const RESOLVE_BUDGET_MS = 30_000;
+
+/** F1: a rotation slot older than this can never confirm a live ceremony (authorizations expire <=600s). */
+export const ROTATION_SLOT_TTL_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class RelayerIdempotencyService {
@@ -79,12 +84,20 @@ export class RelayerIdempotencyService {
     entryPoint: SponsoredEntryPoint,
   ): Promise<ClaimResult> {
     const existing = await this.prisma.relayerBroadcast.findUnique({
-      where: { pid_nonce_chain: { pid, nonce, chain } },
+      where: { pid_nonce_chain_entryPoint: { pid, nonce, chain, entryPoint } },
     });
     if (!existing) {
-      await this.prisma.relayerBroadcast.create({
-        data: { pid, nonce, chain, entryPoint, txBytesHash, status: "claimed" },
-      });
+      try {
+        await this.prisma.relayerBroadcast.create({
+          data: { pid, nonce, chain, entryPoint, txBytesHash, status: "claimed" },
+        });
+      } catch (err) {
+        // Concurrent identical claims both passed the check: the unique index
+        // arbitrates. Re-read the winner and proceed as duplicate/forbidden
+        // instead of surfacing a 500.
+        if (!isP2002(err)) throw err;
+        return this.claimSlot(pid, nonce, chain, txBytesHash, entryPoint);
+      }
       return { decision: "proceed", signature: null };
     }
     if (existing.txBytesHash === txBytesHash) {
@@ -113,9 +126,15 @@ export class RelayerIdempotencyService {
     );
   }
 
-  async recordSubmission(pid: string, nonce: string, chain: string, signature: string): Promise<void> {
+  async recordSubmission(
+    pid: string,
+    nonce: string,
+    chain: string,
+    entryPoint: SponsoredEntryPoint,
+    signature: string,
+  ): Promise<void> {
     await this.prisma.relayerBroadcast.update({
-      where: { pid_nonce_chain: { pid, nonce, chain } },
+      where: { pid_nonce_chain_entryPoint: { pid, nonce, chain, entryPoint } },
       data: { signature, status: "submitted" },
     });
   }
@@ -124,35 +143,50 @@ export class RelayerIdempotencyService {
     pid: string,
     nonce: string,
     chain: string,
+    entryPoint: SponsoredEntryPoint,
     status: BroadcastStatus,
     signature?: string,
   ): Promise<void> {
     await this.prisma.relayerBroadcast.update({
-      where: { pid_nonce_chain: { pid, nonce, chain } },
+      where: { pid_nonce_chain_entryPoint: { pid, nonce, chain, entryPoint } },
       data: { status, ...(signature ? { signature } : {}) },
     });
   }
 
   /**
    * Rotation double-guard (H2.iv): a second rotation MUST NOT be submitted
-   * while a previous one may still confirm. Resolved by polling ceremony
-   * state, not by a new nonce.
+   * while a previous one may still confirm. Self-healing (F1): a slot whose
+   * nonce no longer matches the chain can never land (stale authorization),
+   * and a slot older than the rotation TTL can never confirm a live ceremony
+   * -- both are released as `expired` instead of bricking rotation forever.
+   * Only a fresh slot on the CURRENT nonce blocks. Resolved by polling
+   * ceremony state, not by a new nonce.
    */
-  async assertNoInflightRotation(pid: string, chain: string): Promise<void> {
+  async assertNoInflightRotation(pid: string, chain: string, currentNonce: bigint): Promise<void> {
     const inflight = await this.prisma.relayerBroadcast.findFirst({
       where: { pid, chain, entryPoint: "rotate", status: { in: ["claimed", "submitted", "rebroadcast"] } },
     });
-    if (inflight) {
+    if (!inflight) return;
+    const ageMs = Date.now() - new Date(inflight.updatedAt).getTime();
+    if (BigInt(inflight.nonce) !== currentNonce || ageMs > ROTATION_SLOT_TTL_MS) {
+      await this.recordOutcome(pid, inflight.nonce, chain, "rotate", "expired");
       await this.security.log(pid, RelayerEvents.rotationUnconfirmed, {
         chain,
         nonce: inflight.nonce,
         signature: inflight.signature,
-        guard: "double-rotation",
+        guard: "stale-slot-released",
       });
-      throw new ServiceUnavailableException(
-        "A rotation may still be confirming — check ceremony state before retrying (double-rotation guard)",
-      );
+      return;
     }
+    await this.security.log(pid, RelayerEvents.rotationUnconfirmed, {
+      chain,
+      nonce: inflight.nonce,
+      signature: inflight.signature,
+      guard: "double-rotation",
+    });
+    throw new ServiceUnavailableException(
+      "A rotation may still be confirming — check ceremony state before retrying (double-rotation guard)",
+    );
   }
 
   /**
@@ -183,7 +217,7 @@ export class RelayerIdempotencyService {
       if (isDeterministicBroadcastError(err)) throw err;
       return this.resolveThenAct(opts);
     }
-    await this.recordSubmission(pid, nonce, chain, signature);
+    await this.recordSubmission(pid, nonce, chain, entryPoint, signature);
     return { signature, result, outcome: "broadcast-ok" };
   }
 
@@ -199,7 +233,7 @@ export class RelayerIdempotencyService {
     const resolution = await this.resolveWithBound(opts.resolveState);
     if ("unreadable" in resolution) {
       // Chain state UNREADABLE after the bound: park + alert, never blind-broadcast.
-      await this.recordOutcome(pid, nonce, chain, "parked-unreadable");
+      await this.recordOutcome(pid, nonce, chain, entryPoint, "parked-unreadable");
       await this.security.log(pid, RelayerEvents.parkedUnreadable, { entryPoint, chain, nonce });
       await this.security.log(pid, RelayerEvents.parked, {
         entryPoint,
@@ -216,7 +250,7 @@ export class RelayerIdempotencyService {
       // Chain state proves landing: treat as success (reconcile, no rebroadcast).
       // A null signature means proven-landed but unattributed (nonce consumed,
       // history unreadable) — reconcile what can be reconciled, alert the rest.
-      await this.recordOutcome(pid, nonce, chain, "resolved-landed", resolution.signature ?? undefined);
+      await this.recordOutcome(pid, nonce, chain, entryPoint, "resolved-landed", resolution.signature ?? undefined);
       await this.security.log(pid, RelayerEvents.resolvedLanded, {
         entryPoint,
         chain,
@@ -227,7 +261,7 @@ export class RelayerIdempotencyService {
     }
     // Proven non-landing: the ONE allowed identical-bytes rebroadcast.
     const out = await opts.broadcast();
-    await this.recordOutcome(pid, nonce, chain, "resolved-not-landed-rebroadcast", out.signature);
+    await this.recordOutcome(pid, nonce, chain, entryPoint, "resolved-not-landed-rebroadcast", out.signature);
     await this.security.log(pid, RelayerEvents.rebroadcast, {
       entryPoint,
       chain,
@@ -243,7 +277,7 @@ export class RelayerIdempotencyService {
     return { signature: out.signature, result: out.result, outcome: "resolved-not-landed-rebroadcast" };
   }
 
-  /** R-NFR-11: ≤5 chain-state reads, backoff+jitter, ≤30s total. */
+  /** Up to 5 resolve attempts (~10 RPC reads worst-case), backoff+jitter between attempts, advisory 30s total budget. */
   private async resolveWithBound(
     resolveState: () => Promise<ChainStateResolution>,
   ): Promise<ChainStateResolution> {

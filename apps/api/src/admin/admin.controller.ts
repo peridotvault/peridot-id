@@ -4,9 +4,10 @@ import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CreateChainDto, CreateTokenDto, PreviewChainDto, PreviewTokenDto, SetEvmRelayerDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto, VerifyAppDto } from "./admin.dto";
+import { CreateChainDto, CreateTokenDto, PreviewChainDto, PreviewTokenDto, SetEvmRelayerDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto, VerifyAppDto, CloseBreakerDto } from "./admin.dto";
 import { AdminService } from "./admin.service";
 import { ChainPreviewService } from "./chain-preview.service";
+import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
 import { TokenPreviewService } from "./token-preview.service";
 
 @UseGuards(ThrottlerGuard)
@@ -16,6 +17,7 @@ export class AdminController {
     private readonly adminService: AdminService,
     private readonly preview: TokenPreviewService,
     private readonly chainPreview: ChainPreviewService,
+    private readonly breaker: CircuitBreakerService,
   ) {}
 
   @Get("chains")
@@ -69,6 +71,22 @@ export class AdminController {
   @UseGuards(JwtAuthGuard, AdminGuard)
   deleteEvmRelayer(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.adminService.deleteEvmRelayer(user.pid, id);
+  }
+
+  /** F3: operator-only spend-rate breaker observability (admin JWT, never app tokens). */
+  @Get("relayer/breaker")
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  breakerSnapshot(@Query("chain") chain: string) {
+    if (!chain) throw new BadRequestException("chain query is required");
+    return this.breaker.snapshot(chain);
+  }
+
+  /** F3: manual breaker resume (runbook §H4.4) — evidence required and logged. */
+  @Post("relayer/breaker/close")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  closeBreaker(@CurrentUser() user: AuthenticatedUser, @Body() dto: CloseBreakerDto) {
+    return this.breaker.closeBreaker(user.pid, dto.chain, dto.evidence);
   }
 
   @Post("chains/:id/logo")

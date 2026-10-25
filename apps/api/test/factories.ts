@@ -16,7 +16,12 @@ export function mockSecurity() {
  */
 export function mockIdempotency() {
   return {
-    claimSlot: jest.fn(async () => ({ decision: "proceed", signature: null })),
+    claimSlot: jest.fn(
+    async (): Promise<{ decision: "proceed" | "duplicate"; signature: string | null }> => ({
+      decision: "proceed",
+      signature: null,
+    }),
+  ),
     recordSubmission: jest.fn(async () => undefined),
     recordOutcome: jest.fn(async () => undefined),
     assertNoInflightRotation: jest.fn(async () => undefined),
@@ -38,10 +43,24 @@ export function mockRevocations() {
 export function mockBreaker() {
   return {
     requireClosed: jest.fn(async () => undefined),
-    recordAbsorbed: jest.fn(async () => ({ open: false })),
+    recordAbsorbed: jest.fn(
+      async (): Promise<{ chain: string; open: boolean; absorbedWindow: string; cap: string }> => ({
+        chain: "",
+        open: false,
+        absorbedWindow: "0",
+        cap: "0",
+      }),
+    ),
     isOpen: jest.fn(() => false),
-    closeBreaker: jest.fn(async () => undefined),
-    snapshot: jest.fn(() => ({ open: false })),
+    closeBreaker: jest.fn(
+      async (): Promise<{ chain: string; open: boolean; absorbedWindow: string; cap: string }> => ({
+        chain: "",
+        open: false,
+        absorbedWindow: "0",
+        cap: "0",
+      }),
+    ),
+    snapshot: jest.fn((chain: string) => ({ chain, open: false, absorbedWindow: "0", cap: "0" })),
     withBoundedRetries: jest.fn(
       async (
         _pid: string,

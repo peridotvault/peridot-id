@@ -481,6 +481,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
           user.pid,
           String(dto.expiry),
           BROADCAST_CHAIN_SOLANA,
+          "activate",
           "resolved-landed",
         );
         await this.security.log(user.pid, RelayerEvents.resolvedLanded, {
@@ -500,6 +501,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
           user.pid,
           String(dto.expiry),
           BROADCAST_CHAIN_SOLANA,
+          "activate",
           outcome === "failed" ? "failed" : "submitted",
           signature,
         );
@@ -515,6 +517,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         user.pid,
         String(dto.expiry),
         BROADCAST_CHAIN_SOLANA,
+        "activate",
         "confirmed",
         signature,
       );

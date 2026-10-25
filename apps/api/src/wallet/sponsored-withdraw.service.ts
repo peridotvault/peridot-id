@@ -157,7 +157,7 @@ export class SponsoredWithdrawService {
         "The transaction landed but its receipt is unreadable — support has been alerted, please check state before retrying",
       );
     }
-    await this.idempotency.recordOutcome(pid, nonce, BROADCAST_CHAIN_SOLANA, "resolved-landed", state.signature);
+    await this.idempotency.recordOutcome(pid, nonce, BROADCAST_CHAIN_SOLANA, entryPoint, "resolved-landed", state.signature);
     return {
       signature: state.signature,
       networkFeeLamports: networkFee.toString(),
@@ -502,7 +502,7 @@ export class SponsoredWithdrawService {
     const confirmation = await adapter.waitForConfirmation(signature, 8, 1000);
     if (confirmation === "failed") {
       // Post-confirmation failure: alert, never rebroadcast (H2.iii).
-      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "failed", signature);
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "withdraw", "failed", signature);
       await this.security.log(pid, RelayerEvents.intentRejected, {
         entryPoint: "withdraw",
         chain: BROADCAST_CHAIN_SOLANA,
@@ -520,10 +520,7 @@ export class SponsoredWithdrawService {
       feePolicyVersion: version,
     });
     if (confirmation === "confirmed") {
-      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "confirmed", signature);
-    }
-    if (confirmation === "confirmed") {
-      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "confirmed", signature);
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "withdraw", "confirmed", signature);
     }
     await this.reconcile(pid, adapter, signature, networkFee, protocolFee, version).catch((err) =>
       this.logger.warn(`withdraw reconcile failed for ${signature}: ${(err as Error).message}`),
@@ -847,7 +844,7 @@ export class SponsoredWithdrawService {
     const confirmation = await adapter.waitForConfirmation(signature, 8, 1000);
     if (confirmation === "failed") {
       // Post-confirmation failure: alert, never rebroadcast (H2.iii).
-      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "failed", signature);
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "execute", "failed", signature);
       await this.security.log(pid, RelayerEvents.intentRejected, {
         entryPoint: "execute",
         chain: BROADCAST_CHAIN_SOLANA,
@@ -869,7 +866,7 @@ export class SponsoredWithdrawService {
       this.logger.warn(`execute reconcile failed for ${signature}: ${(err as Error).message}`),
     );
     if (status === "confirmed") {
-      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "confirmed", signature);
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "execute", "confirmed", signature);
     }
     return {
       signature,

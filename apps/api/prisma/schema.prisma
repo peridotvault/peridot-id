@@ -319,13 +319,16 @@ model RelayerBroadcast {
   entryPoint  String
   txBytesHash String
   signature   String?
-  // claimed|submitted|confirmed|failed|rebroadcast|resolved-landed|
+  // claimed|submitted|confirmed|failed|expired|rebroadcast|resolved-landed|
   // resolved-not-landed-rebroadcast|parked-unreadable
+  // Unique key includes entryPoint (F4): a terminally-failed withdraw must not
+  // block an execute under the same chain nonce. The on-chain nonce still
+  // prevents double-execution, so per-entry slots lose no replay safety.
   status      String   @default("claimed")
   createdAt   DateTime @db.Timestamptz(3) @default(now())
   updatedAt   DateTime @db.Timestamptz(3) @updatedAt
 
-  @@unique([pid, nonce, chain])
+  @@unique([pid, nonce, chain, entryPoint])
   @@index([pid])
   @@map("relayer_broadcasts")
 }

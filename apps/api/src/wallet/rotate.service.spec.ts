@@ -64,8 +64,9 @@ function setup() {
       update: jest.fn(async (args: unknown) => args),
     },
   };
-  const service = new RotateService(prisma as never, config as never, security as never, minimalChainsStub() as never, mockIdempotency() as never, mockBreaker() as never, mockRevocations() as never);
-  return { service, prisma, security };
+  const idempotency = mockIdempotency();
+  const service = new RotateService(prisma as never, config as never, security as never, minimalChainsStub() as never, idempotency as never, mockBreaker() as never, mockRevocations() as never);
+  return { service, prisma, security, idempotency };
 }
 
 const base = {
@@ -139,4 +140,28 @@ describe("RotateService", () => {
       expect.objectContaining({ signature: "sig-rotate" }),
     );
   }, 30000);
+
+  it("claims the duplicate slot before the double-rotation guard (F1)", async () => {
+    const { service, idempotency } = setup();
+    const order: string[] = [];
+    idempotency.claimSlot.mockImplementation(async () => {
+      order.push("claim");
+      return { decision: "proceed", signature: null };
+    });
+    idempotency.assertNoInflightRotation.mockImplementation(async () => {
+      order.push("guard");
+    });
+    await service.rotate(IDENTITY_ID, base);
+    expect(order).toEqual(["claim", "guard"]);
+  });
+
+  it("skips the guard on the duplicate-slot resolve path (F1)", async () => {
+    const { service, idempotency } = setup();
+    // Chain already shows the new authority: idempotent completion, no guard.
+    idempotency.claimSlot.mockResolvedValue({ decision: "duplicate", signature: "sig-old" });
+    const res = await service.rotate(IDENTITY_ID, base);
+    expect(res).toEqual({ signature: "sig-old", status: "confirmed" });
+    expect(idempotency.assertNoInflightRotation).not.toHaveBeenCalled();
+    expect(adapterMock.submitRotateAuthorityTx).not.toHaveBeenCalled();
+  });
 });

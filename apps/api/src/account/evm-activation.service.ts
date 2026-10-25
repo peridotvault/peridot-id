@@ -524,7 +524,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     });
     if (!out.result) {
       // Resolved-landed: chain state proves OUR deployment; viewOf re-verifies.
-      await this.idempotency.recordOutcome(pid, String(dto.deadline), chainReference, "resolved-landed");
+      await this.idempotency.recordOutcome(pid, String(dto.deadline), chainReference, "activate", "resolved-landed");
       await this.resolveDeployedView(chainReference, pid);
       return { resolved: true, receipt: null };
     }
