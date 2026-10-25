@@ -2,6 +2,20 @@ export { PeridotWallet, ClusterMismatchError, assertChainEcho, buildChainEcho } 
 export type { PeridotWalletOptions } from "./wallet/wallet-client.js";
 export type { ExecuteInput, ExecuteMetaInput, RotateInput, TopupInput, WithdrawInput, ChainEcho, FeeQuoteView, SubmitTransactionInput } from "./wallet/wallet-client.js";
 export {
+  AUTHORIZATION_TTL_SECS,
+  FeeApprovalDeniedError,
+  QUOTE_TTL_SECS,
+  SOLANA_DECIMALS,
+  classifyFeeFailure,
+  coversBalance,
+  formatFeeAmount,
+  normalizeFeeQuote,
+  shortfallBaseUnits,
+  shortfallMessage,
+  ttlRemainingMs,
+} from "./wallet/fee-quote.js";
+export type { FeeApprovalHandler, FeeFailure, FeeFailureAction, FeeQuoteV2, NormalizedFeeQuote } from "./wallet/fee-quote.js";
+export {
   PeridotFiat,
   sumTransferFee,
   type CheckoutDepositView,
