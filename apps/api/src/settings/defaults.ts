@@ -5,10 +5,9 @@
 // the service falls back to them (fail-closed) when a key is unknown, has
 // the wrong type, or the DB/config cannot be read.
 //
-// Fail-closed posture: intake OFF, suspends OFF (deny-by-absence),
-// limits 0 (= no awards that window when enforced), no active policy ("").
+// Fail-closed posture: suspends OFF (deny-by-absence), limits 0 (= no awards
+// that window when enforced), no active policy ("").
 
-export const XP_INTAKE_ENABLED_DEFAULT = false;
 export const XP_SUSPEND_DEFAULT = false;
 export const XP_LIMIT_DEFAULT = 0;
 export const XP_POLICY_ACTIVE_DEFAULT = "";
@@ -65,13 +64,6 @@ export function validateParameterizedKey(key: string, value: unknown): string | 
 }
 
 export const SETTING_DEFINITIONS: SettingDefinition[] = [
-  {
-    key: "xp.intake.enabled",
-    valueType: "boolean",
-    defaultValue: XP_INTAKE_ENABLED_DEFAULT,
-    description: "DB successor of PID_XP_INTAKE_ENABLED. Effective intake additionally ANDs the env flag during transition.",
-    validate: (v) => (typeof v === "boolean" ? null : "must be a boolean"),
-  },
   {
     key: "xp.limits.daily",
     valueType: "integer",

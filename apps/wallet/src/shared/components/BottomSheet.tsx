@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "../primitives";
+import { Modal } from "./Modal";
+import { Pressable } from "./Pressable";
+import { StyleSheet } from "../styles";
 import { X } from "../icons";
 
 // Shared bottom drawer: slide-up sheet capped at the sm width and centered.
@@ -26,21 +28,21 @@ export function BottomSheet({
         style={styles.scrim}
         onPress={closeDisabled ? undefined : onClose}
         accessibilityLabel={scrimLabel ?? `Close ${title}`}
-      />
-      <View
-        className="absolute bottom-0 left-0 right-0 mx-auto max-h-[75%] w-full max-w-[576px] gap-3 self-center border-t border-border bg-surface p-5 pb-7"
+       />
+      <div
+        className="flex flex-col absolute bottom-0 left-0 right-0 mx-auto max-h-[75%] w-full max-w-[576px] gap-3 self-center border-t border-border bg-surface p-5 pb-7"
         style={{ overflowY: "auto" }}
       >
-        <View style={{ flexDirection: "row" }} className="items-center justify-between">
-          <Text className="font-serif text-[22px] tracking-[-0.3px] text-foreground">{title}</Text>
+        <div style={{ flexDirection: "row" }} className="flex flex-col items-center justify-between">
+          <span className="font-serif text-2xl tracking-[-0.3px] text-foreground">{title}</span>
           <Pressable onPress={onClose} disabled={closeDisabled} accessibilityLabel="Close">
-            <View className="p-1.5">
+            <div className="flex flex-col p-1.5">
               <X size={18} className="text-muted-foreground" />
-            </View>
+            </div>
           </Pressable>
-        </View>
+        </div>
         {children}
-      </View>
+      </div>
     </Modal>
   );
 }

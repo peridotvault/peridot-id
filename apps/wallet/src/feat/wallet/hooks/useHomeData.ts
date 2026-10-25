@@ -3,6 +3,7 @@ import type { Authority, Identity, Profile } from "@peridotvault/pid-types";
 import type { TokenBalance, NftItem } from "@peridotvault/pid-solana";
 import type { ActivationView, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { getCurrency, getRates, type Currency, type Rates } from "../../../shared/currency";
+import { cachedRead, clearApiCache } from "../../../shared/api-cache";
 import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/network-mode";
 
 // Dashboard data: identity, chain assets, fiat ledger balance, activation.
@@ -11,6 +12,10 @@ import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/netw
 // Network mode re-fetches via the store subscription (ANT-15 req 3): every
 // fetch is selection-scoped server-side, so a reload is all it takes to keep
 // balances separate (never merged client-side).
+//
+// Request budget (per-IP 100/min): slow-changing reads go through cachedRead
+// (see shared/api-cache.ts) and NTFs load only when the Items tab is opened,
+// so revisiting Home costs 3 requests (balance, tokens, fiat) instead of 9.
 export function useHomeData(peridot: PeridotClient) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [pid, setPid] = useState<string | null>(null);
@@ -20,6 +25,7 @@ export function useHomeData(peridot: PeridotClient) {
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
   const [nfts, setNfts] = useState<NftItem[]>([]);
+  const [nftsLoaded, setNftsLoaded] = useState(false);
   const [assetTab, setAssetTab] = useState<"tokens" | "items">("tokens");
   const [passkeys, setPasskeys] = useState<Authority[]>([]);
   const [activation, setActivation] = useState<ActivationView | null>(null);
@@ -35,48 +41,42 @@ export function useHomeData(peridot: PeridotClient) {
     // Non-fatal: without prices the card degrades to fiat + native amounts.
     getRates().then(setRates).catch(() => setRates(null));
     try {
-      let acc = await peridot.wallet.me();
+      let acc = await cachedRead("wallet.me", { ttlMs: 10_000, tier: "session" }, () => peridot.wallet.me());
       if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
       if ("statusCode" in acc) {
         const detail = Array.isArray(acc.message) ? acc.message.join(" ") : acc.message;
         throw new Error(`Failed to create account (${acc.statusCode}${detail ? `: ${detail}` : ""})`);
       }
 
-      try {
-        const p = await peridot.profile.me();
-        if (!("statusCode" in p)) setProfile(p as Profile);
-      } catch {
-        /* no profile */
-      }
-      try {
-        const me = await peridot.identity.me();
-        if (!("statusCode" in me)) setPid((me as Identity).pid);
-      } catch {
-        /* no identity */
-      }
-      try {
-        setSolLamports(await peridot.wallet.getBalance());
-      } catch {
-        setSolLamports(0);
-      }
-      try {
-        setTokens(await peridot.wallet.tokens());
-      } catch {
-        setTokens([]);
-      }
-      try {
-        setNfts(await peridot.wallet.nfts());
-      } catch {
-        setNfts([]);
-      }
-      try {
-        // Balance = the fiat ledger. Replay stays server-side; the user sees one
-        // usable number. No DOKU sub-account required.
-        const bal = await peridot.fiat.balance();
-        setBalanceIdr(bal.balanceIdr);
+      // Independent reads, one round trip instead of seven serial awaits.
+      const [p, me, lamports, tok, fiat, creds, act] = await Promise.allSettled([
+        cachedRead("profile.me", { ttlMs: 60_000, tier: "session" }, () => peridot.profile.me()),
+        cachedRead("identity.me", { ttlMs: 60_000, tier: "session" }, () => peridot.identity.me()),
+        cachedRead("wallet.balance", { ttlMs: 10_000 }, () => peridot.wallet.getBalance()),
+        cachedRead("wallet.tokens", { ttlMs: 10_000 }, () => peridot.wallet.tokens()),
+        cachedRead("fiat.balance", { ttlMs: 10_000 }, () => peridot.fiat.balance()),
+        cachedRead("passkey.list", { ttlMs: 60_000, tier: "session" }, () => peridot.passkey.list()),
+        cachedRead("wallet.activation", { ttlMs: 60_000, tier: "session" }, () => peridot.wallet.activation()),
+      ]);
+
+      if (p.status === "fulfilled" && !("statusCode" in p.value)) setProfile(p.value as Profile);
+      if (me.status === "fulfilled" && !("statusCode" in me.value)) setPid((me.value as Identity).pid);
+
+      setSolLamports(lamports.status === "fulfilled" ? lamports.value : 0);
+      setTokens(tok.status === "fulfilled" && Array.isArray(tok.value) ? tok.value : []);
+
+      // Balance = the fiat ledger. Replay stays server-side; the user sees one
+      // usable number. No DOKU sub-account required.
+      if (fiat.status === "fulfilled" && !("statusCode" in fiat.value)) {
+        setBalanceIdr(fiat.value.balanceIdr);
         setBalanceError(null);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+      } else {
+        const msg =
+          fiat.status === "rejected"
+            ? fiat.reason instanceof Error
+              ? fiat.reason.message
+              : String(fiat.reason)
+            : "Balance is temporarily unavailable.";
         setBalanceIdr(null);
         setBalanceError(
           /401|Unauthorized/i.test(msg)
@@ -86,18 +86,12 @@ export function useHomeData(peridot: PeridotClient) {
               : msg,
         );
       }
-      try {
-        const creds = await peridot.passkey.list();
-        setPasskeys(Array.isArray(creds) ? (creds as Authority[]) : []);
-      } catch {
-        setPasskeys([]);
-      }
-      try {
-        const act = await peridot.wallet.activation();
-        if (!("statusCode" in act)) setActivation(act as ActivationView);
-      } catch {
-        setActivation(null);
-      }
+
+      setPasskeys(creds.status === "fulfilled" && Array.isArray(creds.value) ? (creds.value as Authority[]) : []);
+      if (act.status === "fulfilled" && !("statusCode" in act.value)) setActivation(act.value as ActivationView);
+      // Lazy: NTFs come from the Items tab, so don't spend a request here.
+      setNfts([]);
+      setNftsLoaded(false);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -109,10 +103,31 @@ export function useHomeData(peridot: PeridotClient) {
     load();
   }, [load]);
 
+  // NTFs are fetched the first time the Items tab is opened (30s memo).
+  useEffect(() => {
+    if (assetTab !== "items" || nftsLoaded) return;
+    let alive = true;
+    cachedRead("wallet.nfts", { ttlMs: 60_000, tier: "session" }, () => peridot.wallet.nfts())
+      .then((n) => {
+        if (alive) setNfts(Array.isArray(n) ? n : []);
+      })
+      .catch(() => {
+        if (alive) setNfts([]);
+      })
+      .finally(() => {
+        if (alive) setNftsLoaded(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [assetTab, nftsLoaded, peridot]);
+
   // Re-fetch balances/assets on network switch, then release the signing
-  // block. Idempotent — a no-op when no switch is in flight.
+  // block. Idempotent — a no-op when no switch is in flight. Cached reads are
+  // selection-scoped server-side, so drop them first.
   useEffect(() => {
     return subscribeNetworkMode(() => {
+      clearApiCache();
       load().then(endNetworkTransition, endNetworkTransition);
     });
   }, [load]);

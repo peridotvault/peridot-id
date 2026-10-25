@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { SafeAreaView, StyleSheet, Text, View } from "./src/shared/primitives";
+import { StyleSheet, flatten } from "./src/shared/styles";
 import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
 import { readPopupParams } from "@peridotvault/pid-sdk-js";
 import { API_BASE_URL } from "./src/shared/config";
+import { clearApiCache } from "./src/shared/api-cache";
 import { AppContext } from "./src/shared/AppContext";
 import { readEmbedParams, createEmbedClient } from "./src/feat/embed/embed-client";
 import { useEmbedBridge } from "./src/feat/embed/useEmbedBridge";
@@ -33,6 +34,7 @@ import { AppConnectionsScreen } from "./src/screens/AppConnectionsScreen";
 import { ActivityScreen } from "./src/screens/ActivityScreen";
 import { ActivityDetailScreen } from "./src/screens/ActivityDetailScreen";
 import { FiatDetailScreen } from "./src/screens/FiatDetailScreen";
+import { FiatAccountScreen } from "./src/screens/FiatAccountScreen";
 import { UIButton } from "./src/shared/components/UIButton";
 import { FiatTransferScreen } from "./src/screens/FiatTransferScreen";
 import { FiatLedgerDetailScreen } from "./src/screens/FiatLedgerDetailScreen";
@@ -120,7 +122,7 @@ export default function App() {
   }, []);
   // Persistent shell chrome (top bar + tab bar/sidebar) mounts on tab roots
   // only — pushes render chromeless, as before.
-  const isTabRoot = screen === "home" || screen === "activity" || screen === "profile";
+  const isTabRoot = screen === "home" || screen === "activity" || screen === "settings";
 
   // The stack only lives under tab roots: leaving them (login, provisioning)
   // drops any stale overlay so it can never resurface on the next identity.
@@ -175,13 +177,18 @@ export default function App() {
         return <PasskeyScreen onDone={pop} />;
       case "activation":
         return <ActivationScreen onDone={pop} goPasskey={openPasskey} />;
-      case "settings":
+      case "profile":
         return (
-          <SettingsScreen
-            goPasskeys={openPasskey}
-            goSessions={() => push("sessions")}
-            goConnected={() => push("connected")}
+          <ProfileScreen
             onDone={pop}
+            onLogout={logout}
+            goEditProfile={() => push("edit-profile")}
+            onSwitched={() => {
+              setStack([]);
+              clearApiCache();
+              session.reloadSession();
+            }}
+            onAddAccount={() => setScreen("login")}
           />
         );
       case "edit-profile":
@@ -200,6 +207,8 @@ export default function App() {
         ) : (
           <NullOverlayFallback label="Activity detail" onClose={pop} />
         );
+      case "fiat-account":
+        return <FiatAccountScreen onDone={pop} goSend={() => push("fiat-transfer")} goTopup={() => push("topup")} />;
       case "fiat-detail":
         return fiatItem ? (
           <FiatDetailScreen item={fiatItem} onDone={pop} />
@@ -223,6 +232,7 @@ export default function App() {
     } catch {
       // best-effort: still clear the UI session even if the server call fails
     } finally {
+      clearApiCache();
       session.setAuthed(false);
       setScreen("login");
     }
@@ -248,7 +258,7 @@ export default function App() {
       >
         Skip to content
       </a>
-      <SafeAreaView style={[styles.safe, { backgroundColor: theme.colors.background }]}>
+      <div style={flatten([styles.safe, { backgroundColor: theme.colors.background }])} className="flex flex-col">
           {popupRequest ? (
             session.authed ? (
               <ApproveScreen
@@ -283,13 +293,13 @@ export default function App() {
           <AppColumn
             top={
               isTabRoot ? (
-                <TopBar onConnections={() => push("app-connections")} refreshKey={`${screen}-${epoch}`} />
+                <TopBar onProfile={() => push("profile")} refreshKey={`${screen}-${epoch}`} />
               ) : undefined
             }
             side={isTabRoot ? <TabBar current={screen} go={goTab} /> : undefined}
             overlay={isTabRoot ? renderOverlay() : undefined}
           >
-            <View key={epoch} style={styles.base} id="wallet-main">
+            <div key={epoch} style={styles.base} id="wallet-main" className="flex flex-col">
               {ssoRequest && (
                 <LoginScreen
                   onLoggedIn={loginContext ? () => {} : session.handleLoggedIn}
@@ -304,29 +314,29 @@ export default function App() {
                   goSwap={() => push("swap")}
                   goBuy={() => push("topup")}
                   goTransfer={() => push("fiat-transfer")}
+                  goRupiah={() => push("fiat-account")}
                   goPasskeys={openPasskey}
                 />
               )}
               {screen === "activity" && (
                 <ActivityScreen onSelect={openActivityDetail} onSelectFiat={openFiatDetail} onSelectLedger={openLedgerDetail} />
               )}
-              {screen === "profile" && (
-                <ProfileScreen
+              {screen === "settings" && (
+                <SettingsScreen
+                  goPasskeys={openPasskey}
+                  goSessions={() => push("sessions")}
+                  goConnected={() => push("connected")}
+                  goAppConnections={() => push("app-connections")}
+                  onDone={() => goTab("home")}
                   onLogout={logout}
-                  goSettings={() => push("settings")}
-                  goEditProfile={() => push("edit-profile")}
-                  onSwitched={() => {
-                    setStack([]);
-                    session.reloadSession();
-                  }}
-                  onAddAccount={() => setScreen("login")}
+                  tabRoot
                 />
               )}
               {screen === "provisioning" && <ProvisioningScreen onContinue={() => goTab("home")} />}
-            </View>
+            </div>
           </AppColumn>
         )}
-      </SafeAreaView>
+      </div>
     </AppContext.Provider>
   );
 }
@@ -341,10 +351,10 @@ const styles = StyleSheet.create({
  * instead of a bare undefined overlay. */
 function NullOverlayFallback({ label, onClose }: { label: string; onClose: () => void }) {
   return (
-    <View style={styles.base}>
-      <Text style={{ fontSize: 18, fontWeight: "700" }}>{label} unavailable</Text>
-      <Text style={{ fontSize: 14, opacity: 0.7 }}>This item is no longer available.</Text>
+    <div style={styles.base} className="flex flex-col">
+      <span style={{ fontSize: 18, fontWeight: "700" }}>{label} unavailable</span>
+      <span style={{ fontSize: 14, opacity: 0.7 }}>This item is no longer available.</span>
       <UIButton title="Close" onPress={onClose} variant="primary" />
-    </View>
+    </div>
   );
 }

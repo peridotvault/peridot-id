@@ -20,7 +20,7 @@ import { buildThresholds, DEFAULT_FORMULA } from "./xp-curve";
  * Every checklist item carries a failing-before/passing-after regression:
  * dedup race (W2a), cap race (W2b), revocation-mid-flight (F2),
  * reconcile (R2), no-oracle envelope (F5), no-xp-field (F6), checker
- * fail-closed (R3), release gate (HARD GATE).
+ * fail-closed (R3), kill-switch deny path.
  */
 const POLICY_ID = "policy-m3";
 const ACTIVE = {
@@ -334,7 +334,7 @@ function taskRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<string, unknown>; gate?: boolean; settingsAllow?: boolean; settingsThrow?: boolean; revokeAfterFirstRead?: boolean; disableTaskAfterFirstRead?: boolean } = {}) {
+function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<string, unknown>; suspended?: boolean; settingsThrow?: boolean; revokeAfterFirstRead?: boolean; disableTaskAfterFirstRead?: boolean } = {}) {
   const tables: FakeTables = {
     apps: new Map([[APP.id, { ...APP, ...(opts.app ?? {}) }]]),
     tasks: new Map(),
@@ -355,18 +355,17 @@ function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<stri
   for (const t of opts.tasks ?? [taskRow()]) tables.tasks.set(String(t.id), t);
   const prisma = fakePrisma(tables);
   const security = { log: jest.fn(async () => undefined) };
-  const config = { get: jest.fn((k: string, d: string) => (k === "PID_XP_INTAKE_ENABLED" ? (opts.gate === false ? "false" : "true") : d)) };
-  // ANT-456: the effective gate ANDs env with DB settings. Default stub
-  // mirrors "settings allow" so pre-existing tests exercise the pipeline;
-  // opts.settingsAllow=false / settingsThrow=true drive the fail-closed paths.
+  // Effective intake is kill-switch only (xp.suspend.*). Default stub leaves
+  // intake open so pre-existing tests exercise the pipeline; opts.suspended=true
+  // and opts.settingsThrow=true drive the two fail-closed paths.
   const xpSettings = {
     effectiveIntake: jest.fn(async () => {
       if (opts.settingsThrow) throw new Error("settings store unreachable");
-      const allowed = opts.settingsAllow !== false && opts.gate !== false;
+      const suspendGlobal = opts.suspended === true;
       return {
-        allowed,
-        breakdown: { xpIntakeEnabled: opts.settingsAllow !== false, suspendGlobal: false, suspendApp: false, envAllow: opts.gate !== false },
-        source: opts.settingsThrow ? "defaults-fallback" : "db+env",
+        allowed: !suspendGlobal,
+        breakdown: { suspendGlobal, suspendApp: false },
+        source: "db",
       };
     }),
   };
@@ -379,7 +378,6 @@ function setup(opts: { tasks?: Array<Record<string, unknown>>; app?: Record<stri
     new QuotaService(),
     new EvidenceService(),
     security as never,
-    config as never,
     xpSettings as never,
   );
   return { service, tables, prisma, security, ledger, xpSettings };
@@ -567,25 +565,25 @@ describe("EventsService pipeline", () => {
     expect(tables.suspicious.some((s) => s.signal === "xp.intake.quota_exceeded")).toBe(true);
   });
 
-  it("release gate: disabled flag refuses with 503 and writes the feed", async () => {
-    const { service, tables } = setup({ gate: false });
+  it("kill-switch: a global suspend refuses with 503 and writes the feed", async () => {
+    const { service, tables } = setup({ suspended: true });
     await expect(service.submitEvent(dtoFor(), { ...AUTHED })).rejects.toThrow(ServiceUnavailableException);
     expect(tables.entries).toHaveLength(0);
     expect(tables.suspicious.some((s) => s.signal === "xp.intake.disabled_reject")).toBe(true);
   });
 
-  it("ANT-456 AND-precedence: DB settings deny wins over env allow", async () => {
-    const { service, tables, xpSettings } = setup({ gate: true, settingsAllow: false });
+  it("effective intake: suspend denies and the feed carries the breakdown", async () => {
+    const { service, tables, xpSettings } = setup({ suspended: true });
     await expect(service.submitEvent(dtoFor(), { ...AUTHED })).rejects.toThrow(ServiceUnavailableException);
     expect(tables.entries).toHaveLength(0);
     expect(xpSettings.effectiveIntake).toHaveBeenCalledWith("app-1");
     const feed = tables.suspicious.find((s) => s.signal === "xp.intake.disabled_reject");
     expect(feed).toBeDefined();
-    expect(feed?.detail).toMatchObject({ xpIntakeEnabled: false, envAllow: true, source: "db+env" });
+    expect(feed?.detail).toMatchObject({ suspendGlobal: true, suspendApp: false, source: "db" });
   });
 
-  it("ANT-456 fail-closed: a throwing settings layer still denies with 503", async () => {
-    const { service, tables } = setup({ gate: true, settingsThrow: true });
+  it("fail-closed: a throwing settings layer still denies with 503", async () => {
+    const { service, tables } = setup({ settingsThrow: true });
     await expect(service.submitEvent(dtoFor(), { ...AUTHED })).rejects.toThrow(ServiceUnavailableException);
     expect(tables.entries).toHaveLength(0);
     expect(tables.suspicious.some((s) => s.signal === "xp.intake.disabled_reject")).toBe(true);

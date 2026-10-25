@@ -1,6 +1,7 @@
-import { Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Pressable } from "../../../shared/components/Pressable";
 import { Copy } from "../../../shared/icons";
 import { styles as s } from "../../../shared/theme";
+import { flatten } from "../../../shared/styles";
 
 export function DepositAddressCard({
   address,
@@ -16,27 +17,27 @@ export function DepositAddressCard({
   onCopy: () => void;
 }) {
   return (
-    <View style={s.card}>
-      <Text style={[s.label, { marginBottom: 6 }]}>Your deposit address</Text>
-      <Text className="font-sans text-[13px] leading-[19px] text-muted-foreground">
+    <div style={s.card} className="flex flex-col">
+      <span style={flatten([s.label, { marginBottom: 6 }])}>Your deposit address</span>
+      <span className="font-sans text-sm leading-[19px] text-muted-foreground">
         Send SOL to this address to fund your wallet and cover activation. The cost
         currently requires about {requiredSol.toFixed(4)} SOL.
-      </Text>
-      <TouchableOpacity onPress={onCopy} accessibilityLabel="Copy deposit address">
-        <View style={{ flexDirection: "row" }} className="mt-1 w-full items-center justify-between gap-2 border border-border bg-muted p-3">
-          <Text selectable style={s.mono} className="flex-1">
+      </span>
+      <Pressable onPress={onCopy} accessibilityLabel="Copy deposit address">
+        <div style={{ flexDirection: "row" }} className="flex flex-col mt-1 w-full items-center justify-between gap-2 border border-border bg-muted p-3">
+          <span style={s.mono} className="select-text flex-1">
             {address ? `${address.slice(0, 8)}…${address.slice(-8)}` : "—"}
-          </Text>
+          </span>
           {copied ? (
-            <Text className="font-sans text-xs text-success">Copied</Text>
+            <span className="font-sans text-xs text-success">Copied</span>
           ) : (
             <Copy size={14} className="text-muted-foreground" />
           )}
-        </View>
-      </TouchableOpacity>
-      <Text style={s.hint}>
+        </div>
+      </Pressable>
+      <p style={s.hint}>
         Balance: {balanceSol.toFixed(4)} SOL{balanceSol < requiredSol ? ` — top up to at least ${requiredSol.toFixed(4)} SOL` : ""}.
-      </Text>
-    </View>
+      </p>
+    </div>
   );
 }

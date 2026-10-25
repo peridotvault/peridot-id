@@ -196,15 +196,13 @@ function IntakeBanner({ client }: { client: PeridotClient }) {
       </div>
       {b && (
         <dl className="mt-3 flex flex-wrap gap-2 text-xs" aria-label="Intake breakdown">
-          <Chip label={`DB flag ${onOff(b.xpIntakeEnabled)}`} on={b.xpIntakeEnabled} />
           <Chip label={`global suspend ${onOff(b.suspendGlobal)}`} on={!b.suspendGlobal} invert />
           <Chip label={`app suspend ${onOff(b.suspendApp)}`} on={!b.suspendApp} invert />
-          <Chip label={`env override ${onOff(b.envAllow)}`} on={b.envAllow} />
-          <Chip label={`source ${b.source}`} on={b.source === "db+env"} />
+          <Chip label={`source ${b.source}`} on={b.source === "db"} />
         </dl>
       )}
       <p className={`mt-2 text-xs ${MUTED}`}>
-        effectiveIntake = DB flag AND NOT suspends AND env override. Any unreadable input denies awarding
+        effectiveIntake = NOT global suspend AND NOT app suspend. Any unreadable input denies awarding
         (fail-closed). Refreshes every 30s and on focus.
       </p>
     </Card>

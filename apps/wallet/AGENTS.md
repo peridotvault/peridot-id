@@ -87,7 +87,9 @@ done
 ## Done (Phase 2 — screens are slim composers)
 
 - Home → `feat/wallet/{utils/assets,hooks/useHomeData,components/HomeHeader,
-  BalanceCard,QuickActions,AssetSection}`.
+  TotalBalanceSection,SectionTitle,FiatSection,QuickActions,AssetSection}`
+  + `screens/FiatAccountScreen` + `feat/fiat/components/FiatAccountActions`
+  (tap DOKU card → Rupiah page).
 - Activity → `feat/activity/{utils/feed,hooks/useActivityFeed,
   components/ActivityHeader,ChainRow,FiatRow,LedgerRow}`.
 - Receive/Activation → `feat/wallet/{utils/deposit-targets,
@@ -109,17 +111,30 @@ done
   `theme.ts` stays the TS token source). Per-file `StyleSheet.create` is
   gone except documented exceptions.
 - Rules: paint via `className`; `flexDirection` stays a style prop and
-  `Pressable` backgrounds/borders/padding go on an inner wrapper `View`
-  (the shim emits those inline, which beats any class). Never
+  `Pressable` (plain `<button>`) backgrounds/borders/padding go on an inner
+  wrapper `div` (inline style beats any class). Never
   `bg-[rgba()]` (scanner skips it — use `bg-black/60`-style modifiers);
   icon color via `text-*`, never the `color` prop (dynamic tint values
   stay inline props); placeholders via `[--placeholder:var(--color-…)]`.
+  Text sizes use scale tokens only (`text-xs`…`text-5xl`) — never `text-[]`.
 - `shared/components/BackButton.tsx` — single back affordance used by all
   detail screens. `UIButton` keeps its stylesheet (variant backgrounds
   live on the `Pressable` itself); `BottomSheet` keeps one scrim style
-  for the same reason. `ScrollView` inners keep plain objects (no class
+  for the same reason. `ScrollArea` inners keep plain objects (no class
   path) — so `theme.ts` keeps the shared `styles` block (`container`,
   `card`, `input`, …) while per-file blocks are gone.
+
+## Done (Phase 5 — semantic DOM, no RN shim)
+
+- `src/shared/primitives.tsx` is deleted. Elements are semantic HTML:
+  `View`→`div` (+`flex flex-col`, shim default), `Text`→`span`/`p`/`h1`,
+  `Pressable`/`TouchableOpacity`→`shared/components/Pressable.tsx`
+  (plain `<button>`), `TextInput`→`TextField.tsx`, `ScrollView`→`ScrollArea.tsx`
+  (same props), `Image`→`img`, `Modal`→`components/Modal.tsx`,
+  `useWindowDimensions`→`shared/hooks/`, `Linking`→`shared/openExternal.ts`,
+  `Alert`→`window.confirm`. Style helpers live on in `shared/styles.ts`.
+- Exactly one `h1` per screen (screen title; `PushHeader` title is the `h1`
+  on pushed screens). Guard: `rg "shared/primitives" apps/wallet/src apps/wallet/App.tsx` must print nothing.
 
 ## Done (Phase 3 — App.tsx is a pure composer)
 

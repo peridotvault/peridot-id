@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Text, TouchableOpacity, View } from "../shared/primitives";
+import { Pressable } from "../shared/components/Pressable";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
@@ -85,39 +85,39 @@ export function ProvisioningScreen({ onContinue }: { onContinue: () => void }) {
   }, [run]);
 
   return (
-    <View style={s.container}>
-      <Text style={s.title}>Setting up your wallet</Text>
-      <Text style={s.subtitle}>Creating your on-chain account — this usually takes a few seconds.</Text>
+    <div style={s.container} className="flex flex-col">
+      <h1 style={s.title}>Setting up your wallet</h1>
+      <p style={s.subtitle}>Creating your on-chain account — this usually takes a few seconds.</p>
 
       {STEPS.map((step) => {
         const st = states[step.key];
         return (
-          <View key={step.key} className="mt-3 gap-2 border border-border bg-surface p-3">
-            <View style={{ flexDirection: "row" }} className="items-center gap-3">
-              <Text
+          <div key={step.key} className="flex flex-col mt-3 gap-2 border border-border bg-surface p-3">
+            <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+              <span
                 className={`w-7 text-center font-sans text-xl font-semibold ${st.status === "done" ? "text-success" : st.status === "failed" ? "text-danger" : "text-muted-foreground"}`}
-                accessibilityLabel={`${step.label}: ${stepStatusLabel(st.status)}`}
+                aria-label={`${step.label}: ${stepStatusLabel(st.status)}`}
               >
                 {glyph(st.status)}
-              </Text>
-              <View className="flex-1 gap-0.5">
-                <Text className="font-sans text-[15px] font-semibold text-foreground">{step.label}</Text>
-                <Text className="font-sans text-xs text-muted-foreground">{step.hint}</Text>
-              </View>
+              </span>
+              <div className="flex flex-col flex-1 gap-0.5">
+                <span className="font-sans text-base font-semibold text-foreground">{step.label}</span>
+                <span className="font-sans text-xs text-muted-foreground">{step.hint}</span>
+              </div>
               {st.status === "failed" && (
-                <TouchableOpacity onPress={() => run(step.key)} accessibilityLabel={`Retry ${step.label}`}>
-                  <View className="border border-border bg-background px-3 py-1.5">
-                    <Text className="font-sans text-[13px] font-medium text-foreground">Retry</Text>
-                  </View>
-                </TouchableOpacity>
+                <Pressable onPress={() => run(step.key)} accessibilityLabel={`Retry ${step.label}`}>
+                  <div className="flex flex-col border border-border bg-background px-3 py-1.5">
+                    <span className="font-sans text-sm font-medium text-foreground">Retry</span>
+                  </div>
+                </Pressable>
               )}
-            </View>
-            {st.error && <Text role="alert" style={s.error}>{st.error}</Text>}
-          </View>
+            </div>
+            {st.error && <p role="alert" style={s.error}>{st.error}</p>}
+          </div>
         );
       })}
 
       <UIButton title="Continue to home" onPress={onContinue} variant="primary" />
-    </View>
+    </div>
   );
 }

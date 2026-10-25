@@ -1,4 +1,4 @@
-import { Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Pressable } from "../../../shared/components/Pressable";
 import type { NftItem } from "@peridotvault/pid-solana";
 import { styles as s } from "../../../shared/theme";
 import type { Coin } from "../utils/assets";
@@ -20,40 +20,40 @@ export function AssetSection({
 }) {
   return (
     <>
-      <View style={{ flexDirection: "row" }} className="gap-5 py-1.5">
+      <div style={{ flexDirection: "row" }} className="flex flex-col gap-5 py-1.5">
         <TabButton label="Tokens" active={tab === "tokens"} onPress={() => onTabChange("tokens")} />
         <TabButton label="Items" active={tab === "items"} onPress={() => onTabChange("items")} />
-      </View>
+      </div>
       {tab === "tokens" ? (
         <>
           {coins.length === 0 && !busy && (
-            <Text style={s.hint}>No assets yet — receive SOL to your address to get started.</Text>
+            <p style={s.hint}>No assets yet — receive SOL to your address to get started.</p>
           )}
           {coins.map((coin) => (
-            <View key={coin.key} style={{ flexDirection: "row" }} className="items-center gap-3 border-b border-border py-2.5">
-              <View className="flex-1">
-                <Text className="font-sans text-[15px] font-semibold text-foreground">{coin.symbol}</Text>
-                {coin.symbol !== "SOL" && <Text className="font-sans text-[11px] text-muted-foreground">{coin.key.slice(0, 4)}…{coin.key.slice(-4)}</Text>}
-              </View>
-              <Text className="font-mono text-[15px] font-medium text-foreground">{coin.amount}</Text>
-            </View>
+            <div key={coin.key} style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border-b border-border py-2.5">
+              <div className="flex flex-col flex-1">
+                <span className="font-sans text-base font-semibold text-foreground">{coin.symbol}</span>
+                {coin.symbol !== "SOL" && <span className="font-sans text-xs text-muted-foreground">{coin.key.slice(0, 4)}…{coin.key.slice(-4)}</span>}
+              </div>
+              <span className="font-mono text-base font-medium text-foreground">{coin.amount}</span>
+            </div>
           ))}
         </>
       ) : (
         <>
           {nfts.length === 0 && !busy && (
-            <Text style={s.hint}>No items yet — SPL collectibles in this wallet appear here.</Text>
+            <p style={s.hint}>No items yet — SPL collectibles in this wallet appear here.</p>
           )}
           {nfts.map((nft) => (
-            <View key={nft.mint} style={{ flexDirection: "row" }} className="items-center gap-3 border-b border-border py-2.5">
-              <View className="flex-1">
-                <Text className="font-sans text-[15px] font-semibold text-foreground">{nft.name ?? "Unnamed item"}</Text>
-                <Text className="font-sans text-[11px] text-muted-foreground">{nft.mint.slice(0, 4)}…{nft.mint.slice(-4)}</Text>
-              </View>
-            </View>
+            <div key={nft.mint} style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border-b border-border py-2.5">
+              <div className="flex flex-col flex-1">
+                <span className="font-sans text-base font-semibold text-foreground">{nft.name ?? "Unnamed item"}</span>
+                <span className="font-sans text-xs text-muted-foreground">{nft.mint.slice(0, 4)}…{nft.mint.slice(-4)}</span>
+              </div>
+            </div>
           ))}
           {nfts.length > 0 && (
-            <Text style={s.hint}>SPL collectibles only — Token-2022 and compressed NFTs need a DAS RPC.</Text>
+            <p style={s.hint}>SPL collectibles only — Token-2022 and compressed NFTs need a DAS RPC.</p>
           )}
         </>
       )}
@@ -63,8 +63,8 @@ export function AssetSection({
 
 function TabButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <TouchableOpacity onPress={onPress} accessibilityState={{ selected: active }}>
-      <Text className={`pb-1 font-sans text-sm font-medium ${active ? "border-b border-foreground text-foreground" : "text-muted-foreground"}`}>{label}</Text>
-    </TouchableOpacity>
+    <Pressable onPress={onPress} accessibilityState={{ selected: active }}>
+      <span className={`pb-1 font-sans text-sm font-medium ${active ? "border-b border-foreground text-foreground" : "text-muted-foreground"}`}>{label}</span>
+    </Pressable>
   );
 }

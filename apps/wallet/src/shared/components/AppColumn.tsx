@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { View } from "../primitives";
+
 import { styles as s } from "../theme";
 import { useWideLayout } from "../hooks/useWideLayout";
 
@@ -9,8 +9,9 @@ import { useWideLayout } from "../hooks/useWideLayout";
 // spans the full 1400 frame, `side` (the tab bar) docks left as a sidebar
 // while the sm column stays centered in the remainder. Below the breakpoint
 // the same nodes stack top/bottom inside the column.
-// `overlay` (the push stack top) covers the content box only — opaque, so
-// TopBar/sidebar stay visible while a push is open.
+// `overlay` (the push stack top) covers the WHOLE shell — top bar and
+// sidebar/tab bar included — while keeping the same sm width cap, so a push
+// reads as its own full screen on mobile and wide web alike.
 export function AppColumn({
   top,
   side,
@@ -23,32 +24,34 @@ export function AppColumn({
   children: ReactNode;
 }) {
   const wide = useWideLayout();
-  const body = (
-    <View style={s.stackBox}>
-      {children}
-      {overlay && <View style={s.overlay}>{overlay}</View>}
-    </View>
-  );
-  if (wide && (top || side)) {
-    return (
-      <View style={s.shell}>
-        <View style={s.frame}>
+  const body = <div style={s.stackBox} className="flex flex-col">{children}</div>;
+  const shell =
+    wide && (top || side) ? (
+      <div style={s.shell} className="flex flex-col">
+        <div style={s.frame} className="flex flex-col">
           {top}
-          <View style={s.wideRow}>
+          <div style={s.wideRow} className="flex flex-col">
             {side}
-            <View style={s.contentWrap}>{body}</View>
-          </View>
-        </View>
-      </View>
+            <div style={s.contentWrap} className="flex flex-col">{body}</div>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div style={s.shell} className="flex flex-col">
+        <div style={s.column} className="flex flex-col">
+          {top}
+          {body}
+          {side}
+        </div>
+      </div>
     );
-  }
+  if (!overlay) return shell;
   return (
-    <View style={s.shell}>
-      <View style={s.column}>
-        {top}
-        {body}
-        {side}
-      </View>
-    </View>
+    <div style={s.rootFill} className="flex flex-col">
+      {shell}
+      <div style={s.overlayFull} className="flex flex-col">
+        <div style={s.column} className="flex flex-col">{overlay}</div>
+      </div>
+    </div>
   );
 }

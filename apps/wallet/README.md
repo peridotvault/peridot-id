@@ -22,7 +22,7 @@ follow-up work, not silently missing.
 
 ## Stack
 
-- Vite 8 / React 19 (plain DOM + inline styles via `src/shared/primitives.tsx`)
+- Vite 8 / React 19 (semantic DOM + `src/shared/styles.ts` helpers)
 - `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`, `@peridotvault/pid-types`
 
 ## Local

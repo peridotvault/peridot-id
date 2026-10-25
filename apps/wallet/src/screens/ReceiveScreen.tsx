@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Text, View } from "../shared/primitives";
+
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
+import { PushHeader } from "../shared/components/PushHeader";
 import { UIButton } from "../shared/components/UIButton";
 import { useNetworkMode } from "../shared/hooks/useNetworkMode";
 import { useActivationGate } from "../feat/wallet/hooks/useActivationGate";
@@ -30,14 +31,14 @@ export function ReceiveScreen({ onDone, goPasskey }: { onDone: () => void; goPas
   };
 
   return (
-    <View style={s.container}>
-      <Text style={s.title}>Receive</Text>
-      <Text style={s.subtitle}>Share an address below. EVM chains share one address everywhere.</Text>
+    <div style={s.container} className="flex flex-col">
+      <PushHeader onBack={onDone} title="Receive" />
+      <p style={s.subtitle}>Share an address below. EVM chains share one address everywhere.</p>
 
-      {targets.length === 0 && <Text style={s.hint}>Account not initialized.</Text>}
+      {targets.length === 0 && <p style={s.hint}>Account not initialized.</p>}
 
       {!solanaAvailable && (
-        <Text style={s.hint}>Solana deposits are available in Testnet Mode. EVM addresses below work as usual.</Text>
+        <p style={s.hint}>Solana deposits are available in Testnet Mode. EVM addresses below work as usual.</p>
       )}
 
       <DepositCardList
@@ -48,7 +49,6 @@ export function ReceiveScreen({ onDone, goPasskey }: { onDone: () => void; goPas
         onCopy={copy}
       />
 
-      <UIButton title="Back" onPress={onDone} />
 
       {solanaAvailable && (
         <SolActivationModal
@@ -60,6 +60,6 @@ export function ReceiveScreen({ onDone, goPasskey }: { onDone: () => void; goPas
           onGoPasskey={goPasskey}
         />
       )}
-    </View>
+    </div>
   );
 }

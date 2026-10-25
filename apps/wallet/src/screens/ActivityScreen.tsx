@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollView, Text } from "../shared/primitives";
+import { ScrollArea } from "../shared/components/ScrollArea";
 import { UIButton } from "../shared/components/UIButton";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
@@ -37,18 +37,18 @@ export function ActivityScreen({
   );
 
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
+    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
       <ActivityHeader tab={tab} onTabChange={setTab} onRefresh={feed.reload} busy={feed.busy} />
 
-      {feed.error && <Text role="alert" style={s.error}>{feed.error}</Text>}
+      {feed.error && <p role="alert" style={s.error}>{feed.error}</p>}
       {feed.error && <UIButton title="Retry" onPress={feed.reload} />}
-      {feed.busy && <Text role="status" style={s.hint}>Loading…</Text>}
+      {feed.busy && <p role="status" style={s.hint}>Loading…</p>}
 
       {tab !== "idr" && visible.length === 0 && !feed.busy && (
-        <Text style={s.hint}>No activity yet — send, receive, or activate your account to get started.</Text>
+        <p style={s.hint}>No activity yet — send, receive, or activate your account to get started.</p>
       )}
       {tab === "idr" && visible.length === 0 && !feed.busy && (
-        <Text style={s.hint}>No IDR activity yet — top up to get started.</Text>
+        <p style={s.hint}>No IDR activity yet — top up to get started.</p>
       )}
 
       {visible.map((item) =>
@@ -60,6 +60,6 @@ export function ActivityScreen({
           <LedgerRow key={item.item.tx.id} item={item.item} onSelect={onSelectLedger} />
         ),
       )}
-    </ScrollView>
+    </ScrollArea>
   );
 }

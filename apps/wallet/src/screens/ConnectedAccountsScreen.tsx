@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, Text, TouchableOpacity, View, Alert } from "../shared/primitives";
+import { ScrollArea } from "../shared/components/ScrollArea";
+import { Pressable } from "../shared/components/Pressable";
 import { Link2 } from "../shared/icons";
 import type { IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
+import { cachedRead, invalidate } from "../shared/api-cache";
 import { styles as s } from "../shared/theme";
-import { BackButton } from "../shared/components/BackButton";
+import { PushHeader } from "../shared/components/PushHeader";
 
 export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -14,7 +16,7 @@ export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
   const [justUnlinked, setJustUnlinked] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await peridot.identity.credentials();
+    const res = await cachedRead("identity.credentials", { ttlMs: 60_000, tier: "session" }, () => peridot.identity.credentials());
     setCredentials(Array.isArray(res) ? (res as IdentityCredential[]) : []);
   }, [peridot]);
 
@@ -23,63 +25,58 @@ export function ConnectedAccountsScreen({ onDone }: { onDone: () => void }) {
   }, [load]);
 
   const unlink = async (id: string, provider: string) => {
-    Alert.alert(
-      `Unlink ${provider}?`,
-      "Google works as a recovery login. Unlinking it means you rely on your passkeys to sign in.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Unlink",
-          style: "destructive",
-          onPress: async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              await peridot.identity.unlinkCredential(id);
-              setJustUnlinked(true);
-              await load();
-            } catch (e) {
-              setError(String(e));
-            } finally {
-              setBusy(false);
-            }
-          },
-        },
-      ],
-    );
+    if (
+      !window.confirm(
+        `Unlink ${provider}?\n\nGoogle works as a recovery login. Unlinking it means you rely on your passkeys to sign in.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await peridot.identity.unlinkCredential(id);
+      invalidate("identity.credentials");
+      setJustUnlinked(true);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
-      <BackButton onPress={onDone} />
+    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
+      <PushHeader
+        onBack={onDone}
+        title="Connected Accounts"
+        subtitle="Login methods linked to this Peridot ID. Google is the fallback/recovery path for your passkeys."
+      />
 
-      <Text style={s.title}>Connected Accounts</Text>
-      <Text style={s.subtitle}>Login methods linked to this Peridot ID. Google is the fallback/recovery path for your passkeys.</Text>
-
-      {error && <Text role="alert" style={s.error}>{error}</Text>}
-      {justUnlinked && <Text className="font-sans text-[13px] text-success">Account unlinked.</Text>}
+      {error && <p role="alert" style={s.error}>{error}</p>}
+      {justUnlinked && <span className="font-sans text-sm text-success">Account unlinked.</span>}
 
       {credentials.map((c) => (
-        <View key={c.id} style={s.card}>
-          <View style={{ flexDirection: "row" }} className="items-center gap-3">
-            <View className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+        <div key={c.id} style={s.card} className="flex flex-col">
+          <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+            <div className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full bg-muted">
               <Link2 size={16} className="text-foreground" />
-            </View>
-            <View className="flex-1 gap-0.5">
-              <Text className="font-sans text-[15px] font-semibold text-foreground">{c.provider === "google" ? "Google" : c.provider}</Text>
-              <Text className="font-sans text-xs text-muted-foreground">{c.email ?? "No email"}</Text>
-              {c.lastLoginAt && <Text className="font-sans text-xs text-muted-foreground">Last login {new Date(c.lastLoginAt).toLocaleString()}</Text>}
-            </View>
+            </div>
+            <div className="flex flex-col flex-1 gap-0.5">
+              <span className="font-sans text-base font-semibold text-foreground">{c.provider === "google" ? "Google" : c.provider}</span>
+              <span className="font-sans text-xs text-muted-foreground">{c.email ?? "No email"}</span>
+              {c.lastLoginAt && <span className="font-sans text-xs text-muted-foreground">Last login {new Date(c.lastLoginAt).toLocaleString()}</span>}
+            </div>
             {credentials.length > 1 && (
-              <TouchableOpacity onPress={() => unlink(c.id, c.provider)} disabled={busy}>
-                <Text className="font-sans text-[13px] text-danger">Unlink</Text>
-              </TouchableOpacity>
+              <Pressable onPress={() => unlink(c.id, c.provider)} disabled={busy}>
+                <span className="font-sans text-sm text-danger">Unlink</span>
+              </Pressable>
             )}
-          </View>
-          {credentials.length <= 1 && <Text className="font-sans text-xs text-muted-foreground">Keep at least one login method.</Text>}
-        </View>
+          </div>
+          {credentials.length <= 1 && <span className="font-sans text-xs text-muted-foreground">Keep at least one login method.</span>}
+        </div>
       ))}
 
-    </ScrollView>
+    </ScrollArea>
   );
 }

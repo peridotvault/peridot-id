@@ -1114,8 +1114,8 @@ paths:
         Idempotent per app: retries with the same (`client_id`, `event_id`)
         return `duplicate` without a second award. Unknown subjects and
         failed verifications share the generic `not_eligible` rejection (no
-        PID oracle). Awards are release-gated: 503 while
-        `PID_XP_INTAKE_ENABLED` is not exactly `"true"`.
+        PID oracle). Awards return 503 only while the runtime kill-switch
+        (`xp.suspend.global` / `xp.suspend.<appId>`) is on.
 
         Rate limits: global default plus per-app (60/min) and
         per-app+subject (30/min) tiers.
@@ -2743,7 +2743,7 @@ components:
             statusCode: 503
             message: "Google OAuth is not configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET (and GOOGLE_CALLBACK_URL) in the env for this environment"
     XpIntakeDisabled:
-      description: XP intake is release-gated off (PID_XP_INTAKE_ENABLED is not exactly "true")
+      description: XP intake is suspended by the runtime kill-switch (xp.suspend.global / xp.suspend.<appId>)
       content:
         application/json:
           schema:

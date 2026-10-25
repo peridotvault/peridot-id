@@ -1,4 +1,4 @@
-import { Text, View } from "../../shared/primitives";
+
 import { styles as s } from "../../shared/theme";
 import { UIButton } from "../../shared/components/UIButton";
 
@@ -9,10 +9,10 @@ import { UIButton } from "../../shared/components/UIButton";
  */
 export function EmbedConnectScreen({ onConnect }: { onConnect: () => void }) {
   return (
-    <View style={s.container}>
-      <Text style={s.title}>PeridotID</Text>
-      <Text style={s.subtitle}>Connect your PeridotID wallet to continue in this app.</Text>
+    <div style={s.container} className="flex flex-col">
+      <h1 style={s.title}>PeridotID</h1>
+      <p style={s.subtitle}>Connect your PeridotID wallet to continue in this app.</p>
       <UIButton title="Sign in with PeridotID" onPress={onConnect} variant="primary" />
-    </View>
+    </div>
   );
 }

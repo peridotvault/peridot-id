@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, ScrollView, Text, TouchableOpacity, View } from "../shared/primitives";
+import { ScrollArea } from "../shared/components/ScrollArea";
+import { Pressable } from "../shared/components/Pressable";
 import { Link2 } from "../shared/icons";
 import type { SsoGrant } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
+import { cachedRead, invalidate } from "../shared/api-cache";
 import { styles as s } from "../shared/theme";
-import { BackButton } from "../shared/components/BackButton";
+import { PushHeader } from "../shared/components/PushHeader";
 
 function hostOf(origin: string): string {
   try {
@@ -26,7 +28,7 @@ export function AppConnectionsScreen({ onDone }: { onDone: () => void }) {
   const [justRevoked, setJustRevoked] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await peridot.auth.grants();
+    const res = await cachedRead("auth.grants", { ttlMs: 60_000, tier: "session" }, () => peridot.auth.grants());
     setGrants(Array.isArray(res) ? (res as SsoGrant[]) : []);
   }, [peridot]);
 
@@ -34,70 +36,65 @@ export function AppConnectionsScreen({ onDone }: { onDone: () => void }) {
     load();
   }, [load]);
 
-  const disconnect = (id: string, label: string) => {
-    Alert.alert(
-      `Disconnect ${label}?`,
-      "Future sign-ins there stop. The site keeps its own session — sign out on the site too.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Disconnect",
-          style: "destructive",
-          onPress: async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              await peridot.auth.revokeGrant(id);
-              setJustRevoked(true);
-              await load();
-            } catch (e) {
-              setError(String(e));
-            } finally {
-              setBusy(false);
-            }
-          },
-        },
-      ],
-    );
+  const disconnect = async (id: string, label: string) => {
+    if (
+      !window.confirm(
+        `Disconnect ${label}?\n\nFuture sign-ins there stop. The site keeps its own session — sign out on the site too.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await peridot.auth.revokeGrant(id);
+      invalidate("auth.grants");
+      setJustRevoked(true);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
-      <BackButton onPress={onDone} />
+    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
+      <PushHeader
+        onBack={onDone}
+        title="App Connections"
+        subtitle="Sites you signed in to with PeridotID. Disconnecting stops future sign-ins there."
+      />
 
-      <Text style={s.title}>App Connections</Text>
-      <Text style={s.subtitle}>Sites you signed in to with PeridotID. Disconnecting stops future sign-ins there.</Text>
-
-      {error && <Text role="alert" style={s.error}>{error}</Text>}
-      {justRevoked && <Text className="font-sans text-[13px] text-success">Site disconnected.</Text>}
+      {error && <p role="alert" style={s.error}>{error}</p>}
+      {justRevoked && <span className="font-sans text-sm text-success">Site disconnected.</span>}
 
       {grants.map((g) => {
         const host = hostOf(g.origin);
         const label = g.name ?? host;
         return (
-          <View key={g.id} style={s.card}>
-            <View style={{ flexDirection: "row" }} className="items-center gap-3">
-              <View className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+          <div key={g.id} style={s.card} className="flex flex-col">
+            <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+              <div className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full bg-muted">
                 <Link2 size={16} className="text-foreground" />
-              </View>
-              <View className="flex-1 gap-0.5">
-                <Text className="font-sans text-[15px] font-semibold text-foreground" accessibilityLabel={`${label}${g.isVerified ? ", verified" : ""}`}>
+              </div>
+              <div className="flex flex-col flex-1 gap-0.5">
+                <span className="font-sans text-base font-semibold text-foreground" aria-label={`${label}${g.isVerified ? ", verified" : ""}`}>
                   {label}
-                  {g.isVerified && <Text aria-hidden="true"> ✓</Text>}
-                </Text>
-                {g.name && <Text className="font-sans text-xs text-muted-foreground">{host}</Text>}
-                <Text className="font-sans text-xs text-muted-foreground">Connected {fmtDate(g.firstSeenAt)}</Text>
-                <Text className="font-sans text-xs text-muted-foreground">Last used {fmtDate(g.lastUsedAt)}</Text>
-              </View>
-              <TouchableOpacity onPress={() => disconnect(g.id, label)} disabled={busy}>
-                <Text className="font-sans text-[13px] text-danger">Disconnect</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+                  {g.isVerified && <span aria-hidden="true"> ✓</span>}
+                </span>
+                {g.name && <span className="font-sans text-xs text-muted-foreground">{host}</span>}
+                <span className="font-sans text-xs text-muted-foreground">Connected {fmtDate(g.firstSeenAt)}</span>
+                <span className="font-sans text-xs text-muted-foreground">Last used {fmtDate(g.lastUsedAt)}</span>
+              </div>
+              <Pressable onPress={() => disconnect(g.id, label)} disabled={busy}>
+                <span className="font-sans text-sm text-danger">Disconnect</span>
+              </Pressable>
+            </div>
+          </div>
         );
       })}
 
-      {grants.length === 0 && <Text style={s.hint}>No connected sites yet.</Text>}
-    </ScrollView>
+      {grants.length === 0 && <p style={s.hint}>No connected sites yet.</p>}
+    </ScrollArea>
   );
 }

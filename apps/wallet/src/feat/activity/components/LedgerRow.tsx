@@ -1,4 +1,4 @@
-import { Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Pressable } from "../../../shared/components/Pressable";
 import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/icons";
 import { theme, styles as s } from "../../../shared/theme";
 import type { FiatLedgerItem } from "../../../shared/fiat";
@@ -16,18 +16,18 @@ export function LedgerRow({ item, onSelect }: { item: FiatLedgerItem; onSelect: 
   // Only posted money gets a sign: pending/failed/cancelled moved nothing.
   const sign = posted ? (incoming ? "+" : "-") : "";
   return (
-    <TouchableOpacity key={tx.id} style={s.card} onPress={() => onSelect(item)}>
-      <View style={{ flexDirection: "row" }} className="items-center gap-3">
-        <View style={{ backgroundColor: color + "22" }} className="flex h-9 w-9 items-center justify-center rounded-full">
+    <Pressable key={tx.id} style={s.card} onPress={() => onSelect(item)}>
+      <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+        <div style={{ backgroundColor: color + "22" }} className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full">
           <Icon size={16} className={tone} />
-        </View>
-        <View className="flex-1 gap-0.5">
-          <Text className="font-sans text-[15px] font-semibold text-foreground">{ledgerLabel(item.kind, incoming)}</Text>
-          <Text className="font-sans text-xs text-muted-foreground">{fmtDate(item.createdAt)} · {ledgerStatusLabel(tx.status)}</Text>
-        </View>
-        <Text className="font-mono text-sm font-medium text-foreground">{sign}{fmtIdr(amount)}</Text>
+        </div>
+        <div className="flex flex-col flex-1 gap-0.5">
+          <span className="font-sans text-base font-semibold text-foreground">{ledgerLabel(item.kind, incoming)}</span>
+          <span className="font-sans text-xs text-muted-foreground">{fmtDate(item.createdAt)} · {ledgerStatusLabel(tx.status)}</span>
+        </div>
+        <span className="font-mono text-sm font-medium text-foreground">{sign}{fmtIdr(amount)}</span>
         <ChevronRight size={16} className="text-muted-foreground" />
-      </View>
-    </TouchableOpacity>
+      </div>
+    </Pressable>
   );
 }

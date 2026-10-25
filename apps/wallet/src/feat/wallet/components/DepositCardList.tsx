@@ -1,4 +1,4 @@
-import { Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Pressable } from "../../../shared/components/Pressable";
 import { Check } from "../../../shared/icons";
 import { styles as s } from "../../../shared/theme";
 import type { DepositTarget } from "../utils/deposit-targets";
@@ -23,22 +23,22 @@ export function DepositCardList({
         const isSol = t.key.startsWith("solana-");
         const alert = isSol && solAlert;
         return (
-          <View key={t.key} className={`mt-4 border bg-surface p-3 ${alert ? "border-danger" : "border-border"}`}>
-            <View style={{ flexDirection: "row" }} className="mb-2 items-baseline justify-between">
-              <Text className="font-sans text-[15px] font-semibold">{t.label}</Text>
-              <Text style={s.hint}>{t.sublabel}</Text>
-            </View>
-            {alert && <Text className="mb-2 font-sans text-xs font-medium text-danger">Top up here to activate</Text>}
-            <TouchableOpacity
+          <div key={t.key} className={`flex flex-col mt-4 border bg-surface p-3 ${alert ? "border-danger" : "border-border"}`}>
+            <div style={{ flexDirection: "row" }} className="flex flex-col mb-2 items-baseline justify-between">
+              <span className="font-sans text-base font-semibold">{t.label}</span>
+              <p style={s.hint}>{t.sublabel}</p>
+            </div>
+            {alert && <span className="mb-2 font-sans text-xs font-medium text-danger">Top up here to activate</span>}
+            <Pressable
               onPress={() => (isSol ? onOpen(t) : onCopy(t.key, t.address))}
             >
-              <View style={{ flexDirection: "row" }} className="w-full items-center justify-between gap-2 border border-border bg-background p-3">
-                <Text selectable style={s.mono}>{t.address}</Text>
+              <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center justify-between gap-2 border border-border bg-background p-3">
+                <span style={s.mono} className="select-text">{t.address}</span>
                 {copiedKey === t.key && <Check size={16} className="text-success" />}
-              </View>
-            </TouchableOpacity>
-            {copiedKey === t.key && <Text className="text-center font-sans text-[13px] text-success">Copied to clipboard</Text>}
-          </View>
+              </div>
+            </Pressable>
+            {copiedKey === t.key && <span className="text-center font-sans text-sm text-success">Copied to clipboard</span>}
+          </div>
         );
       })}
     </>

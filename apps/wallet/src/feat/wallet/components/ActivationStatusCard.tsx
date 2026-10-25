@@ -1,6 +1,7 @@
-import { Text, View } from "../../../shared/primitives";
+
 import { Info } from "../../../shared/icons";
 import { styles as s } from "../../../shared/theme";
+import { flatten } from "../../../shared/styles";
 
 export function ActivationStatusCard({
   status,
@@ -12,11 +13,11 @@ export function ActivationStatusCard({
   balanceSol: number;
 }) {
   return (
-    <View style={s.card}>
-      <Text style={[s.label, { marginBottom: 6 }]}>Status</Text>
-      <View style={{ flexDirection: "row" }} className="items-start gap-2">
+    <div style={s.card} className="flex flex-col">
+      <span style={flatten([s.label, { marginBottom: 6 }])}>Status</span>
+      <div style={{ flexDirection: "row" }} className="flex flex-col items-start gap-2">
         <Info size={16} className="text-muted-foreground" />
-        <Text className="font-sans text-[13px] leading-[19px] text-muted-foreground">
+        <span className="font-sans text-sm leading-[19px] text-muted-foreground">
           {status === "ready"
             ? `Ready to activate.`
             : status === "inactivated"
@@ -26,8 +27,8 @@ export function ActivationStatusCard({
                 : status === "activating"
                   ? "Activating on-chain…"
                   : "Funds received — activation is checked shortly."}
-        </Text>
-      </View>
-    </View>
+        </span>
+      </div>
+    </div>
   );
 }

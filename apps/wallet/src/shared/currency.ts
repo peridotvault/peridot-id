@@ -99,3 +99,21 @@ export function formatTotal(total: number, currency: Currency): string {
     ? `${total.toLocaleString("id-ID", { maximumFractionDigits: 0 })} IDR`
     : `${total.toLocaleString("en-US", { maximumFractionDigits: 2 })} USD`;
 }
+
+/** Split total into symbol + integer + fraction for mixed-size display (always 2 decimals). */
+export function formatTotalParts(total: number, currency: Currency): { prefix: string; int: string; frac: string } {
+  if (!Number.isFinite(total)) return { prefix: "", int: "—", frac: "" };
+  const parts = new Intl.NumberFormat(currency === "IDR" ? "id-ID" : "en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).formatToParts(total);
+  let int = "";
+  let frac = "";
+  let decimal = ".";
+  for (const p of parts) {
+    if (p.type === "integer" || p.type === "group" || p.type === "minusSign") int += p.value;
+    else if (p.type === "fraction") frac = p.value;
+    else if (p.type === "decimal") decimal = p.value;
+  }
+  return { prefix: currency === "IDR" ? "Rp" : "$", int, frac: `${decimal}${frac}` };
+}

@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { ScrollView, Text, TouchableOpacity, View } from "../shared/primitives";
+import { ScrollArea } from "../shared/components/ScrollArea";
+import { Pressable } from "../shared/components/Pressable";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
 import { useHomeData } from "../feat/wallet/hooks/useHomeData";
 import { buildCoins, calcTotal } from "../feat/wallet/utils/assets";
-import { BalanceCard } from "../feat/wallet/components/BalanceCard";
+import { TotalBalanceSection } from "../feat/wallet/components/TotalBalanceSection";
+import { FiatSection } from "../feat/wallet/components/FiatSection";
 import { QuickActions } from "../feat/wallet/components/QuickActions";
 import { SendChoiceModal } from "../feat/wallet/components/SendChoiceModal";
 import { AssetSection } from "../feat/wallet/components/AssetSection";
@@ -15,6 +17,7 @@ interface HomeScreenProps {
   goSwap: () => void;
   goBuy: () => void;
   goTransfer: () => void;
+  goRupiah: () => void;
   goPasskeys: () => void;
 }
 
@@ -24,6 +27,7 @@ export function HomeScreen({
   goSwap,
   goBuy,
   goTransfer,
+  goRupiah,
   goPasskeys,
 }: HomeScreenProps) {
   const { peridot } = usePeridot();
@@ -39,19 +43,20 @@ export function HomeScreen({
   });
 
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
-      <BalanceCard
+    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
+      <TotalBalanceSection
         currency={d.currency}
         totalValue={totalValue}
+        loading={d.busy && d.balanceIdr === null}
+      />
+      <QuickActions onSend={() => setChoice(true)} onReceive={goReceive} onSwap={goSwap} onBuy={goBuy} />
+      <FiatSection
         balanceIdr={d.balanceIdr}
         balanceError={d.balanceError}
         busy={d.busy}
-        rates={d.rates}
         onRetry={d.load}
-        onTopup={goBuy}
+        onOpen={goRupiah}
       />
-
-      <QuickActions onSend={() => setChoice(true)} onReceive={goReceive} onSwap={goSwap} onBuy={goBuy} />
 
       <SendChoiceModal
         visible={choice}
@@ -67,17 +72,17 @@ export function HomeScreen({
         onClose={() => setChoice(false)}
       />
 
-      {d.error && <Text role="alert" style={s.error}>{d.error}</Text>}
+      {d.error && <p role="alert" style={s.error}>{d.error}</p>}
 
       {d.activated && d.passkeys.length === 0 && !d.busy && (
-        <TouchableOpacity onPress={goPasskeys} accessibilityLabel="Add a passkey in Security">
-          <View className="border border-border bg-muted p-3">
-            <Text className="text-center font-sans text-[13px] text-muted-foreground">No passkey — add one in Security to authorize withdrawals.</Text>
-          </View>
-        </TouchableOpacity>
+        <Pressable onPress={goPasskeys} accessibilityLabel="Add a passkey in Security">
+          <div className="flex flex-col border border-border bg-muted p-3">
+            <span className="text-center font-sans text-sm text-muted-foreground">No passkey — add one in Security to authorize withdrawals.</span>
+          </div>
+        </Pressable>
       )}
 
       <AssetSection tab={d.assetTab} onTabChange={d.setAssetTab} coins={coins} nfts={d.nfts} busy={d.busy} />
-    </ScrollView>
+    </ScrollArea>
   );
 }

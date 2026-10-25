@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { Linking, ScrollView, Text, TextInput, View } from "../shared/primitives";
+import { ScrollArea } from "../shared/components/ScrollArea";
+import { TextField } from "../shared/components/TextField";
+import { openExternalUrl } from "../shared/openExternal";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
-import { BackButton } from "../shared/components/BackButton";
+import { PushHeader } from "../shared/components/PushHeader";
 import { UIButton } from "../shared/components/UIButton";
 import { fmtIdr } from "../shared/fiat";
 import { isNetworkSwitching, isTestnetMode } from "../shared/network-mode";
@@ -43,7 +45,7 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
   const belowMin = /^\d+$/.test(digits) && BigInt(digits) > 0n && BigInt(digits) < MIN_NET_IDR;
 
   const openUrl = (url: string) => {
-    Linking.openURL(url).catch(() => setError("Could not open the payment page."));
+    openExternalUrl(url).catch(() => setError("Could not open the payment page."));
   };
 
   const createCheckout = async () => {
@@ -86,34 +88,36 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <ScrollView contentContainerStyle={s.container}>
-      <BackButton onPress={onDone} />
-      <Text style={s.title}>Top Up</Text>
-      <Text style={s.subtitle}>Enter what you want credited — you pay that plus the fees shown below.</Text>
+    <ScrollArea contentContainerStyle={s.container}>
+      <PushHeader
+        onBack={onDone}
+        title="Top Up"
+        subtitle="Enter what you want credited — you pay that plus the fees shown below."
+      />
       {gated && (
-        <View className="border border-border bg-muted p-3">
-          <Text className="font-sans text-[13px] font-semibold text-foreground">Disabled in Testnet Mode</Text>
-          <Text className="font-sans text-[13px] leading-5 text-muted-foreground">
+        <div className="flex flex-col border border-border bg-muted p-3">
+          <span className="font-sans text-sm font-semibold text-foreground">Disabled in Testnet Mode</span>
+          <span className="font-sans text-sm leading-5 text-muted-foreground">
             Real-money checkout is mainnet-only — switch back to Mainnet in Settings to top up.
-          </Text>
-        </View>
+          </span>
+        </div>
       )}
-      {frozen && !gated && <Text style={s.hint}>Network is switching — top-ups pause until balances reload.</Text>}
+      {frozen && !gated && <p style={s.hint}>Network is switching — top-ups pause until balances reload.</p>}
 
       {/* ANT-341 FR7: submit errors render above the fold (no scroll to find them). */}
-      {error && <Text role="alert" tabIndex={-1} id="topup-error" style={s.error}>{error}</Text>}
+      {error && <p role="alert" tabIndex={-1} id="topup-error" style={s.error}>{error}</p>}
 
-      <View className="mt-3 gap-1.5 border border-border bg-surface p-3">
+      <div className="flex flex-col mt-3 gap-1.5 border border-border bg-surface p-3">
         <label htmlFor="topup-amount">
-          <Text style={s.label}>Amount credited to you (IDR)</Text>
+          <span style={s.label}>Amount credited to you (IDR)</span>
         </label>
-        <TextInput id="topup-amount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000" />
-        {belowMin && <Text role="alert" style={s.error}>Minimum top-up is Rp50.000.</Text>}
+        <TextField id="topup-amount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000"  />
+        {belowMin && <p role="alert" style={s.error}>Minimum top-up is Rp50.000.</p>}
 
         {q.quote && (
           <>
             {q.noMethods ? (
-              <Text role="alert" style={s.error}>No payment methods available right now. Try again later.</Text>
+              <p role="alert" style={s.error}>No payment methods available right now. Try again later.</p>
             ) : (
               <FiatQuoteBreakdown
                 quote={q.quote}
@@ -134,22 +138,22 @@ export function TopupScreen({ onDone }: { onDone: () => void }) {
           variant="primary"
         />
         {sync.pending && (
-          <View className="gap-1.5">
-            <Text style={s.hint}>Complete your payment, then tap Check status — your Saldo updates once the payment is confirmed.</Text>
+          <div className="flex flex-col gap-1.5">
+            <p style={s.hint}>Complete your payment, then tap Check status — your Saldo updates once the payment is confirmed.</p>
             <UIButton
               title={sync.syncing ? "Checking…" : "Check payment status"}
               onPress={() => sync.checkStatus(sync.pending!)}
               disabled={sync.syncing}
             />
             <UIButton title="Open payment page" onPress={() => openUrl(sync.pending!.paymentUrl)} />
-          </View>
+          </div>
         )}
-        {sync.syncMsg && <Text role="status" style={s.hint}>{sync.syncMsg}</Text>}
-      </View>
+        {sync.syncMsg && <p role="status" style={s.hint}>{sync.syncMsg}</p>}
+      </div>
 
-      <Text style={s.hint}>
+      <p style={s.hint}>
         Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Verified apps pay a Rp0 PeridotID fee. Tap Check payment status after paying — your Saldo updates once confirmed.
-      </Text>
-    </ScrollView>
+      </p>
+    </ScrollArea>
   );
 }

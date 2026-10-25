@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { ScrollView, Text, TextInput, View } from "../shared/primitives";
+import { ScrollArea } from "../shared/components/ScrollArea";
+import { TextField } from "../shared/components/TextField";
 import type { FiatTransferInquiryView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
-import { BackButton } from "../shared/components/BackButton";
+import { PushHeader } from "../shared/components/PushHeader";
 import { UIButton } from "../shared/components/UIButton";
 import { isNetworkSwitching, isTestnetMode } from "../shared/network-mode";
 import { useNetworkMode } from "../shared/hooks/useNetworkMode";
@@ -129,70 +130,67 @@ export function FiatTransferScreen({ onDone }: { onDone: () => void }) {
 
   if (result) {
     return (
-      <View style={s.container}>
-        <Text style={s.title}>Sent</Text>
-        <Text selectable className="font-sans text-sm leading-5 text-muted-foreground">{result}</Text>
+      <div style={s.container} className="flex flex-col">
+        <span style={s.title}>Sent</span>
+        <span className="select-text font-sans text-sm leading-5 text-muted-foreground">{result}</span>
         <UIButton title="Done" onPress={onDone} variant="primary" />
-      </View>
+      </div>
     );
   }
 
   if (inquiry) {
     return (
-      <ScrollView contentContainerStyle={s.container}>
-        <BackButton onPress={cancel} />
-        <Text style={s.title}>Review transfer</Text>
-        <View className="gap-2.5 border border-border bg-surface p-3">
+      <ScrollArea contentContainerStyle={s.container}>
+        <PushHeader onBack={cancel} title="Review transfer" />
+        <div className="flex flex-col gap-2.5 border border-border bg-surface p-3">
           <Row label="To" value={inquiry.beneficiaryPid} />
           <Row label="They receive" value={fmtIdr(inquiry.netIdr)} />
           <Row label="Service fee" value={fmtIdr(inquiry.feeIdr)} />
           <Row label="Total debited" value={fmtIdr(inquiry.grossIdr)} />
-        </View>
-        {error && <Text role="alert" tabIndex={-1} id="fiat-transfer-error-review" style={s.error}>{error}</Text>}
+        </div>
+        {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error-review" style={s.error}>{error}</p>}
         <UIButton title={busy ? "Sending…" : "Confirm & send"} onPress={confirm} disabled={busy || gated || frozen} variant="primary" />
-        <UIButton title="Back" onPress={cancel} disabled={busy} />
-      </ScrollView>
+      </ScrollArea>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={s.container}>
-      <BackButton onPress={onDone} />
-      <Text style={s.title}>Transfer</Text>
-      <Text style={s.subtitle}>Send from your balance to any PeridotID user. The fee is quoted from the amount you enter.</Text>
+    <ScrollArea contentContainerStyle={s.container}>
+      <PushHeader onBack={onDone} title="Transfer" />
+      <p style={s.subtitle}>Send from your balance to any PeridotID user. The fee is quoted from the amount you enter.</p>
       {gated && (
-        <View className="border border-border bg-muted p-3">
-          <Text className="font-sans text-[13px] font-semibold text-foreground">Disabled in Testnet Mode</Text>
-          <Text className="font-sans text-[13px] leading-5 text-muted-foreground">
+        <div className="flex flex-col border border-border bg-muted p-3">
+          <span className="font-sans text-sm font-semibold text-foreground">Disabled in Testnet Mode</span>
+          <span className="font-sans text-sm leading-5 text-muted-foreground">
             Fiat transfers move real money — switch back to Mainnet in Settings to send.
-          </Text>
-        </View>
+          </span>
+        </div>
       )}
-      {frozen && !gated && <Text style={s.hint}>Network is switching — transfers pause until balances reload.</Text>}
+      {frozen && !gated && <p style={s.hint}>Network is switching — transfers pause until balances reload.</p>}
       <label htmlFor="fiat-to">
-        <Text style={s.label}>Recipient PID</Text>
+        <span style={s.label}>Recipient PID</span>
       </label>
-      <TextInput id="fiat-to" aria-label="Recipient PID" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid" />
+      <TextField id="fiat-to" aria-label="Recipient PID" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid"  />
       <label htmlFor="fiat-amount">
-        <Text style={s.label}>Amount (IDR)</Text>
+        <span style={s.label}>Amount (IDR)</span>
       </label>
-      <TextInput id="fiat-amount" aria-label="Amount (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000" />
+      <TextField id="fiat-amount" aria-label="Amount (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000"  />
       <label htmlFor="fiat-note">
-        <Text style={s.label}>Note (optional)</Text>
+        <span style={s.label}>Note (optional)</span>
       </label>
-      <TextInput id="fiat-note" aria-label="Note (optional)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for" />
-      <Text style={s.hint}>Recipient must have a PeridotID account.</Text>
-      {error && <Text role="alert" tabIndex={-1} id="fiat-transfer-error" style={s.error}>{error}</Text>}
+      <TextField id="fiat-note" aria-label="Note (optional)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for"  />
+      <p style={s.hint}>Recipient must have a PeridotID account.</p>
+      {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error" style={s.error}>{error}</p>}
       <UIButton title={busy ? "Checking…" : "Continue"} onPress={prepare} disabled={busy || gated || frozen || !to || !amount} variant="primary" />
-    </ScrollView>
+    </ScrollArea>
   );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <View className="gap-1">
-      <Text style={s.label}>{label}</Text>
-      <Text className="font-mono text-[15px] text-foreground" selectable>{value}</Text>
-    </View>
+    <div className="flex flex-col gap-1">
+      <span style={s.label}>{label}</span>
+      <span className="select-text font-mono text-base text-foreground">{value}</span>
+    </div>
   );
 }

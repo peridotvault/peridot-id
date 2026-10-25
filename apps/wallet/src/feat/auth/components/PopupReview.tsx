@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, Text, View } from "../../../shared/primitives";
+import { Pressable } from "../../../shared/components/Pressable";
 import { styles as s } from "../../../shared/theme";
 import { UIButton } from "../../../shared/components/UIButton";
 import type { ExecuteGate } from "../utils/knownPrograms";
@@ -72,24 +72,24 @@ export function PopupReview({
     <>
       {summary && (
         <>
-          <Text style={s.label}>Requested action</Text>
-          <Text selectable style={s.mono}>{summary}</Text>
+          <span style={s.label}>Requested action</span>
+          <span style={s.mono} className="select-text">{summary}</span>
         </>
       )}
       {unknown && (
-        <View style={s.card}>
-          <Text style={s.label}>Unknown program</Text>
-          <Text selectable style={s.mono}>{unknown.description.target}</Text>
+        <div style={s.card} className="flex flex-col">
+          <span style={s.label}>Unknown program</span>
+          <span style={s.mono} className="select-text">{unknown.description.target}</span>
           <Pressable onPress={copyTarget} accessibilityRole="button" accessibilityLabel="Copy program address">
-            <Text style={s.hint}>{copied ? "Copied" : "Copy address"}</Text>
+            <span style={s.hint}>{copied ? "Copied" : "Copy address"}</span>
           </Pressable>
-          <Text style={s.mono}>
+          <span style={s.mono}>
             {unknown.description.dataLen} bytes · sha256:{unknown.description.dataHashHex}
-          </Text>
-          <Text style={s.hint}>
+          </span>
+          <p style={s.hint}>
             {unknown.description.metaCount} accounts ({unknown.description.writableCount} writable)
-          </Text>
-          <Text style={s.hint}>{UNKNOWN_PROGRAM_RISK_COPY}</Text>
+          </p>
+          <p style={s.hint}>{UNKNOWN_PROGRAM_RISK_COPY}</p>
           <Pressable
             style={{ flexDirection: "row" }}
             className="items-center gap-2.5"
@@ -99,26 +99,26 @@ export function PopupReview({
             accessibilityState={{ checked: acknowledged === true }}
             accessibilityLabel="I understand this calls an unknown program"
           >
-            <View className={`h-[22px] w-[22px] items-center justify-center border ${acknowledged === true ? "border-foreground" : "border-muted-foreground"}`}>
-              {acknowledged === true && <Text aria-hidden="true" className="font-sans text-sm text-foreground">✓</Text>}
-            </View>
-            <Text className="flex-1 font-sans text-xs text-muted-foreground">I understand this calls an unknown program</Text>
+            <div className={`flex flex-col h-[22px] w-[22px] items-center justify-center border ${acknowledged === true ? "border-foreground" : "border-muted-foreground"}`}>
+              {acknowledged === true && <span aria-hidden="true" className="font-sans text-sm text-foreground">✓</span>}
+            </div>
+            <span className="flex-1 font-sans text-xs text-muted-foreground">I understand this calls an unknown program</span>
           </Pressable>
-        </View>
+        </div>
       )}
       {invalid && (
-        <View style={s.card}>
-          <Text role="alert" style={s.error}>Cannot approve this request</Text>
-          <Text style={s.hint}>{invalid.reason}</Text>
-        </View>
+        <div style={s.card} className="flex flex-col">
+          <p role="alert" style={s.error}>Cannot approve this request</p>
+          <p style={s.hint}>{invalid.reason}</p>
+        </div>
       )}
       {approvingPid && (
-        <Text style={s.hint}>
+        <p style={s.hint}>
           Approving as {approvingPid}{switched ? " (switched to this account for approval)" : ""}
-        </Text>
+        </p>
       )}
-      <Text style={s.hint}>Requested by {origin}</Text>
-      <Text style={s.hint}>Review carefully — approving signs with your passkey.</Text>
+      <p style={s.hint}>Requested by {origin}</p>
+      <p style={s.hint}>Review carefully — approving signs with your passkey.</p>
       <UIButton title={busy ? "Waiting for passkey…" : "Approve"} onPress={onApprove} disabled={approveDisabled} variant="primary" />
       <UIButton title="Deny" onPress={onDeny} disabled={busy} />
     </>

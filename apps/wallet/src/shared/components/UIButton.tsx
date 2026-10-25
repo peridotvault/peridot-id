@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "../primitives";
+import { Pressable } from "./Pressable";
+import { StyleSheet, flatten } from "../styles";
 import { theme } from "../theme";
 
 // Shared button — web CutButton feel: sharp corners, 14px medium
@@ -40,20 +41,20 @@ export function UIButton({
         left && styles.btnLeft,
       ]}
     >
-      <View style={[styles.content, left && styles.contentLeft]}>
+      <div style={flatten([styles.content, left && styles.contentLeft])} className="flex flex-col">
         {icon}
-        <Text
-          style={[
+        <span
+          style={flatten([
             styles.label,
             primary && styles.labelPrimary,
             danger && styles.labelDanger,
             disabled && !primary && !danger && styles.labelDisabled,
-          ]}
+          ])}
         >
           {title}
-        </Text>
-      </View>
-      {note && <Text style={styles.note}>{note}</Text>}
+        </span>
+      </div>
+      {note && <span style={styles.note}>{note}</span>}
     </Pressable>
   );
 }

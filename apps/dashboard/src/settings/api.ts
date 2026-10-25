@@ -36,11 +36,9 @@ export interface SettingHistoryEntry {
 export interface EffectiveIntake {
   effectiveIntake: boolean;
   breakdown: {
-    xpIntakeEnabled: boolean;
     suspendGlobal: boolean;
     suspendApp: boolean;
-    envAllow: boolean;
-    source: "db+env" | "defaults-fallback";
+    source: "db" | "defaults-fallback";
   };
 }
 

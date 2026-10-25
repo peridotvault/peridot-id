@@ -15,8 +15,9 @@ import { PidClaimForm } from "../feat/auth/components/PidClaimForm";
 import { EmailOtpForm } from "../feat/auth/components/EmailOtpForm";
 import { LoginOptions } from "../feat/auth/components/LoginOptions";
 import { readOAuthError, stripOAuthError } from "../feat/auth/utils/parseOAuthError";
-import { Text, View } from "../shared/primitives";
+
 import { styles as s } from "../shared/theme";
+import { flatten } from "../shared/styles";
 
 export function LoginScreen({
   onLoggedIn,
@@ -144,10 +145,10 @@ export function LoginScreen({
   // Delivered/denied but still open: terminal screen, never the consent card.
   if (finished) {
     return (
-      <View style={[s.container, { justifyContent: "center", alignItems: "center" }]}>
-        <Text style={s.title}>PeridotID</Text>
-        <Text style={s.hint}>{finished}</Text>
-      </View>
+      <div style={flatten([s.container, { justifyContent: "center", alignItems: "center" }])} className="flex flex-col">
+        <h1 style={s.title}>PeridotID</h1>
+        <p style={s.hint}>{finished}</p>
+      </div>
     );
   }
 

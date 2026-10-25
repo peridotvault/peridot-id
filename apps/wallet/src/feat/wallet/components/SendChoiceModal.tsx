@@ -1,4 +1,4 @@
-import { Text } from "../../../shared/primitives";
+
 import { styles as s } from "../../../shared/theme";
 import { BottomSheet } from "../../../shared/components/BottomSheet";
 import { UIButton } from "../../../shared/components/UIButton";
@@ -21,7 +21,7 @@ export function SendChoiceModal({
 }) {
   return (
     <BottomSheet visible={visible} title="Send" onClose={onClose} scrimLabel="Close send options">
-      <Text style={s.hint}>Choose where to send from.</Text>
+      <p style={s.hint}>Choose where to send from.</p>
       <UIButton
         title="Send On-Chain"
         note={activated ? "To Solana address" : "Activate account first"}

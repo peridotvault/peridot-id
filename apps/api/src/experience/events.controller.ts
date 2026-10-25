@@ -21,8 +21,8 @@ import { XP_INTAKE_APP_PID_THROTTLER, XP_INTAKE_APP_THROTTLER } from "./rate-lim
  * standard envelope and feed the suspicious-activity alert hook (F7).
  *
  * CALLERS: server-to-server only. Responses never oracle PID existence and
- * never carry secret material (F5/F9). XP-awarding is RELEASE-GATED (plan
- * rev 5 §13) — disabled unless PID_XP_INTAKE_ENABLED is exactly "true".
+ * never carry secret material (F5/F9). Awarding is gated only by the runtime
+ * kill-switches (xp.suspend.global / xp.suspend.<appId>).
  */
 @Controller("v1/experience")
 @UseGuards(ThrottlerGuard)

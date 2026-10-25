@@ -1,10 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { isPid } from "../common/pid";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
-import { XP_INTAKE_ENABLED_KEY } from "../settings/env-keys";
 import { XpSettingsService } from "../settings/xp-settings.service";
 import type { EffectiveIntake } from "../settings/xp-settings.service";
 import { AuthedXpApp } from "./app-credential.guard";
@@ -27,13 +25,6 @@ export interface IntakeResult {
   reason?: string;
   leveledUp?: boolean;
 }
-
-/** Release gate (HARD GATE, plan rev 5 §13) — re-exported from settings
- * (single source; the AND-precedence evaluation lives in XpSettingsService).
- * XP-awarding stays OFF until Tobias sign-off + Tristan test evidence on
- * the parent. Exact-"true" match, fail-closed — same convention as
- * PID_FAUCET_ENABLED. */
-export { XP_INTAKE_ENABLED_KEY } from "../settings/env-keys";
 
 /** Generic rejection cause shared by unknown-subject and failed-verification
  * (Tobias F5: no PID oracle — callers cannot distinguish "no such user"
@@ -90,22 +81,15 @@ export class EventsService {
     private readonly quotas: QuotaService,
     private readonly evidence: EvidenceService,
     private readonly security: SecurityEventService,
-    private readonly config: ConfigService,
     private readonly xpSettings: XpSettingsService,
   ) {}
 
-  /** Env leg of the intake gate (exact-"true", fail-closed). The effective
-   * gate additionally ANDs the DB settings — see submitEvent. */
-  intakeEnabled(): boolean {
-    return this.config.get<string>(XP_INTAKE_ENABLED_KEY, "false") === "true";
-  }
-
   async submitEvent(dto: SubmitEventDto, authed: AuthedXpApp): Promise<IntakeResult> {
     if (!authed) throw new ForbiddenException("App is not permitted to submit events");
-    // ANT-456 effective intake (plan §3.3): env flag AND DB settings, most
-    // restrictive wins; any settings read failure denies (fail-closed).
-    // XpSettingsService never throws by contract (F4), but the gate is
-    // wrapped defensively: a throwing settings layer must still deny.
+    // Effective intake (plan §3.3): only the kill-switches (xp.suspend.global
+    // / xp.suspend.<appId>) can deny; any settings read failure also denies
+    // (fail-closed). XpSettingsService never throws by contract (F4), but the
+    // gate is wrapped defensively: a throwing settings layer must still deny.
     let gate: EffectiveIntake;
     try {
       gate = await this.xpSettings.effectiveIntake(authed.id);

@@ -1,8 +1,9 @@
-import { Linking, ScrollView, Text, View } from "../shared/primitives";
+import { ScrollArea } from "../shared/components/ScrollArea";
+import { openExternalUrl } from "../shared/openExternal";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { styles as s } from "../shared/theme";
 import { solanaExplorerTxUrl } from "../shared/network-mode";
-import { BackButton } from "../shared/components/BackButton";
+import { PushHeader } from "../shared/components/PushHeader";
 import { UIButton } from "../shared/components/UIButton";
 
 const LAMPORTS_PER_SOL = 1e9;
@@ -21,23 +22,22 @@ function fmtDate(iso: string | null): string {
 
 export function ActivityDetailScreen({ tx, onDone }: { tx: WalletTransaction; onDone: () => void }) {
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
-      <BackButton onPress={onDone} />
+    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
+      <PushHeader
+        onBack={onDone}
+        title={tx.type === "DEPOSIT" ? "Receive" : tx.type === "WITHDRAW" ? "Send" : tx.type === "ACTIVATION" ? "Activation" : "Transaction"}
+      />
 
-      <Text style={s.title}>
-        {tx.type === "DEPOSIT" ? "Receive" : tx.type === "WITHDRAW" ? "Send" : tx.type === "ACTIVATION" ? "Activation" : "Transaction"}
-      </Text>
-
-      {tx.amount != null && <Text className="my-2 font-serif text-[32px] text-foreground">{fmtAmount(tx)}</Text>}
+      {tx.amount != null && <span className="my-2 font-serif text-3xl text-foreground">{fmtAmount(tx)}</span>}
 
       {tx.type === "ACTIVATION" && (
-        <View style={s.card}>
-          <Text className="font-sans text-[13px] leading-[19px] text-muted-foreground">
+        <div style={s.card} className="flex flex-col">
+          <span className="font-sans text-sm leading-[19px] text-muted-foreground">
             Peridot paid the SOL to create your on-chain smart account (PDA). The activation
             cost — rent + network fee + margin — was reimbursed from your wallet to the
             Peridot treasury in the same transaction.
-          </Text>
-        </View>
+          </span>
+        </div>
       )}
 
       <Field label="Status" value={String(tx.status)} />
@@ -55,21 +55,21 @@ export function ActivityDetailScreen({ tx, onDone }: { tx: WalletTransaction; on
           // Explorer cluster follows the selection (ANT-15 req 3): testnet
           // links carry ?cluster=devnet via the shared helper.
           onPress={() => {
-            Linking.openURL(solanaExplorerTxUrl(tx.txHash, tx.network)).catch(() => undefined);
+            openExternalUrl(solanaExplorerTxUrl(tx.txHash, tx.network)).catch(() => undefined);
           }}
           variant="primary"
         />
       )}
-    </ScrollView>
+    </ScrollArea>
   );
 }
 
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <View className="gap-1">
-      <Text style={s.label}>{label}</Text>
-      <Text className={mono ? "font-mono text-[13px] text-foreground" : "font-sans text-sm text-foreground"} selectable>{value}</Text>
-    </View>
+    <div className="flex flex-col gap-1">
+      <span style={s.label}>{label}</span>
+      <span className={mono ? "select-text font-mono text-sm text-foreground" : "select-text font-sans text-sm text-foreground"}>{value}</span>
+    </div>
   );
 }
 

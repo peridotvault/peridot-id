@@ -1,4 +1,4 @@
-import { Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Pressable } from "../../../shared/components/Pressable";
 import type { DepositQuoteView } from "@peridotvault/pid-sdk-js";
 import { styles as s } from "../../../shared/theme";
 import { fmtIdr, sumIdr } from "../../../shared/fiat";
@@ -24,29 +24,29 @@ export function FiatQuoteBreakdown({
 }) {
   return (
     <>
-      <View className="mt-2 gap-1">
+      <div className="flex flex-col mt-2 gap-1">
         <Row label="Amount" value={fmtIdr(quote.netIdr)} />
         {BigInt(transferFee) > 0n && <Row label="Transfer Fee" value={fmtIdr(transferFee)} />}
         {Number(quote.appFeeIdr) > 0 && <Row label="App Fee" value={fmtIdr(quote.appFeeIdr)} />}
         <Row label="Total Payment" value={fmtIdr(selectedTotalIdr)} strong />
-      </View>
+      </div>
       {editable && (
         <>
-          <Text style={s.label}>Payment method</Text>
-          <View className="mt-0.5 gap-1.5">
+          <span style={s.label}>Payment method</span>
+          <div className="flex flex-col mt-0.5 gap-1.5">
             {quote.paymentMethods.map((m) => (
-              <TouchableOpacity
+              <Pressable
                 key={m.key}
                 onPress={() => onMethod(m.key)}
                 accessibilityLabel={`Pay with ${m.label}`}
               >
-                <View style={{ flexDirection: "row" }} className={`w-full items-center justify-between border px-2.5 py-2 ${method === m.key ? "border-foreground" : "border-border"}`}>
-                  <Text className={`font-sans text-sm text-foreground ${method === m.key ? "font-semibold" : ""}`}>{m.label}</Text>
-                  {m.enabled && <Text className="font-mono text-[13px] text-muted-foreground">{fmtIdr(sumIdr(m.gatewayFeeIdr, m.gatewayTaxIdr))}</Text>}
-                </View>
-              </TouchableOpacity>
+                <div style={{ flexDirection: "row" }} className={`flex flex-col w-full items-center justify-between border px-2.5 py-2 ${method === m.key ? "border-foreground" : "border-border"}`}>
+                  <span className={`font-sans text-sm text-foreground ${method === m.key ? "font-semibold" : ""}`}>{m.label}</span>
+                  {m.enabled && <span className="font-mono text-sm text-muted-foreground">{fmtIdr(sumIdr(m.gatewayFeeIdr, m.gatewayTaxIdr))}</span>}
+                </div>
+              </Pressable>
             ))}
-          </View>
+          </div>
         </>
       )}
     </>
@@ -56,9 +56,9 @@ export function FiatQuoteBreakdown({
 /** One label/value line of the quote breakdown. */
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
-    <View style={{ flexDirection: "row" }} className="items-center justify-between">
-      <Text className={`font-sans text-[13px] ${strong ? "font-bold text-foreground" : "text-muted-foreground"}`}>{label}</Text>
-      <Text className={`font-mono text-[13px] text-foreground ${strong ? "font-bold" : ""}`}>{value}</Text>
-    </View>
+    <div style={{ flexDirection: "row" }} className="flex flex-col items-center justify-between">
+      <span className={`font-sans text-sm ${strong ? "font-bold text-foreground" : "text-muted-foreground"}`}>{label}</span>
+      <span className={`font-mono text-sm text-foreground ${strong ? "font-bold" : ""}`}>{value}</span>
+    </div>
   );
 }

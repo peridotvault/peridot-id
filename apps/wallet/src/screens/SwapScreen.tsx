@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { Text, TextInput, TouchableOpacity, View } from "../shared/primitives";
+import { TextField } from "../shared/components/TextField";
+import { Pressable } from "../shared/components/Pressable";
 import { ArrowDownUp } from "../shared/icons";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
+import { PushHeader } from "../shared/components/PushHeader";
 import { UIButton } from "../shared/components/UIButton";
 
 export function SwapScreen({ onDone }: { onDone: () => void }) {
@@ -17,44 +19,43 @@ export function SwapScreen({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <View style={s.container}>
-      <Text style={s.title}>Swap</Text>
-      <Text style={s.subtitle}>Swap between assets on the smart account.</Text>
+    <div style={s.container} className="flex flex-col">
+      <PushHeader onBack={onDone} title="Swap" />
+      <p style={s.subtitle}>Swap between assets on the smart account.</p>
 
-      <View className="gap-2">
-        <Text style={s.label}>You pay</Text>
-        <TextInput style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="0.0" />
-        <Text style={s.label}>From asset</Text>
-        <TextInput style={s.input} value={from} onChangeText={setFrom} autoCapitalize="none" />
+      <div className="flex flex-col gap-2">
+        <span style={s.label}>You pay</span>
+        <TextField style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="0.0"  />
+        <span style={s.label}>From asset</span>
+        <TextField style={s.input} value={from} onChangeText={setFrom} autoCapitalize="none"  />
 
-        <View style={{ flexDirection: "row" }} className="my-2 items-center gap-3">
-          <View className="h-px flex-1 bg-border" />
-          <View className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
+        <div style={{ flexDirection: "row" }} className="flex flex-col my-2 items-center gap-3">
+          <div className="flex flex-col h-px flex-1 bg-border"  />
+          <div className="flex flex-col flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
             <ArrowDownUp size={16} className="text-foreground" />
-          </View>
-          <View className="h-px flex-1 bg-border" />
-        </View>
+          </div>
+          <div className="flex flex-col h-px flex-1 bg-border"  />
+        </div>
 
-        <Text style={s.label}>You receive</Text>
-        <Text className="font-sans text-[13px] text-muted-foreground">
+        <span style={s.label}>You receive</span>
+        <span className="font-sans text-sm text-muted-foreground">
           No quote yet — swaps aren&apos;t available in this build, so no estimate is shown.
-        </Text>
-        <Text style={s.label}>To asset</Text>
-        <TextInput style={s.input} value={to} onChangeText={setTo} autoCapitalize="none" />
-      </View>
+        </span>
+        <span style={s.label}>To asset</span>
+        <TextField style={s.input} value={to} onChangeText={setTo} autoCapitalize="none"  />
+      </div>
 
-      <TouchableOpacity
+      <Pressable
         onPress={swap}
         disabled
         accessibilityRole="button"
         accessibilityState={{ disabled: true }}
         accessibilityLabel="Swap (unavailable — coming soon)"
       >
-        <View className="w-full items-center border border-border bg-surface p-3.5 opacity-60">
-          <Text className="font-sans text-[13px] font-medium text-muted-foreground">Swap coming soon</Text>
-        </View>
-      </TouchableOpacity>
-      <UIButton title="Back" onPress={onDone} />
-    </View>
+        <div className="flex flex-col w-full items-center border border-border bg-surface p-3.5 opacity-60">
+          <span className="font-sans text-sm font-medium text-muted-foreground">Swap coming soon</span>
+        </div>
+      </Pressable>
+    </div>
   );
 }

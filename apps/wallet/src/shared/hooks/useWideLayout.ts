@@ -1,4 +1,4 @@
-import { useWindowDimensions } from "../primitives";
+import { useWindowDimensions } from "./useWindowDimensions";
 import { theme } from "../theme";
 
 // True past the md breakpoint: the tab bar docks left as a sidebar.

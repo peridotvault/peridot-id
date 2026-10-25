@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { ScrollView, Text, View } from "../shared/primitives";
+import { ScrollArea } from "../shared/components/ScrollArea";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
-import { BackButton } from "../shared/components/BackButton";
+import { PushHeader } from "../shared/components/PushHeader";
 import { UIButton } from "../shared/components/UIButton";
 import type { FiatLedgerItem } from "../shared/fiat";
 import { ledgerStatusLabel } from "../shared/fiat";
@@ -50,11 +50,9 @@ export function FiatLedgerDetailScreen({ item: initial, onDone }: { item: FiatLe
   };
 
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={s.container}>
-      <BackButton onPress={onDone} />
-
-      <Text style={s.title}>{titleOf(item, incoming)}</Text>
-      <Text className="my-2 font-serif text-[32px] text-foreground">{sign}{fmtIdr(amount)}</Text>
+    <ScrollArea className="flex-1 bg-background" contentContainerStyle={s.container}>
+      <PushHeader onBack={onDone} title={titleOf(item, incoming)} />
+      <span className="my-2 font-serif text-3xl text-foreground">{sign}{fmtIdr(amount)}</span>
 
       <Field label="Status" value={ledgerStatusLabel(tx.status)} />
       {tx.counterpartyPid && <Field label={incoming ? "From" : "To"} value={tx.counterpartyPid} />}
@@ -62,20 +60,20 @@ export function FiatLedgerDetailScreen({ item: initial, onDone }: { item: FiatLe
       <Field label="Reference" value={tx.entryGroup} />
       <Field label="Created" value={fmtDate(item.createdAt)} />
 
-      {error && <Text role="alert" style={s.error}>{error}</Text>}
+      {error && <p role="alert" style={s.error}>{error}</p>}
 
       {cancellable && (
         <UIButton title={busy ? "Cancelling…" : "Cancel transfer"} onPress={cancel} disabled={busy} variant="danger" />
       )}
-    </ScrollView>
+    </ScrollArea>
   );
 }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <View className="gap-1">
-      <Text style={s.label}>{label}</Text>
-      <Text className="font-sans text-sm text-foreground" selectable>{value}</Text>
-    </View>
+    <div className="flex flex-col gap-1">
+      <span style={s.label}>{label}</span>
+      <span className="select-text font-sans text-sm text-foreground">{value}</span>
+    </div>
   );
 }

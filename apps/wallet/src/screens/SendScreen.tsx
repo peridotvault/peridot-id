@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Text, TextInput, View } from "../shared/primitives";
+import { TextField } from "../shared/components/TextField";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
+import { PushHeader } from "../shared/components/PushHeader";
 import { UIButton } from "../shared/components/UIButton";
 import { sendDestinationError } from "../feat/wallet/utils/solana-address";
 import { isNetworkSwitching } from "../shared/network-mode";
@@ -103,13 +104,13 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <View style={s.container}>
-      <Text style={s.title}>Send</Text>
+    <div style={s.container} className="flex flex-col">
+      <PushHeader onBack={goBack} title="Send" />
       {/* ANT-333: labels explicitly associated with their inputs. */}
       <label htmlFor="send-to">
-        <Text style={s.label}>Destination (Solana address)</Text>
+        <span style={s.label}>Destination (Solana address)</span>
       </label>
-      <TextInput
+      <TextField
         id="send-to"
         aria-label="Destination (Solana address)"
         style={s.input}
@@ -118,11 +119,11 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
         onChangeText={setTo}
         autoCapitalize="none"
         placeholder="Recipient address"
-      />
+       />
       <label htmlFor="send-amount">
-        <Text style={s.label}>Amount ({asset === "SOL" ? "SOL" : "raw units"})</Text>
+        <span style={s.label}>Amount ({asset === "SOL" ? "SOL" : "raw units"})</span>
       </label>
-      <TextInput
+      <TextField
         id="send-amount"
         aria-label={`Amount (${asset === "SOL" ? "SOL" : "raw units"})`}
         style={s.input}
@@ -131,11 +132,11 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
         onChangeText={setAmount}
         keyboardType="decimal-pad"
         placeholder={asset === "SOL" ? "0.5" : "0"}
-      />
+       />
       <label htmlFor="send-asset">
-        <Text style={s.label}>Asset (SOL or mint address)</Text>
+        <span style={s.label}>Asset (SOL or mint address)</span>
       </label>
-      <TextInput
+      <TextField
         id="send-asset"
         aria-label="Asset (SOL or mint address)"
         style={s.input}
@@ -143,13 +144,12 @@ export function SendScreen({ onDone }: { onDone: () => void }) {
         value={asset}
         onChangeText={setAsset}
         autoCapitalize="none"
-      />
-      <Text style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</Text>
-      {error && <Text role="alert" tabIndex={-1} id="send-error" style={s.error}>{error}</Text>}
-      {result && <Text role="status" selectable style={s.mono}>{result}</Text>}
-      {net.switching && <Text style={s.hint}>Network is switching — sending is paused until balances reload.</Text>}
+       />
+      <p style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</p>
+      {error && <p role="alert" tabIndex={-1} id="send-error" style={s.error}>{error}</p>}
+      {result && <span role="status" style={s.mono} className="select-text">{result}</span>}
+      {net.switching && <p style={s.hint}>Network is switching — sending is paused until balances reload.</p>}
       <UIButton title={busy ? "Sending…" : "Send"} onPress={send} disabled={busy || net.switching || !to || !amount} variant="primary" />
-      <UIButton title="Back" onPress={goBack} />
-    </View>
+    </div>
   );
 }

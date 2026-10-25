@@ -1,4 +1,5 @@
-import { Pressable, Text, TextInput, View } from "../../../shared/primitives";
+import { Pressable } from "../../../shared/components/Pressable";
+import { TextField } from "../../../shared/components/TextField";
 import { styles as s } from "../../../shared/theme";
 import { AsciiRidges } from "../../../shared/components/AsciiRidges";
 import { UIButton } from "../../../shared/components/UIButton";
@@ -32,25 +33,25 @@ export function PidClaimForm({
   onSignOut: () => void;
 }) {
   return (
-    <View className="flex-1">
+    <div className="flex flex-col flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <View style={s.container}>
-      <View style={{ flexDirection: "row" }} className="w-full items-center justify-end pt-2">
+      <div style={s.container} className="flex flex-col">
+      <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center justify-end pt-2">
         <Pressable onPress={onSignOut} disabled={busy} accessibilityLabel="Sign out and cancel PID creation">
-          <Text className="font-sans text-sm text-danger">Sign Out</Text>
+          <span className="font-sans text-sm text-danger">Sign Out</span>
         </Pressable>
-      </View>
-      <View className="flex-1 w-full items-center justify-center gap-5">
-        <View className="items-center gap-2">
-          <Text className="font-serif text-[40px] tracking-[-0.4px] text-foreground">Create your PID</Text>
+      </div>
+      <div className="flex flex-col flex-1 w-full items-center justify-center gap-5">
+        <div className="flex flex-col items-center gap-2">
+          <span className="font-serif text-4xl tracking-[-0.4px] text-foreground">Create your PID</span>
           {(email || displayName) && (
-            <Text className="font-sans text-sm text-muted-foreground">Continuing as {displayName ?? email}</Text>
+            <span className="font-sans text-sm text-muted-foreground">Continuing as {displayName ?? email}</span>
           )}
-        </View>
-        {error && <Text role="alert" style={s.error}>{error}</Text>}
-        <View className="w-full max-w-[343px] gap-3">
-          <View className="relative flex-1 justify-center">
-            <TextInput
+        </div>
+        {error && <p role="alert" style={s.error}>{error}</p>}
+        <div className="flex flex-col w-full max-w-[343px] gap-3">
+          <div className="flex flex-col relative flex-1 justify-center">
+            <TextField
                 id="pid-claim-handle"
                 aria-label="Choose your handle"
               style={[s.input, { paddingRight: 64 }]}
@@ -61,13 +62,13 @@ export function PidClaimForm({
               autoCorrect={false}
               placeholder="username"
               editable={!busy}
-            />
-            <Text pointerEvents="none" className="absolute right-3 font-sans text-[15px] text-muted-foreground">@pid</Text>
-          </View>
-          {handleStatus === "free" && <Text className="font-sans text-xs text-success"><Text aria-hidden="true">✓ </Text>{handle.trim().toLowerCase()}@pid is available</Text>}
-          {handleStatus === "taken" && <Text role="alert" style={s.error}>Taken — try another handle.</Text>}
+             />
+            <span className="pointer-events-none absolute right-3 font-sans text-base text-muted-foreground">@pid</span>
+          </div>
+          {handleStatus === "free" && <span className="font-sans text-xs text-success"><span aria-hidden="true">✓ </span>{handle.trim().toLowerCase()}@pid is available</span>}
+          {handleStatus === "taken" && <p role="alert" style={s.error}>Taken — try another handle.</p>}
           {handleStatus === "invalid" && handle.length > 0 && (
-            <Text role="alert" style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</Text>
+            <p role="alert" style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</p>
           )}
           <Pressable
             style={{ flexDirection: "row" }}
@@ -77,12 +78,12 @@ export function PidClaimForm({
             accessibilityRole="checkbox"
             accessibilityState={{ checked: ackPermanent }}
           >
-            <View className={`h-[22px] w-[22px] items-center justify-center border ${ackPermanent ? "border-foreground" : "border-muted-foreground"}`}>
-              {ackPermanent && <Text aria-hidden="true" className="font-sans text-sm text-foreground">✓</Text>}
-            </View>
-            <Text className="flex-1 font-sans text-xs text-muted-foreground">
+            <div className={`flex flex-col h-[22px] w-[22px] items-center justify-center border ${ackPermanent ? "border-foreground" : "border-muted-foreground"}`}>
+              {ackPermanent && <span aria-hidden="true" className="font-sans text-sm text-foreground">✓</span>}
+            </div>
+            <span className="flex-1 font-sans text-xs text-muted-foreground">
               Your PID is permanent — it can never be changed, reused, or reassigned. Choose carefully.
-            </Text>
+            </span>
           </Pressable>
           <UIButton
             title={busy ? "Creating…" : "Create & Continue"}
@@ -90,9 +91,9 @@ export function PidClaimForm({
             disabled={busy || handleStatus !== "free" || !ackPermanent}
             variant="primary"
           />
-        </View>
-      </View>
-      </View>
-    </View>
+        </div>
+      </div>
+      </div>
+    </div>
   );
 }

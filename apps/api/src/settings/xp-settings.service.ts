@@ -1,26 +1,21 @@
 // ANT-456 — XP domain accessors over SystemSetting (plan §3.3, spec §4).
 //
 // Typed reads for the XP intake path plus the normative effective-intake
-// rule: `xp.intake.enabled AND NOT xp.suspend.global AND NOT
-// xp.suspend.<appId> AND envAllow`, where envAllow is the legacy
-// PID_XP_INTAKE_ENABLED flag (both must be true during transition — most
-// restrictive wins, plan §3.3). Fail-closed: any unreadable / mismatched /
-// missing input evaluates to deny, and reads never throw to intake
-// callers (spec F4).
+// rule: `NOT xp.suspend.global AND NOT xp.suspend.<appId>`. The original
+// release gates (env PID_XP_INTAKE_ENABLED + DB xp.intake.enabled) are gone:
+// XP intake is a required feature, so only the kill-switches remain.
+// Fail-closed: any unreadable / mismatched / missing input evaluates to deny,
+// and reads never throw to intake callers (spec F4).
 
 import { Injectable } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { XP_INTAKE_ENABLED_KEY } from "../settings/env-keys";
 import { SettingsService, SettingsSource } from "./settings.service";
-import { XP_INTAKE_ENABLED_DEFAULT, XP_LIMIT_DEFAULT, XP_POLICY_ACTIVE_DEFAULT, XP_SUSPEND_DEFAULT } from "./defaults";
+import { XP_LIMIT_DEFAULT, XP_POLICY_ACTIVE_DEFAULT, XP_SUSPEND_DEFAULT } from "./defaults";
 
-export type IntakeSource = "db+env" | "defaults-fallback";
+export type IntakeSource = "db" | "defaults-fallback";
 
 export interface IntakeBreakdown {
-  xpIntakeEnabled: boolean;
   suspendGlobal: boolean;
   suspendApp: boolean;
-  envAllow: boolean;
 }
 
 export interface EffectiveIntake {
@@ -36,25 +31,11 @@ export interface AppPermissions {
 
 @Injectable()
 export class XpSettingsService {
-  constructor(
-    private readonly settings: SettingsService,
-    private readonly config: ConfigService,
-  ) {}
+  constructor(private readonly settings: SettingsService) {}
 
-  /** Legacy env leg (untouched during transition — plan req 5). Exact-"true", fail-closed. */
-  envIntakeAllow(): boolean {
-    try {
-      return this.config.get<string>(XP_INTAKE_ENABLED_KEY, "false") === "true";
-    } catch {
-      return false;
-    }
-  }
-
-  /** Import cycle guard: events.service owns the env key constant; this file only reads it. */
-  private settingKey(kind: "intake" | "suspendGlobal" | "suspendApp" | "limitsDaily" | "limitsWeekly" | "limitsMonthly" | "policyActive" | "policyThresholds", appId?: string): string {
+  /** Closed-catalog key builder for the parameterized DB settings. */
+  private settingKey(kind: "suspendGlobal" | "suspendApp" | "limitsDaily" | "limitsWeekly" | "limitsMonthly" | "policyActive" | "policyThresholds", appId?: string): string {
     switch (kind) {
-      case "intake":
-        return "xp.intake.enabled";
       case "suspendGlobal":
         return "xp.suspend.global";
       case "suspendApp":
@@ -73,23 +54,19 @@ export class XpSettingsService {
   }
 
   async effectiveIntake(appId?: string): Promise<EffectiveIntake> {
-    const [intake, suspendGlobal, suspendApp] = await Promise.all([
-      this.settings.readDetailed<boolean>(this.settingKey("intake"), XP_INTAKE_ENABLED_DEFAULT),
+    const [suspendGlobal, suspendApp] = await Promise.all([
       this.settings.readDetailed<boolean>(this.settingKey("suspendGlobal"), XP_SUSPEND_DEFAULT),
       appId
         ? this.settings.readDetailed<boolean>(this.settingKey("suspendApp", appId), XP_SUSPEND_DEFAULT)
         : { value: false, source: "default" as SettingsSource, degraded: false },
     ]);
-    const envAllow = this.envIntakeAllow();
     const breakdown: IntakeBreakdown = {
-      xpIntakeEnabled: intake.value,
       suspendGlobal: suspendGlobal.value,
       suspendApp: suspendApp.value,
-      envAllow,
     };
-    const degraded = intake.degraded || suspendGlobal.degraded || suspendApp.degraded;
-    const allowed = !degraded && intake.value === true && suspendGlobal.value !== true && suspendApp.value !== true && envAllow;
-    return { allowed, breakdown, source: degraded ? "defaults-fallback" : "db+env" };
+    const degraded = suspendGlobal.degraded || suspendApp.degraded;
+    const allowed = !degraded && suspendGlobal.value !== true && suspendApp.value !== true;
+    return { allowed, breakdown, source: degraded ? "defaults-fallback" : "db" };
   }
 
   async isSuspended(appId?: string): Promise<boolean> {

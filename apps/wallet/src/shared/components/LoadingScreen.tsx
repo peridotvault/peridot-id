@@ -1,4 +1,4 @@
-import { Text, View } from "../primitives";
+
 import { AsciiRidges } from "./AsciiRidges";
 
 // Branded loader — pixel-identical backdrop to the login screen (same
@@ -9,11 +9,11 @@ import { AsciiRidges } from "./AsciiRidges";
 // first paint never waits on font files).
 export function LoadingScreen({ fontsReady = true }: { fontsReady?: boolean }) {
   return (
-    <View role="status" aria-label="Loading" className="flex-1">
+    <div role="status" aria-label="Loading" className="flex flex-col flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <View className="flex-1 items-center justify-center">
-        <Text className={fontsReady ? "font-serif text-[40px] tracking-[-0.4px] text-foreground" : "font-[serif] text-[40px] tracking-normal text-foreground"}>PeridotID</Text>
-      </View>
-    </View>
+      <div className="flex flex-col flex-1 items-center justify-center">
+        <span className={fontsReady ? "font-serif text-4xl tracking-[-0.4px] text-foreground" : "font-[serif] text-4xl tracking-normal text-foreground"}>PeridotID</span>
+      </div>
+    </div>
   );
 }

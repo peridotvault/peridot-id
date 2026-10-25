@@ -1,4 +1,4 @@
-import { Text, TouchableOpacity, View } from "../../../shared/primitives";
+import { Pressable } from "../../../shared/components/Pressable";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { ChevronRight } from "../../../shared/icons";
 import { styles as s } from "../../../shared/theme";
@@ -8,18 +8,18 @@ export function ChainRow({ tx: t, onSelect }: { tx: WalletTransaction; onSelect:
   const m = meta(t);
   const Icon = m.icon;
   return (
-    <TouchableOpacity key={t.id} style={s.card} onPress={() => onSelect(t)}>
-      <View style={{ flexDirection: "row" }} className="items-center gap-3">
-        <View style={{ backgroundColor: m.color + "22" }} className="flex h-9 w-9 items-center justify-center rounded-full">
+    <Pressable key={t.id} style={s.card} onPress={() => onSelect(t)}>
+      <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+        <div style={{ backgroundColor: m.color + "22" }} className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full">
           <Icon size={16} color={m.color} />
-        </View>
-        <View className="flex-1 gap-0.5">
-          <Text className="font-sans text-[15px] font-semibold text-foreground">{m.label}</Text>
-          <Text className="font-sans text-xs text-muted-foreground">{fmtDate(t.createdAt)} · {t.status}</Text>
-        </View>
-        {t.amount != null && <Text className="font-mono text-sm font-medium text-foreground">{fmtAmount(t)}</Text>}
+        </div>
+        <div className="flex flex-col flex-1 gap-0.5">
+          <span className="font-sans text-base font-semibold text-foreground">{m.label}</span>
+          <span className="font-sans text-xs text-muted-foreground">{fmtDate(t.createdAt)} · {t.status}</span>
+        </div>
+        {t.amount != null && <span className="font-mono text-sm font-medium text-foreground">{fmtAmount(t)}</span>}
         <ChevronRight size={16} className="text-muted-foreground" />
-      </View>
-    </TouchableOpacity>
+      </div>
+    </Pressable>
   );
 }

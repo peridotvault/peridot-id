@@ -5,8 +5,8 @@
 // DB failure → static defaults AND intake denied with
 // source="defaults-fallback". Plus: 30s cache + invalidate-on-write,
 // optimistic-locking 409s, audit atomicity (SecurityEvent in the same
-// txn), and the transition AND-precedence
-// (env AND settings, most restrictive wins).
+// txn), and the kill-switch effective-intake rule (suspend-only: the old env
+// + DB intake gates are gone).
 
 import { ConflictException } from "@nestjs/common";
 import { SettingsService } from "./settings.service";
@@ -115,8 +115,7 @@ function setup(opts: { rows?: SettingRow[]; failReads?: boolean; failWrites?: bo
 }
 
 const SEEDED = () => [
-  seedRow("xp.intake.enabled", true, "boolean"),
-  seedRow("xp.suspend.global", false, "boolean"),
+  seedRow("xp.suspend.global", true, "boolean"),
   seedRow("xp.suspend.app-1", false, "boolean"),
   seedRow("xp.limits.daily", 1000, "integer"),
   seedRow("xp.policy.active", "v2", "string"),
@@ -128,19 +127,19 @@ describe("SettingsService fail-closed matrix", () => {
 
   it("returns the DB value on a hit", async () => {
     const { service } = setup({ rows: SEEDED() });
-    await expect(service.get<boolean>("xp.intake.enabled", false)).resolves.toBe(true);
+    await expect(service.get<boolean>("xp.suspend.global", false)).resolves.toBe(true);
   });
 
   it("unknown key resolves to the static default without alerting", async () => {
     const { service, alerts } = setup({ rows: SEEDED() });
-    await expect(service.get<boolean>("xp.intake.enabled.missing", false)).resolves.toBe(false);
+    await expect(service.get<boolean>("xp.suspend.missing", false)).resolves.toBe(false);
     expect(alerts).toHaveLength(0);
   });
 
   it("type mismatch falls back to the static default and fires the alert hook", async () => {
-    const { service, alerts } = setup({ rows: [seedRow("xp.intake.enabled", "yes", "string")] });
-    await expect(service.get<boolean>("xp.intake.enabled", false)).resolves.toBe(false);
-    expect(alerts).toEqual([{ key: "xp.intake.enabled", reason: "type_mismatch", detail: expect.stringContaining("catalog") }]);
+    const { service, alerts } = setup({ rows: [seedRow("xp.suspend.global", "yes", "string")] });
+    await expect(service.get<boolean>("xp.suspend.global", false)).resolves.toBe(false);
+    expect(alerts).toEqual([{ key: "xp.suspend.global", reason: "type_mismatch", detail: expect.stringContaining("catalog") }]);
   });
 
   it("semantic violation (negative limit) falls back with an alert", async () => {
@@ -152,43 +151,43 @@ describe("SettingsService fail-closed matrix", () => {
 
   it("DB read failure falls back to the static default with a db_error alert", async () => {
     const { service, alerts } = setup({ rows: SEEDED(), failReads: true });
-    await expect(service.get<boolean>("xp.intake.enabled", false)).resolves.toBe(false);
-    expect(alerts).toEqual([{ key: "xp.intake.enabled", reason: "db_error", detail: "db down" }]);
+    await expect(service.get<boolean>("xp.suspend.global", false)).resolves.toBe(false);
+    expect(alerts).toEqual([{ key: "xp.suspend.global", reason: "db_error", detail: "db down" }]);
   });
 
   it("caches reads for 30s and invalidates on admin write", async () => {
     const { service, tables } = setup({ rows: SEEDED() });
-    await service.get<boolean>("xp.intake.enabled", false);
-    await service.get<boolean>("xp.intake.enabled", false);
+    await service.get<boolean>("xp.suspend.global", false);
+    await service.get<boolean>("xp.suspend.global", false);
     expect(tables.reads).toBe(1);
-    await service.updateSetting("xp.intake.enabled", false, { reason: "disable intake for maintenance window", expectedVersion: 1, updatedBy: "admin@pid" });
+    await service.updateSetting("xp.suspend.global", false, { reason: "disable intake for maintenance window", expectedVersion: 1, updatedBy: "admin@pid" });
     const readsBefore = tables.reads;
-    await service.get<boolean>("xp.intake.enabled", true);
+    await service.get<boolean>("xp.suspend.global", true);
     // Cache was invalidated by the write: the read hits the DB again.
     expect(tables.reads).toBe(readsBefore + 1);
   });
 
   it("admin write bumps version, writes history, and audits in the same txn", async () => {
     const { service, tables, security, audit } = setup({ rows: SEEDED() });
-    const updated = await service.updateSetting("xp.intake.enabled", false, {
+    const updated = await service.updateSetting("xp.suspend.global", false, {
       reason: "disable intake for maintenance window",
       expectedVersion: 1,
       updatedBy: "admin@pid",
     });
-    expect(updated).toMatchObject({ key: "xp.intake.enabled", value: false, version: 2, updatedBy: "admin@pid" });
-    expect(tables.settings.get("xp.intake.enabled")?.version).toBe(2);
+    expect(updated).toMatchObject({ key: "xp.suspend.global", value: false, version: 2, updatedBy: "admin@pid" });
+    expect(tables.settings.get("xp.suspend.global")?.version).toBe(2);
     expect(tables.history).toHaveLength(1);
-    expect(tables.history[0]).toMatchObject({ key: "xp.intake.enabled", oldValue: true, newValue: false, version: 2, updatedBy: "admin@pid" });
+    expect(tables.history[0]).toMatchObject({ key: "xp.suspend.global", oldValue: true, newValue: false, version: 2, updatedBy: "admin@pid" });
     expect(security.log).toHaveBeenCalledTimes(1);
     expect(audit[0]).toMatchObject({ pid: "admin@pid", event: "system_setting.updated", inTxn: true });
-    expect(audit[0].meta).toMatchObject({ key: "xp.intake.enabled", oldValue: true, newValue: false, version: 2 });
+    expect(audit[0].meta).toMatchObject({ key: "xp.suspend.global", oldValue: true, newValue: false, version: 2 });
   });
 
   it("stale expectedVersion loses with 409 carrying current state (optimistic locking)", async () => {
     const { service } = setup({ rows: SEEDED() });
-    await service.updateSetting("xp.intake.enabled", false, { reason: "first writer wins here", expectedVersion: 1, updatedBy: "admin@pid" });
+    await service.updateSetting("xp.suspend.global", false, { reason: "first writer wins here", expectedVersion: 1, updatedBy: "admin@pid" });
     const err = await service
-      .updateSetting("xp.intake.enabled", true, { reason: "second writer loses here", expectedVersion: 1, updatedBy: "admin@pid" })
+      .updateSetting("xp.suspend.global", true, { reason: "second writer loses here", expectedVersion: 1, updatedBy: "admin@pid" })
       .catch((e) => e);
     expect(err).toBeInstanceOf(ConflictException);
     expect(err.getResponse()).toMatchObject({ error: "version_conflict", current: { value: false, version: 2 } });
@@ -206,7 +205,7 @@ describe("SettingsService fail-closed matrix", () => {
   it("short reason is a 400 validation_error (reason-required writes)", async () => {
     const { service } = setup({ rows: SEEDED() });
     const err = await service
-      .updateSetting("xp.intake.enabled", false, { reason: "short", expectedVersion: 1, updatedBy: "admin@pid" })
+      .updateSetting("xp.suspend.global", false, { reason: "short", expectedVersion: 1, updatedBy: "admin@pid" })
       .catch((e) => e);
     expect(err.getResponse()).toMatchObject({ error: "validation_error", message: expect.stringContaining("reason") });
   });
@@ -229,52 +228,61 @@ describe("SettingsService fail-closed matrix", () => {
 
   it("history returns newest entries with reason/actor and a next cursor", async () => {
     const { service } = setup({ rows: SEEDED() });
-    await service.updateSetting("xp.intake.enabled", false, { reason: "first reason for history view", expectedVersion: 1, updatedBy: "admin@pid" });
-    const page = await service.settingHistory("xp.intake.enabled", { limit: 50 });
+    await service.updateSetting("xp.suspend.global", false, { reason: "first reason for history view", expectedVersion: 1, updatedBy: "admin@pid" });
+    const page = await service.settingHistory("xp.suspend.global", { limit: 50 });
     expect(page.entries).toHaveLength(1);
     expect(page.entries[0]).toMatchObject({ version: 2, oldValue: true, newValue: false, updatedBy: "admin@pid" });
     expect(page.nextCursor).toBeNull();
   });
 });
 
-describe("XpSettingsService effective intake (AND-precedence)", () => {
-  const configFor = (env: string) => ({ get: jest.fn((k: string, d: string) => (k === "PID_XP_INTAKE_ENABLED" ? env : d)) });
-
-  const matrix: Array<{ name: string; env: string; db: boolean; suspend: boolean; want: boolean }> = [
-    { name: "env true + db true → open", env: "true", db: true, suspend: false, want: true },
-    { name: "env false + db true → closed (env leg wins)", env: "false", db: true, suspend: false, want: false },
-    { name: "env true + db false → closed (db leg wins)", env: "true", db: false, suspend: false, want: false },
-    { name: "suspend.global wins over both", env: "true", db: true, suspend: true, want: false },
+describe("XpSettingsService effective intake (kill-switch only)", () => {
+  const matrix: Array<{ name: string; suspendGlobal: boolean; suspendApp: boolean; want: boolean }> = [
+    { name: "nothing suspended → open", suspendGlobal: false, suspendApp: false, want: true },
+    { name: "global suspend → closed", suspendGlobal: true, suspendApp: false, want: false },
+    { name: "app suspend → closed for that app", suspendGlobal: false, suspendApp: true, want: false },
   ];
 
-  it.each(matrix)("$name", async ({ env, db, suspend, want }) => {
-    const { service } = setup({ rows: [seedRow("xp.intake.enabled", db, "boolean"), seedRow("xp.suspend.global", suspend, "boolean")] });
-    const xp = new XpSettingsService(service, configFor(env) as never);
-    const result = await xp.effectiveIntake("app-9");
+  it.each(matrix)("$name", async ({ suspendGlobal, suspendApp, want }) => {
+    const { service } = setup({
+      rows: [seedRow("xp.suspend.global", suspendGlobal, "boolean"), seedRow("xp.suspend.app-1", suspendApp, "boolean")],
+    });
+    const xp = new XpSettingsService(service);
+    const result = await xp.effectiveIntake("app-1");
     expect(result.allowed).toBe(want);
-    expect(result.breakdown).toMatchObject({ xpIntakeEnabled: db, suspendGlobal: suspend, suspendApp: false, envAllow: env === "true" });
-    expect(result.source).toBe("db+env");
+    expect(result.breakdown).toEqual({ suspendGlobal, suspendApp });
+    expect(result.source).toBe("db");
   });
 
   it("per-app suspend scopes to that app", async () => {
     const { service } = setup({
-      rows: [seedRow("xp.intake.enabled", true, "boolean"), seedRow("xp.suspend.global", false, "boolean"), seedRow("xp.suspend.app-1", true, "boolean")],
+      rows: [seedRow("xp.suspend.global", false, "boolean"), seedRow("xp.suspend.app-1", true, "boolean")],
     });
-    const xp = new XpSettingsService(service, configFor("true") as never);
+    const xp = new XpSettingsService(service);
     await expect(xp.effectiveIntake("app-1")).resolves.toMatchObject({ allowed: false });
     await expect(xp.effectiveIntake("app-2")).resolves.toMatchObject({ allowed: true });
   });
 
+  it("absent keys leave intake open (no release gate anymore)", async () => {
+    const { service } = setup({ rows: [] });
+    const xp = new XpSettingsService(service);
+    await expect(xp.effectiveIntake("app-1")).resolves.toEqual({
+      allowed: true,
+      breakdown: { suspendGlobal: false, suspendApp: false },
+      source: "db",
+    });
+  });
+
   it("DB outage denies with source=defaults-fallback (B5)", async () => {
     const { service } = setup({ rows: SEEDED(), failReads: true });
-    const xp = new XpSettingsService(service, configFor("true") as never);
+    const xp = new XpSettingsService(service);
     const result = await xp.effectiveIntake("app-1");
     expect(result).toMatchObject({ allowed: false, source: "defaults-fallback" });
   });
 
   it("absent app-permission keys deny by default", async () => {
     const { service } = setup({ rows: SEEDED() });
-    const xp = new XpSettingsService(service, configFor("true") as never);
+    const xp = new XpSettingsService(service);
     await expect(xp.getAppPermissions("ghost-app")).resolves.toEqual({ canEarn: false, canSpend: false });
     await expect(xp.getReward("ghost_task")).resolves.toBeNull();
   });

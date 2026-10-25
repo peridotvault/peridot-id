@@ -16,7 +16,7 @@ const MIN_REASON_LENGTH = 10;
 const MAX_REASON_LENGTH = 500;
 
 function lookupKind(key) {
-  if (key === "xp.intake.enabled" || key === "xp.suspend.global") return "boolean";
+  if (key === "xp.suspend.global") return "boolean";
   if (key === "xp.limits.daily" || key === "xp.limits.weekly" || key === "xp.limits.monthly") return "integer";
   if (key === "xp.policy.active") return "string";
   if (key === "xp.policy.thresholds" || key.startsWith("xp.rewards.") || key.startsWith("xp.app_permissions."))
@@ -118,7 +118,6 @@ describe("thresholds shape", () => {
 
 describe("key catalog", () => {
   it("resolves fixed keys to types", () => {
-    assert.equal(lookupKind("xp.intake.enabled"), "boolean");
     assert.equal(lookupKind("xp.limits.daily"), "integer");
     assert.equal(lookupKind("xp.policy.active"), "string");
     assert.equal(lookupKind("xp.policy.thresholds"), "json");

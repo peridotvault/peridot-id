@@ -44,14 +44,6 @@ export const MAX_THRESHOLDS = 50;
 
 export const FIXED_CATALOG: CatalogEntry[] = [
   {
-    key: "xp.intake.enabled",
-    valueType: "boolean",
-    group: "intake",
-    description: "Master XP intake gate (DB successor of PID_XP_INTAKE_ENABLED).",
-    defaultValue: false,
-    pattern: false,
-  },
-  {
     key: "xp.limits.daily",
     valueType: "integer",
     group: "limits",

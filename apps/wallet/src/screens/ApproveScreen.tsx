@@ -4,7 +4,7 @@
 // action runs here on the PeridotID origin with this session + passkey (the
 // trusted DOM), and the result is posted back to the opener's origin.
 import { useCallback, useEffect, useState } from "react";
-import { Text, View } from "../shared/primitives";
+
 import type { PopupParams } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../shared/AppContext";
 import { styles as s } from "../shared/theme";
@@ -55,12 +55,12 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
   }, [req.approve, acknowledged]);
 
   return (
-    <View style={s.container}>
-      <Text style={s.title}>Approve request</Text>
-      {req.phase === "waiting" && <Text role="status" style={s.hint}>Waiting for the app…</Text>}
-      {req.phase === "preparing" && <Text role="status" style={s.hint}>Loading verified details…</Text>}
-      {req.phase === "redirecting" && <Text style={s.hint}>Opening the payment page…</Text>}
-      {req.phase === "done" && <Text style={s.hint}>Done — you can close this window.</Text>}
+    <div style={s.container} className="flex flex-col">
+      <h1 style={s.title}>Approve request</h1>
+      {req.phase === "waiting" && <p role="status" style={s.hint}>Waiting for the app…</p>}
+      {req.phase === "preparing" && <p role="status" style={s.hint}>Loading verified details…</p>}
+      {req.phase === "redirecting" && <p style={s.hint}>Opening the payment page…</p>}
+      {req.phase === "done" && <p style={s.hint}>Done — you can close this window.</p>}
       {(req.phase === "review" || req.phase === "busy") && (
         <>
           {req.action === "fiat-checkout" && fiat.checkout && (
@@ -90,7 +90,7 @@ export function ApproveScreen({ popup, onNeedAuth }: { popup: PopupParams; onNee
       {req.phase === "failed" && (
         <UIButton title="Close" onPress={() => void req.deny(req.expectedPid ? "wrong_account" : "access_denied")} />
       )}
-      {req.error && <Text role="alert" tabIndex={-1} id="approve-error" style={s.error}>{req.error}</Text>}
-    </View>
+      {req.error && <p role="alert" tabIndex={-1} id="approve-error" style={s.error}>{req.error}</p>}
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { needsProvisioning } from "../fiat-ensure";
+import { cachedRead } from "../api-cache";
 
 // Shell screen map. Owned here (not in App.tsx) so the session hooks and the
 // shell share one vocabulary; the router JSX stays in App.
@@ -22,6 +23,7 @@ export type Screen =
   | "activity"
   | "activity-detail"
   | "fiat-detail"
+  | "fiat-account"
   | "fiat-transfer"
   | "fiat-ledger-detail"
   | "activation";
@@ -99,13 +101,14 @@ export function useSessionBootstrap(
       setBootstrapping(false);
     }, 10000);
     try {
-      let me = await peridot.identity.me();
+      // Shared with Home's first load (5s) — same row, same second.
+      let me = await cachedRead("identity.me", { ttlMs: 60_000, tier: "session" }, () => peridot.identity.me());
       if (typeof me === "object" && me !== null && "statusCode" in me) {
         const refreshed = await peridot.auth.refresh();
         if (refreshed === "step-up") {
           if (alive) setStepUp(true);
         } else if (refreshed === true) {
-          me = await peridot.identity.me();
+          me = await cachedRead("identity.me", { ttlMs: 60_000, tier: "session" }, () => peridot.identity.me());
         }
       }
       if (alive && me && !("statusCode" in me)) {

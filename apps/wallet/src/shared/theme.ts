@@ -1,4 +1,4 @@
-import { StyleSheet } from "./primitives";
+import { StyleSheet } from "./styles";
 
 // PeridotID brand theme — mirrors the marketing site (apps/docs): monochrome
 // premium dark, serif display numerals, cut-corner aesthetic.
@@ -78,12 +78,17 @@ export const styles = StyleSheet.create({
     maxWidth: theme.layout.maxWidth,
     position: "relative",
   },
-  // Opaque cover over the content box only — TopBar/sidebar stay visible.
-  // (Push roots use s.container with no bg of their own, so the wrapper
-  // provides the opacity.)
-  overlay: {
+  // Full-shell cover for pushes: hides the top bar + tab bar/sidebar entirely,
+  // while the inner column keeps the same sm width cap as tab screens.
+  rootFill: {
+    flex: 1,
+    width: "100%",
+    position: "relative",
+  },
+  overlayFull: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: c.background,
+    alignItems: "center",
   },
   container: {
     flex: 1,

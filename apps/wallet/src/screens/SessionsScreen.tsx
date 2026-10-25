@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, Text, TouchableOpacity, View } from "../shared/primitives";
+import { ScrollArea } from "../shared/components/ScrollArea";
+import { Pressable } from "../shared/components/Pressable";
 import { Monitor, LogOut } from "../shared/icons";
 import type { Session } from "@peridotvault/pid-types";
 import { usePeridot } from "../shared/AppContext";
+import { cachedRead, invalidate } from "../shared/api-cache";
 import { styles as s } from "../shared/theme";
-import { BackButton } from "../shared/components/BackButton";
+import { PushHeader } from "../shared/components/PushHeader";
 import { UIButton } from "../shared/components/UIButton";
 
 function fmtDate(iso: string): string {
@@ -18,7 +20,7 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await peridot.auth.sessions();
+    const res = await cachedRead("auth.sessions", { ttlMs: 60_000, tier: "session" }, () => peridot.auth.sessions());
     setSessions(Array.isArray(res) ? (res as Session[]) : []);
   }, [peridot]);
 
@@ -31,6 +33,7 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
     setError(null);
     try {
       await peridot.auth.revokeOtherSessions();
+      invalidate("auth.sessions");
       await load();
     } catch (e) {
       setError(String(e));
@@ -44,6 +47,7 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
     setError(null);
     try {
       await peridot.auth.revokeSession(id);
+      invalidate("auth.sessions");
       await load();
     } catch (e) {
       setError(String(e));
@@ -53,44 +57,45 @@ export function SessionsScreen({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
-      <BackButton onPress={onDone} />
+    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
+      <PushHeader
+        onBack={onDone}
+        title="Sessions / Devices"
+        subtitle="Devices currently signed in to your Peridot ID."
+      />
 
-      <Text style={s.title}>Sessions / Devices</Text>
-      <Text style={s.subtitle}>Devices currently signed in to your Peridot ID.</Text>
-
-      {error && <Text role="alert" style={s.error}>{error}</Text>}
+      {error && <p role="alert" style={s.error}>{error}</p>}
 
       {sessions.length > 1 && (
         <UIButton title={busy ? "Signing out…" : "Sign out other sessions"} onPress={revokeAllOthers} disabled={busy} />
       )}
 
       {sessions.map((se) => (
-        <View key={se.id} style={s.card}>
-          <View style={{ flexDirection: "row" }} className="items-center gap-3">
-            <View className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+        <div key={se.id} style={s.card} className="flex flex-col">
+          <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+            <div className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full bg-muted">
               <Monitor size={16} className="text-foreground" />
-            </View>
-            <View className="flex-1 gap-0.5">
-              <Text className="font-sans text-sm font-semibold text-foreground">
+            </div>
+            <div className="flex flex-col flex-1 gap-0.5">
+              <span className="font-sans text-sm font-semibold text-foreground">
                 {se.userAgent ?? "Unknown device"}
                 {se.isCurrent ? "  ·  this device" : ""}
-              </Text>
-              <Text className="font-sans text-xs text-muted-foreground">Signed in {fmtDate(se.createdAt)}</Text>
-              <Text className="font-sans text-xs text-muted-foreground">Seen {se.lastSeenAt ? fmtDate(se.lastSeenAt) : "—"} · Expires {fmtDate(se.expiresAt)}</Text>
-            </View>
+              </span>
+              <span className="font-sans text-xs text-muted-foreground">Signed in {fmtDate(se.createdAt)}</span>
+              <span className="font-sans text-xs text-muted-foreground">Seen {se.lastSeenAt ? fmtDate(se.lastSeenAt) : "—"} · Expires {fmtDate(se.expiresAt)}</span>
+            </div>
             {!se.isCurrent && (
-              <TouchableOpacity onPress={() => revoke(se.id)} disabled={busy} accessibilityLabel="Sign out session">
-                <View className="p-2">
+              <Pressable onPress={() => revoke(se.id)} disabled={busy} accessibilityLabel="Sign out session">
+                <div className="flex flex-col p-2">
                   <LogOut size={16} className="text-danger" />
-                </View>
-              </TouchableOpacity>
+                </div>
+              </Pressable>
             )}
-          </View>
-        </View>
+          </div>
+        </div>
       ))}
 
-      {sessions.length === 0 && <Text style={s.hint}>No active sessions.</Text>}
-    </ScrollView>
+      {sessions.length === 0 && <p style={s.hint}>No active sessions.</p>}
+    </ScrollArea>
   );
 }

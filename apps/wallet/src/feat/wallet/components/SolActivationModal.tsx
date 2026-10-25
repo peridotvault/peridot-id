@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { Modal, Text, View } from "../../../shared/primitives";
+import { Modal } from "../../../shared/components/Modal";
 import QRCode from "react-qr-code";
 import { theme, styles as s } from "../../../shared/theme";
 import { UIButton } from "../../../shared/components/UIButton";
@@ -38,30 +38,30 @@ export function SolActivationModal({
   if (!solanaAvailable) return null;
   return (
     <Modal visible={target !== null} transparent animationType="fade" onRequestClose={onClose}>
-      <View className="flex-1 items-center justify-center bg-black/70 p-6">
-        <View className="w-full max-w-[360px] gap-3 border border-border bg-surface p-5">
-          <Text className="font-sans text-[15px] font-semibold">{target?.label}</Text>
+      <div className="flex flex-col flex-1 items-center justify-center bg-black/70 p-6">
+        <div className="flex flex-col w-full max-w-[360px] gap-3 border border-border bg-surface p-5">
+          <span className="font-sans text-base font-semibold">{target?.label}</span>
           {target && (
-            <View className="mb-2 self-center bg-foreground p-3">
+            <div className="flex flex-col mb-2 self-center bg-foreground p-3">
               <QRCode value={target.qrValue} size={220} bgColor={theme.colors.foreground} fgColor={theme.colors.background} />
-            </View>
+            </div>
           )}
-          <Text selectable style={s.mono}>{target?.address}</Text>
+          <span style={s.mono} className="select-text">{target?.address}</span>
           {!gate.isActive && (
-            <Text className={gate.balanceSol < gate.requiredSol ? "font-sans text-xs text-danger" : ""} style={gate.balanceSol < gate.requiredSol ? undefined : s.hint}>
+            <span className={gate.balanceSol < gate.requiredSol ? "font-sans text-xs text-danger" : ""} style={gate.balanceSol < gate.requiredSol ? undefined : s.hint}>
               Balance: {gate.balanceSol.toFixed(4)} SOL{gate.balanceSol < gate.requiredSol ? ` — top up to at least ${gate.requiredSol.toFixed(4)} SOL` : ""}.
-            </Text>
+            </span>
           )}
           {!gate.isActive && !gate.ready && (
-            <Text style={s.hint}>
+            <p style={s.hint}>
               {gate.st === "insufficient"
                 ? `Need at least ${gate.requiredSol.toFixed(4)} SOL to cover activation (you have ${gate.balanceSol.toFixed(4)}).`
                 : gate.st === "activating"
                   ? "Activating on-chain…"
                   : "Send SOL to this address first."}
-            </Text>
+            </p>
           )}
-          {gate.error && <Text role="alert" style={s.error}>{gate.error}</Text>}
+          {gate.error && <p role="alert" style={s.error}>{gate.error}</p>}
           {!gate.isActive && (
             <UIButton
               title={gate.busy ? "Activating…" : "Activate Account"}
@@ -80,8 +80,8 @@ export function SolActivationModal({
             onPress={() => target && onCopy(target.key, target.address)}
           />
           <UIButton title="Close" onPress={onClose} />
-        </View>
-      </View>
+        </div>
+      </div>
     </Modal>
   );
 }

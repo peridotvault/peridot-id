@@ -27,8 +27,9 @@ import { VerificationService } from "./verification.service";
  *
  * M3 adds the event intake pipeline (EventsController/EventsService,
  * server-to-server AppCredentialGuard only — never JwtAuthGuard) plus the
- * R4 policy-backfill tooling. Both stay behind the release gate
- * (PID_XP_INTAKE_ENABLED / PID_XP_MIGRATION_ENABLED, exact "true").
+ * R4 policy-backfill tooling. Intake awarding is gated only by the
+ * xp.suspend.* kill-switches; migration execution stays behind
+ * PID_XP_MIGRATION_ENABLED (exact "true").
  */
 @Module({
   imports: [SecurityModule, AuthModule, SettingsModule],

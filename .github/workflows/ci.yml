@@ -206,6 +206,16 @@ jobs:
             exit 1
           fi
 
+      - name: Semantic DOM guard
+        run: |
+          # The RN shim (apps/wallet/src/shared/primitives.tsx) is deleted —
+          # wallet renders semantic HTML. Any reintroduced primitives import
+          # fails the build.
+          if rg -n "shared/primitives" apps/wallet/src apps/wallet/App.tsx; then
+            echo "::error::apps/wallet must not import the deleted RN shim — use semantic DOM (see apps/wallet AGENTS.md Phase 5)"
+            exit 1
+          fi
+
       - name: Delegatecall ban guard
         run: |
           # V4_PERMISSIONS.md: no delegatecall anywhere in first-party account code
