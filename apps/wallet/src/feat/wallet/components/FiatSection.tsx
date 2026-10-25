@@ -51,7 +51,7 @@ export function FiatSection({
               <span
                 className="font-serif text-2xl"
                 role={balanceIdr === null && busy ? "status" : undefined}
-                aria-label={balanceIdr === null && busy ? "Loading DOKU balance" : undefined}
+                aria-label={balanceIdr === null && busy ? "Loading IDR balance" : undefined}
               >
                 {balanceIdr === null ? (busy ? "…" : "—") : fmtIdr(balanceIdr)}
               </span>

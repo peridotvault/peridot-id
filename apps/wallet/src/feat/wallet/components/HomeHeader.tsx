@@ -30,7 +30,7 @@ export function HomeHeader({
         <div className="flex bg-surface py-1 pr-1 pl-2 gap-2 border border-border">
           {level !== null && (
             <div className="flex items-center justify-center min-w-3">
-              <span>Lv {level}</span>
+              <span>{level}</span>
             </div>
           )}
           <div className="h-10 w-10 border-border border">
