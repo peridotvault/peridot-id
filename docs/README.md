@@ -34,6 +34,7 @@ packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
 
 ## Core docs
 
+- [business_model-onchain.md](business_model-onchain.md) — on-chain business model (pricing, revenue scenarios)
 - [prds/PRD_v5.md](prds/PRD_v5.md) — current product spec (smart wallet)
 - [prds/PRD_v6.md](prds/PRD_v6.md) — fiat money layer (on-chain balances live in v5; fiat lives here)
 - [prds/PRD_v4(done).md](prds/PRD_v4(done).md) — architecture base (note: its `PidAccount` model is
