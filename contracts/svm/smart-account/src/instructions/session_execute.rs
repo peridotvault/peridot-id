@@ -246,6 +246,16 @@ pub fn process(
         record.record_seen(seen_auth, seen_has_auth, seen_slot);
     }
 
+    // C3 per-execution spend pin (ANT-544 C3, ANT-556): the session PDA holds
+    // the rent-exempt minimum ONLY, and the outer transaction fee is paid by
+    // the session signer — never from this PDA. Baseline its lamports here; any
+    // decrease observed after the CPI (a game draining session rent via the
+    // session-PDA signer, e.g. a system transfer) reverts with
+    // `SessionSpendExceeded`. Increases are allowed (harmless top-ups). This is
+    // the per-execution gas/rent spend cap: zero net outflow per call.
+    // (A snapshot is a read, not an interaction — effects-first ordering holds.)
+    let session_lamports_before = session.lamports();
+
     // Post-effects, pre-CPI snapshot of every protected account: lamports,
     // owner, full data hash (covers balances AND delegate/close_authority moves
     // uniformly), plus explicit authority-field snapshots for token-owned
@@ -346,6 +356,9 @@ pub fn process(
     // Lamport/owner/data-hash equality catches balance moves, owner swaps
     // (`assign`-then-drain), and delegate/close_authority edits alike.
     // (The seq was already consumed above; a violation here reverts it too.)
+    // C3 spend pin: the session PDA itself must not have lost lamports across
+    // the call (checked even when it is not in the protected list).
+    check_session_spend_pinned(session_lamports_before, session.lamports())?;
     for (p, before) in protected.iter().zip(snapshots.iter()) {
         let (lamports, owner, data_hash, token_auth) = if p == session.address().as_array() {
             let borrowed = session.try_borrow()?;
@@ -378,4 +391,58 @@ pub fn process(
 
     pinocchio_log::log!("PeridotEvent::SessionExecuted");
     Ok(())
+}
+
+/// C3 per-execution spend pin (ANT-544 C3, ANT-556): the session PDA's lamports
+/// must not decrease across one gameplay execution. Pure helper so the rule is
+/// unit-testable on the host (the full CPI flow is validator-gated).
+pub fn check_session_spend_pinned(before: u64, after: u64) -> ProgramResult {
+    if after < before {
+        return Err(PeridotError::SessionSpendExceeded.into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::PeridotError;
+
+    #[test]
+    fn spend_pin_allows_unchanged_or_topped_up() {
+        assert!(check_session_spend_pinned(1_000, 1_000).is_ok());
+        assert!(check_session_spend_pinned(1_000, 1_001).is_ok());
+        assert!(check_session_spend_pinned(0, 0).is_ok());
+    }
+
+    #[test]
+    fn spend_pin_rejects_any_decrease() {
+        // Even a 1-lamport drain is a spend violation (cap = zero net outflow).
+        let err = check_session_spend_pinned(1_000, 999).unwrap_err();
+        assert_eq!(err, PeridotError::SessionSpendExceeded.into());
+        let err = check_session_spend_pinned(1_000, 0).unwrap_err();
+        assert_eq!(err, PeridotError::SessionSpendExceeded.into());
+    }
+
+    #[test]
+    fn spend_exceeded_uses_fresh_discriminant() {
+        // Additive-only error table: the new variant is 24, the reintroduced
+        // fee cap is back at its retired slot 12, V3 discriminants untouched.
+        assert_eq!(PeridotError::SessionSpendExceeded as u32, 24);
+        assert_eq!(PeridotError::FeeExceedsMax as u32, 12);
+        assert_eq!(PeridotError::UnknownFeePolicy as u32, 13);
+    }
+
+    #[test]
+    fn v4_discriminants_are_additive() {
+        // New V4 spend paths are 11-14; V3 0-10 unchanged (old SDK decoders
+        // keep working; op-tags equal discriminators per auth.rs convention).
+        use super::super::Instruction;
+        assert_eq!(Instruction::try_from(6).unwrap(), Instruction::Execute);
+        assert_eq!(Instruction::try_from(11).unwrap(), Instruction::WithdrawSolV4);
+        assert_eq!(Instruction::try_from(12).unwrap(), Instruction::WithdrawTokenV4);
+        assert_eq!(Instruction::try_from(13).unwrap(), Instruction::ExecuteV4);
+        assert_eq!(Instruction::try_from(14).unwrap(), Instruction::ActivateV4);
+        assert!(Instruction::try_from(15).is_err());
+    }
 }

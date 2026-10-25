@@ -3,16 +3,20 @@
 use pinocchio::error::ProgramError;
 
 pub mod activate;
+pub mod activate_v4;
 pub mod close;
 pub mod close_session;
 pub mod execute;
+pub mod execute_v4;
 pub mod initialize;
 pub mod register_session;
 pub mod revoke_session;
 pub mod session_execute;
 pub mod update_authority;
 pub mod withdraw_sol;
+pub mod withdraw_sol_v4;
 pub mod withdraw_token;
+pub mod withdraw_token_v4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -28,6 +32,14 @@ pub enum Instruction {
     SessionExecute = 8,
     RevokeSession = 9,
     CloseSession = 10,
+    /// V4 fee-capped siblings (ANT-544 B5, ANT-556): each mirrors its V3
+    /// counterpart's layout plus a trailing `max_total_fee u64`, verified under
+    /// `DOMAIN_V4` with `total ≤ max_total_fee` enforced. Additive-only: V3
+    /// discriminants 0-10 are untouched so old SDK decoders keep working.
+    WithdrawSolV4 = 11,
+    WithdrawTokenV4 = 12,
+    ExecuteV4 = 13,
+    ActivateV4 = 14,
 }
 
 impl TryFrom<u8> for Instruction {
@@ -46,6 +58,10 @@ impl TryFrom<u8> for Instruction {
             8 => Ok(Self::SessionExecute),
             9 => Ok(Self::RevokeSession),
             10 => Ok(Self::CloseSession),
+            11 => Ok(Self::WithdrawSolV4),
+            12 => Ok(Self::WithdrawTokenV4),
+            13 => Ok(Self::ExecuteV4),
+            14 => Ok(Self::ActivateV4),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
@@ -63,6 +79,13 @@ impl TryFrom<u8> for Instruction {
 /// - Close:           nonce u64 | expiry i64 | len u16 | clientDataJSON
 /// - Activate:        account_id [u8; 32] | authority [u8; 33] | policy u16 | expiry i64 | network_fee u64 | len u16 | clientDataJSON
 /// - Execute:         nonce u64 | target [u8; 32] | meta_count u8 | metas meta_count×(addr[32] ‖ flags u8) | data_len u16 | data | expiry i64 | policy u16 | network_fee u64 | len u16 | clientDataJSON
+/// V4 fee-capped layouts (ANT-544 B5, ANT-556 — discriminators 11-14, verified
+/// under `DOMAIN_V4` with `total ≤ max_total_fee` else `FeeExceedsMax`; the fee
+/// formula follows the signed policy version via `fee::policy_v2_row`):
+/// - WithdrawSolV4:   V3 WithdrawSol | max_total_fee u64 (after network_fee)
+/// - WithdrawTokenV4: V3 WithdrawToken | max_total_fee u64 (after network_fee)
+/// - ExecuteV4:       V3 Execute | max_total_fee u64 (after network_fee)
+/// - ActivateV4:      V3 Activate | max_total_fee u64 (after network_fee)
 /// Every V3 authorization payload starts with the one-byte op-tag (`auth::OP_*`,
 /// equal to the discriminator) followed by `account_id`, so a signature for one
 /// operation or one account can never authorize another. Fee recipients are

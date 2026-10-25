@@ -88,6 +88,10 @@ pub fn process_instruction(
             Instruction::SessionExecute => instructions::session_execute::process(program_id, accounts, &instruction_data),
             Instruction::RevokeSession => instructions::revoke_session::process(program_id, accounts, &instruction_data),
             Instruction::CloseSession => instructions::close_session::process(program_id, accounts, &instruction_data),
+            Instruction::WithdrawSolV4 => instructions::withdraw_sol_v4::process(program_id, accounts, &instruction_data),
+            Instruction::WithdrawTokenV4 => instructions::withdraw_token_v4::process(program_id, accounts, &instruction_data),
+            Instruction::ExecuteV4 => instructions::execute_v4::process(program_id, accounts, &instruction_data),
+            Instruction::ActivateV4 => instructions::activate_v4::process(program_id, accounts, &instruction_data),
         }
 }
 
