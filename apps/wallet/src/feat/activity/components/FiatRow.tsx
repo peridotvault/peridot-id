@@ -1,8 +1,8 @@
-import { Pressable } from "../../../shared/components/Pressable";
-import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/icons";
-import { theme, styles as s } from "../../../shared/theme";
-import type { FiatItem } from "../../../shared/fiat";
-import { fiatStatusLabel, fmtIdr } from "../../../shared/fiat";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/components/icons";
+import { theme, styles as s } from "../../../shared/styles/theme";
+import type { FiatItem } from "../../../shared/data/fiat";
+import { fiatStatusLabel, fmtIdr } from "../../../shared/data/fiat";
 import { fiatLabel, fmtDate } from "../utils/feed";
 
 export function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: FiatItem) => void }) {

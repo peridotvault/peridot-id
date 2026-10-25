@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable } from "../../../shared/components/Pressable";
-import { styles as s } from "../../../shared/theme";
-import { UIButton } from "../../../shared/components/UIButton";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { styles as s } from "../../../shared/styles/theme";
+import { UIButton } from "../../../shared/components/ui/UIButton";
 import type { ExecuteGate } from "../utils/knownPrograms";
 
 export const UNKNOWN_PROGRAM_RISK_COPY =

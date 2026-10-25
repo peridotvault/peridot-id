@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import type { Authority, Identity, Profile } from "@peridotvault/pid-types";
 import type { TokenBalance, NftItem } from "@peridotvault/pid-solana";
 import type { ActivationView, PeridotClient } from "@peridotvault/pid-sdk-js";
-import { getCurrency, getRates, type Currency, type Rates } from "../../../shared/currency";
-import { cachedRead, clearApiCache } from "../../../shared/api-cache";
-import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/network-mode";
+import { getCurrency, getRates, type Currency, type Rates } from "../../../shared/data/currency";
+import { cachedRead, clearApiCache } from "../../../shared/data/api-cache";
+import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/data/network-mode";
 
 // Dashboard data: identity, chain assets, fiat ledger balance, activation.
 // Currency pref re-reads on every load (Settings writes localStorage; the

@@ -1,7 +1,7 @@
-import { Pressable } from "../../../shared/components/Pressable";
+import { Pressable } from "../../../shared/components/ui/Pressable";
 import type { WalletTransaction } from "@peridotvault/pid-types";
-import { ChevronRight } from "../../../shared/icons";
-import { styles as s } from "../../../shared/theme";
+import { ChevronRight } from "../../../shared/components/icons";
+import { styles as s } from "../../../shared/styles/theme";
 import { fmtAmount, fmtDate, meta } from "../utils/feed";
 
 export function ChainRow({ tx: t, onSelect }: { tx: WalletTransaction; onSelect: (tx: WalletTransaction) => void }) {

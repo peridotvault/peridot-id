@@ -1,53 +1,53 @@
 import { useCallback, useEffect, useState } from "react";
-import { StyleSheet, flatten } from "./src/shared/styles";
+import { StyleSheet, flatten } from "./src/shared/styles/stylesheet";
 import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
 import { readPopupParams } from "@peridotvault/pid-sdk-js";
-import { API_BASE_URL } from "./src/shared/config";
-import { clearApiCache } from "./src/shared/api-cache";
-import { AppContext } from "./src/shared/AppContext";
+import { API_BASE_URL } from "./src/shared/app/config";
+import { clearApiCache } from "./src/shared/data/api-cache";
+import { AppContext } from "./src/shared/app/AppContext";
 import { readEmbedParams, createEmbedClient } from "./src/feat/embed/utils/embed-client";
 import { useEmbedBridge } from "./src/feat/embed/hooks/useEmbedBridge";
-import { EmbedConnectScreen } from "./src/screens/EmbedConnectScreen";
+import { EmbedConnect } from "./src/pages/embed/EmbedConnect";
 import { readLoginContext } from "./src/feat/auth/utils/popup-login";
-import { theme } from "./src/shared/theme";
-import { AppColumn } from "./src/shared/components/AppColumn";
+import { theme } from "./src/shared/styles/theme";
+import { AppColumn } from "./src/shared/components/shell/AppColumn";
 import { useStartupGate } from "./src/shared/hooks/useStartupGate";
 import { useSessionBootstrap, type Screen } from "./src/shared/hooks/useSessionBootstrap";
 import { useSessionSync } from "./src/shared/hooks/useSessionSync";
-import { LoginScreen } from "./src/screens/LoginScreen";
-import { LoadingScreen } from "./src/shared/components/LoadingScreen";
+import { Login } from "./src/pages/auth/Login";
+import { LoadingScreen } from "./src/shared/components/shell/LoadingScreen";
 import { readSsoParams } from "./src/feat/auth/utils/sso";
-import { HomeScreen } from "./src/screens/HomeScreen";
-import { ApproveScreen } from "./src/screens/ApproveScreen";
-import { SendScreen } from "./src/screens/SendScreen";
-import { ReceiveScreen } from "./src/screens/ReceiveScreen";
-import { SwapScreen } from "./src/screens/SwapScreen";
-import { TopupScreen } from "./src/screens/TopupScreen";
-import { ProvisioningScreen } from "./src/screens/ProvisioningScreen";
-import { PasskeyScreen } from "./src/screens/PasskeyScreen";
-import { SettingsScreen } from "./src/screens/SettingsScreen";
-import { ProfileScreen } from "./src/screens/ProfileScreen";
-import { EditProfileScreen } from "./src/screens/EditProfileScreen";
-import { SessionsScreen } from "./src/screens/SessionsScreen";
-import { ConnectedAccountsScreen } from "./src/screens/ConnectedAccountsScreen";
-import { AppConnectionsScreen } from "./src/screens/AppConnectionsScreen";
-import { ActivityScreen } from "./src/screens/ActivityScreen";
-import { ActivityDetailScreen } from "./src/screens/ActivityDetailScreen";
-import { FiatDetailScreen } from "./src/screens/FiatDetailScreen";
-import { FiatAccountScreen } from "./src/screens/FiatAccountScreen";
-import { UIButton } from "./src/shared/components/UIButton";
-import { FiatTransferScreen } from "./src/screens/FiatTransferScreen";
-import { FiatLedgerDetailScreen } from "./src/screens/FiatLedgerDetailScreen";
-import { TabBar, type TabKey } from "./src/shared/components/TabBar";
-import { TopBar } from "./src/feat/wallet/components/TopBar";
-import { ActivationScreen } from "./src/screens/ActivationScreen";
+import { Home } from "./src/pages/wallet/Home";
+import { Approve } from "./src/pages/auth/Approve";
+import { Send } from "./src/pages/wallet/Send";
+import { Receive } from "./src/pages/wallet/Receive";
+import { Swap } from "./src/pages/wallet/Swap";
+import { Topup } from "./src/pages/fiat/Topup";
+import { Provisioning } from "./src/pages/auth/Provisioning";
+import { Passkey } from "./src/pages/identity/Passkey";
+import { Settings } from "./src/pages/identity/Settings";
+import { Profile } from "./src/pages/identity/Profile";
+import { EditProfile } from "./src/pages/identity/EditProfile";
+import { Sessions } from "./src/pages/identity/Sessions";
+import { ConnectedAccounts } from "./src/pages/identity/ConnectedAccounts";
+import { AppConnections } from "./src/pages/identity/AppConnections";
+import { Activity } from "./src/pages/activity/Activity";
+import { ActivityDetail } from "./src/pages/activity/ActivityDetail";
+import { FiatDetail } from "./src/pages/fiat/FiatDetail";
+import { FiatAccount } from "./src/pages/fiat/FiatAccount";
+import { UIButton } from "./src/shared/components/ui/UIButton";
+import { FiatTransfer } from "./src/pages/fiat/FiatTransfer";
+import { FiatLedgerDetail } from "./src/pages/fiat/FiatLedgerDetail";
+import { TabBar, type TabKey } from "./src/shared/components/shell/TabBar";
+import { TopBar } from "./src/shared/components/shell/TopBar";
+import { Activation } from "./src/pages/wallet/Activation";
 import type { WalletTransaction } from "@peridotvault/pid-types";
-import type { FiatItem, FiatLedgerItem } from "./src/shared/fiat";
+import type { FiatItem, FiatLedgerItem } from "./src/shared/data/fiat";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
-  // Third-party SSO request (?redirect_uri=…): LoginScreen handles it even when logged
-  // in (consent flow) — otherwise a logged-in user landing here would sit on HomeScreen
+  // Third-party SSO request (?redirect_uri=…): Login handles it even when logged
+  // in (consent flow) — otherwise a logged-in user landing here would sit on Home
   // with the request silently ignored.
   const [ssoRequest] = useState(readSsoParams);
   // Auth-in-a-new-tab (`?popup=login&origin=…&client_id=…`): the tab stays on
@@ -56,7 +56,7 @@ export default function App() {
   const [loginContext] = useState(readLoginContext);
   // Popup sign request (`?popup=<action>&origin=…` opened by a dapp): the
   // approval screen takes over the whole app — never the normal wallet flow.
-  // (`?popup=login` stays on the normal flow; LoginScreen delivers via popup.)
+  // (`?popup=login` stays on the normal flow; Login delivers via popup.)
   const [popupRequest] = useState(() => {
     const p = readPopupParams();
     return p && p.action !== "login" ? p : null;
@@ -164,22 +164,22 @@ export default function App() {
     const top = stack[stack.length - 1];
     switch (top) {
       case "send":
-        return <SendScreen onDone={pop} />;
+        return <Send onDone={pop} />;
       case "fiat-transfer":
-        return <FiatTransferScreen onDone={pop} />;
+        return <FiatTransfer onDone={pop} />;
       case "receive":
-        return <ReceiveScreen onDone={pop} goPasskey={openPasskey} />;
+        return <Receive onDone={pop} goPasskey={openPasskey} />;
       case "swap":
-        return <SwapScreen onDone={pop} />;
+        return <Swap onDone={pop} />;
       case "topup":
-        return <TopupScreen onDone={pop} />;
+        return <Topup onDone={pop} />;
       case "passkey":
-        return <PasskeyScreen onDone={pop} />;
+        return <Passkey onDone={pop} />;
       case "activation":
-        return <ActivationScreen onDone={pop} goPasskey={openPasskey} />;
+        return <Activation onDone={pop} goPasskey={openPasskey} />;
       case "profile":
         return (
-          <ProfileScreen
+          <Profile
             onDone={pop}
             onLogout={logout}
             goEditProfile={() => push("edit-profile")}
@@ -192,32 +192,32 @@ export default function App() {
           />
         );
       case "edit-profile":
-        return <EditProfileScreen onDone={pop} />;
+        return <EditProfile onDone={pop} />;
       case "sessions":
-        return <SessionsScreen onDone={pop} />;
+        return <Sessions onDone={pop} />;
       case "connected":
-        return <ConnectedAccountsScreen onDone={pop} />;
+        return <ConnectedAccounts onDone={pop} />;
       case "app-connections":
-        return <AppConnectionsScreen onDone={pop} />;
+        return <AppConnections onDone={pop} />;
       case "activity-detail":
         // ANT-341 FR4: null payload never strands a bare overlay — fallback
         // with a working Close that pops the stack.
         return activityTx ? (
-          <ActivityDetailScreen tx={activityTx} onDone={pop} />
+          <ActivityDetail tx={activityTx} onDone={pop} />
         ) : (
           <NullOverlayFallback label="Activity detail" onClose={pop} />
         );
       case "fiat-account":
-        return <FiatAccountScreen onDone={pop} goSend={() => push("fiat-transfer")} goTopup={() => push("topup")} />;
+        return <FiatAccount onDone={pop} goSend={() => push("fiat-transfer")} goTopup={() => push("topup")} />;
       case "fiat-detail":
         return fiatItem ? (
-          <FiatDetailScreen item={fiatItem} onDone={pop} />
+          <FiatDetail item={fiatItem} onDone={pop} />
         ) : (
           <NullOverlayFallback label="Fiat detail" onClose={pop} />
         );
       case "fiat-ledger-detail":
         return ledgerItem ? (
-          <FiatLedgerDetailScreen item={ledgerItem} onDone={pop} />
+          <FiatLedgerDetail item={ledgerItem} onDone={pop} />
         ) : (
           <NullOverlayFallback label="Ledger detail" onClose={pop} />
         );
@@ -240,7 +240,7 @@ export default function App() {
 
   // Embedded and not yet authenticated: ask the parent to run the login popup.
   if (embedParams && !embed.bearer) {
-    return <EmbedConnectScreen onConnect={embed.requestLogin} />;
+    return <EmbedConnect onConnect={embed.requestLogin} />;
   }
 
   // Paint first, complete later: the branded loader shows instantly (system
@@ -261,7 +261,7 @@ export default function App() {
       <div style={flatten([styles.safe, { backgroundColor: theme.colors.background }])} className="flex flex-col">
           {popupRequest ? (
             session.authed ? (
-              <ApproveScreen
+              <Approve
                 popup={popupRequest}
                 onNeedAuth={(reason) => {
                   session.setStepUp(reason === "step-up");
@@ -272,7 +272,7 @@ export default function App() {
               // No session in this popup window: sign in here first, then the
               // approval resumes (popup params are persisted across the OAuth
               // round-trip by readPopupParams).
-              <LoginScreen
+              <Login
                 onLoggedIn={() => {
                   session.setStepUp(false);
                   session.setAuthed(true);
@@ -282,9 +282,9 @@ export default function App() {
             )
         ) : screen === "login" ? (
           // Standalone login (plain, SSO entry, auth-in-a-new-tab): full-bleed
-          // public page. The in-column LoginScreen below then only serves the
+          // public page. The in-column Login below then only serves the
           // authed SSO consent overlay over the app.
-          <LoginScreen
+          <Login
             onLoggedIn={loginContext ? () => {} : session.handleLoggedIn}
             loginContext={loginContext}
             stepUp={session.stepUp}
@@ -301,14 +301,14 @@ export default function App() {
           >
             <div key={epoch} style={styles.base} id="wallet-main" className="flex flex-col">
               {ssoRequest && (
-                <LoginScreen
+                <Login
                   onLoggedIn={loginContext ? () => {} : session.handleLoggedIn}
                   loginContext={loginContext}
                   stepUp={session.stepUp}
                 />
               )}
               {screen === "home" && (
-                <HomeScreen
+                <Home
                   goSend={() => push("send")}
                   goReceive={() => push("receive")}
                   goSwap={() => push("swap")}
@@ -319,10 +319,10 @@ export default function App() {
                 />
               )}
               {screen === "activity" && (
-                <ActivityScreen onSelect={openActivityDetail} onSelectFiat={openFiatDetail} onSelectLedger={openLedgerDetail} />
+                <Activity onSelect={openActivityDetail} onSelectFiat={openFiatDetail} onSelectLedger={openLedgerDetail} />
               )}
               {screen === "settings" && (
-                <SettingsScreen
+                <Settings
                   goPasskeys={openPasskey}
                   goSessions={() => push("sessions")}
                   goConnected={() => push("connected")}
@@ -332,7 +332,7 @@ export default function App() {
                   tabRoot
                 />
               )}
-              {screen === "provisioning" && <ProvisioningScreen onContinue={() => goTab("home")} />}
+              {screen === "provisioning" && <Provisioning onContinue={() => goTab("home")} />}
             </div>
           </AppColumn>
         )}

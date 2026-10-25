@@ -1,8 +1,8 @@
 import type { FiatDepositView, FiatLedgerEntry } from "@peridotvault/pid-sdk-js";
 import type { WalletTransaction } from "@peridotvault/pid-types";
-import { ArrowDownLeft, ArrowUpRight, RefreshCw, Rocket } from "../../../shared/icons";
-import { theme } from "../../../shared/theme";
-import type { FiatItem, FiatKind, FiatLedgerItem, LedgerKind } from "../../../shared/fiat";
+import { ArrowDownLeft, ArrowUpRight, RefreshCw, Rocket } from "../../../shared/components/icons";
+import { theme } from "../../../shared/styles/theme";
+import type { FiatItem, FiatKind, FiatLedgerItem, LedgerKind } from "../../../shared/data/fiat";
 
 const LAMPORTS_PER_SOL = 1e9;
 

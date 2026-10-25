@@ -3,7 +3,7 @@
 // Run: `node --test test/` from apps/wallet.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { cachedRead, clearApiCache, invalidate } from "../src/shared/api-cache.ts";
+import { cachedRead, clearApiCache, invalidate } from "../src/shared/data/api-cache.ts";
 
 describe("cachedRead", () => {
   it("serves the second call from cache inside the TTL", async () => {

@@ -2,7 +2,7 @@
 // Run: `node --test test/` from apps/wallet.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { assertSafeExternalUrl } from "../src/shared/safeUrl.ts";
+import { assertSafeExternalUrl } from "../src/shared/app/safeUrl.ts";
 
 describe("assertSafeExternalUrl", () => {
   it("allows https URLs", () => {

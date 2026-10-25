@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { DepositQuoteView, PeridotClient } from "@peridotvault/pid-sdk-js";
-import { pickMethod, selectedTransferFee } from "../../../shared/fiat";
+import { pickMethod, selectedTransferFee } from "../../../shared/data/fiat";
 import { MIN_NET_IDR } from "../utils/topup-amount";
 
 // Server quote for the entered NET amount (moves no money), debounced until

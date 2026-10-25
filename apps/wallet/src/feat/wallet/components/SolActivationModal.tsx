@@ -1,11 +1,11 @@
 import { useSyncExternalStore } from "react";
-import { Modal } from "../../../shared/components/Modal";
+import { Modal } from "../../../shared/components/ui/Modal";
 import QRCode from "react-qr-code";
-import { theme, styles as s } from "../../../shared/theme";
-import { UIButton } from "../../../shared/components/UIButton";
+import { theme, styles as s } from "../../../shared/styles/theme";
+import { UIButton } from "../../../shared/components/ui/UIButton";
 import type { useActivationGate } from "../hooks/useActivationGate";
 import type { DepositTarget } from "../utils/deposit-targets";
-import { isSolanaAvailable, subscribeNetworkMode } from "../../../shared/network-mode";
+import { isSolanaAvailable, subscribeNetworkMode } from "../../../shared/data/network-mode";
 
 type Gate = ReturnType<typeof useActivationGate>;
 

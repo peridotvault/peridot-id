@@ -1,9 +1,9 @@
-import { Pressable } from "../../../shared/components/Pressable";
+import { Pressable } from "../../../shared/components/ui/Pressable";
 import type { DepositQuoteView } from "@peridotvault/pid-sdk-js";
-import { styles as s } from "../../../shared/theme";
-import { fmtIdr, sumIdr } from "../../../shared/fiat";
+import { styles as s } from "../../../shared/styles/theme";
+import { fmtIdr, sumIdr } from "../../../shared/data/fiat";
 
-// Single copy of the DOKU-checkout quote UI shared by TopupScreen and
+// Single copy of the DOKU-checkout quote UI shared by Topup and
 // ApproveScreen (fiat-checkout): fee breakdown + payment-method picker.
 // Screens may import any feat, so this lives in feat/fiat (not shared/).
 export function FiatQuoteBreakdown({

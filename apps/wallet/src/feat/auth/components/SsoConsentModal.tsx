@@ -1,11 +1,11 @@
-import { Pressable } from "../../../shared/components/Pressable";
-import { X } from "../../../shared/icons";
-import { styles as s } from "../../../shared/theme";
-import { UIButton } from "../../../shared/components/UIButton";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { X } from "../../../shared/components/icons";
+import { styles as s } from "../../../shared/styles/theme";
+import { UIButton } from "../../../shared/components/ui/UIButton";
 
 // One-tap SSO consent as an overlay modal: dimmed scrim + centered card.
 // Rendered over the live app screen (and the login backdrop) — the login
-// form itself stays a full screen in LoginScreen.
+// form itself stays a full page in Login.
 export function SsoConsentModal({
   origin,
   sessionLabel,

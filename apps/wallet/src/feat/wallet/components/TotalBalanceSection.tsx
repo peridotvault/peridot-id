@@ -1,6 +1,6 @@
 
-import { formatTotalParts, type Currency } from "../../../shared/currency";
-import { SectionTitle } from "./SectionTitle";
+import { formatTotalParts, type Currency } from "../../../shared/data/currency";
+import { SectionTitle } from "../../../shared/components/ui/SectionTitle";
 
 // New top section: portfolio total (fiat + crypto). Reuses the same
 // calcTotal value as the card — no new fetch, no new logic. Integer leg is

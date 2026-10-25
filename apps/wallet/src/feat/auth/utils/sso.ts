@@ -1,5 +1,5 @@
 /**
- * Third-party SSO helpers, shared by App (routing) and LoginScreen (flow).
+ * Third-party SSO helpers, shared by App (routing) and Login (flow).
  *
  * When this page is opened as `...?redirect_uri=https://app.example/callback` (+
  * optional `client_id`), a successful sign-in returns to the app with `?pid_code=...`

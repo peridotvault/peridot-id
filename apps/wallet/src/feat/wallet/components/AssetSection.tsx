@@ -1,6 +1,6 @@
-import { Pressable } from "../../../shared/components/Pressable";
+import { Pressable } from "../../../shared/components/ui/Pressable";
 import type { NftItem } from "@peridotvault/pid-solana";
-import { styles as s } from "../../../shared/theme";
+import { styles as s } from "../../../shared/styles/theme";
 import type { Coin } from "../utils/assets";
 
 // Tokens/Items tabs + lists. TabButton stays here (not shared): Home's

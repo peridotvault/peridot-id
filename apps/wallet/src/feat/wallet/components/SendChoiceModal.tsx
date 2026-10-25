@@ -1,8 +1,8 @@
 
-import { styles as s } from "../../../shared/theme";
-import { BottomSheet } from "../../../shared/components/BottomSheet";
-import { UIButton } from "../../../shared/components/UIButton";
-import { ArrowUpRight, Banknote } from "../../../shared/icons";
+import { styles as s } from "../../../shared/styles/theme";
+import { BottomSheet } from "../../../shared/components/ui/BottomSheet";
+import { UIButton } from "../../../shared/components/ui/UIButton";
+import { ArrowUpRight, Banknote } from "../../../shared/components/icons";
 
 // Send entry point: one button opens this chooser instead of routing direct.
 // On-chain needs an activated Solana account; IDR (fiat ledger) never does.

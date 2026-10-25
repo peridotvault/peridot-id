@@ -1,5 +1,5 @@
 import type { TokenBalance } from "@peridotvault/pid-solana";
-import type { Currency, Rates } from "../../../shared/currency";
+import type { Currency, Rates } from "../../../shared/data/currency";
 
 const KNOWN_MINTS: Record<string, string> = {
   "4zMMC6tc2RJf5zkCBqsqJ5mTcgnEHXUsdt8E3uBcps15": "USDC",

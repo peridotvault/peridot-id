@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { FiatDepositView, FiatLedgerEntry, PeridotClient } from "@peridotvault/pid-sdk-js";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { pendingDeposit } from "../utils/feed";
-import { cachedRead, clearApiCache } from "../../../shared/api-cache";
-import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/network-mode";
+import { cachedRead, clearApiCache } from "../../../shared/data/api-cache";
+import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/data/network-mode";
 
 // Unified feed source: chain history + DOKU intents + fiat ledger rows.
 // Tab-agnostic — the screen filters via selectVisible.

@@ -1,8 +1,8 @@
-import { Pressable } from "../../../shared/components/Pressable";
-import { TextField } from "../../../shared/components/TextField";
-import { styles as s } from "../../../shared/theme";
-import { AsciiRidges } from "../../../shared/components/AsciiRidges";
-import { UIButton } from "../../../shared/components/UIButton";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { TextField } from "../../../shared/components/ui/TextField";
+import { styles as s } from "../../../shared/styles/theme";
+import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
+import { UIButton } from "../../../shared/components/ui/UIButton";
 import type { HandleStatus } from "../hooks/usePidClaim";
 
 // Claim branch: verified credential, no identity yet — the only way forward

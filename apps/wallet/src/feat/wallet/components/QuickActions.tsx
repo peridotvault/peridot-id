@@ -1,5 +1,5 @@
-import { Pressable } from "../../../shared/components/Pressable";
-import { ArrowDownLeft, ArrowUpRight, Banknote, Coins } from "../../../shared/icons";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { ArrowDownLeft, ArrowUpRight, Banknote, Coins } from "../../../shared/components/icons";
 
 export function QuickActions({
   onSend,

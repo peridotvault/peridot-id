@@ -5,7 +5,7 @@ import type {
   FiatTransferInquiryView,
   PeridotClient,
 } from "@peridotvault/pid-sdk-js";
-import { fmtIdr, pickMethod, selectedTransferFee } from "../../../shared/fiat";
+import { fmtIdr, pickMethod, selectedTransferFee } from "../../../shared/data/fiat";
 
 // Server-quoted fiat state for popup approvals. Summaries are built from
 // THESE (DOKU-side truth), never from opener-supplied amounts — a malicious

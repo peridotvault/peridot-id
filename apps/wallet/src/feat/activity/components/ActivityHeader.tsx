@@ -1,6 +1,6 @@
-import { Pressable } from "../../../shared/components/Pressable";
-import { RefreshCw } from "../../../shared/icons";
-import { styles as s } from "../../../shared/theme";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { RefreshCw } from "../../../shared/components/icons";
+import { styles as s } from "../../../shared/styles/theme";
 import type { Tab } from "../utils/feed";
 
 export function ActivityHeader({

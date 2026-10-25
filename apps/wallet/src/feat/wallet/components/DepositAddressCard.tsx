@@ -1,7 +1,7 @@
-import { Pressable } from "../../../shared/components/Pressable";
-import { Copy } from "../../../shared/icons";
-import { styles as s } from "../../../shared/theme";
-import { flatten } from "../../../shared/styles";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { Copy } from "../../../shared/components/icons";
+import { styles as s } from "../../../shared/styles/theme";
+import { flatten } from "../../../shared/styles/stylesheet";
 
 export function DepositAddressCard({
   address,

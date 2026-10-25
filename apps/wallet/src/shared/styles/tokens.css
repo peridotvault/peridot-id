@@ -1,0 +1,16 @@
+/* Brand tokens (byte-identical to styles/theme.ts): sidebar and other
+   Tailwind-styled components consume these so the palette stays single-source. */
+@theme {
+  --color-background: #0a0a0a;
+  --color-surface: #141414;
+  --color-muted: #171717;
+  --color-border: #262626;
+  --color-foreground: #fafafa;
+  --color-muted-foreground: #a3a3a3;
+  --color-danger: #ff5f57;
+  --color-success: #28c840;
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Source Serif 4", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-level: "NT Brick Sans", "Geist", system-ui, sans-serif;
+}

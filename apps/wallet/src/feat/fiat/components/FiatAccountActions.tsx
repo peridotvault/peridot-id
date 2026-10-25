@@ -1,5 +1,5 @@
-import { Pressable } from "../../../shared/components/Pressable";
-import { ArrowDownLeft, ArrowUpRight, Banknote, Plus } from "../../../shared/icons";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { ArrowDownLeft, ArrowUpRight, Banknote, Plus } from "../../../shared/components/icons";
 
 // Rupiah account actions. Send/Top Up route to the existing overlays;
 // Receive/Withdraw stay disabled until the ledger API supports them.

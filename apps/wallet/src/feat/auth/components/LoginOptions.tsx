@@ -1,9 +1,9 @@
-import { Pressable } from "../../../shared/components/Pressable";
-import { TextField } from "../../../shared/components/TextField";
-import { styles as s } from "../../../shared/theme";
-import { AsciiRidges } from "../../../shared/components/AsciiRidges";
-import { UIButton } from "../../../shared/components/UIButton";
-import { ArrowRight, Mail } from "../../../shared/icons";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { TextField } from "../../../shared/components/ui/TextField";
+import { styles as s } from "../../../shared/styles/theme";
+import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
+import { UIButton } from "../../../shared/components/ui/UIButton";
+import { ArrowRight, Mail } from "../../../shared/components/icons";
 
 // Brand glyphs (Google "G", Apple logo) — inline SVG, the only two brand
 // marks in the wallet. lucide ships no brand icons; two tiny paths beat a

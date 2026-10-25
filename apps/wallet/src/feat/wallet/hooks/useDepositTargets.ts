@@ -7,7 +7,7 @@ import {
   isSolanaAvailable,
   refreshSolanaAvailability,
   subscribeNetworkMode,
-} from "../../../shared/network-mode";
+} from "../../../shared/data/network-mode";
 
 // ANT-74 + ANT-78: Solana deposit targets render only when a Solana program
 // exists for the current selection. Testnet always shows them; mainnet shows

@@ -52,7 +52,7 @@ export function isSolanaAddress(value: unknown): value is string {
   }
 }
 
-/** User-facing destination error for SendScreen, or null when sendable. */
+/** User-facing destination error for Send, or null when sendable. */
 export function sendDestinationError(to: string): string | null {
   if (!to.trim()) return "Enter a destination address.";
   if (!isSolanaAddress(to)) {

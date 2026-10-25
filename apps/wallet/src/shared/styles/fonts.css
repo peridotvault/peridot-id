@@ -1,0 +1,9 @@
+/* Game-badge face (local, no Google Fonts): level chip + level numerals only.
+   Never money, never body, never mono-replacement. */
+@font-face {
+  font-family: "NT Brick Sans";
+  src: url("/assets/fonts/NTBrickSans.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}

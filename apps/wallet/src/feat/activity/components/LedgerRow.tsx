@@ -1,8 +1,8 @@
-import { Pressable } from "../../../shared/components/Pressable";
-import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/icons";
-import { theme, styles as s } from "../../../shared/theme";
-import type { FiatLedgerItem } from "../../../shared/fiat";
-import { fmtIdr, ledgerStatusLabel } from "../../../shared/fiat";
+import { Pressable } from "../../../shared/components/ui/Pressable";
+import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/components/icons";
+import { theme, styles as s } from "../../../shared/styles/theme";
+import type { FiatLedgerItem } from "../../../shared/data/fiat";
+import { fmtIdr, ledgerStatusLabel } from "../../../shared/data/fiat";
 import { fmtDate, ledgerLabel } from "../utils/feed";
 
 export function LedgerRow({ item, onSelect }: { item: FiatLedgerItem; onSelect: (item: FiatLedgerItem) => void }) {

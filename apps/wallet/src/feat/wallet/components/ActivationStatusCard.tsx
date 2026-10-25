@@ -1,7 +1,7 @@
 
-import { Info } from "../../../shared/icons";
-import { styles as s } from "../../../shared/theme";
-import { flatten } from "../../../shared/styles";
+import { Info } from "../../../shared/components/icons";
+import { styles as s } from "../../../shared/styles/theme";
+import { flatten } from "../../../shared/styles/stylesheet";
 
 export function ActivationStatusCard({
   status,
