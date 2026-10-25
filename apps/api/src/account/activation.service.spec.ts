@@ -124,6 +124,24 @@ describe("ActivationService", () => {
       expect.objectContaining({ data: expect.objectContaining({ status: "active" }) }),
     );
     expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "account.activated", expect.any(Object));
+    // H2 + H1.iv: resolve-then-act outcome and per-tx P&L with contract keys.
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "relay.resolve_landed",
+      expect.objectContaining({ chain: "solana", entryPoint: "activate", signature: "sig1" }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "relayer.pnl",
+      expect.objectContaining({
+        chain: "solana",
+        entryPoint: "activate",
+        signature: "sig1",
+        absorbed: "0",
+        attested: String(NETWORK),
+        actual: String(NETWORK),
+      }),
+    );
   });
 
   it("rejects an assertion from an unknown credential", async () => {
@@ -267,11 +285,27 @@ describe("ActivationService", () => {
   });
 
   it("rejects drift beyond 120% of the quoted network fee without broadcasting", async () => {
-    const { service } = setup();
+    const { service, security } = setup();
     await expect(
       service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(QUOTED_TOO_SMALL), maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } }),
     ).rejects.toThrow(ConflictException);
     expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    // H1.v + H1.ii: drift pair with the exact contract keys.
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "quote.drift_rejected",
+      expect.objectContaining({
+        chain: "solana",
+        entryPoint: "activate",
+        quoted: String(QUOTED_TOO_SMALL),
+        attested: String(NETWORK),
+      }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "intent.rejected",
+      expect.objectContaining({ chain: "solana", entryPoint: "activate", cause: "drift" }),
+    );
   });
 
   it("accepts attestation at exactly 120% of the quote", async () => {

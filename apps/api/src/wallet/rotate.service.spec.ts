@@ -106,11 +106,51 @@ describe("RotateService", () => {
   });
 
   it("rejects a stale nonce before broadcasting", async () => {
-    const { service } = setup();
+    const { service, security } = setup();
     adapterMock.getNonce.mockResolvedValue(9n);
     await expect(service.rotate(IDENTITY_ID, base)).rejects.toThrow(ConflictException);
     expect(adapterMock.submitRotateAuthorityTx).not.toHaveBeenCalled();
+    // H1.ii: typed rejection with the exact contract keys.
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "intent.rejected",
+      expect.objectContaining({ chain: "solana", entryPoint: "rotate", cause: "stale-nonce", nonce: "4" }),
+    );
   });
+
+  it("emits rotation.confirmed with chain + latencyMs and chains the rotated row", async () => {
+    const { service, security } = setup();
+    const res = await service.rotate(IDENTITY_ID, base);
+    expect(res.signature).toBe("sig-rotate");
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "relay.resolve_landed",
+      expect.objectContaining({ chain: "solana", entryPoint: "rotate", nonce: "4", signature: "sig-rotate" }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "rotation.confirmed",
+      expect.objectContaining({ chain: "solana", signature: "sig-rotate", nonce: "4" }),
+    );
+    const confirmed = (security.log as jest.Mock).mock.calls.find((c) => c[1] === "rotation.confirmed");
+    expect(Number(confirmed[2].latencyMs)).not.toBeNaN();
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "credential.rotated",
+      expect.objectContaining({ chain: "solana", signature: "sig-rotate" }),
+    );
+  });
+
+  it("emits credential.rotation.unconfirmed with the chain key", async () => {
+    const { service, security } = setup();
+    rotatedKeyHex = "03" + "cd".repeat(32); // chain never shows the new key
+    await expect(service.rotate(IDENTITY_ID, base)).rejects.toThrow(ServiceUnavailableException);
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "credential.rotation.unconfirmed",
+      expect.objectContaining({ chain: "solana", signature: "sig-rotate" }),
+    );
+  }, 30000);
 
   it("rejects an over-TTL expiry", async () => {
     const { service } = setup();

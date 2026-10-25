@@ -195,9 +195,20 @@ describe("SponsoredWithdrawService", () => {
   });
 
   it("rejects drift beyond 120% of the quoted network fee without broadcasting", async () => {
-    const { service } = setup();
+    const { service, security } = setup();
     await expect(service.withdraw(IDENTITY_ID, { ...base, quotedNetworkFeeLamports: "1000" })).rejects.toThrow(ConflictException);
     expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    // H1.v + H1.ii: drift pair with the exact contract keys.
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "quote.drift_rejected",
+      expect.objectContaining({ chain: "solana", entryPoint: "withdraw", quoted: "1000", attested: "5000" }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "intent.rejected",
+      expect.objectContaining({ chain: "solana", entryPoint: "withdraw", cause: "drift", nonce: "7" }),
+    );
   });
 
   it("accepts attestation at exactly 120% of the quote", async () => {
@@ -261,6 +272,53 @@ describe("SponsoredWithdrawService", () => {
       IDENTITY_ID,
       "withdraw.reconciled",
       expect.objectContaining({ actualNetworkFee: "4000", overAttested: true }),
+    );
+    // H1.iii + H1.iv canonical rows with base-unit money strings.
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "reconcile.over_attested",
+      expect.objectContaining({
+        chain: "solana",
+        entryPoint: "withdraw",
+        signature: "sig-sponsor-sol",
+        attested: "5000",
+        actual: "4000",
+        expected: "4000",
+        absorbed: "0",
+      }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "relayer.pnl",
+      expect.objectContaining({
+        chain: "solana",
+        entryPoint: "withdraw",
+        signature: "sig-sponsor-sol",
+        absorbed: "0",
+        attested: "5000",
+        actual: "4000",
+      }),
+    );
+  });
+
+  it("emits relay.resolve_landed on confirmed sponsored withdraw", async () => {
+    const { service, security } = setup();
+    await service.withdraw(IDENTITY_ID, base);
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "relay.resolve_landed",
+      expect.objectContaining({ chain: "solana", entryPoint: "withdraw", nonce: "7", signature: "sig-sponsor-sol" }),
+    );
+  });
+
+  it("emits intent.rejected with a typed cause on stale nonce", async () => {
+    const { service, security } = setup();
+    adapterMock.getNonce.mockResolvedValue(9n); // differs from dto.nonce=7
+    await expect(service.withdraw(IDENTITY_ID, base)).rejects.toThrow(ConflictException);
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "intent.rejected",
+      expect.objectContaining({ chain: "solana", entryPoint: "withdraw", cause: "stale-nonce", nonce: "7" }),
     );
   });
 
