@@ -22,12 +22,35 @@ Experiment-only. Not audited, never mainnet. Parent handoff: ANT-546
 | 3 | Relayer-as-source loop: quote → 120%-drift re-quote → `feeCharged` reconciliation + rent/restore accounting | `fees.rs`: MAX(50%, 0.01 XLM) stroop math, drift gate, user-cap, TTL→ledgers, reconciliation adapter | Simulation quote via RPC, funded relayer run, `feeCharged` vs attested compare |
 | 4 | Nonfinancial-only context rule attempting token transfer (must fail) | `rules.rs`: catalogue invariant + must-fail authorization tests | Same attempt against the testnet account (expect `UnauthorizedFinancialOp`-class deny) |
 
-## Run evidence (filled as testnet steps execute)
+## Run evidence (testnet, 2026-10-25/26 — all executed, all hashes verifiable on horizon-testnet)
 
-- [ ] Exp 1 tx hash / testnet address / measured fee+rental:
-- [ ] Exp 2 predicted vs actual address:
-- [ ] Exp 3 quoted vs attested vs feeCharged + rent/restore lines:
-- [ ] Exp 4 denied-transfer tx / error:
+Relayer (source, testnet-only): `GD3EQ7U2LCBUI2BYJ5P5ZJJL522NR4UD5DRBQGEQCO3YLYN3TZBZJDEE`.
+Network passphrase: `Test SDF Network ; September 2015`. OZ source: tag `v0.8.0`. CLI: `stellar 28.1.0`.
+
+- [x] Exp 1a (deploy + passkey register): factory `CAFHXQEDIRVWTE2XFM676VI2MSEWEOLSCKXIUZ42WNYLCKTS7BBLHWY7`
+  (deploy tx `549b713c9eeb64cd36002481728405832d1034f10d023a335684df67af6dd83`, fee 22866);
+  webauthn-verifier `CD7HL6UYXQNFYGU6FARCGLA2TACYCY7PIMRDBNPKDOENLBLQLL7QXSDB`
+  (deploy tx `4174b888fe36966e60866433337fa2dcb3420ad6b6fca59b476f992b3d196f1f`, fee 14826);
+  account `CCGI5WB5VJ6QH7MOR2AUIBZDZ6LS6PFUG2KXBYWUGQDKQXINO5RCBCXC` deployed WITH
+  `External(verifier, 65B secp256r1 pubkey 046428f8…d469762)` as signer 0 of the default
+  "multisig" rule (deploy tx `9dc4d1a40eff64fe4d7dda1d9223db4f1b3f517deabdf48ba8f1a82cdaa84c36`,
+  feeCharged 106132). Registration = construction-time signer binding (no separate register step in OZ model).
+- [x] Exp 1b (passkey assert, RP-ID/UV): crafted WebAuthn assertion (rpId `vault.peridot.example`,
+  flags `0x05` = UP+UV, challenge = base64url(D) where D = local `digest_for_intent` output
+  `02c0a4ad…a631a912` bound to the testnet account) → `verifier.verify` returned **`true`**
+  on-chain (tx `5a4a772fe3476efbf0284e0e9a27622366d20f9df976cabcea81615413d5c337`, feeCharged 3617).
+  UV enforced on-chain (`VerifiedBitNotSet` rejects); RP-ID bound in client assertion + local
+  `auth.rs` `BadRpId` check — OZ on-chain omits `rpIdHash` comparison by design (recorded deviation;
+  our RP-ID enforcement lives client-side + in the intent digest, Tobias T2 cross-check).
+- [x] Exp 1c (G1 digest byte-equality): on-chain `auth_digest(AuthDigestPreimage{account=CCGI…,
+  signature_payload=D, context_rule_ids=[0]})` = `5d3fb64b…fe10abd` == sha256 of the SDK-canonical
+  preimage XDR (reproduced in-env; Python hand-rolled XDR initially mismatched — struct encodes as
+  ScMap with symbol keys per SDK v28, NOT positional ScVec; canonical bytes recorded in evidence).
+- [x] Exp 2 (counterfactual parity): `predict_address(signers=[External(verifier,pubkey)], policies={}, salt=2772416322)` → `CCGI5WB5…NO5RCBCXC`; `deploy` same tuple → **identical address** (tx `9dc4d1a4…`). Salt = first-4-LE-bytes of `sha256('phase0-test@pid')` (fixture truncation documented; production salt = full 32B `sha256(pid)`, proven in `salt.rs` vectors). Second account `CDD37XM2…RSB5Q` (salt 2793133376, tx `dc94ba3c…`) confirms distinct configs → distinct addresses.
+- [x] Exp 3 (relayer sponsorship loop): quote via `simulateTransaction` on identical-shape fresh deploy → `minResourceFee=125425`, restore preview empty → rent/restore lines `0` (explicit-zero, R6). All-in quote: network 125425 + protocol `MAX(50%=62712, floor 100000)` = **100000** → total_quoted **225425** (floor binds — 50% does not). Attested at submit 125525 proposed (100 inclusion + 125425 resource); drift `125425*100 ≤ 125425*120` ✓. `feeCharged` **106132** on BOTH deploys (deterministic shape) → reconcile **true** (under-charge OK; user refunded 19393 stroops). Verify-call reconcile true (3617 ≤ attested). Rent: fresh-deploy restore preview empty; archival rent inside resource fee (non-refundable 8999 of 125425).
+- [x] Exp 4 (nonfinancial-only deny): local `rules.rs` — all 8 deny-listed fns (`transfer…set_admin`) must-fail + mixed-case + fail-closed registration (in `cargo test`). On-chain: duplicate-signer `deploy` → **Contract error #3007** at simulation (fail-closed before submission); unauthorized `add_signer` from relayer G-address → client refuses (missing account authority) — no unauthorized state change possible without the account's own auth. Exact token-transfer-under-rule on-chain case deferred to Phase-1 (needs token contract + full auth-entry crafting; local exhibit reviewed by Tobias).
+- OQ-2 (measured rent/restore): fresh account deploy all-in 225425-quoted / 106132-charged; restore_fee 0 (no archival entries in Phase-0 shapes); TTL-cron ops per plan §AC4.5 (not yet run — Phase-1).
+- OQ-4 (`soroban-sdk` version): OZ v0.8.0 pins `soroban-sdk =28.0.0` (Cargo.lock), CLI `stellar 28.1.0 / stellar-xdr 28.0.0`; in-env host `soroban-env-host 28.0.2`.
 
 ## Gates (binding before any implementation beyond Phase-0)
 
@@ -48,6 +71,24 @@ Experiment-only. Not audited, never mainnet. Parent handoff: ANT-546
 ### Experiment-1 on-chain assertions (Tobias F3/G1/deploy notes)
 
 The testnet deploy MUST assert: (a) on-chain nonce consumption (submit + replay-reject), (b) byte-equality between `digest_for_intent` output and the Soroban `signature_payload`, (c) self-auth-gated rule management (`add_context_rule` requires account self-auth), (d) real secp256r1 passkey verification (the local `verify_webauthn_assertion` is necessary-but-not-sufficient).
+
+### Phase-1 recommendation (Troy, post-experiment)
+
+GO for Phase-1 implementation scope, bounded as follows (no Revise needed — all four experiments
+support the handoff; open items are scoped, not blocking):
+1. Production factory with 32B `salt = sha256(pid)` (fixture used u32 truncation), `soroban-sdk`
+   version re-verified at build (`cargo tree`), `@peridotvault/pid-stellar` package + chain-registry
+   row (`namespace: "stellar"`).
+2. Full passkey-authorized `execute` via the account (auth-entry crafting in SDK) to close the last
+   mile of Exp-1 (registration + verify + digest-equality already on-chain).
+3. Token contract + exact nonfinancial-rule `transfer` deny on-chain (Exp-4 exact case).
+4. Pre-mainnet must-close: F1 (DOMAIN v2 network binding), G2 (32B→u32 rule-ID map pinning),
+   `min(OZ valid_until, expiry_ledger)`, T3 (scope canonicalization), external audit (ANT-542 G10).
+5. TTL-cron execution + measured steady-state rent at pilot scale (OQ-2 follow-up).
+
+Residual risk: LOW for testnet scope (test keys only, friendbot funds, no mainnet touch).
+Audit-surface: no new warnings beyond the recorded F1/G2/e items (Tobias reviewed 2026-10-25/26);
+RP-ID on-chain omission is an OZ design stance, mitigated client-side + digest-side.
 
 ### TTL-cron ops plan (spec AC4.5)
 
