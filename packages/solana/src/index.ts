@@ -99,7 +99,7 @@ export {
   smartAccountAta,
 } from "./instructions.js";
 export { SolanaRpc } from "./rpc.js";
-export type { ChainRpc, NftItem, ParsedTx, TokenBalance } from "./rpc.js";
+export type { ChainRpc, NftItem, ParsedTx, TokenBalance, TokenInfo } from "./rpc.js";
 export { getNftsOf, parseMetadataString, parseMetadataUri } from "./rpc.js";
 export { SolanaAdapter } from "./adapter.js";
 export type { TransactionStatus } from "./adapter.js";

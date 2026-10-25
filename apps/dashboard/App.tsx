@@ -5,6 +5,8 @@ import AppDetailPage from "./src/routes/app-detail-page";
 import ChainsPage from "./src/routes/chains";
 import ChainsCreatePage from "./src/routes/chains-create";
 import ChainsEditPage from "./src/routes/chains-edit";
+import TokensPage from "./src/routes/tokens";
+import TokensCreatePage from "./src/routes/tokens-create";
 import ContractsPage from "./src/routes/contracts";
 import FeesPage from "./src/routes/fees";
 import PartnersPage from "./src/routes/partners";
@@ -40,6 +42,8 @@ export default function App() {
           <Route path="/chains" element={<ChainsPage />} />
           <Route path="/chains/create" element={<ChainsCreatePage />} />
           <Route path="/chains/edit" element={<ChainsEditPage />} />
+          <Route path="/tokens" element={<TokensPage />} />
+          <Route path="/tokens/create" element={<TokensCreatePage />} />
           <Route path="/contracts" element={<ContractsPage />} />
           <Route path="/fees" element={<FeesPage />} />
           <Route path="/partners" element={<PartnersPage />} />

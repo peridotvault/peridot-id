@@ -1,0 +1,63 @@
+import { useEffect } from "react";
+import { Link } from "react-router";
+import { TokensManager } from "../workspace/tokens-manager";
+import { useWorkspace } from "../workspace/workspace-provider";
+import { Card, ERROR, MUTED } from "../workspace/ui";
+import { PageHeader } from "../workspace/page-header";
+import { CutButton } from "../workspace/cut-button";
+
+/** Admin token grid. */
+export default function WorkspaceTokensPage() {
+  const { client, status, isAdmin, busy, error, signIn } = useWorkspace();
+
+  useEffect(() => {
+    document.title = "Tokens · Dashboard · PeridotID";
+  }, []);
+
+  if (status === "checking") {
+    return (
+      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+        <p role="status" className={`mt-8 text-sm ${MUTED}`}>Checking session…</p>
+      </main>
+    );
+  }
+
+  if (status === "anonymous") {
+    return (
+      <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+        <PageHeader eyebrow="Token registry" title="Tokens" />
+        <Card className="mt-8">
+          <h2 className="text-lg font-semibold tracking-tight">Sign in to manage tokens</h2>
+          <p className={`mt-1 text-sm ${MUTED}`}>The token registry is admin-only.</p>
+          {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
+          <div className="mt-4">
+            <CutButton
+              type="button"
+              onClick={signIn}
+              disabled={busy}
+              className={busy ? "pointer-events-none opacity-60" : ""}
+            >
+              {busy ? "Waiting for wallet…" : "Sign in with PeridotID"}
+            </CutButton>
+          </div>
+        </Card>
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
+        <p className={`text-sm ${MUTED}`}>
+          Admin only. <Link to="/" className="underline">Back to workspace</Link>
+        </p>
+      </main>
+    );
+  }
+
+  return (
+    <main id="main-content" className="mx-auto w-full max-w-7xl px-5 pb-16 pt-8 sm:px-8">
+      <TokensManager client={client} />
+    </main>
+  );
+}

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import type { NftItem } from "@peridotvault/pid-solana";
 import { styles as s } from "../../../shared/styles/theme";
@@ -31,9 +32,14 @@ export function AssetSection({
           )}
           {coins.map((coin) => (
             <div key={coin.key} style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border-b border-border py-2.5">
+              <CoinIcon symbol={coin.symbol} image={coin.image} />
               <div className="flex flex-col flex-1">
                 <span className="font-sans text-base font-semibold text-foreground">{coin.symbol}</span>
-                {coin.symbol !== "SOL" && <span className="font-sans text-xs text-muted-foreground">{coin.key.slice(0, 4)}…{coin.key.slice(-4)}</span>}
+                {coin.key !== "sol" && (
+                  <span className="font-sans text-xs text-muted-foreground">
+                    {coin.name !== coin.symbol ? coin.name : `${coin.key.slice(0, 4)}…${coin.key.slice(-4)}`}
+                  </span>
+                )}
               </div>
               <span className="font-mono text-base font-medium text-foreground">{coin.amount}</span>
             </div>
@@ -66,5 +72,18 @@ function TabButton({ label, active, onPress }: { label: string; active: boolean;
     <Pressable onPress={onPress} accessibilityState={{ selected: active }}>
       <span className={`pb-1 font-sans text-sm font-medium ${active ? "border-b border-foreground text-foreground" : "text-muted-foreground"}`}>{label}</span>
     </Pressable>
+  );
+}
+
+// Logo with initial-letter fallback (broken/offline images degrade to the letter).
+function CoinIcon({ symbol, image }: { symbol: string; image?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (image && !failed) {
+    return <img src={image} alt="" loading="lazy" onError={() => setFailed(true)} className="h-9 w-9 rounded-full" />;
+  }
+  return (
+    <div aria-hidden className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+      <span className="font-sans text-sm font-semibold text-muted-foreground">{symbol.slice(0, 1).toUpperCase()}</span>
+    </div>
   );
 }

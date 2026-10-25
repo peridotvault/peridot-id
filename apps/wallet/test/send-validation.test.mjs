@@ -2,7 +2,7 @@
 // withdraw. Run: `node --test test/` from apps/wallet.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isSolanaAddress, sendDestinationError } from "../src/feat/wallet/utils/solana-address.ts";
+import { isSolanaAddress, sendDestinationError } from "../src/feat/chain/utils/solana-address.ts";
 
 const SYSTEM = "11111111111111111111111111111111"; // 32 zero bytes
 const PAYER = "kgERWXbLfq6MHcWLd86a5dpmSvM86QhQrQjL2gGPbnD"; // 32 random bytes

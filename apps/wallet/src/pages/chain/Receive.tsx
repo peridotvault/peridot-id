@@ -5,12 +5,12 @@ import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
-import { useActivationGate } from "../../feat/wallet/hooks/useActivationGate";
-import { useCopyAddress } from "../../feat/wallet/hooks/useCopyAddress";
-import { useDepositTargets } from "../../feat/wallet/hooks/useDepositTargets";
-import { DepositCardList } from "../../feat/wallet/components/DepositCardList";
-import { SolActivationModal } from "../../feat/wallet/components/SolActivationModal";
-import type { DepositTarget } from "../../feat/wallet/utils/deposit-targets";
+import { useActivationGate } from "../../feat/chain/hooks/useActivationGate";
+import { useCopyAddress } from "../../feat/chain/hooks/useCopyAddress";
+import { useDepositTargets } from "../../feat/chain/hooks/useDepositTargets";
+import { DepositCardList } from "../../feat/chain/components/DepositCardList";
+import { SolActivationModal } from "../../feat/chain/components/SolActivationModal";
+import type { DepositTarget } from "../../feat/chain/utils/deposit-targets";
 
 export function Receive({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {
   const { peridot } = usePeridot();

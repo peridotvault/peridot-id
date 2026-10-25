@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FiatDepositView, FiatLedgerEntry, PeridotClient } from "@peridotvault/pid-sdk-js";
-import type { WalletTransaction } from "@peridotvault/pid-types";
-import { pendingDeposit } from "../utils/feed";
+import { pendingDeposit } from "../utils/history";
 import { cachedRead, clearApiCache } from "../../../shared/data/api-cache";
 import { endNetworkTransition, subscribeNetworkMode } from "../../../shared/data/network-mode";
 
-// Unified feed source: chain history + DOKU intents + fiat ledger rows.
-// Tab-agnostic — the screen filters via selectVisible.
-// Re-fetches on network switch (ANT-15 req 3) like useHomeData.
-export function useActivityFeed(peridot: PeridotClient) {
-  const [items, setItems] = useState<WalletTransaction[]>([]);
+// Fiat half of the activity feed: DOKU intents + ledger rows. Tab-agnostic —
+// the screen merges this with the chain half. Re-fetches on network switch.
+export function useFiatHistory(peridot: PeridotClient) {
   const [deposits, setDeposits] = useState<FiatDepositView[]>([]);
   const [entries, setEntries] = useState<FiatLedgerEntry[]>([]);
   const [busy, setBusy] = useState(false);
@@ -21,8 +18,7 @@ export function useActivityFeed(peridot: PeridotClient) {
     try {
       // Money reads coalesce for 10s (same window as Home): revisits and the
       // StrictMode double-mount share one fetch instead of paying full price.
-      const [chain, depositsView, ledgerView] = await Promise.all([
-        peridot.wallet.history(),
+      const [depositsView, ledgerView] = await Promise.all([
         cachedRead("fiat.deposits", { ttlMs: 10_000 }, () => peridot.fiat.deposits()).catch(
           () => [] as FiatDepositView[],
         ),
@@ -41,12 +37,10 @@ export function useActivityFeed(peridot: PeridotClient) {
           .map((x) => peridot.fiat.syncTransaction(x.id).catch(() => null)),
       );
       const fresh = new Map(healed.filter((x) => x !== null).map((x) => [x.id, x]));
-      setItems((Array.isArray(chain) ? chain : []) as WalletTransaction[]);
       setDeposits(depositsView.map((x) => fresh.get(x.id) ?? x));
       setEntries(ledgerView);
     } catch (e) {
       setError(String(e));
-      // Non-fatal: keep showing cached local history if the RPC is unreachable.
     } finally {
       setBusy(false);
     }
@@ -56,7 +50,6 @@ export function useActivityFeed(peridot: PeridotClient) {
     load();
   }, [load]);
 
-  // Re-fetch chain history on network switch, then release the signing block.
   useEffect(() => {
     return subscribeNetworkMode(() => {
       clearApiCache();
@@ -64,5 +57,5 @@ export function useActivityFeed(peridot: PeridotClient) {
     });
   }, [load]);
 
-  return { items, deposits, entries, busy, error, reload: load };
+  return { deposits, entries, busy, error, reload: load };
 }

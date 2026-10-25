@@ -5,7 +5,9 @@ import type {
   Authority,
   Chain,
   ChainContract,
+  ChainPreview,
   CreateChainInput,
+  CreateTokenInput,
   ExchangeResult,
   Identity,
   IdentityCredential,
@@ -14,10 +16,17 @@ import type {
   Profile,
   ProfileUpdate,
   RegisterStart,
+  RegistryToken,
   Role,
   Session,
   SsoGrant,
+  Token,
+  TokenDeployment,
+  TokenDeploymentInput,
+  TokenPreview,
   UpdateChainInput,
+  UpdateTokenDeploymentInput,
+  UpdateTokenInput,
   UpsertContractInput,
 } from "@peridotvault/pid-types";
 import { PeridotWallet, type PeridotWalletOptions } from "./wallet/wallet-client.js";
@@ -591,6 +600,50 @@ export class PeridotAdmin {
     const res = await this.client.post<ChainContract>(`/v1/admin/chains/${chainId}/contracts`, input);
     return res.data;
   }
+
+  async uploadChainLogo(id: string, file: File | Blob): Promise<Chain | ApiError> {
+    const form = new FormData();
+    form.append("logo", file);
+    const res = await this.client.postForm<Chain>(`/v1/admin/chains/${id}/logo`, form);
+    return res.data;
+  }
+
+  async tokens(): Promise<Token[] | ApiError> {
+    const res = await this.client.get<Token[]>("/v1/admin/tokens");
+    return res.data;
+  }
+
+  async previewToken(input: { chainNamespace: string; chainReference: string; mint: string }): Promise<TokenPreview | ApiError> {
+    const res = await this.client.post<TokenPreview>("/v1/admin/tokens/preview", input);
+    return res.data;
+  }
+
+  async previewChain(input: { chainNamespace: string; reference: string; rpcUrl: string }): Promise<ChainPreview | ApiError> {
+    const res = await this.client.post<ChainPreview>("/v1/admin/chains/preview", input);
+    return res.data;
+  }
+
+  async createToken(input: CreateTokenInput): Promise<Token | ApiError> {
+    const res = await this.client.post<Token>("/v1/admin/tokens", input);
+    return res.data;
+  }
+
+  async updateToken(id: string, input: UpdateTokenInput): Promise<Token | ApiError> {
+    const res = await this.client.patch<Token>(`/v1/admin/tokens/${id}`, input);
+    return res.data;
+  }
+
+  async updateTokenDeployment(deploymentId: string, input: UpdateTokenDeploymentInput): Promise<TokenDeployment | ApiError> {
+    const res = await this.client.patch<TokenDeployment>(`/v1/admin/tokens/deployments/${deploymentId}`, input);
+    return res.data;
+  }
+
+  async uploadTokenLogo(id: string, file: File | Blob): Promise<Token | ApiError> {
+    const form = new FormData();
+    form.append("logo", file);
+    const res = await this.client.postForm<Token>(`/v1/admin/tokens/${id}/logo`, form);
+    return res.data;
+  }
 }
 
 class PeridotClient {
@@ -643,15 +696,16 @@ class PeridotClient {
     this.bearer = token;
   }
 
-  private async request<T>(path: string, init: RequestInit): Promise<{ ok: boolean; data: T | ApiError }> {
+  private async request<T>(path: string, init: RequestInit & { multipart?: boolean }): Promise<{ ok: boolean; data: T | ApiError }> {
+    const { multipart, ...fetchInit } = init;
     const res = await fetch(`${this.baseUrl}${path}`, {
-      ...init,
+      ...fetchInit,
       credentials: this.bearer ? "omit" : "include",
       headers: {
-        "Content-Type": "application/json",
+        ...(multipart ? {} : { "Content-Type": "application/json" }),
         ...(this.sessionScope ? { "x-pid-scope": this.sessionScope } : {}),
         ...(this.bearer ? { Authorization: `Bearer ${this.bearer}` } : {}),
-        ...init.headers,
+        ...fetchInit.headers,
       },
     });
     if (res.status === 401) {
@@ -681,6 +735,11 @@ class PeridotClient {
 
   post<T>(path: string, body?: unknown) {
     return this.request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
+  }
+
+  /** Multipart POST (logo upload) — fetch sets the boundary, so no JSON header. */
+  postForm<T>(path: string, form: FormData) {
+    return this.request<T>(path, { method: "POST", body: form, multipart: true } as RequestInit & { multipart?: boolean });
   }
 
   patch<T>(path: string, body: unknown) {
@@ -755,17 +814,27 @@ export type {
   Authority,
   Chain,
   ChainContract,
+  ChainPreview,
   CreateChainInput,
+  CreateTokenInput,
   ExchangeResult,
   Identity,
   IdentityCredential,
   LevelSummary,
+  LoginResponse,
   Profile,
   ProfileUpdate,
+  RegistryToken,
   Role,
   Session,
   SsoGrant,
+  Token,
+  TokenDeployment,
+  TokenDeploymentInput,
+  TokenPreview,
   UpdateChainInput,
+  UpdateTokenDeploymentInput,
+  UpdateTokenInput,
   UpsertContractInput,
 };
 export function Peridot(options: PeridotOptions = {}): PeridotClient {

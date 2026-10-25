@@ -2,8 +2,8 @@
 
 import { PublicKey } from "@peridotvault/pid-core";
 import { b64url, b64urlToBytes, buildActivatePayload, buildActivatePayloadV2, buildActivatePayloadV3, buildExecutePayloadV3, buildUpdateAuthorityPayloadV2, buildUpdateAuthorityPayloadV3, buildWithdrawPayload, buildWithdrawPayloadV2, buildWithdrawPayloadV3, buildWithdrawTokenPayload, buildWithdrawTokenPayloadV2, buildWithdrawTokenPayloadV3, executeCallHash, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
-import type { NftItem, ParsedTx, PasskeySigner, TokenBalance, TransactionStatus } from "@peridotvault/pid-solana";
-import type { ApiError, Authority, Chain, ChainAccount, WalletTransaction } from "@peridotvault/pid-types";
+import type { NftItem, ParsedTx, PasskeySigner, TokenBalance, TokenInfo, TransactionStatus } from "@peridotvault/pid-solana";
+import type { ApiError, Authority, Chain, ChainAccount, RegistryToken, WalletTransaction } from "@peridotvault/pid-types";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
 
@@ -507,6 +507,61 @@ export class PeridotWallet {
   /** SPL token balances held by the smart account (with their account/ATA addresses). */
   async tokens(): Promise<TokenBalance[]> {
     return (await this.solana()).getTokenBalancesOf(await this.smartAccountAddress());
+  }
+
+  /**
+   * Curated registry rows for Solana (fail-open to [] — the list then shows
+   * short mints). Metadata + visibility are admin-managed, never third-party.
+   */
+  async tokensRegistry(): Promise<RegistryToken[]> {
+    try {
+      const res = await this.api.get<RegistryToken[]>("/v1/tokens?namespace=solana");
+      if (!res.ok || isApiError(res.data) || !Array.isArray(res.data)) return [];
+      return res.data as RegistryToken[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Phantom-style list: on-chain SPL + Token-2022 balances joined with the
+   * curated registry. Unknown mints render the same, minus metadata. Pinned
+   * rows (e.g. USDC) render even at zero balance. Raw `tokens()` stays for
+   * balance checks/history.
+   */
+  async tokensEnriched(): Promise<TokenInfo[]> {
+    const pid = await this.pid();
+    const adapter = await this.solana();
+    const address = await this.smartAccountAddress();
+    const [balances, registry] = await Promise.all([
+      adapter.getTokenBalancesOf(address),
+      this.tokensRegistry(),
+    ]);
+    const byMint = new Map(registry.map((r) => [r.mint, r]));
+    const out: TokenInfo[] = balances
+      .filter((b) => b.amount !== "0")
+      .map((b) => {
+        const meta = byMint.get(b.mint);
+        byMint.delete(b.mint);
+        return meta
+          ? { ...b, name: meta.name, symbol: meta.symbol, image: meta.logoUrl ?? undefined, pinned: meta.isPinned }
+          : { ...b };
+      });
+    for (const meta of byMint.values()) {
+      if (!meta.isPinned) continue;
+      const ata = await adapter.tokenAta(pid, new PublicKey(meta.mint)).catch(() => null);
+      out.push({
+        mint: meta.mint,
+        amount: "0",
+        decimals: meta.decimals,
+        account: ata ? ata.toBase58() : "",
+        name: meta.name,
+        symbol: meta.symbol,
+        image: meta.logoUrl ?? undefined,
+        pinned: true,
+      });
+    }
+    return out;
   }
 
   /** Heuristic NFT inventory (SPL 0-decimal ×1; misses Token-2022/cNFTs — no DAS). */

@@ -8,8 +8,10 @@ screens communicate via callback props (`onDone`, `goSend`, …), never imports.
 ```
 App.tsx               # shell/composer — wires screens + providers + TabBar
 src/
-  pages/<domain>/     # 23 pages in domain folders (auth|wallet|fiat|
-                      # activity|identity|embed) — never screen→screen imports
+  pages/<domain>/     # 23 pages in domain folders (auth|home|chain|fiat|
+                      # activity|identity|embed) — flat, screen files only, no
+                      # subfolders. Route-private helpers live in-file. Never
+                      # screen→screen imports.
   shared/             # highest reusable layer: usable by >1 feature AND by shell
     styles/           # index.css (+tokens/fonts/base split), theme.ts
                       # (TS token source, byte-identical to tokens.css),
@@ -17,6 +19,7 @@ src/
     data/             # api-cache.ts (cachedRead/invalidate/clearApiCache),
                       # currency.ts (IDR/USD pref + CoinGecko), fiat.ts
                       # (FiatItem/FiatLedgerItem + labels + sumIdr),
+                      # format.ts (fmtDate feed helper, used by 2 feats),
                       # network-mode.ts (testnet store; view: hooks/useNetworkMode)
     app/              # AppContext.tsx (SDK provider + usePeridot()),
                       # config.ts (API_BASE_URL), fiat-ensure.ts (post-auth
@@ -32,15 +35,17 @@ src/
       icons.ts        # lucide barrel (deep per-icon imports only)
     hooks/            # session bootstrap/sync, startup gate, network-mode
                       # view, wide layout, window dimensions
-  feat/<domain>/      # auth | wallet | fiat | activity | identity | embed
-                      # (each: components/ hooks/ utils/ — no loose files)
+  feat/<domain>/      # auth | chain | fiat | identity | embed — one domain
+                      # capability each (one SDK namespace); each: components/
+                      # hooks/ utils/ — no loose files
   modules.d.ts        # ambient type shims (stays at src/ root)
 ```
 
 ## Import rules
 
 1. `pages/<domain>/` → may import from `shared/` and `feat/` only.
-   **Never** from another screen (same folder or otherwise).
+   **Never** from another screen (same folder or otherwise). No subfolders
+   under `pages/` — route-private helpers live in the screen file.
 2. `shared/` → may import from `shared/` only (any subfolder).
    **Never** from `pages/` or `feat/`. Shell-only app-wide modules
    (`app/config`, `app/fiat-ensure`, `components/shell/TabBar`) live
@@ -51,14 +56,23 @@ src/
    Needed by 2+ feats? Promote it to `shared/`.
 4. `App.tsx` may import from `pages/`, `shared/`, and `feat/`.
    Nothing may import from `App.tsx`.
-5. New code: used by 1 domain → `feat/<domain>/` (`components/`,
-   `hooks/`, `utils/` inside as needed); used by 2+ → `shared/`.
-   No new top-level `src/*.ts` files.
+5. New code: route-private (1 screen, incl. multi-namespace assembly and
+   pure nav/chrome) → in-file helpers in the screen (`pages/` is flat);
+   single-domain → `feat/<domain>/` (private: never import another feat,
+   `shared/` never imports `feat/`); used by 2+ domains → `shared/`.
+   `shared/data|hooks|app` must be multi-domain or shell infra (the
+   composition root: App + shell chrome). `shared/components/ui` is the
+   design system — generic primitives, exempt from multi-use.
+   Test: which SDK namespace does it wrap? More than one (or none) means
+   it is not a feat. No new top-level `src/*.ts` files.
 
-## Page → domain map (= `pages/` folders, mirrors `feat/`; no `Page` suffix — the folder says it)
+## Page → domain map (no `Page` suffix — the folder says it; `pages/activity`
+composes `feat/chain` + `feat/fiat` — the merge is the page's job, there is
+no `feat/activity`)
 
 - `auth`: Login, Provisioning, Approve
-- `wallet`: Home, Send, Receive, Swap, Activation
+- `home`: Home (dashboard aggregate; all route-private code in-file)
+- `chain`: Send, Receive, Swap, Activation
 - `fiat`: Topup, FiatTransfer, FiatDetail, FiatLedgerDetail, FiatAccount
 - `activity`: Activity, ActivityDetail
 - `identity`: Profile, EditProfile, ConnectedAccounts, Passkey,
@@ -72,15 +86,20 @@ W=apps/wallet
 # shared must not reference pages/ or feat/, and must never escape src/shared/
 rg "from\s+['\"][^'\"]*(pages|feat)/" $W/src/shared && exit 1
 rg "from\s+['\"]\.\./\.\./\.\./" $W/src/shared && exit 1
-# pages: every RELATIVE import must be shared/ or feat/ (blocks same-folder
-# AND cross-folder page imports; bare react/sdk packages are untouched)
+# pages: flat (no subfolders) + shared/feat imports only (bare react/sdk
+# packages untouched). Same-folder screen→screen imports have nowhere to
+# hide: any RELATIVE import outside shared/|feat/ fails.
+test -z "$(find $W/src/pages -mindepth 2 -type d)" || exit 1
 rg -o "from\s+['\"]\.[^'\"]+['\"]" $W/src/pages | rg -v "shared/|feat/" && exit 1
 # ui primitives never import shell chrome (shell composes ui, not the reverse)
 rg "from\s+['\"][^'\"]*components/shell/" $W/src/shared/components/ui && exit 1
-# no cross-feat imports (one line per feat)
-for f in auth wallet fiat activity identity embed; do
-  rg "from\s+['\"][^'\"]*feat/" $W/src/feat/$f \
-    | rg -v "feat/$f/" && exit 1
+# no cross-feat imports: every RELATIVE import in feat/ must stay in-folder
+# (./ same-dir or ../components|hooks|utils) or go to shared/. Catches the
+# ../../<other-feat>/ shape the old feat/ substring check was blind to.
+for f in auth chain fiat identity embed; do
+  rg -o "from\s+['\"]\.[^'\"]+['\"]" $W/src/feat/$f \
+    | rg -v "shared/" | rg -v "from\s+['\"]\./[^'\"/]+['\"]" \
+    | rg -v "from\s+['\"]\.\./(components|hooks|utils)/" && exit 1
 done
 ```
 
@@ -93,9 +112,9 @@ done
 
 ## Done (Phase 1)
 
-- `feat/wallet/hooks/useActivationGate.ts` — single activation gate
+- `feat/chain/hooks/useActivationGate.ts` — single activation gate
   (was duplicated in Receive/Activation).
-- `feat/wallet/hooks/useCopyAddress.ts` — keyed clipboard (was duplicated).
+- `feat/chain/hooks/useCopyAddress.ts` — keyed clipboard (was duplicated).
 - `shared/data/fiat.ts`: `fmtIdr`, `transferFeeOf`, `pickMethod`
   (were duplicated in Topup/Approve).
 - `feat/fiat/components/FiatQuoteBreakdown.tsx` — single quote breakdown +
@@ -104,13 +123,15 @@ done
 
 ## Done (Phase 2 — screens are slim composers)
 
-- Home → `feat/wallet/{utils/assets,hooks/useHomeData,components/HomeHeader,
-  TotalBalanceSection,SectionTitle,FiatSection,QuickActions,AssetSection}`
-  + `pages/fiat/FiatAccount` + `feat/fiat/components/FiatAccountActions`
-  (tap DOKU card → Rupiah page).
-- Activity → `feat/activity/{utils/feed,hooks/useActivityFeed,
-  components/ActivityHeader,ChainRow,FiatRow,LedgerRow}`.
-- Receive/Activation → `feat/wallet/{utils/deposit-targets,
+- Home → `pages/home/Home.tsx` (route assembly: `useHomeData`, `calcTotal`,
+  `TotalBalanceSection`, `QuickActions`, `SendChoiceModal` in-file — no
+  single feat owns them) over `feat/chain/{utils/assets,components/AssetSection}`
+  + `feat/fiat/components/FiatAccountActions` (tap DOKU card → Rupiah page).
+- Activity → `pages/activity/Activity.tsx` composes `feat/chain/hooks/useChainHistory`
+  + `feat/fiat/hooks/useFiatHistory` (merge + tab header inline — composition
+  is the page's job) over `feat/chain/components/ChainRow` and
+  `feat/fiat/components/{FiatRow,LedgerRow}`.
+- Receive/Activation → `feat/chain/{utils/deposit-targets,
   hooks/useDepositTargets,components/DepositCardList,SolActivationModal,
   DepositAddressCard,ActivationStatusCard}` (reuses Phase-1 gate/copy hooks).
 - Topup → `feat/fiat/{utils/topup-amount,hooks/useDepositQuote,
@@ -202,3 +223,60 @@ done
 - Depth check (codebase-design): moves only, no new interfaces —
   `data/` modules (`cachedRead`, `fmtIdr`, network store) were already
   deep; nothing introduced a hypothetical seam.
+
+## Done (Phase 8 — feat = model)
+
+- `feat/wallet/` split: on-chain model → `feat/chain/` (send, receive,
+  deposit targets, activation gate, address utils, `history.ts` chain
+  formatters + `useChainHistory`); dashboard aggregate → `feat/home/`
+  (`useHomeData`, `assets`, `TotalBalanceSection`, `AssetSection`,
+  `QuickActions`, `SendChoiceModal`). `pages/wallet/` split the same way
+  (`pages/home/Home`, `pages/chain/Send|Receive|Swap|Activation`).
+  Moves only — same depth, so `shared/`/`../utils/` imports unchanged.
+- `feat/activity/` dissolved (a read-projection, not a model): `ChainRow`
+  → `feat/chain/`; `FiatRow`/`LedgerRow` + fiat selectors →
+  `feat/fiat/utils/history.ts`; `fmtDate` → `shared/data/format.ts`
+  (rule 5: used by 2 feats); merge (`selectVisible`) + tab header inlined
+  in `pages/activity/Activity.tsx`; `useActivityFeed` split into
+  `useChainHistory` + `useFiatHistory` (each half verbatim, same resub).
+  Supersedes the Phase 7 "fiat smell is legitimate" note above.
+- Guard loop covers `auth chain home fiat identity embed` now.
+
+## Done (Phase 9 — route-private code colocates, feat = one namespace)
+
+- `feat/home/` was a route-named bucket (same sin as `feat/wallet/`),
+  corrected same-session: its 6 files → `pages/home/{components,hooks,
+  utils}/` (private to the Home route). `useHomeData` wraps 5 SDK
+  namespaces — no single feat can own it; the portfolio sections and
+  nav chrome wrap none. Assembly + chrome belong to the route.
+- Rule 5 fixed (it manufactured fake feats): 1 screen →
+  `pages/<route>/` submodules; single-domain, 2+ screens →
+  `feat/<domain>/`; 2+ domains → `shared/`.
+- Guards: pages allowlist now also bans `../../` in non-shared/feat
+  relative imports (escaping the route folder); cross-feat loop covers
+  `auth chain fiat identity embed`.
+
+## Done (Phase 10 — pages are flat, feat owns its domain)
+
+- `pages/home/` submodules deleted (the Phase 9 colocation violated the
+  pages-are-pure-screens law): chain-pure `assets.ts` (`Coin`,
+  `fmtBalance`, `shortMint`, `buildCoins`) → `feat/chain/utils/assets.ts`;
+  `AssetSection` (already fully props-driven) → `feat/chain/components/`
+  (zero import changes — same depth); `useHomeData`, `calcTotal`,
+  `TotalBalanceSection`, `QuickActions`, `SendChoiceModal` inlined in
+  `pages/home/Home.tsx` (~410 lines: honest size for a dashboard —
+  assembly + chrome belong to the route).
+- `calcTotal` unit test dropped (`tokens.test.mjs` keeps `buildCoins`/
+  `shortMint` from `feat/chain`): testing it would mean importing from a
+  page — a layering violation. Covered by typecheck.
+- `shared/` audited file-by-file: everything live, no deletions.
+  `HomeHeader` is used by `TopBar`, `useWideLayout` by `TabBar`/`AppColumn`,
+  `useWindowDimensions` by `useWideLayout` — a premature delete was caught
+  and restored before verification. Single-use generics (`Modal`,
+  `BottomSheet`, `BackButton`) stay: `shared/components/ui` is the design
+  system, exempt from multi-use (moving a generic Modal into a feat would
+  be wrong-homing). `shared/data|hooks|app` = multi-domain or shell infra.
+- Guards fixed: pages = flatness (`find -mindepth 2`) + strict allowlist
+  (no submodules left to allow); cross-feat check rewritten — the old
+  `feat/` substring match was blind to `../../<other-feat>/` imports
+  (green in practice, broken in theory; verified both directions).

@@ -126,7 +126,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       ? "contracts"
       : pathname?.startsWith("/chains") === true
         ? "chains"
-        : pathname?.startsWith("/partners") === true
+        : pathname?.startsWith("/tokens") === true
+          ? "tokens"
+          : pathname?.startsWith("/partners") === true
           ? "partners"
           : pathname?.startsWith("/fees") === true
             ? "fees"
@@ -137,6 +139,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         ? [
             { key: "apps", label: "Apps" },
             { key: "chains", label: "Chains" },
+            { key: "tokens", label: "Tokens" },
             { key: "contracts", label: "Contracts" },
             { key: "partners", label: "Partners" },
             { key: "fees", label: "Fees" },

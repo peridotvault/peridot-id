@@ -3,7 +3,8 @@ import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/compo
 import { theme, styles as s } from "../../../shared/styles/theme";
 import type { FiatLedgerItem } from "../../../shared/data/fiat";
 import { fmtIdr, ledgerStatusLabel } from "../../../shared/data/fiat";
-import { fmtDate, ledgerLabel } from "../utils/feed";
+import { ledgerLabel } from "../utils/history";
+import { fmtDate } from "../../../shared/data/format";
 
 export function LedgerRow({ item, onSelect }: { item: FiatLedgerItem; onSelect: (item: FiatLedgerItem) => void }) {
   const { tx } = item;

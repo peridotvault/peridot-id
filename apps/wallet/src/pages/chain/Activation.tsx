@@ -4,10 +4,10 @@ import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
-import { useActivationGate } from "../../feat/wallet/hooks/useActivationGate";
-import { useCopyAddress } from "../../feat/wallet/hooks/useCopyAddress";
-import { DepositAddressCard } from "../../feat/wallet/components/DepositAddressCard";
-import { ActivationStatusCard } from "../../feat/wallet/components/ActivationStatusCard";
+import { useActivationGate } from "../../feat/chain/hooks/useActivationGate";
+import { useCopyAddress } from "../../feat/chain/hooks/useCopyAddress";
+import { DepositAddressCard } from "../../feat/chain/components/DepositAddressCard";
+import { ActivationStatusCard } from "../../feat/chain/components/ActivationStatusCard";
 import { flatten } from "../../shared/styles/stylesheet";
 
 export function Activation({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {

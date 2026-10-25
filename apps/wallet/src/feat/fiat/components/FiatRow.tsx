@@ -3,7 +3,8 @@ import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/compo
 import { theme, styles as s } from "../../../shared/styles/theme";
 import type { FiatItem } from "../../../shared/data/fiat";
 import { fiatStatusLabel, fmtIdr } from "../../../shared/data/fiat";
-import { fiatLabel, fmtDate } from "../utils/feed";
+import { fiatLabel } from "../utils/history";
+import { fmtDate } from "../../../shared/data/format";
 
 export function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: FiatItem) => void }) {
   const incoming = item.kind === "deposit";

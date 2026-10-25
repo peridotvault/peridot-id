@@ -404,6 +404,7 @@ model Chain {
   contracts ChainContract[]
   accounts  ChainAccount[]
   evmRelayerKey EvmRelayerKey?
+  deployments TokenDeployment[]
 
   @@unique([namespace, reference])
   @@map("chains")
@@ -423,6 +424,47 @@ model ChainContract {
 
   @@unique([chainId, type])
   @@map("chain_contracts")
+}
+
+// Token registry (admin-managed, curated like the chain registry). Token rows
+// hold GLOBAL metadata once (symbol/name/logo); per-chain rows live in
+// TokenDeployment (mint + decimals differ per chain — e.g. USDT on base, bnb,
+// solana). Wallets render only visible deployments, joined with active chains.
+// Unknown mints fall back to the short-mint display with no warning.
+model Token {
+  id         String   @id @default(uuid())
+  symbol     String   @unique
+  name       String
+  logoKey    String?
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
+  updatedAt  DateTime @db.Timestamptz(3) @updatedAt
+
+  deployments TokenDeployment[]
+
+  @@map("tokens")
+}
+
+// One token on one chain (chainId FK → chains.id, so the dashboard picks from
+// the chains table and dead chains can never be registered). `isPinned` rows
+// render even at zero balance; `isVisible=false` hides instantly. No delete —
+// hiding keeps history like chains.
+model TokenDeployment {
+  id          String   @id @default(uuid())
+  tokenId     String
+  token       Token    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  chainId     String
+  chain       Chain    @relation(fields: [chainId], references: [id], onDelete: Cascade)
+  mint        String
+  decimals    Int
+  isVisible   Boolean  @default(true)
+  isPinned    Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @db.Timestamptz(3) @default(now())
+  updatedAt   DateTime @db.Timestamptz(3) @updatedAt
+
+  @@unique([tokenId, chainId])
+  @@unique([chainId, mint])
+  @@map("token_deployments")
 }
 
 // EVM auto-deploy relayer key per chain (replaces EVM_RELAYER_SECRET env,

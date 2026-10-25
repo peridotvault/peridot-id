@@ -25,6 +25,16 @@ function setup() {
       upsert: jest.fn(async (args: { create: Record<string, unknown> }) => ({ ...args.create, updatedAt: new Date(0) })),
       deleteMany: jest.fn(async () => ({ count: 1 })),
     },
+    token: {
+      findMany: jest.fn(async (): Promise<any[]> => []),
+      findUnique: jest.fn(async (): Promise<any> => null),
+      create: jest.fn(async (args: { data: Record<string, unknown> }) => ({ id: "tok-1", symbol: "TST", name: "Test", ...args.data })),
+      update: jest.fn(async (args: { data: Record<string, unknown> }) => ({ id: "tok-1", ...args.data })),
+    },
+    tokenDeployment: {
+      findUnique: jest.fn(async (): Promise<any> => null),
+      update: jest.fn(async (args: { data: Record<string, unknown> }) => ({ id: "dep-1", ...args.data })),
+    },
     identity: { findUnique: jest.fn(async () => ({ role: "admin", status: "active" })) },
     pidApp: {
       findUnique: jest.fn(async (): Promise<any> => null),
@@ -35,11 +45,16 @@ function setup() {
     },
   };
   const chains = { invalidate: jest.fn() };
+  const tokenRegistry = { invalidate: jest.fn() };
+  const wasabi = {
+    putTokenLogo: jest.fn(async () => "public/tokens/TST.png"),
+    moveLogo: jest.fn(async () => undefined),
+  };
   const security = mockSecurity();
   const config = { get: (k: string, d?: string) => (k === "PID_SECRETS_ENC_KEY" ? TEST_ENC_KEY : (d ?? "")) };
-  const service = new AdminService(prisma as never, chains as never, security as never, config as never);
+  const service = new AdminService(prisma as never, chains as never, tokenRegistry as never, wasabi as never, security as never, config as never);
   const guard = new AdminGuard(prisma as never);
-  return { service, prisma, chains, security, guard };
+  return { service, prisma, chains, tokenRegistry, wasabi, security, guard };
 }
 
 const IDENTITY = "pid_admin";
@@ -194,8 +209,8 @@ describe("AdminService", () => {
   });
 
   it("fails closed on setEvmRelayer without a usable data key (never stores plaintext)", async () => {
-    const { prisma, chains, security } = setup();
-    const noKey = new AdminService(prisma as never, chains as never, security as never, { get: () => "" } as never);
+    const { prisma, chains, tokenRegistry, wasabi, security } = setup();
+    const noKey = new AdminService(prisma as never, chains as never, tokenRegistry as never, wasabi as never, security as never, { get: () => "" } as never);
     prisma.chain.findUnique.mockResolvedValue({ id: "chain-97", namespace: "eip155", reference: "97" });
     const secret = "0x" + "33".repeat(32);
     await expect(noKey.setEvmRelayer(IDENTITY, "chain-97", secret)).rejects.toThrow("PID_SECRETS_ENC_KEY");
@@ -216,5 +231,137 @@ describe("AdminService", () => {
     await expect(service.deleteEvmRelayer(IDENTITY, "chain-97")).resolves.toEqual({ ok: true });
     expect(prisma.evmRelayerKey.deleteMany).toHaveBeenCalledWith({ where: { chainId: "chain-97" } });
     expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.evm_relayer.deleted", { chainId: "chain-97" });
+  });
+
+  it("creates tokens with deployments (EVM mints lowercased) in one save", async () => {
+    const { service, prisma, tokenRegistry, security } = setup();
+    prisma.chain.findUnique.mockResolvedValue({ id: "chain-97", namespace: "eip155", reference: "97" });
+    const token = await service.createToken(IDENTITY, {
+      symbol: "tst",
+      name: "Test Token",
+      deployments: [
+        { chainId: "chain-97", mint: "0xABCDABCDABCDABCDABCDABCDABCDABCDABCDABCD", decimals: 18 },
+      ],
+    });
+    expect(token.symbol).toBe("TST");
+    const createArg = (prisma.token.create as jest.Mock).mock.calls[0][0];
+    expect(createArg.data.deployments.create[0].mint).toBe("0xabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd");
+    expect(tokenRegistry.invalidate).toHaveBeenCalled();
+    expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.token.created", expect.objectContaining({ tokenId: "tok-1", symbol: "TST" }));
+  });
+
+  it("rejects duplicate symbols and unknown chains", async () => {
+    const { service, prisma } = setup();
+    prisma.token.findUnique.mockResolvedValueOnce({ id: "tok-1" });
+    await expect(
+      service.createToken(IDENTITY, { symbol: "USDC", name: "USD Coin", deployments: [] }),
+    ).rejects.toThrow(ConflictException);
+    expect(prisma.token.create).not.toHaveBeenCalled();
+    prisma.token.findUnique.mockResolvedValueOnce(null);
+    prisma.chain.findUnique.mockResolvedValueOnce(null);
+    await expect(
+      service.createToken(IDENTITY, {
+        symbol: "NEW",
+        name: "New",
+        deployments: [{ chainId: "nope", mint: "M", decimals: 6 }],
+      }),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it("rejects duplicate chains within one save", async () => {
+    const { service, prisma } = setup();
+    prisma.token.findUnique.mockResolvedValueOnce(null);
+    prisma.chain.findUnique.mockResolvedValue({ id: "c1", namespace: "solana", reference: "devnet" });
+    await expect(
+      service.createToken(IDENTITY, {
+        symbol: "DUP",
+        name: "Dup",
+        deployments: [
+          { chainId: "c1", mint: "M", decimals: 6 },
+          { chainId: "c1", mint: "M", decimals: 6 },
+        ],
+      }),
+    ).rejects.toThrow(ConflictException);
+    expect(prisma.token.create).not.toHaveBeenCalled();
+  });
+
+  it("updates token metadata and deployment visibility/pin", async () => {
+    const { service, prisma, tokenRegistry, security } = setup();
+    prisma.token.findUnique.mockResolvedValue({ id: "tok-1" });
+    await service.updateToken(IDENTITY, "tok-1", { name: "Renamed" });
+    expect(prisma.token.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "tok-1" }, data: expect.objectContaining({ name: "Renamed" }) }),
+    );
+    expect(tokenRegistry.invalidate).toHaveBeenCalled();
+    expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.token.updated", { tokenId: "tok-1" });
+    prisma.token.findUnique.mockResolvedValue(null);
+    await expect(service.updateToken(IDENTITY, "nope", { name: "x" })).rejects.toThrow(NotFoundException);
+
+    prisma.tokenDeployment.findUnique.mockResolvedValue({ id: "dep-1" });
+    await service.updateTokenDeployment(IDENTITY, "dep-1", { isVisible: false, isPinned: true });
+    expect(prisma.tokenDeployment.update).toHaveBeenCalledWith({
+      where: { id: "dep-1" },
+      data: { isVisible: false, isPinned: true },
+    });
+    expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.token.deployment.updated", { deploymentId: "dep-1" });
+  });
+
+  it("uploads token logos to Wasabi by symbol", async () => {
+    const { service, prisma, wasabi, tokenRegistry, security } = setup();
+    prisma.token.findUnique.mockResolvedValue({ id: "tok-1", symbol: "TST" });
+    const file = { buffer: Buffer.from("png"), mimetype: "image/png", size: 3, originalname: "l.png" };
+    await service.setTokenLogo(IDENTITY, "tok-1", file);
+    expect(wasabi.putTokenLogo).toHaveBeenCalledWith("TST", file);
+    expect(prisma.token.update).toHaveBeenCalledWith({
+      where: { id: "tok-1" },
+      data: { logoKey: "public/tokens/TST.png" },
+    });
+    expect(tokenRegistry.invalidate).toHaveBeenCalled();
+    expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.token.logo.updated", expect.anything());
+  });
+
+  it("maps logo keys to proxy URLs in the token list", async () => {
+    const { prisma, chains, tokenRegistry, wasabi, security } = setup();
+    const svc = new AdminService(
+      prisma as never, chains as never, tokenRegistry as never, wasabi as never, security as never,
+      { get: (k: string) => (k === "API_URL" ? "https://api.example" : "") } as never,
+    );
+    prisma.token.findMany.mockResolvedValue([
+      { id: "tok-1", symbol: "TST", logoKey: "public/tokens/TST.png", deployments: [] },
+      { id: "tok-2", symbol: "NON", logoKey: null, deployments: [] },
+    ]);
+    const rows = await svc.listTokens();
+    expect(rows[0]).toMatchObject({ logoUrl: "https://api.example/v1/tokens/logo?key=public%2Ftokens%2FTST.png" });
+    expect(rows[1]).toMatchObject({ logoUrl: null });
+  });
+
+  it("moves the logo object on symbol rename", async () => {
+    const { service, prisma, wasabi, tokenRegistry } = setup();
+    prisma.token.findUnique.mockResolvedValueOnce({ id: "tok-1", symbol: "OLD", logoKey: "public/tokens/OLD.png" });
+    prisma.token.findUnique.mockResolvedValueOnce(null);
+    await service.updateToken(IDENTITY, "tok-1", { symbol: "new" });
+    expect(wasabi.moveLogo).toHaveBeenCalledWith("public/tokens/OLD.png", "public/tokens/NEW.png");
+    expect(prisma.token.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ symbol: "NEW", logoKey: "public/tokens/NEW.png" }) }),
+    );
+    expect(tokenRegistry.invalidate).toHaveBeenCalled();
+  });
+
+  it("uploads chain logos and stores the proxy URL", async () => {
+    const { prisma, chains, security } = setup();
+    const wasabiChain = { putChainLogo: jest.fn(async () => "public/chains/eip155-97.png") };
+    const svc = new AdminService(
+      prisma as never, chains as never, { invalidate: jest.fn() } as never, wasabiChain as never, security as never,
+      { get: (k: string) => (k === "API_URL" ? "https://api.example" : "") } as never,
+    );
+    prisma.chain.findUnique.mockResolvedValue({ id: "chain-97", namespace: "eip155", reference: "97" });
+    const file = { buffer: Buffer.from("png"), mimetype: "image/png", size: 3, originalname: "l.png" };
+    const updated = await svc.setChainLogo(IDENTITY, "chain-97", file);
+    expect(wasabiChain.putChainLogo).toHaveBeenCalledWith("eip155", "97", file);
+    expect(prisma.chain.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ logoUrl: "https://api.example/v1/tokens/logo?key=public%2Fchains%2Feip155-97.png" }) }),
+    );
+    expect(updated).toMatchObject({ logoUrl: "https://api.example/v1/tokens/logo?key=public%2Fchains%2Feip155-97.png" });
+    expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.chain.logo.updated", expect.anything());
   });
 });
