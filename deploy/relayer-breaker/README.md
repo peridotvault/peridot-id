@@ -10,9 +10,28 @@ canonical in `docs/RELAYER_RUNBOOK.md` §4 — this file does not duplicate it.
 ## Config contract (for the ANT-581 mechanism)
 
 - The mechanism reads caps from env at startup, in **native base units**
-  (lamports / stroops / wei, integer strings): `BREAKER_CAP_SOLANA`,
-  `BREAKER_CAP_STELLAR`, `BREAKER_CAP_ETHEREUM`, `BREAKER_CAP_BASE`,
-  `BREAKER_CAP_BSC`. `breaker.config.example.json` is the documented source.
+  (lamports / stroops / wei, integer strings). Two env families are
+  canonical (ANT-601 reconciliation):
+  - Mechanism-canonical (repo `PID_*` convention): global default
+    `PID_RELAYER_BREAKER_CAP_LAMPORTS` + per-chain override
+    `PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN>` (`SOLANA`, `STELLAR`,
+    `ETHEREUM`, `BASE`, `BSC`).
+  - Ops/alerts alias: `BREAKER_CAP_SOLANA`, `BREAKER_CAP_STELLAR`,
+    `BREAKER_CAP_ETHEREUM`, `BREAKER_CAP_BASE`, `BREAKER_CAP_BSC`
+    (same names the alert check reads).
+- Resolution order, identical on both sides: per-chain `PID_…_<CHAIN>` →
+  per-chain `BREAKER_CAP_<CHAIN>` → global `PID_RELAYER_BREAKER_CAP_LAMPORTS`.
+  First set, non-empty value wins. Setting either family alone is enough to
+  enforce; if both are set for a chain, keep them identical (on disagreement
+  the `PID_…_<CHAIN>` value wins on both sides, so the breaker and the page
+  still agree). `breaker.config.example.json` maps both families.
+- Unset/invalid everywhere = `"0"` = breaker **disabled** for that chain.
+  There are NO compiled-in cap defaults: an operator who sets only alert
+  thresholds (or nothing at all) gets alerts but no enforcement — the
+  pre-ANT-601 README claim that the mechanism "falls back to compiled
+  defaults equal to these values" was inaccurate and is withdrawn.
+  Deployments MUST export at least one cap family (verified pre-launch with
+  Q4 + a `relayer.breaker.opened` drill).
 - Rolling window: 1 h (`R-NFR-9`), summed from `relayer.pnl.absorbed` (+ legacy
   `*.reconciled.relayerAbsorbed`) — the same Q4 the alert check evaluates, so
   the breaker and the page can never disagree about the sum.
@@ -56,8 +75,9 @@ alerts + float monitoring). Bootstrap errs toward tight; the 7-day re-tune
   path in runbook §4 applies (same evidence bar, expedited close with CTO
   named as closer).
 - This directory is config + docs only: deleting it changes nothing at
-  runtime (mechanism falls back to compiled defaults — which MUST equal these
-  values; ANT-581 acceptance checks that).
+  runtime. The mechanism has NO compiled-in cap defaults (default `"0"` =
+  disabled per chain); ANT-601 acceptance checks the both-families contract
+  above, including the disabled-by-default behavior.
 
 ## Verification (recorded 2026-10-25, scratch Postgres 17)
 

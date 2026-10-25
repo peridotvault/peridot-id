@@ -2,10 +2,16 @@
 // per-chain spend-rate circuit breaker + bounded retries with park.
 //
 // Cap VALUES are Trevor+CTO owned (OQ-3) — this ships the mechanism with
-// configurable caps: `PID_RELAYER_BREAKER_CAP_LAMPORTS` (default across
-// chains) with per-chain override `PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN>`
-// (chain key uppercased, e.g. `_SOLANA`). Rolling window: 1h absorbed-loss
-// sum per chain (R-NFR-9). Breaker opens → sponsored broadcasts pause
+// configurable caps, in native base units (lamports / stroops / wei,
+// integer strings). Two env families are canonical (ANT-601 reconciliation;
+// repo convention is `PID_*` per AGENTS.md, ops/alerts use `BREAKER_CAP_*`):
+// per-chain `PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN>` (chain key uppercased,
+// e.g. `_SOLANA`), then per-chain alias `BREAKER_CAP_<CHAIN>`, then global
+// default `PID_RELAYER_BREAKER_CAP_LAMPORTS`. First set, non-empty value
+// wins; unset/invalid everywhere means "0" = breaker disabled for that chain.
+// The alert check (`deploy/alerts/relayer-h1-check.sh`) mirrors this exact
+// precedence, so the breaker and the page can never disagree about the cap.
+// Rolling window: 1h absorbed-loss sum per chain (R-NFR-9). Breaker opens → sponsored broadcasts pause
 // fail-closed (re-quote still serves); resume is manual via `closeBreaker`
 // (runbook §H4.4 owns who may resume).
 
@@ -38,15 +44,35 @@ export class CircuitBreakerService {
     private readonly security: SecurityEventService,
   ) {}
 
-  /** Configured cap for a chain (bigint base units). Zero/negative = breaker disabled. */
+  /**
+   * Configured cap for a chain (bigint base units). Zero/negative = breaker
+   * disabled. Resolution order (ANT-601): per-chain `PID_…_<CHAIN>`, then
+   * per-chain `BREAKER_CAP_<CHAIN>` alias, then global `PID_…` default.
+   * Empty strings count as unset so a stray empty export cannot shadow a
+   * real value; unparsable values fail safe to 0 (disabled).
+   */
   capFor(chain: string): bigint {
-    const override = this.config.get<string>(`PID_RELAYER_BREAKER_CAP_LAMPORTS_${chain.toUpperCase()}`);
-    const raw = override ?? this.config.get<string>("PID_RELAYER_BREAKER_CAP_LAMPORTS", "0");
+    const upper = chain.toUpperCase();
+    const raw =
+      this.firstSet(
+        `PID_RELAYER_BREAKER_CAP_LAMPORTS_${upper}`,
+        `BREAKER_CAP_${upper}`,
+        "PID_RELAYER_BREAKER_CAP_LAMPORTS",
+      ) ?? "0";
     try {
       return BigInt(raw);
     } catch {
       return 0n;
     }
+  }
+
+  /** First configured, non-empty value across the given env keys, if any. */
+  private firstSet(...keys: string[]): string | undefined {
+    for (const key of keys) {
+      const value = this.config.get<string>(key);
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return undefined;
   }
 
   /** Absorbed P&L recorded post-reconcile; opens the breaker on cap breach. */

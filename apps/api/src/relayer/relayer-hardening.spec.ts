@@ -7,10 +7,11 @@ import { mockSecurity } from "../../test/factories";
 
 const PID = "pid_01HASH";
 
-function breakerSetup(cap?: string) {
+function breakerSetup(cap?: string, extraEnv: Record<string, string> = {}) {
   const security = mockSecurity();
   const config = {
     get: jest.fn((key: string, def?: unknown) => {
+      if (key in extraEnv) return extraEnv[key];
       if (key === "PID_RELAYER_BREAKER_CAP_LAMPORTS") return cap ?? "0";
       return def;
     }),
@@ -83,6 +84,56 @@ describe("CircuitBreakerService", () => {
     const fn = jest.fn().mockResolvedValueOnce("ok");
     await expect(service.withBoundedRetries(PID, "solana", "withdraw", "getNonce", fn, 3)).resolves.toBe("ok");
     expect(security.log).not.toHaveBeenCalled();
+  });
+
+  it("honors the BREAKER_CAP_<CHAIN> alias when the PID family is unset (ANT-601)", async () => {
+    // No PID_* set at all: the mock returns def (undefined) for PID keys.
+    const { service, security } = breakerSetup(undefined, { BREAKER_CAP_SOLANA: "5000" });
+    const snap = await service.recordAbsorbed(PID, "solana", 6000n);
+    expect(snap.open).toBe(true);
+    expect(snap.cap).toBe("5000");
+    expect(security.log).toHaveBeenCalledWith(
+      PID,
+      "relayer.breaker.opened",
+      expect.objectContaining({ chain: "solana", cap: "5000" }),
+    );
+  });
+
+  it("prefers PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN> over the BREAKER_CAP alias (ANT-601)", async () => {
+    const { service } = breakerSetup(undefined, {
+      PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA: "9000",
+      BREAKER_CAP_SOLANA: "5000",
+    });
+    // 6000 >= 5000 (alias) but < 9000 (PID winner): stays closed, cap is the PID value.
+    const snap = await service.recordAbsorbed(PID, "solana", 6000n);
+    expect(snap.open).toBe(false);
+    expect(snap.cap).toBe("9000");
+  });
+
+  it("falls back to the global PID default when no per-chain value is set (ANT-601)", async () => {
+    const { service } = breakerSetup("7000");
+    const snap = await service.recordAbsorbed(PID, "solana", 6000n);
+    expect(snap.open).toBe(false);
+    expect(snap.cap).toBe("7000");
+  });
+
+  it("prefers any per-chain value over the global default, regardless of family (ANT-601)", async () => {
+    const { service } = breakerSetup("7000", { BREAKER_CAP_SOLANA: "5000" });
+    // Chain-specific alias (5000) beats the global default (7000): specificity first, family second.
+    const snap = await service.recordAbsorbed(PID, "solana", 6000n);
+    expect(snap.open).toBe(true);
+    expect(snap.cap).toBe("5000");
+  });
+
+  it("treats empty and unparsable cap values as disabled, never as enforced (ANT-601)", async () => {
+    const { service } = breakerSetup(undefined, {
+      PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA: "",
+      BREAKER_CAP_SOLANA: "not-a-number",
+    });
+    // Empty PID override is skipped (counts as unset); unparsable alias fails safe to 0.
+    const snap = await service.recordAbsorbed(PID, "solana", 999_999_999n);
+    expect(snap.open).toBe(false);
+    expect(snap.cap).toBe("0");
   });
 });
 
