@@ -22,12 +22,13 @@ fi
 
 RUNNER="$SCRIPT_DIR/run-with-infisical.sh"
 
-# Both checks run on each VPS scoped to that stack's ALERT_ENV; cadence
+# All checks run on each VPS scoped to that stack's ALERT_ENV; cadence
 # mirrors deploy/alerts/README.md.
 ENTRIES=$(cat <<EOF
 */5 * * * *  ALERT_ENV=$ALERT_ENV $RUNNER $ENV refresh-reuse-check.sh #peridot-alert
 */15 * * * *  ALERT_ENV=$ALERT_ENV $RUNNER $ENV faucet-abuse-check.sh #peridot-alert
 */5 * * * *  ALERT_ENV=$ALERT_ENV $RUNNER $ENV xp-leveling-check.sh #peridot-alert
+*/5 * * * *  ALERT_ENV=$ALERT_ENV $RUNNER $ENV relayer-h1-check.sh #peridot-alert
 EOF
 )
 
