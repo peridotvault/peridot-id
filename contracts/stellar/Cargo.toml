@@ -1,0 +1,16 @@
+[package]
+name = "peridot-stellar-phase0"
+version = "0.1.0"
+description = "PeridotID Stellar Phase-0 testnet experiments (ANT-551). Experiment-only: not audited, never mainnet."
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.75"
+
+[lib]
+name = "peridot_stellar_phase0"
+path = "src/lib.rs"
+
+[dependencies]
+sha2 = "0.10"
+
+[workspace]
