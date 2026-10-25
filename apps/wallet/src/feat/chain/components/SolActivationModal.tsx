@@ -3,6 +3,7 @@ import { Modal } from "../../../shared/components/ui/Modal";
 import QRCode from "react-qr-code";
 import { theme, styles as s } from "../../../shared/styles/theme";
 import { UIButton } from "../../../shared/components/ui/UIButton";
+import { ActivationFee } from "./ActivationFee";
 import type { useActivationGate } from "../hooks/useActivationGate";
 import type { DepositTarget } from "../utils/depositTargets";
 import { isSolanaAvailable, subscribeNetworkMode } from "../../../shared/data/networkMode";
@@ -62,6 +63,7 @@ export function SolActivationModal({
             </p>
           )}
           {gate.error && <p role="alert" style={s.error}>{gate.error}</p>}
+          {!gate.isActive && gate.activation && <ActivationFee view={gate.activation} />}
           {!gate.isActive && (
             <UIButton
               title={gate.busy ? "Activating…" : "Activate Account"}
