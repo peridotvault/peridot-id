@@ -274,9 +274,81 @@ describe("EvmActivationService", () => {
     );
   });
 
+  it("activate emits canonical H2/H1 rows on deploy (chain 97 buckets to unknown)", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service, security } = setup("0x" + "11".repeat(32));
+    let deployed = false;
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = jest.fn(async () => {
+      deployed = true;
+      return { hash: "0xdeploy", from: "0xrelayer", costWei: "100000000000000" };
+    });
+    (global as unknown as { fetch: unknown }).fetch = jest.fn(async (_url: unknown, opts: unknown) => {
+      const { method, params } = JSON.parse((opts as { body: string }).body) as {
+        method: string;
+        params?: Array<{ data?: string }>;
+      };
+      const result =
+        method === "eth_getCode"
+          ? deployed
+            ? "0x6080604052"
+            : "0x"
+          : method === "eth_getBalance"
+            ? balance
+            : method === "eth_getBlockByNumber"
+              ? { timestamp: "0x3b9aca00" }
+              : method === "eth_call"
+                ? defaultView(params?.[0]?.data ?? "")
+                : gasPrice;
+      return { ok: true, json: async () => ({ result }) };
+    });
+    await service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 1,
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    });
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "relay.resolve_landed",
+      expect.objectContaining({ chain: "unknown", entryPoint: "activate", signature: "0xdeploy" }),
+    );
+    // attested 350000×1e9 = 350000000000000 vs actual cost 100000000000000 → over-attested.
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "relayer.pnl",
+      expect.objectContaining({
+        chain: "unknown",
+        entryPoint: "activate",
+        signature: "0xdeploy",
+        absorbed: "0",
+        attested: "350000000000000",
+        actual: "100000000000000",
+      }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "reconcile.over_attested",
+      expect.objectContaining({
+        chain: "unknown",
+        entryPoint: "activate",
+        signature: "0xdeploy",
+        attested: "350000000000000",
+        actual: "100000000000000",
+        expected: "100000000000000",
+        absorbed: "0",
+      }),
+    );
+  });
+
   it("activate rejects drift beyond 120% of the quoted network fee", async () => {
     balance = "0x" + (10n ** 18n).toString(16);
-    const { service } = setup("0x" + "11".repeat(32));
+    const { service, security } = setup("0x" + "11".repeat(32));
     await expect(service.activate({ pid: IDENTITY_ID }, "97", {
       quotedNetworkFeeWei: "1",
       feePolicyVersion: 1,
@@ -289,6 +361,22 @@ describe("EvmActivationService", () => {
         clientDataJSON: Buffer.from("{}").toString("base64url"),
       },
     })).rejects.toThrow(ConflictException);
+    // H1.v + H1.ii: drift pair with the exact contract keys.
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "quote.drift_rejected",
+      expect.objectContaining({
+        chain: "unknown",
+        entryPoint: "activate",
+        quoted: "1",
+        attested: "350000000000000",
+      }),
+    );
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      "intent.rejected",
+      expect.objectContaining({ chain: "unknown", entryPoint: "activate", cause: "drift" }),
+    );
   });
 
   it("activate accepts attestation at exactly 120% of the quote", async () => {

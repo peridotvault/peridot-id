@@ -35,7 +35,14 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
 import { RelayerIdempotencyService } from "../relayer/relayer-idempotency.service";
-import { RelayerEvents, absorbedLoss } from "../relayer/relayer-events";
+import {
+  FeeChain,
+  IntentRejectionCause,
+  RelayerH1Events,
+  absorbedLoss,
+  evmReferenceToFeeChain,
+  fmtBaseUnits,
+} from "../relayer/relayer-events";
 
 export interface EvmActivationView {
   pid: string;
@@ -111,6 +118,16 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     // EVM canonical is V4 policy 2 (MAX 50%, chainMin floor). Policy 1 stays
     // accepted on submit for sunset (frozen semantics: 50% no floor).
     return 2;
+  }
+
+  /** H1.ii: semantic intent rejections emit intent.rejected (EVM intents carry no nonce — key omitted). */
+  private async reject(pid: string, chain: FeeChain | "unknown", cause: IntentRejectionCause, err: Error): Promise<never> {
+    await this.security.log(pid, RelayerH1Events.intentRejected, {
+      chain,
+      entryPoint: "activate",
+      cause,
+    });
+    throw err;
   }
 
   /** Chain id numeric for the V2 floor table (reference IS the decimal chain id). */
@@ -304,6 +321,8 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   ): Promise<EvmActivationView> {
     const chain = await this.chainOrThrow(chainReference);
     const row = await this.ownedRow(user.pid, chain);
+    // FeeChain for every H1/H2/H3 row on this path (unknown testnets bucket to 'unknown').
+    const feeChain = evmReferenceToFeeChain(chain.reference);
     const adapter = await this.adapterFor(chainReference);
 
     const live = await this.viewOf(user, chainReference);
@@ -313,7 +332,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     }
 
     // H3: fail-closed while the per-chain spend-rate breaker is open.
-    await this.breaker.requireClosed(user.pid, chainReference, "activate");
+    await this.breaker.requireClosed(chainReference, "activate");
 
     const authority = await requireActiveAuthority(this.prisma, user.pid);
 
@@ -331,34 +350,29 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     // submit must match what the client signed — mismatch means re-quote.
     const version = dto.feePolicyVersion;
     if (version !== 1 && version !== 2) {
-      throw new BadRequestException("Unsupported fee policy — re-quote and try again");
+      return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("Unsupported fee policy — re-quote and try again"));
     }
     const chainId = this.chainIdFor(chain);
     const rpc = await this.rpcFor(chainReference);
     const now = await rpc.blockTimestamp().catch(() => Math.floor(Date.now() / 1000));
-    if (dto.deadline <= now) throw new BadRequestException("Authorization expired — please try again");
+    if (dto.deadline <= now) {
+      return this.reject(user.pid, feeChain, "expired", new BadRequestException("Authorization expired — please try again"));
+    }
     if (dto.deadline - now > MAX_TTL_SECS) {
-      throw new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again");
+      return this.reject(user.pid, feeChain, "expired", new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again"));
     }
     // Attest the realtime network fee at submit time; fail closed when it drifted
     // beyond 120% of what the client quoted against.
     const quoted = BigInt(dto.quotedNetworkFeeWei);
     const networkFee = await this.networkFeeWei(chainReference);
     if (exceedsDriftBound(networkFee, quoted)) {
-      await this.security.log(user.pid, RelayerEvents.intentRejected, {
+      await this.security.log(user.pid, RelayerH1Events.driftRejected, {
+        chain: feeChain,
         entryPoint: "activate",
-        chain: chainReference,
-        cause: "drift",
-        quoted: quoted.toString(),
-        attested: networkFee.toString(),
+        quoted: fmtBaseUnits(quoted),
+        attested: fmtBaseUnits(networkFee),
       });
-      await this.security.log(user.pid, RelayerEvents.quoteDriftRejected, {
-        entryPoint: "activate",
-        chain: chainReference,
-        quoted: quoted.toString(),
-        attested: networkFee.toString(),
-      });
-      throw new ConflictException("Network fee moved — re-quote and try again");
+      return this.reject(user.pid, feeChain, "drift", new ConflictException("Network fee moved — re-quote and try again"));
     }
     const protocolFee = this.protocolFeeFor(networkFee, version, chainId);
     const totalFee = networkFee + protocolFee;
@@ -367,17 +381,25 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     let maxTotalFee = totalFee;
     if (version === 2) {
       if (dto.maxTotalFeeWei == null) {
-        throw new BadRequestException("maxTotalFeeWei is required for fee policy 2 — re-quote and try again");
+        return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("maxTotalFeeWei is required for fee policy 2 — re-quote and try again"));
       }
       maxTotalFee = BigInt(dto.maxTotalFeeWei);
       if (totalFee > maxTotalFee) {
-        throw new ConflictException("Network fee exceeds maxTotalFee — re-quote and try again");
+        await this.security.log(user.pid, RelayerH1Events.driftRejected, {
+          chain: feeChain,
+          entryPoint: "activate",
+          quoted: fmtBaseUnits(maxTotalFee),
+          attested: fmtBaseUnits(totalFee),
+        });
+        return this.reject(user.pid, feeChain, "drift", new ConflictException("Network fee exceeds maxTotalFee — re-quote and try again"));
       }
     }
     const asserting = await this.prisma.authority.findFirst({
       where: { pid: user.pid, credentialId: dto.assertion.id, status: "active" },
     });
-    if (!asserting) throw new BadRequestException("Unknown or inactive passkey");
+    if (!asserting) {
+      return this.reject(user.pid, feeChain, "unauthorized", new BadRequestException("Unknown or inactive passkey"));
+    }
 
     await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "activating" } });
     try {
@@ -419,9 +441,9 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         // receipt: mark active, log the resolution, skip receipt-bound records
         // (no fake hashes in the unique txHash column, no false reconcile).
         await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "active" } });
-        await this.security.log(user.pid, RelayerEvents.resolvedLanded, {
+        await this.security.log(user.pid, RelayerH1Events.resolveLanded, {
+          chain: feeChain,
           entryPoint: "activate",
-          chain: chainReference,
           unattributed: true,
         });
         return this.viewOf(user, chainReference);
@@ -461,6 +483,12 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         protocolFee: protocolFee.toString(),
         feePolicyVersion: version,
         maxTotalFee: maxTotalFee.toString(),
+      });
+      // H2: resolve-then-act outcome for the sponsored activation.
+      await this.security.log(user.pid, RelayerH1Events.resolveLanded, {
+        chain: feeChain,
+        entryPoint: "activate",
+        signature: receipt.hash,
       });
       await this.reconcileActivation(user.pid, chainReference, receipt, networkFee, protocolFee, version).catch(
         (err) => this.logger.warn(`evm activation reconcile failed for ${receipt.hash}: ${(err as Error).message}`),
@@ -557,6 +585,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     protocolFee: bigint,
     version: number,
   ): Promise<void> {
+    const chain = evmReferenceToFeeChain(chainReference);
     const chainId = Number(chainReference);
     const expectedProtocol =
       version === 2 && Number.isInteger(chainId)
@@ -564,8 +593,8 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         : protocolFeeOf(networkFee, protocolFeeBps(version));
     const l1Fee = receipt.l1FeeWei != null ? BigInt(receipt.l1FeeWei) : 0n;
     const actual = BigInt(receipt.costWei) + l1Fee;
-    const overAttested = exceedsDriftBound(networkFee, actual);
     const absorbed = absorbedLoss(networkFee, actual);
+    const overAttested = exceedsDriftBound(networkFee, actual);
     await this.security.log(pid, "account.evm.activation.reconciled", {
       txHash: receipt.hash,
       networkFee: networkFee.toString(),
@@ -576,43 +605,52 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       overAttested,
     });
     // H1.iv: per-tx relayer P&L, dashboarded per chain + entry point.
-    await this.security.log(pid, RelayerEvents.pnl, {
-      txHash: receipt.hash,
+    await this.security.log(pid, RelayerH1Events.pnl, {
+      chain,
       entryPoint: "activate",
-      chain: chainReference,
-      absorbed: absorbed.toString(),
+      signature: receipt.hash,
+      absorbed: fmtBaseUnits(absorbed),
+      attested: fmtBaseUnits(networkFee),
+      actual: fmtBaseUnits(actual),
     });
     // H3: absorbed losses feed the per-chain spend-rate breaker.
-    await this.breaker.recordAbsorbed(pid, chainReference, absorbed).catch((err) =>
+    await this.breaker.recordAbsorbed(pid, chain, absorbed).catch((err) =>
       this.logger.warn(`breaker record failed: ${(err as Error).message}`),
     );
     if (protocolFee !== expectedProtocol) {
       // H1.iii: formula divergence — alert, never rebroadcast.
-      await this.security.log(pid, RelayerEvents.formulaMismatch, {
-        txHash: receipt.hash,
+      await this.security.log(pid, RelayerH1Events.formulaMismatch, {
+        chain,
         entryPoint: "activate",
-        chain: chainReference,
-        attested: networkFee.toString(),
-        actual: actual.toString(),
-        expected: expectedProtocol.toString(),
+        signature: receipt.hash,
+        attested: fmtBaseUnits(networkFee),
+        actual: fmtBaseUnits(actual),
+        expected: fmtBaseUnits(expectedProtocol),
+        absorbed: fmtBaseUnits(absorbed),
       });
       this.logger.error(
         `evm activation formula anomaly: ${receipt.hash} protocol=${protocolFee} expected=${expectedProtocol}`,
       );
     }
     if (overAttested) {
-      await this.security.log(pid, RelayerEvents.overAttested, {
-        txHash: receipt.hash,
+      // H1.iii: attested fee exceeded the drift bound over the actual charge.
+      await this.security.log(pid, RelayerH1Events.overAttested, {
+        chain,
         entryPoint: "activate",
-        chain: chainReference,
-        attested: networkFee.toString(),
-        actual: actual.toString(),
-        expected: expectedProtocol.toString(),
+        signature: receipt.hash,
+        attested: fmtBaseUnits(networkFee),
+        actual: fmtBaseUnits(actual),
+        expected: fmtBaseUnits(actual),
+        absorbed: fmtBaseUnits(absorbed),
       });
       this.logger.error(
         `evm activation over-attestation anomaly: ${receipt.hash} attested=${networkFee} actual=${actual}`,
       );
     }
+    // H3: feed the rolling absorbed-loss window (opens the breaker on breach).
+    await this.breaker.recordAbsorbed(pid, chain, absorbed).catch((err) =>
+      this.logger.warn(`breaker record failed: ${(err as Error).message}`),
+    );
   }
 
   private async ownedRow(pid: string, chain: Pick<RegistryChain, "id" | "reference">) {

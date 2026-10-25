@@ -44,23 +44,23 @@ export function mockBreaker() {
   return {
     requireClosed: jest.fn(async () => undefined),
     recordAbsorbed: jest.fn(
-      async (): Promise<{ chain: string; open: boolean; absorbedWindow: string; cap: string }> => ({
+      async (): Promise<{ chain: string; open: boolean; absorbedSum: string; cap: string }> => ({
         chain: "",
         open: false,
-        absorbedWindow: "0",
+        absorbedSum: "0",
         cap: "0",
       }),
     ),
     isOpen: jest.fn(() => false),
     closeBreaker: jest.fn(
-      async (): Promise<{ chain: string; open: boolean; absorbedWindow: string; cap: string }> => ({
+      async (): Promise<{ chain: string; open: boolean; absorbedSum: string; cap: string }> => ({
         chain: "",
         open: false,
-        absorbedWindow: "0",
+        absorbedSum: "0",
         cap: "0",
       }),
     ),
-    snapshot: jest.fn((chain: string) => ({ chain, open: false, absorbedWindow: "0", cap: "0" })),
+    snapshot: jest.fn((chain: string) => ({ chain, open: false, absorbedSum: "0", cap: "0" })),
     withBoundedRetries: jest.fn(
       async (
         _pid: string,

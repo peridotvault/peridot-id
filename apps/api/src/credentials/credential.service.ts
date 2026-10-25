@@ -414,8 +414,13 @@ export class CredentialService {
       where: { id: authority.id },
       data: { status: "revoked" as AuthorityStatus },
     });
-    await this.security.log(pid, "credential.revoked", { credentialId: authority.credentialId });
-    // H1.i: registry revokes are chain-agnostic — count under "global".
+    await this.security.log(pid, "credential.revoked", {
+      // H1.i: registry revokes are chain-agnostic (pid-level, not
+      // chain-bound — explicit 'unknown' buckets them for the global count).
+      chain: "unknown",
+      credentialId: authority.credentialId,
+    });
+    // H1.i: feed the revocation spike monitor under the "global" key.
     await this.revocations.recordRevocation(pid, "global").catch((err) =>
       this.logger.warn(`revocation record failed: ${(err as Error).message}`),
     );

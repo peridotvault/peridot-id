@@ -34,13 +34,13 @@ describe("Relayer breaker admin endpoints (F3)", () => {
 
   it("closes the breaker with recorded evidence", async () => {
     const { controller, breaker } = setup();
-    breaker.closeBreaker.mockResolvedValue({ chain: "solana", open: false, absorbedWindow: "0", cap: "0" });
+    breaker.closeBreaker.mockResolvedValue({ chain: "solana", open: false, absorbedSum: "0", cap: "0" });
     await expect(
       controller.closeBreaker({ pid: "pid_01HASH" } as never, {
         chain: "solana",
         evidence: "incident #1 reviewed",
       } as never),
-    ).resolves.toEqual({ chain: "solana", open: false, absorbedWindow: "0", cap: "0" });
+    ).resolves.toEqual({ chain: "solana", open: false, absorbedSum: "0", cap: "0" });
     expect(breaker.closeBreaker).toHaveBeenCalledWith("pid_01HASH", "solana", "incident #1 reviewed");
   });
 

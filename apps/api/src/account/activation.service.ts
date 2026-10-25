@@ -42,7 +42,7 @@ import {
   BROADCAST_CHAIN_SOLANA,
   RelayerIdempotencyService,
 } from "../relayer/relayer-idempotency.service";
-import { RelayerEvents, absorbedLoss } from "../relayer/relayer-events";
+import { IntentRejectionCause, RelayerH1Events, absorbedLoss, fmtBaseUnits } from "../relayer/relayer-events";
 
 export type ActivationStatus = ChainAccountStatus;
 
@@ -358,7 +358,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     }
 
     // H3: fail-closed while the per-chain spend-rate breaker is open.
-    await this.breaker.requireClosed(user.pid, BROADCAST_CHAIN_SOLANA, "activate");
+    await this.breaker.requireClosed(BROADCAST_CHAIN_SOLANA, "activate");
 
     await requireActiveAuthority(this.prisma, user.pid);
 
@@ -370,13 +370,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         where: { pid: user.pid, credentialId: dto.assertion.id, status: "active" },
       });
       if (!asserting) {
-        await this.security.log(user.pid, RelayerEvents.intentRejected, {
-          entryPoint: "activate",
-          chain: BROADCAST_CHAIN_SOLANA,
-          cause: "unauthorized",
-          credentialId: dto.assertion.id,
-        });
-        throw new BadRequestException("Unknown or inactive passkey");
+        return this.reject(user.pid, "unauthorized", new BadRequestException("Unknown or inactive passkey"));
       }
       // Pre-check: Peridot's relayer floats the fee + rent. If it's out of SOL the tx would
       // be silently dropped (skipPreflight), so fail fast with a clear message instead.
@@ -388,11 +382,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       }
       if (relayerBalance < required) {
         await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
-        await this.security.log(user.pid, RelayerEvents.intentRejected, {
-          entryPoint: "activate",
-          chain: BROADCAST_CHAIN_SOLANA,
-          cause: "relayer-unfunded",
-        });
+        // Service outage, not an intent rejection: no intent.rejected row (the
+        // H1.ii cause set is closed and has no service-side cause). The legacy
+        // row + 503 below preserve the alert trail.
         await this.security.log(user.pid, "account.activation.relayer_unfunded", { relayer: this.relayer().publicKey.toBase58() });
         throw new ServiceUnavailableException(
           "Peridot's activation service is temporarily out of funds. No SOL was deducted from your wallet — please try again in a moment.",
@@ -403,31 +395,13 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       // as are lifetimes beyond the cross-cluster replay bound.
       const chainTime = await adapter.chainTime().catch(() => 0);
       if (dto.expiry <= chainTime) {
-        await this.security.log(user.pid, RelayerEvents.intentRejected, {
-          entryPoint: "activate",
-          chain: BROADCAST_CHAIN_SOLANA,
-          cause: "expired",
-          expiry: dto.expiry,
-        });
-        throw new BadRequestException("Authorization expired — please try again");
+        return this.reject(user.pid, "expired", new BadRequestException("Authorization expired — please try again"));
       }
       if (dto.expiry - chainTime > MAX_TTL_SECS) {
-        await this.security.log(user.pid, RelayerEvents.intentRejected, {
-          entryPoint: "activate",
-          chain: BROADCAST_CHAIN_SOLANA,
-          cause: "over-ttl",
-          expiry: dto.expiry,
-        });
-        throw new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again");
+        return this.reject(user.pid, "expired", new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again"));
       }
       if (dto.feePolicyVersion !== quoted.version) {
-        await this.security.log(user.pid, RelayerEvents.intentRejected, {
-          entryPoint: "activate",
-          chain: BROADCAST_CHAIN_SOLANA,
-          cause: "policy-unknown",
-          feePolicyVersion: dto.feePolicyVersion,
-        });
-        throw new BadRequestException("Unsupported fee policy — re-quote and try again");
+        return this.reject(user.pid, "policy-unknown", new BadRequestException("Unsupported fee policy — re-quote and try again"));
       }
       // Attest the realtime network fee at submit time; fail closed when it drifted
       // beyond 120% of what the client quoted against.
@@ -435,20 +409,13 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       const submitCost = await adapter.estimateActivationCost(0);
       const networkFee = submitCost.rentLamports + submitCost.feeLamports;
       if (exceedsDriftBound(networkFee, quotedNetwork)) {
-        await this.security.log(user.pid, RelayerEvents.intentRejected, {
+        await this.security.log(user.pid, RelayerH1Events.driftRejected, {
+          chain: "solana",
           entryPoint: "activate",
-          chain: BROADCAST_CHAIN_SOLANA,
-          cause: "drift",
-          quoted: quotedNetwork.toString(),
-          attested: networkFee.toString(),
+          quoted: fmtBaseUnits(quotedNetwork),
+          attested: fmtBaseUnits(networkFee),
         });
-        await this.security.log(user.pid, RelayerEvents.quoteDriftRejected, {
-          entryPoint: "activate",
-          chain: BROADCAST_CHAIN_SOLANA,
-          quoted: quotedNetwork.toString(),
-          attested: networkFee.toString(),
-        });
-        throw new ConflictException("Network fee moved — re-quote and try again");
+        return this.reject(user.pid, "drift", new ConflictException("Network fee moved — re-quote and try again"));
       }
       const protocolFee = platformFeeOf(networkFee, "solana", quoted.version);
       const totalFee = networkFee + protocolFee;
@@ -523,7 +490,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
           "activate",
           "resolved-landed",
         );
-        await this.security.log(user.pid, RelayerEvents.resolvedLanded, {
+        await this.security.log(user.pid, RelayerH1Events.resolveLanded, {
           entryPoint: "activate",
           chain: BROADCAST_CHAIN_SOLANA,
           unattributed: true,
@@ -588,6 +555,12 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         protocolFee: protocolFee.toString(),
         feePolicyVersion: quoted.version,
       });
+      // H2: resolve-then-act outcome for the sponsored activation.
+      await this.security.log(user.pid, RelayerH1Events.resolveLanded, {
+        chain: "solana",
+        entryPoint: "activate",
+        signature,
+      });
       await this.reconcileActivation(user.pid, adapter, signature, networkFee, protocolFee, quoted.version).catch(
         (err) => this.logger.warn(`activation reconcile failed for ${signature}: ${(err as Error).message}`),
       );
@@ -597,6 +570,16 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     }
 
     return this.viewOf(user, selection);
+  }
+
+  /** H1.ii: semantic intent rejections emit intent.rejected (activation has no nonce — key omitted). */
+  private async reject(pid: string, cause: IntentRejectionCause, err: Error): Promise<never> {
+    await this.security.log(pid, RelayerH1Events.intentRejected, {
+      chain: "solana",
+      entryPoint: "activate",
+      cause,
+    });
+    throw err;
   }
 
   /** Decode a client assertion DTO into chain bytes (mirrors SponsoredWithdrawService). */  private toAssertion(dto: {
@@ -690,23 +673,26 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       relayerAbsorbed: absorbed.toString(),
       formulaDiverged,
     });
-    await this.security.log(pid, RelayerEvents.pnl, {
-      signature,
-      entryPoint: "activate",
+    await this.security.log(pid, RelayerH1Events.pnl, {
       chain: BROADCAST_CHAIN_SOLANA,
+      entryPoint: "activate",
+      signature,
       absorbed: absorbed.toString(),
+      attested: networkFee.toString(),
+      actual: actual?.toString() ?? "unknown",
     });
     await this.breaker.recordAbsorbed(pid, BROADCAST_CHAIN_SOLANA, absorbed).catch((err) =>
       this.logger.warn(`breaker record failed: ${(err as Error).message}`),
     );
     if (formulaDiverged) {
-      await this.security.log(pid, RelayerEvents.formulaMismatch, {
-        signature,
-        entryPoint: "activate",
+      await this.security.log(pid, RelayerH1Events.formulaMismatch, {
         chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "activate",
+        signature,
         attested: networkFee.toString(),
         actual: actual?.toString() ?? "unknown",
         expected: expectedProtocol.toString(),
+        absorbed: absorbed.toString(),
       });
       this.logger.error(
         `activation formula anomaly: ${signature} protocol=${protocolFee} expected=${expectedProtocol}`,
