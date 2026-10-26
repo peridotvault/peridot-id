@@ -1,0 +1,22 @@
+[package]
+name = "peridot-stellar-account"
+version = "0.1.0"
+description = "PeridotID Stellar Phase-1 P1 smart account (testnet-only, ANT-711). OZ stellar-accounts 0.8.0 multisig + Peridot DOMAIN_V2 intent helpers. Not audited, never mainnet."
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.75"
+
+[lib]
+crate-type = ["cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = "=28.0.0"
+stellar-accounts = "=0.8.0"
+stellar-contract-utils = "=0.8.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "=28.0.0", features = ["testutils"] }
+
+[profile.release]
+overflow-checks = true
