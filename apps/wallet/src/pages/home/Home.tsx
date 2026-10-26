@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Authority, Identity, Profile } from "@peridotvault/pid-types";
+import type { ApiError, Authority, Identity, Profile, ChainAccount } from "@peridotvault/pid-types";
 import type { NftItem, TokenBalance, TokenInfo } from "@peridotvault/pid-solana";
 import type { ActivationView, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { ScrollArea } from "../../shared/components/ui/ScrollArea";
 import { Pressable } from "../../shared/components/ui/Pressable";
 import { BottomSheet } from "../../shared/components/ui/BottomSheet";
 import { UIButton } from "../../shared/components/ui/UIButton";
-import { ArrowDownLeft, ArrowUpRight, Banknote, Coins } from "../../shared/components/icons";
+import { ArrowDownLeft, ArrowUpRight, Banknote, Coins, LayoutGrid } from "../../shared/components/icons";
 import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
 import { SectionTitle } from "../../shared/components/ui/SectionTitle";
+import { useSelectedChains } from "../../shared/hooks/useSelectedChains";
 import {
   formatTotalParts,
   getCurrency,
@@ -19,6 +20,12 @@ import {
 } from "../../shared/data/currency";
 import { cachedRead, clearApiCache } from "../../shared/data/apiCache";
 import { endNetworkTransition, subscribeNetworkMode } from "../../shared/data/networkMode";
+import {
+  filterChainAccountsForSelection,
+  getSelection,
+  isSolanaSelected,
+  subscribeSelectedChains,
+} from "../../shared/data/selectedChains";
 import { buildCoins } from "../../feat/chain/utils/coins";
 import { FiatSection } from "../../feat/fiat/components/FiatSection";
 import { AssetSection } from "../../feat/chain/components/AssetSection";
@@ -31,6 +38,7 @@ interface HomeProps {
   goTransfer: () => void;
   goRupiah: () => void;
   goPasskeys: () => void;
+  goSettings: () => void;
 }
 
 export function Home({
@@ -41,9 +49,13 @@ export function Home({
   goTransfer,
   goRupiah,
   goPasskeys,
+  goSettings,
 }: HomeProps) {
   const { peridot } = usePeridot();
   const d = useHomeData(peridot);
+  // ANT-625 FR2: read-only selection chip (no toggle on Home — Settings is
+  // the single place). Links to the Chains group in Settings.
+  const sel = useSelectedChains();
   const [choice, setChoice] = useState(false);
   const coins = buildCoins(d.solLamports, d.tokens);
   const totalValue = calcTotal({
@@ -56,6 +68,12 @@ export function Home({
 
   return (
     <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
+      <Pressable onPress={goSettings} accessibilityRole="link" accessibilityLabel={`Chains: ${sel.label}. Change in Settings.`}>
+        <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-2 self-start border border-border bg-surface px-2.5 py-1.5">
+          <LayoutGrid size={14} className="text-muted-foreground" />
+          <span className="font-sans text-xs font-medium text-muted-foreground">{sel.label}</span>
+        </div>
+      </Pressable>
       <TotalBalanceSection
         currency={d.currency}
         totalValue={totalValue}
@@ -94,7 +112,24 @@ export function Home({
         </Pressable>
       )}
 
-      <AssetSection tab={d.assetTab} onTabChange={d.setAssetTab} coins={coins} nfts={d.nfts} busy={d.busy} />
+      {/* ANT-625 FR6: the selection has no smart-account row — defined empty
+          state, never an infinite spinner (load() always settles; the
+          signing-block failsafe in the store is the ceiling, not the path). */}
+      {d.emptySelection && !d.busy ? (
+        <div className="flex flex-col gap-2 border border-border bg-surface p-3.5">
+          <span className="font-sans text-sm font-semibold text-foreground">No {sel.label} account yet</span>
+          <span className="font-sans text-sm leading-5 text-muted-foreground">
+            This selection has no smart-account row — receive address below to fund it.
+          </span>
+          <Pressable onPress={goReceive} accessibilityLabel="Show receive addresses">
+            <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-1 border border-foreground px-2.5 py-1.5">
+              <span className="font-sans text-sm font-medium text-foreground">Show receive addresses</span>
+            </div>
+          </Pressable>
+        </div>
+      ) : (
+        <AssetSection tab={d.assetTab} onTabChange={d.setAssetTab} coins={coins} nfts={d.nfts} busy={d.busy} />
+      )}
     </ScrollArea>
   );
 }
@@ -127,13 +162,22 @@ function useHomeData(peridot: PeridotClient) {
   const [error, setError] = useState<string | null>(null);
   const [currency, setCurrency] = useState<Currency>(getCurrency);
   const [rates, setRates] = useState<Rates | null>(null);
+  // ANT-625 FR6: custom selection with no smart-account row in the selected
+  // set — the screen renders the defined empty state instead of asset lists.
+  const [emptySelection, setEmptySelection] = useState(false);
 
   const load = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setEmptySelection(false);
     setCurrency(getCurrency());
     // Non-fatal: without prices the card degrades to fiat + native amounts.
     getRates().then(setRates).catch(() => setRates(null));
+    // ANT-625 FR3/FR4: read the selection synchronously before the first
+    // fetch; Solana reads run only when Solana is selected (strict — no
+    // unselected request fires, mode:all stays byte-identical to today).
+    const sel = getSelection();
+    const solanaOn = isSolanaSelected(sel);
     try {
       let acc = await cachedRead("wallet.me", { ttlMs: 10_000, tier: "session" }, () => peridot.wallet.me());
       if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
@@ -141,18 +185,34 @@ function useHomeData(peridot: PeridotClient) {
         const detail = Array.isArray(acc.message) ? acc.message.join(" ") : acc.message;
         throw new Error(`Failed to create account (${acc.statusCode}${detail ? `: ${detail}` : ""})`);
       }
+      const selectedRows = filterChainAccountsForSelection(acc as ChainAccount[], sel);
+      setEmptySelection(
+        sel.mode === "custom" && !selectedRows.some((c) => c.accountType === "smart_account"),
+      );
 
       // Independent reads, one round trip instead of seven serial awaits.
+      // Solana reads run only when Solana is selected (strict); the
+      // explicitly-typed fallbacks keep the allSettled tuple inference
+      // intact when the RPC is skipped.
+      const balanceP: Promise<number> = solanaOn
+        ? cachedRead("wallet.balance", { ttlMs: 10_000 }, () => peridot.wallet.getBalance())
+        : Promise.resolve(0);
+      const tokensP: Promise<unknown> = solanaOn
+        ? cachedRead("wallet.tokens", { ttlMs: 10_000 }, () =>
+            peridot.wallet.tokensEnriched().catch(() => peridot.wallet.tokens()),
+          )
+        : Promise.resolve([]);
+      const activationP: Promise<unknown> = solanaOn
+        ? cachedRead("wallet.activation", { ttlMs: 60_000, tier: "session" }, () => peridot.wallet.activation())
+        : Promise.resolve(null);
       const [p, me, lamports, tok, fiat, creds, act] = await Promise.allSettled([
         cachedRead("profile.me", { ttlMs: 60_000, tier: "session" }, () => peridot.profile.me()),
         cachedRead("identity.me", { ttlMs: 60_000, tier: "session" }, () => peridot.identity.me()),
-        cachedRead("wallet.balance", { ttlMs: 10_000 }, () => peridot.wallet.getBalance()),
-        cachedRead("wallet.tokens", { ttlMs: 10_000 }, () =>
-          peridot.wallet.tokensEnriched().catch(() => peridot.wallet.tokens()),
-        ),
+        balanceP,
+        tokensP,
         cachedRead("fiat.balance", { ttlMs: 10_000 }, () => peridot.fiat.balance()),
         cachedRead("passkey.list", { ttlMs: 60_000, tier: "session" }, () => peridot.passkey.list()),
-        cachedRead("wallet.activation", { ttlMs: 60_000, tier: "session" }, () => peridot.wallet.activation()),
+        activationP,
       ]);
 
       if (p.status === "fulfilled" && !("statusCode" in p.value)) setProfile(p.value as Profile);
@@ -184,7 +244,15 @@ function useHomeData(peridot: PeridotClient) {
       }
 
       setPasskeys(creds.status === "fulfilled" && Array.isArray(creds.value) ? (creds.value as Authority[]) : []);
-      if (act.status === "fulfilled" && !("statusCode" in act.value)) setActivation(act.value as ActivationView);
+      // Strict: with Solana unselected the activation view is cleared, never
+      // fetched (assertChainEcho paths in withdraw/execute/activate keep
+      // working untouched — the echo still asserts on 2xx when Solana runs).
+      if (!solanaOn) {
+        setActivation(null);
+      } else if (act.status === "fulfilled") {
+        const v = act.value as ActivationView | ApiError | null;
+        if (v && typeof v === "object" && !("statusCode" in v)) setActivation(v);
+      }
       // Lazy: NTFs come from the Items tab, so don't spend a request here.
       setNfts([]);
       setNftsLoaded(false);
@@ -200,8 +268,14 @@ function useHomeData(peridot: PeridotClient) {
   }, [load]);
 
   // NTFs are fetched the first time the Items tab is opened (30s memo).
+  // Strict: skipped entirely while Solana is unselected.
   useEffect(() => {
     if (assetTab !== "items" || nftsLoaded) return;
+    if (!isSolanaSelected(getSelection())) {
+      setNfts([]);
+      setNftsLoaded(true);
+      return;
+    }
     let alive = true;
     cachedRead("wallet.nfts", { ttlMs: 60_000, tier: "session" }, () => peridot.wallet.nfts())
       .then((n) => {
@@ -220,9 +294,17 @@ function useHomeData(peridot: PeridotClient) {
 
   // Re-fetch balances/assets on network switch, then release the signing
   // block. Idempotent — a no-op when no switch is in flight. Cached reads are
-  // selection-scoped server-side, so drop them first.
+  // selection-scoped server-side, so drop them first. A selection switch
+  // does the same via the selection store (strict client filtering).
   useEffect(() => {
     return subscribeNetworkMode(() => {
+      clearApiCache();
+      load().then(endNetworkTransition, endNetworkTransition);
+    });
+  }, [load]);
+
+  useEffect(() => {
+    return subscribeSelectedChains(() => {
       clearApiCache();
       load().then(endNetworkTransition, endNetworkTransition);
     });
@@ -245,6 +327,7 @@ function useHomeData(peridot: PeridotClient) {
     currency,
     rates,
     load,
+    emptySelection,
     activated: st === "active",
   };
 }

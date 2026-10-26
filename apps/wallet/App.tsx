@@ -316,6 +316,7 @@ export default function App() {
                   goTransfer={() => push("fiat-transfer")}
                   goRupiah={() => push("fiat-account")}
                   goPasskeys={openPasskey}
+                  goSettings={() => push("settings")}
                 />
               )}
               {screen === "activity" && (
