@@ -325,7 +325,7 @@ export class SponsoredWithdrawService {
     const networkFee = await this.networkFeeLamports(adapter);
     const version = this.policyVersion();
     const chainTime = await adapter.chainTime();
-    const solChain = await this.chains.solanaChain().catch(() => undefined);
+    const solChain = await this.chains.solanaChain(selection).catch(() => undefined);
     return {
       ...this.quoteEnvelope(networkFee, version, chainTime, this.treasury().toBase58()),
       ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
@@ -802,7 +802,7 @@ export class SponsoredWithdrawService {
     const networkFee = await adapter.estimateExecuteFee(decoded.target, decoded.metas, decoded.data.length);
     const version = this.policyVersion();
     const chainTime = await adapter.chainTime();
-    const solChain = await this.chains.solanaChain().catch(() => undefined);
+    const solChain = await this.chains.solanaChain(selection).catch(() => undefined);
     return {
       ...this.quoteEnvelope(networkFee, version, chainTime, this.treasury().toBase58()),
       ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),

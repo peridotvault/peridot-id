@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { SponsoredWithdrawService } from "./sponsored-withdraw.service";
+import { SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE } from "../common/chains";
 import { mockSecurity, mockIdempotency, mockBreaker, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
 
 
@@ -485,6 +486,39 @@ describe("SponsoredWithdrawService", () => {
     chains.solanaChain.mockResolvedValue({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
     const q = await service.quote(IDENTITY_ID);
     expect(q.chain).toEqual({ namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" });
+  });
+
+  it("quote echoes the selected Solana chain when a selection is passed (ANT-626)", async () => {
+    const { service } = setup();
+    const chains = (service as unknown as { chains: { solanaChain: jest.Mock } }).chains;
+    chains.solanaChain.mockImplementation(async (selection?: string) => ({
+      namespace: "solana",
+      reference: selection === "testnet" ? SOLANA_TESTNET_REFERENCE : SOLANA_DEVNET_REFERENCE,
+    }));
+    const q = await service.quote(IDENTITY_ID, "testnet");
+    expect(chains.solanaChain).toHaveBeenCalledWith("testnet");
+    expect(q.chain).toEqual({ namespace: "solana", reference: SOLANA_TESTNET_REFERENCE });
+  });
+
+  it("quoteExecute echoes the selected Solana chain when a selection is passed (ANT-626)", async () => {
+    const { service } = setup();
+    const chains = (service as unknown as { chains: { solanaChain: jest.Mock } }).chains;
+    chains.solanaChain.mockImplementation(async (selection?: string) => ({
+      namespace: "solana",
+      reference: selection === "testnet" ? SOLANA_TESTNET_REFERENCE : SOLANA_DEVNET_REFERENCE,
+    }));
+    adapterMock.estimateExecuteFee.mockResolvedValue(10000n);
+    const q = await service.quoteExecute(
+      IDENTITY_ID,
+      {
+        target: executeBase.target,
+        metas: executeBase.metas,
+        data: executeBase.data,
+      },
+      "testnet",
+    );
+    expect(chains.solanaChain).toHaveBeenCalledWith("testnet");
+    expect(q.chain).toEqual({ namespace: "solana", reference: SOLANA_TESTNET_REFERENCE });
   });
 
   it("quoteExecute echoes the active Solana chain when the registry has one", async () => {
