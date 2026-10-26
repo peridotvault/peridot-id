@@ -24,9 +24,16 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EVM_ROOT = join(HERE, "..");
 const ANVIL = "http://127.0.0.1:8545";
+// Admin of the fresh factory (holds no creation privilege — creation is
+// permissionless since ANT-610; admin only drains revenue via withdrawRevenue).
 const RELAYER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+// Independent submitter (anvil account #1): proves AC-E1 — anyone with a valid
+// user authorization can deploy, not just the factory admin.
+const SUBMITTER = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const GAS_PRICE = 10_000_000_000n; // 10 gwei — explicit price for the sanity bound
 const GAS_PRICE_HEX = "0x" + GAS_PRICE.toString(16);
+// Even-length hex: anvil rejects odd-length `value` quantities.
+const weiHex = (v) => { const h = v.toString(16); return "0x" + (h.length % 2 ? "0" + h : h); };
 const PROTOCOL_FEE_OF = (net) => net / 2n; // policy v1 = 5000 bps
 const CHAINID = 31337;
 
@@ -42,15 +49,19 @@ const implDeploy = await rpc("eth_sendTransaction", [{ from: RELAYER, data: depl
 const impl = (await receiptOf(implDeploy)).contractAddress;
 const factoryDeploy = await rpc("eth_sendTransaction", [{
   from: RELAYER,
-  // constructor(implementation, relayer, admins[]) — single admin = relayer; dynamic array encoding
+  // constructor(implementation, admins[]) — single admin = RELAYER; dynamic array encoding.
+  // No relayer allowlist since ANT-610: creation is permissionless.
   data: deployBytecode("PeridotFactory.sol/PeridotFactory",
-    padAddr(impl) + padAddr(RELAYER) +
-    "0000000000000000000000000000000000000000000000000000000000000060" + // admins offset
+    padAddr(impl) +
+    "0000000000000000000000000000000000000000000000000000000000000040" + // admins offset
     "0000000000000000000000000000000000000000000000000000000000000001" + // length 1
     padAddr(RELAYER)),
 }]);
 const factory = (await receiptOf(factoryDeploy)).contractAddress;
 console.log("impl", impl, "factory", factory);
+
+// Fund the independent submitter (gas money only — the fee split pays it back).
+await rpc("eth_sendTransaction", [{ from: RELAYER, to: SUBMITTER, value: weiHex(10n ** 18n) }]);
 
 // --- P-256 keypair (node:crypto cannot sign prehashed digests; python ecdsa can) ---
 const keyJson = genKey();
@@ -77,18 +88,25 @@ const draftData = deployAndInitData({
   salt, x, y, feePolicyVersion: 1, deadline, networkFee: 0n,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
-const estGas = BigInt(await rpc("eth_estimateGas", [{ from: RELAYER, to: factory, data: draftData }]));
+const estGas = BigInt(await rpc("eth_estimateGas", [{ from: SUBMITTER, to: factory, data: draftData }]));
 const NETWORK_FEE = estGas * GAS_PRICE; // backend-style attestation: estimate × price
 const PROTOCOL_FEE = PROTOCOL_FEE_OF(NETWORK_FEE);
-await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: "0x" + (NETWORK_FEE + PROTOCOL_FEE).toString(16) }]);
+await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: weiHex(NETWORK_FEE + PROTOCOL_FEE) }]);
+// AC-E1: the deploy is submitted by the independent SUBMITTER, not the admin.
 const data = deployAndInitData({
   salt, x, y, feePolicyVersion: 1, deadline, networkFee: NETWORK_FEE,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
-const relayerBefore = BigInt(await rpc("eth_getBalance", [RELAYER, "latest"]));
-const hash = await rpc("eth_sendTransaction", [{ from: RELAYER, to: factory, data, gasPrice: GAS_PRICE_HEX }]);
+const submitterBefore = BigInt(await rpc("eth_getBalance", [SUBMITTER, "latest"]));
+const hash = await rpc("eth_sendTransaction", [{ from: SUBMITTER, to: factory, data, gasPrice: GAS_PRICE_HEX }]);
 const receipt = await receiptOf(hash);
 assert.equal(receipt.status, "0x1", "deployAndInit succeeded: " + JSON.stringify(receipt).slice(0, 200));
+// Fee split follows the submitter: networkFee → SUBMITTER minus its own gas,
+// protocolFee → factory vault.
+const submitterAfter = BigInt(await rpc("eth_getBalance", [SUBMITTER, "latest"]));
+const gasCost = BigInt(receipt.gasUsed) * GAS_PRICE;
+assert.equal(submitterAfter - submitterBefore, NETWORK_FEE - gasCost, "networkFee reimbursed to the actual submitter");
+assert.equal(BigInt(await rpc("eth_getBalance", [factory, "latest"])), PROTOCOL_FEE, "protocolFee landed in the factory vault");
 const get = async (s) => rpc("eth_call", [{ to: account, data: viewSel(s) }, "latest"]);
 assert.equal(BigInt(await get("initialized()")), 1n, "initialized");
 assert.equal((await get("authorityX()")).toLowerCase(), "0x" + keyJson.x, "authorityX stored");
@@ -100,7 +118,7 @@ console.log("activate OK", hash);
 // --- execute 0.5 ETH via self-contained payload + revenue assertions ---
 const dest = "0x0000000000000000000000000000000000001234";
 const value = 500_000_000_000_000_000n;
-await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: "0x" + (value + 50_000_000_000_000_000n).toString(16) }]);
+await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: weiHex(value + 50_000_000_000_000_000n) }]);
 const nonce = 0;
 const exePayload = exePayloadV3({
   chainId: CHAINID, account, nonce, to: dest, value,

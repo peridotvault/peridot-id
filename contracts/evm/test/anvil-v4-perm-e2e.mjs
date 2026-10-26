@@ -24,9 +24,14 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EVM_ROOT = join(HERE, "..");
 const ANVIL = "http://127.0.0.1:8545";
+// Factory admin (revenue drain only — no creation privilege since ANT-610).
 const RELAYER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+// Independent submitter (anvil account #1): proves AC-E1 for the V4 path.
+const SUBMITTER = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const GAS_PRICE = 10_000_000_000n;
 const GAS_PRICE_HEX = "0x" + GAS_PRICE.toString(16);
+// Even-length hex: anvil rejects odd-length `value` quantities.
+const weiHex = (v) => { const h = v.toString(16); return "0x" + (h.length % 2 ? "0" + h : h); };
 const CHAINID = 31337;
 
 const { rpc, receiptOf } = await makeRpc(ANVIL);
@@ -45,14 +50,18 @@ const implDeploy = await rpc("eth_sendTransaction", [{ from: RELAYER, data: depl
 const impl = (await receiptOf(implDeploy)).contractAddress;
 const factoryDeploy = await rpc("eth_sendTransaction", [{
   from: RELAYER,
+  // constructor(implementation, admins[]) — no relayer allowlist since ANT-610.
   data: deployBytecode("PeridotFactory.sol/PeridotFactory",
-    padAddr(impl) + padAddr(RELAYER) +
-    "0000000000000000000000000000000000000000000000000000000000000060" +
+    padAddr(impl) +
+    "0000000000000000000000000000000000000000000000000000000000000040" +
     "0000000000000000000000000000000000000000000000000000000000000001" +
     padAddr(RELAYER)),
 }]);
 const factory = (await receiptOf(factoryDeploy)).contractAddress;
 console.log("impl", impl, "factory", factory);
+
+// Fund the independent submitter (gas money only).
+await rpc("eth_sendTransaction", [{ from: RELAYER, to: SUBMITTER, value: weiHex(10n ** 18n) }]);
 
 // --- two P-256 keypairs: owner (grants) + session (executions) ---
 const owner = genKey();
@@ -77,10 +86,11 @@ const draftAct = deployAndInitData({
   feePolicyVersion: 1, deadline, networkFee: 0n,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
-const actFee = BigInt(await rpc("eth_estimateGas", [{ from: RELAYER, to: factory, data: draftAct }])) * GAS_PRICE;
-await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: "0x" + ((actFee * 3n) / 2n).toString(16) }]);
+const actFee = BigInt(await rpc("eth_estimateGas", [{ from: SUBMITTER, to: factory, data: draftAct }])) * GAS_PRICE;
+await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: weiHex((actFee * 3n) / 2n) }]);
+// AC-E1: activation submitted by the independent SUBMITTER.
 const actRcpt = await sendTx({
-  from: RELAYER, to: factory,
+  from: SUBMITTER, to: factory,
   data: deployAndInitData({
     salt, x: B(owner.x), y: B(owner.y),
     feePolicyVersion: 1, deadline, networkFee: actFee,
@@ -91,7 +101,7 @@ assert.equal(actRcpt.status, "0x1", "activate");
 console.log("activate OK", account);
 
 // --- fund for ETH movement + fees ---
-await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: "0x" + (2n * 10n ** 18n).toString(16) }]);
+await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: weiHex(2n * 10n ** 18n) }]);
 
 // --- grant NONFINANCIAL (owner signs; local payload + calldata builders) ---
 // ANT-556: v2 grant carries owner-approved feeLimit; v2 exec carries the
@@ -213,7 +223,7 @@ assert.equal(tinyCapRcpt.status, "0x0", "under-cap exec reverts");
 console.log("maxTotalFee rejected OK");
 
 // --- owner revokes (nonce 1 — the reverted grant consumed nothing); session exec reverts ---
-const revokeP = revokePayload({ chainId: CHAINID, account, permissionId: pid, nonce: 2, deadline });
+const revokeP = revokePayload({ chainId: CHAINID, account, permissionId: pid, nonce: 1, deadline });
 const rv = assertion(owner, revokeP);
 const revokeRcpt = await sendTx({
   from: RELAYER, to: account,

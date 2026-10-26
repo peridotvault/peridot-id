@@ -120,7 +120,7 @@ contract PeridotPermissionTest is Test {
         address[] memory admins = new address[](1);
         admins[0] = address(this);
         // Same deploy order as the V3 suite → same factory address → VEC_ACT reusable.
-        factory = new PeridotFactory(address(new PeridotAccount()), address(this), admins);
+        factory = new PeridotFactory(address(new PeridotAccount()), admins);
         address predicted = factory.predict(SALT);
         vm.deal(predicted, 0.01 ether);
         account = PeridotAccount(
