@@ -207,10 +207,33 @@ impl<'data> RevenueConfigMut<'data> {
 
     /// Add a live admin. Fails `TooManyAdmins` at cap, `InvalidAccountData`
     /// on duplicates (fail-closed: no double slots).
+    ///
+    /// ANT-687 (Low ANT-682 dead-slot guard): the zero address (`[0u8; 32]`,
+    /// the native-loader system address) is rejected with
+    /// `InvalidAccountData` — it can never satisfy the `is_signer` gate on
+    /// the withdraw/add/remove paths, so admitting it would burn one of the
+    /// 8 fixed slots permanently (recoverable only via `RemoveAdmin` by
+    /// another admin). No new error discriminant (additivity frozen): the
+    /// duplicate path already uses `InvalidAccountData`.
+    ///
+    /// PDA prohibition (documented, not enforced on-chain): any PDA —
+    /// including the treasury/config PDAs — likewise can never pass
+    /// `is_signer` on these paths (there is no `invoke_signed` signer
+    /// escalation here), so operators MUST NOT add PDAs as admins. A full
+    /// on-chain off-curve check is deliberately omitted: `solana-address`
+    /// 2.1.0 `is_on_curve` is `unimplemented!()` on BPF, and vendoring an
+    /// ed25519 decompressor into the program would cost compute units and
+    /// audit surface disproportionate to a Low (Gas optimization, Economy
+    /// of Mechanism). Operational review of each `AddAdmin` remains
+    /// required — an on-curve key with a lost private key is equally dead
+    /// and no curve check can catch that.
     pub fn add_admin(&mut self, new_admin: [u8; 32]) -> Result<(), ProgramError> {
         let count = self.admin_count();
         if count >= MAX_ADMINS {
             return Err(PeridotError::TooManyAdmins.into());
+        }
+        if new_admin == [0u8; 32] {
+            return Err(ProgramError::InvalidAccountData);
         }
         if self.is_admin(&new_admin) {
             return Err(ProgramError::InvalidAccountData);
@@ -319,6 +342,38 @@ mod tests {
         let mut cfg = RevenueConfigMut::try_from_bytes(&mut bytes).unwrap();
         let err = cfg.add_admin(admin).unwrap_err();
         assert_eq!(err, ProgramError::InvalidAccountData);
+    }
+
+    #[test]
+    fn zero_address_add_rejected_no_slot_consumed() {
+        // ANT-687 (Low ANT-682): the zero/system address can never sign, so
+        // it must never occupy a slot. Reuses InvalidAccountData (frozen
+        // errors — no new discriminant).
+        let (mut bytes, admin) = fresh_config();
+        let mut cfg = RevenueConfigMut::try_from_bytes(&mut bytes).unwrap();
+        let err = cfg.add_admin([0u8; 32]).unwrap_err();
+        assert_eq!(err, ProgramError::InvalidAccountData);
+        assert_eq!(cfg.admin_count(), 1);
+        assert!(!cfg.is_admin(&[0u8; 32]));
+        // Valid EOA adds are unaffected by the guard.
+        cfg.add_admin([2u8; 32]).unwrap();
+        assert_eq!(cfg.admin_count(), 2);
+        assert!(cfg.is_admin(&admin));
+        assert!(cfg.is_admin(&[2u8; 32]));
+    }
+
+    #[test]
+    fn zero_address_rejected_at_cap_without_masking_cap() {
+        // Guard order: cap check wins at MAX_ADMINS (a full vault reports
+        // TooManyAdmins regardless of input); the zero rule pins below cap.
+        let (mut bytes, _) = fresh_config();
+        let mut cfg = RevenueConfigMut::try_from_bytes(&mut bytes).unwrap();
+        for i in 0..(MAX_ADMINS as u8 - 1) {
+            cfg.add_admin([i * 16 + 1; 32]).unwrap();
+        }
+        assert_eq!(cfg.admin_count(), MAX_ADMINS);
+        let err = cfg.add_admin([0u8; 32]).unwrap_err();
+        assert_eq!(err, ProgramError::from(PeridotError::TooManyAdmins));
     }
 
     #[test]

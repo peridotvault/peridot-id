@@ -1,8 +1,11 @@
 //! Add a revenue-vault admin (ANT-635 option a, ANT-638).
 //!
 //! Signer must be an existing live admin; `new_admin` must not already be
-//! listed; fails `TooManyAdmins` at 8. In-place mutation, no realloc.
-//! Admin keys sign directly (no WebAuthn, no sysvar needed).
+//! listed; fails `TooManyAdmins` at 8. The zero address is rejected
+//! (`InvalidAccountData`, ANT-687 — it could never sign, so it would burn a
+//! slot); PDAs must never be added as admins (documented prohibition, same
+//! reason — no `invoke_signed` escalation on these paths). In-place mutation,
+//! no realloc. Admin keys sign directly (no WebAuthn, no sysvar needed).
 
 use crate::{
     errors::PeridotError,
