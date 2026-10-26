@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { ActivationService } from "./activation.service";
-import { SOLANA_DEVNET_REFERENCE } from "../common/chains";
+import { SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE } from "../common/chains";
 import { mockSecurity, mockIdempotency, mockBreaker, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
 
 
@@ -356,6 +356,18 @@ describe("ActivationService", () => {
     const { service } = setup();
     const view = await service.viewOf({ pid: IDENTITY_ID });
     expect(view.chain).toBeUndefined();
+  });
+
+  it("echoes the selected Solana chain when a selection is passed (ANT-626)", async () => {
+    const { service } = setup();
+    const chains = (service as unknown as { chains: { solanaChain: jest.Mock } }).chains;
+    chains.solanaChain.mockImplementation(async (selection?: string) => ({
+      namespace: "solana",
+      reference: selection === "testnet" ? SOLANA_TESTNET_REFERENCE : SOLANA_DEVNET_REFERENCE,
+    }));
+    const view = await service.viewOf({ pid: IDENTITY_ID }, "testnet");
+    expect(chains.solanaChain).toHaveBeenCalledWith("testnet");
+    expect(view.chain).toEqual({ namespace: "solana", reference: SOLANA_TESTNET_REFERENCE });
   });
 
   it("echoes the active Solana chain when the registry has one", async () => {

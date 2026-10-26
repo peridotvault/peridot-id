@@ -36,9 +36,12 @@ frozen. Nothing in V4 ports to Solana.
   squat vector) AND canonical revenue vault (`receive()` accumulates protocol fees;
   `addAdmin` / `removeAdmin` / `withdrawRevenue`, admin-only, floor ≥1 admin, with
   events; no path touches user accounts). Salt = `bytes32(pidToSeed32(pid))`, so
-  rotation never moves the address. `deployAndInit` is relayer-submitted but
-  user-authorized (passkey binds salt, authority, rpIdHash, policy, deadline,
-  chainid, factory). Constructor: `(implementation, relayer, admins[])`.
+  rotation never moves the address. `deployAndInit` is permissionless but
+  user-authorized (ANT-610: any submitter — official relayer, volunteer, or the
+  user self-relaying — may call with a valid user authorization; passkey binds
+  salt, authority, policy, deadline, chainid, factory). No creation allowlist
+  remains: `deploysPaused` (admin-only, default off) is the narrow kill-switch
+  for creation only. Constructor: `(implementation, admins[])`.
 - `src/Base64Url.sol` — tiny base64url decoder for the challenge field.
 - `lib/openzeppelin-contracts/` — vendored sources used (MIT): `proxy/Clones.sol`
   for deterministic proxies, `utils/cryptography/P256.sol` for signature
@@ -76,17 +79,18 @@ forge test
 cd contracts/evm
 anvil &   # localhost:8545, funded default keys
 DEPLOYER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6bb9d3777c8a7f2383c692335d6779b7f1549d21b7 \
-RELAYER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
 ADMINS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
   forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
 ```
 
 First run deploys implementation + factory and prints `IMPLEMENTATION`, `FACTORY`,
-`INIT_CODE_HASH` — note them. `RELAYER` (required) is the only address allowed to
-submit `deployAndInit` — but it authorizes nothing: authority, fee policy and
-recipients are fixed by the user's signed authorization + the factory's immutables.
-Rotate the submitter on-chain via `updateRelayer`, or set to `0x0` to disable
-deploys. `ADMINS` (required, comma-separated) seeds the revenue administrators —
+`INIT_CODE_HASH` — note them. Creation is permissionless (ANT-610): any submitter
+may call `deployAndInit` with a valid user authorization — nothing about the
+submitter is authorized: authority, fee policy and recipients are fixed by the
+user's signed authorization + the factory's immutables, and the fee split pays
+`networkFee` to the actual caller. The admin-only `setDeploysPaused` is the narrow
+creation kill-switch (default off; spend + revenue paths unaffected). `ADMINS`
+(required, comma-separated) seeds the revenue administrators —
 same value on every chain; the factory itself accumulates protocol revenue
 (`withdrawRevenue`, admin-only). (Localnet deploys against anvil's own chain id;
 API wiring below is for testnet and up.) Wire the API (`apps/api/.env`):
@@ -118,7 +122,7 @@ Phase-1 chains — same flow on each, same addresses everywhere:
    all four testnets) with the same bytecode → same address.
 2. Run the factory script with that address on each chain:
     ```sh
-    IMPLEMENTATION=0x... RELAYER=0x... ADMINS=0x... DEPLOYER_PRIVATE_KEY=0x... \
+    IMPLEMENTATION=0x... ADMINS=0x... DEPLOYER_PRIVATE_KEY=0x... \
       forge script script/Deploy.s.sol --rpc-url $EVM_RPC_URL_97 --broadcast
     ```
    Deploying the factory through the same keyless deployer keeps the factory

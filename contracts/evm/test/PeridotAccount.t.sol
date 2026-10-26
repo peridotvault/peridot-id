@@ -57,7 +57,7 @@ contract PeridotAccountTest is Test {
         authPrefix = sha256("test-rp");
         address[] memory admins = new address[](1);
         admins[0] = address(this);
-        factory = new PeridotFactory(address(new PeridotAccount()), address(this), admins);
+        factory = new PeridotFactory(address(new PeridotAccount()), admins);
     }
 
     function _authData() internal view returns (bytes memory) {
@@ -285,13 +285,38 @@ contract PeridotAccountTest is Test {
         );
     }
 
+    function test_DeployAndInitPermissionlessSubmitter() public {
+        // AC-E1 (ANT-610): no relayer allowlist — ANY submitter with a valid
+        // user authorization deploys. The fee split follows the submitter:
+        // networkFee → submitter (payer), protocolFee → factory vault.
+        if (!VEC_READY) return;
+        address submitter = address(0xbEEF);
+        uint256 protocolFee = _protocolFee(NETWORK_FEE);
+        address predicted = factory.predict(SALT);
+        vm.deal(predicted, NETWORK_FEE + protocolFee);
+        vm.prank(submitter);
+        address account = factory.deployAndInit(
+            SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
+            _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
+        );
+        assertEq(account, predicted);
+        assertTrue(PeridotAccount(payable(account)).initialized());
+        assertEq(submitter.balance, NETWORK_FEE);
+        assertEq(address(factory).balance, protocolFee);
+    }
+
     function test_DeployAndInitRejectsStranger() public {
-        vm.expectRevert(PeridotFactory.Unauthorized.selector);
+        // Without a valid user signature there is no deployment — even for a
+        // random submitter. This is the EVM anti-squat proof (AC-E2): knowing
+        // the salt is not enough without the passkey.
+        address predicted = factory.predict(SALT);
+        vm.expectRevert(PeridotFactory.InitFailed.selector);
         vm.prank(address(0xdead));
         factory.deployAndInit(
             SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
             _authData(), _clientData(_actPayload()), bytes32(0), bytes32(0)
         );
+        assertEq(predicted.code.length, 0);
     }
 
     function test_InitializeRejectsDirectCall() public {
@@ -504,13 +529,68 @@ contract PeridotAccountTest is Test {
 
     // --- factory admin + revenue ---
 
-    function test_UpdateRelayer() public {
-        vm.expectRevert(PeridotFactory.Unauthorized.selector);
+    function test_NoRelayerAllowlist() public {
+        // AC-E3 (ANT-610): the old `updateRelayer` selector no longer exists —
+        // calling it reverts without touching state (no function match).
+        (bool ok, ) = address(factory).call(
+            abi.encodeWithSignature("updateRelayer(address)", address(0xCAFE))
+        );
+        assertFalse(ok);
+    }
+
+    function test_SetDeploysPaused() public {
+        // AC-E4 (ANT-610 §3.2): the admin pause is the narrow kill-switch
+        // replacing the relayer gate. Non-admins cannot toggle it.
+        if (!VEC_READY) return;
+        vm.expectRevert(PeridotFactory.NotAdmin.selector);
         vm.prank(address(0xdead));
-        factory.updateRelayer(address(0xCAFE));
-        factory.updateRelayer(address(0xCAFE));
-        assertEq(factory.relayer(), address(0xCAFE));
-        assertEq(factory.adminCount(), 1);
+        factory.setDeploysPaused(true);
+        assertFalse(factory.deploysPaused());
+
+        // Paused creation reverts with `Paused()` and writes no state.
+        factory.setDeploysPaused(true);
+        assertTrue(factory.deploysPaused());
+        address predicted = factory.predict(SALT);
+        vm.deal(predicted, NETWORK_FEE + _protocolFee(NETWORK_FEE));
+        vm.expectRevert(PeridotFactory.Paused.selector);
+        factory.deployAndInit(
+            SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
+            _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
+        );
+        assertEq(predicted.code.length, 0);
+
+        // Unpausing restores creation; the same salt activates cleanly.
+        factory.setDeploysPaused(false);
+        assertFalse(factory.deploysPaused());
+        address account = factory.deployAndInit(
+            SALT, GX, GY, POLICY, DEADLINE, NETWORK_FEE,
+            _authData(), _clientData(_actPayload()), VEC_ACT_R, VEC_ACT_S
+        );
+        assertEq(account, predicted);
+    }
+
+    function test_PauseLeavesSpendAndRevenueUntouched() public {
+        // AC-E4/NFR-5: the pause covers creation only — existing accounts keep
+        // executing and revenue keeps draining while paused.
+        if (!VEC_READY) return;
+        PeridotAccount account = _deployV3();
+        uint256 protocolFee = _protocolFee(NETWORK_FEE);
+        factory.setDeploysPaused(true);
+
+        address to = address(0x1234);
+        vm.deal(address(account), EXE_VALUE + NETWORK_FEE + protocolFee);
+        account.execute(
+            to, EXE_VALUE, "", DEADLINE, POLICY, NETWORK_FEE,
+            _authData(), _clientData(_exePayload(address(account), 0)), VEC_EXE_R, VEC_EXE_S
+        );
+        assertEq(to.balance, EXE_VALUE);
+
+        address payable dest = payable(address(0xD357));
+        uint256 vaultBal = address(factory).balance;
+        assertTrue(vaultBal > 0);
+        factory.withdrawRevenue(dest, vaultBal);
+        assertEq(dest.balance, vaultBal);
+        assertEq(address(factory).balance, 0);
     }
 
     function test_AdminAddRemove() public {

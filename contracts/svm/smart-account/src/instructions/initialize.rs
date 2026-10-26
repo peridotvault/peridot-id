@@ -1,15 +1,18 @@
-//! Initialize the smart account PDA, V3 authorization (authorized by the future
-//! passkey itself).
+//! Initialize the smart account PDA, V3 authorization (historical direct path).
 //!
-//! Creation is passkey-signed: the V3 payload binds `op-tag ‖ account_id ‖
-//! authority`, so only the owner of the new authority can claim the
-//! PDA — squatting is impossible without the victim's private key. No expiry/nonce:
-//! replaying a creation authorization only fails `AlreadyInitialized` (or recreates
-//! the same state). State is written in the domain-free 80-byte layout.
+//! PERMANENTLY DISABLED (ANT-16(e) + ANT-612, ANT-610 spec section 5.1):
+//! direct `initialize` bypasses the 50% sponsored-creation fee, so every build
+//! rejects it with `InitializeDeprecated` before any other validation.
+//! `activate`/`activate_v4` are the sole creation paths. The code below the
+//! gate is retained for shape/decoder stability only (discriminant 0 still
+//! decodes, then rejects — never shifted).
+//!
+//! Historical note: creation used to be passkey-signed with the V3 payload
+//! binding `op-tag ‖ account_id ‖ authority`, so only the owner of the new
+//! authority could claim the PDA. That property now lives in `activate`.
 
 use crate::{
     auth,
-    config::BACKEND,
     errors::PeridotError,
     state::{verify_pda, SmartAccountMut, STATE_LEN_V2},
 };
@@ -29,20 +32,20 @@ const ACCOUNT_ID_OFFSET: usize = 0;
 const AUTHORITY_OFFSET: usize = 32;
 const CLIENT_JSON_LEN_OFFSET: usize = 65;
 
-/// ANT-16(e) creation-leak fix, Option A (ANT-22 spec): direct `initialize`
-/// bypasses the 50% sponsored-creation fee that `activate` collects, so it is
-/// deprecated — `activate` is the sole production creation path.
-///
-/// Gate form (ANT-22 Q1, owner: CTO): a plain `const`, default `false`, so
-/// testnet/devnet builds keep `initialize` fully functional (plus a
-/// deprecation event for drift alerting). Production builds flip this to
-/// `true`; the check runs before any other validation so a production binary
-/// rejects every direct `initialize` uniformly. A `const` cannot be flipped
-/// at runtime by a caller — there is no new signer, money path, or trust
-/// root (see ANT-19 gate-flip analysis).
-pub const DEPRECATE_DIRECT_INITIALIZE: bool = false;
+/// ANT-16(e) creation-leak fix, Option A (ANT-22 spec), finalized by ANT-612
+/// (ANT-610 spec section 5.1): direct `initialize` bypasses the 50%
+/// sponsored-creation fee that `activate` collects, so it is permanently
+/// disabled — `activate`/`activate_v4` are the sole creation paths in every
+/// build. There is no toggle back: the const below is `true` unconditionally
+/// and the check runs before any other validation, so every build rejects
+/// direct `initialize` uniformly with `InitializeDeprecated`. The
+/// discriminator (0) is retained so old SDK decoders keep working (frozen
+/// V3 discriminant rule — index 0 decodes, then rejects; never shifted).
+/// A `const` cannot be flipped at runtime by a caller — there is no new
+/// signer, money path, or trust root (see ANT-19 gate-flip analysis).
+pub const DEPRECATE_DIRECT_INITIALIZE: bool = true;
 
-/// Reject direct creation on production-gated builds. Pure (no account
+/// Reject direct creation on all builds. Pure (no account
 /// access), so it is host-testable: the `true` arm is pinned by the
 /// `initialize_deprecated_gate_is_first` source-ordering test plus the
 /// discriminant pin in `errors.rs`.
@@ -54,7 +57,9 @@ pub fn check_initialize_allowed() -> ProgramResult {
 }
 
 /// Accounts:
-///   0. `[WRITE, SIGNER]` rent payer (funds the PDA creation)
+///   0. `[WRITE, SIGNER]` rent payer (historical; the instruction always
+///      rejects before reaching account validation — retained for
+///      decoder/shape stability only)
 ///   1. `[WRITE]` smart account PDA (must be uninitialized)
 ///   2. `[]` system program
 ///   3. `[]` instructions sysvar (for secp256r1 introspection)
@@ -67,9 +72,9 @@ pub fn process(
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
-    // ANT-16(e): production-gated builds reject direct creation outright, so
-    // the fee-free path can never mint an account where `activate` (and its
-    // 50% sponsored-creation fee) was due. Runs before any other validation.
+    // ANT-16(e) + ANT-612: the fee-free path can never mint an account where
+    // `activate` (and its 50% sponsored-creation fee) was due. Runs before any
+    // other validation; unreachable code below is retained for shape stability.
     check_initialize_allowed()?;
 
     let rent_payer = &accounts[0];
@@ -79,11 +84,9 @@ pub fn process(
     if !rent_payer.is_signer() {
         return Err(PeridotError::NotSigner.into());
     }
-    // PID-ownership proof: only the backend (which maps pids to identities) may
-    // fund creation. Without this, anyone could squat any unclaimed PDA.
-    if rent_payer.address().as_array() != &BACKEND {
-        return Err(PeridotError::Forbidden.into());
-    }
+    // ANT-612: creation is permissionless (any submitter may relay
+    // `activate`; anti-squat is the passkey signature). This instruction
+    // rejects above regardless, so no payer check remains here.
     if smart_account.data_len() != 0 {
         return Err(PeridotError::AlreadyInitialized.into());
     }
@@ -131,9 +134,8 @@ pub fn process(
     drop(data_ref);
 
     pinocchio_log::log!("PeridotEvent::AccountInitialized");
-    // ANT-16(e): testnet/devnet drift signal — production builds never reach
-    // here (gated above), so every direct `initialize` still in use is counted
-    // for SDK-migration alerting (ANT-16(c) sink; threshold owner: DevOpsEngineer).
+    // Unreachable on every build (gated above): retained so the success event
+    // shape is unchanged for indexers if the path is ever re-enabled by spec.
     pinocchio_log::log!("PeridotEvent::AccountInitializeDeprecated");
     Ok(())
 }

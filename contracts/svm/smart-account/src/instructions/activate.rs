@@ -1,11 +1,12 @@
-//! Activate a user's smart account, V3 authorization (Peridot-sponsored activation
+//! Activate a user's smart account, V3 authorization (permissionless submission
 //! with attested network reimbursement + fixed protocol percentage).
 //!
 //! The user deposits SOL directly to their deterministic (uninitialized) PDA address. When
-//! the backend detects sufficient funds it runs activation: a Peridot relayer signs the
-//! tx and an optional top-up brings the PDA to rent-exempt, then this instruction claims
-//! the account and reimburses the attested `network_fee` in full to the relayer plus
-//! `protocol_fee` (recomputed on-chain from the signed fee-policy version) to the
+//! sufficiently funded, ANY submitter (the user themselves, the official relayer,
+//! or a volunteer third party — creation is permissionless since ANT-612) may relay activation:
+//! a signer payer fronts the transaction, the pre-funded PDA covers rent plus fees, and this
+//! instruction claims the account and reimburses the attested `network_fee` in full to the
+//! submitter plus `protocol_fee` (recomputed on-chain from the signed fee-policy version) to the
 //! canonical revenue vault — all in one atomic transaction. No temporary wallet is
 //! created; the user's deposited balance stays on the one PDA address.
 //!
@@ -22,7 +23,6 @@
 
 use crate::{
     auth,
-    config::BACKEND,
     errors::PeridotError,
     fee::{policy_protocol_bps, split_attested_fee, total_fee},
     state::{verify_pda, SmartAccountMut, STATE_LEN_V2},
@@ -48,7 +48,9 @@ const NETWORK_FEE_OFFSET: usize = 75;
 const CLIENT_JSON_LEN_OFFSET: usize = 83;
 
 /// Accounts:
-///   0. `[WRITE, SIGNER]` relayer (Peridot float; pays the network fee / rent, receives the exact reimbursement)
+///   0. `[WRITE, SIGNER]` submitter (any payer: user self-relay, official
+///      relayer, or volunteer — ANT-612 permissionless; fronts tx costs and
+///      receives the exact network-fee reimbursement)
 ///   1. `[WRITE]` smart account PDA (must be uninitialized / system-owned)
 ///   2. `[WRITE]` canonical revenue vault (receives the protocol fee; must be the `[b"treasury"]` PDA vault (ANT-635))
 ///   3. `[]` system program
@@ -70,11 +72,10 @@ pub fn process(
     if !relayer.is_signer() {
         return Err(PeridotError::NotSigner.into());
     }
-    // PID-ownership proof (see initialize): only the backend may claim PDAs, so a
-    // stranger can neither squat a funded deposit nor divert it to own treasury.
-    if relayer.address().as_array() != &BACKEND {
-        return Err(PeridotError::Forbidden.into());
-    }
+    // ANT-612 (ANT-610 spec section 5): permissionless creation. Any signer may
+    // submit; anti-squat is the passkey signature below (only the new
+    // authority authorizes the claim), and every claim still pays the protocol
+    // fee to the canonical vault. No creation gate remains.
     // The PDA may not already be program-owned or initialized.
     if smart_account.data_len() != 0 || smart_account.owned_by(program_id) {
         return Err(PeridotError::AlreadyInitialized.into());
@@ -83,9 +84,9 @@ pub fn process(
         return Err(PeridotError::InvalidDestination.into());
     }
     // ANT-635 (ANT-638): the protocol fee lands in the program-bound PDA vault
-    // `[b"treasury"]` (verified against the runtime program_id), not the
-    // build-baked `config::TREASURY` const (removed). Fee math unchanged (D5).
-    // BACKEND creation gate above untouched (deny: no new gates, none removed).
+    // `[b"treasury"]` (verified against the runtime program_id), not a
+    // build-baked const. Fee math unchanged (D5). Creation stays permissionless
+    // (ANT-612): any signer may submit; no gate remains.
     verify_treasury_pda(treasury, program_id)?;
 
     let account_id = data.read_array::<32>(ACCOUNT_ID_OFFSET)?;
@@ -121,7 +122,7 @@ pub fn process(
     let signer = pinocchio::cpi::Signer::from(&seeds[..]);
 
     // Claim the account: create (if empty) or top-up→assign→allocate (if pre-funded).
-    // Payer = relayer. Rent is paid only up to the rent-exempt amount for the state.
+    // Payer = submitter (any signer). Rent is paid only up to the rent-exempt amount for the state.
     // Owner is the runtime `program_id` (ANT-211: see initialize.rs — same value,
     // no second source of truth).
     create_account_with_minimum_balance_signed(
@@ -142,7 +143,7 @@ pub fn process(
         return Err(PeridotError::InsufficientFunds.into());
     }
 
-    // Reimburse exact network cost (relayer) + protocol fee (revenue vault).
+    // Reimburse exact network cost (submitter) + protocol fee (revenue vault).
     //
     // Move lamports directly, exactly like withdraw_sol — a System `Transfer` is forbidden
     // when `from` carries data, and this PDA now holds program-owned state.

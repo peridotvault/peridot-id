@@ -88,7 +88,7 @@ impl TryFrom<u8> for Instruction {
 
 /// Fixed-layout V3 instruction payload after the discriminator byte.
 ///
-/// Layouts (all multi-byte integers little-endian; `network_fee` is the backend-
+/// Layouts (all multi-byte integers little-endian; `network_fee` is the submitter-
 /// attested realtime network cost — the program recomputes the protocol fee from
 /// the signed policy version, never trusting a caller-supplied total):
 /// - Initialize:      account_id [u8; 32] | authority [u8; 33] | len u16 | clientDataJSON

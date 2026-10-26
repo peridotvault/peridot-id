@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ScrollArea } from "../../shared/components/ui/ScrollArea";
 import { Pressable } from "../../shared/components/ui/Pressable";
-import { ChevronRight, FlaskConical, KeyRound, Monitor, Link2, Check, Banknote, TriangleAlert } from "../../shared/components/icons";
+import { ChevronRight, FlaskConical, KeyRound, Monitor, Link2, Check, Banknote, TriangleAlert, LayoutGrid } from "../../shared/components/icons";
 import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead } from "../../shared/data/apiCache";
@@ -11,6 +11,8 @@ import { UIButton } from "../../shared/components/ui/UIButton";
 import { CURRENCIES, getCurrency, setCurrency, type Currency } from "../../shared/data/currency";
 import { setNetworkMode } from "../../shared/data/networkMode";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
+import { isChainSelected } from "../../shared/data/selectedChains";
+import { useSelectedChains } from "../../shared/hooks/useSelectedChains";
 
 interface Props {
   goPasskeys: () => void;
@@ -83,6 +85,27 @@ export function Settings({ goPasskeys, goSessions, goConnected, goAppConnections
     setNetworkMode(net.mode === "testnet" ? "mainnet" : "testnet");
   }, [net.mode, net.switching]);
 
+  // ANT-625 chain selection (FR1): master All-chains row + one row per
+  // GET /v1/chains row. Toggles write the selectedChains store (same
+  // signing-block + failsafe as a network switch); data hooks reload on the
+  // subscription. pid_network_mode is untouched.
+  const sel = useSelectedChains();
+  const toggleMaster = useCallback(() => {
+    if (net.switching) return;
+    if (sel.selection.mode === "all") {
+      // Custom covering every known row: no visible change, and the user
+      // can now deselect rows one by one. Refresh first when rows are
+      // still loading so the set is built from live registry data.
+      if (sel.chains.length === 0) {
+        sel.retryChains();
+        return;
+      }
+      sel.setCustom(sel.chains.map((c) => ({ namespace: c.namespace, reference: c.reference })));
+    } else {
+      sel.setAll();
+    }
+  }, [net.switching, sel]);
+
   return (
     <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 10 }}>
       {!tabRoot && <BackButton onPress={onDone} />}
@@ -148,6 +171,108 @@ export function Settings({ goPasskeys, goSessions, goConnected, goAppConnections
           </div>
         </div>
       </Pressable>
+
+      {/* ANT-625 FR1: Chains group — master All-chains row + one row per
+          GET /v1/chains row (name + testnet badge + toggle). Toggles are
+          disabled while a network/selection switch propagates. */}
+      <span className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Chains</span>
+      <span className="font-sans text-xs text-muted-foreground">
+        {sel.selection.mode === "all"
+          ? "Showing all chains — data loads for every available chain."
+          : `Showing ${sel.label} — data loads only for selected chains.`}
+      </span>
+
+      {sel.notice && (
+        <Pressable onPress={sel.dismissNotice} accessibilityRole="button" accessibilityLabel="Dismiss chain notice">
+          <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border border-border bg-muted p-3.5">
+            <span role="status" className="flex-1 font-sans text-sm text-muted-foreground">{sel.notice}</span>
+          </div>
+        </Pressable>
+      )}
+
+      <Pressable
+        onPress={toggleMaster}
+        disabled={net.switching}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: sel.selection.mode === "all" }}
+        accessibilityLabel="All chains"
+      >
+        <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 border border-border bg-surface p-3.5">
+          <div className="flex flex-col flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
+            <LayoutGrid size={18} className="text-foreground" />
+          </div>
+          <div className="flex flex-col flex-1 gap-0.5">
+            <span className="font-sans text-base font-medium text-foreground">All chains</span>
+            <span className="font-sans text-xs text-muted-foreground">
+              {net.switching ? "Switching…" : sel.selection.mode === "all" ? "On — using every chain" : "Off — custom selection below"}
+            </span>
+          </div>
+          <div
+            style={{ flexDirection: "row" }}
+            className={`flex flex-col items-center gap-1 border px-2.5 py-1.5 ${sel.selection.mode === "all" ? "border-foreground" : "border-border"}`}
+          >
+            {sel.selection.mode === "all" && <Check size={14} className="text-foreground" />}
+            <span className={`font-sans text-sm font-medium ${sel.selection.mode === "all" ? "text-foreground" : "text-muted-foreground"}`}>
+              {net.switching ? "…" : sel.selection.mode === "all" ? "ON" : "OFF"}
+            </span>
+          </div>
+        </div>
+      </Pressable>
+
+      {sel.chainsError && (
+        <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border border-danger bg-surface p-3.5">
+          <span role="alert" className="flex-1 font-sans text-sm text-muted-foreground">
+            Couldn&apos;t load the chain list ({sel.chainsError}) — showing your saved selection. Retry to refresh.
+          </span>
+          <Pressable onPress={sel.retryChains} accessibilityRole="button" accessibilityLabel="Retry loading chains">
+            <div className="flex flex-col border border-border px-2.5 py-1.5">
+              <span className="font-sans text-sm font-medium text-foreground">Retry</span>
+            </div>
+          </Pressable>
+        </div>
+      )}
+
+      {sel.chains.length === 0 && !sel.chainsError && (
+        <span role="status" className="font-sans text-sm text-muted-foreground">Loading chains…</span>
+      )}
+
+      {sel.chains.map((c) => {
+        const on = isChainSelected(sel.selection, c.namespace, c.reference);
+        return (
+          <Pressable
+            key={`${c.namespace}:${c.reference}`}
+            onPress={() => sel.toggle(c.namespace, c.reference)}
+            disabled={net.switching}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: on }}
+            accessibilityLabel={`${c.name}${c.isTestnet ? " (testnet)" : ""}`}
+          >
+            <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 border border-border bg-surface p-3.5">
+              <div className="flex flex-col flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
+                <LayoutGrid size={18} className="text-foreground" />
+              </div>
+              <div className="flex flex-col flex-1 gap-0.5">
+                <span className="font-sans text-base font-medium text-foreground">{c.name}</span>
+                <span className="font-sans text-xs text-muted-foreground">
+                  {c.namespace}:{c.reference.slice(0, 8)}{c.reference.length > 8 ? "…" : ""}
+                </span>
+              </div>
+              {c.isTestnet && (
+                <span className="font-sans text-xs font-bold tracking-[1px] text-muted-foreground">TESTNET</span>
+              )}
+              <div
+                style={{ flexDirection: "row" }}
+                className={`flex flex-col items-center gap-1 border px-2.5 py-1.5 ${on ? "border-foreground" : "border-border"}`}
+              >
+                {on && <Check size={14} className="text-foreground" />}
+                <span className={`font-sans text-sm font-medium ${on ? "text-foreground" : "text-muted-foreground"}`}>
+                  {net.switching ? "…" : on ? "ON" : "OFF"}
+                </span>
+              </div>
+            </div>
+          </Pressable>
+        );
+      })}
 
       <span className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Preferences</span>
       {/* flexWrap: at 320px the two currency pills drop below the label instead of squeezing. */}

@@ -5,6 +5,8 @@
 // boundary: the vault PDA never enters game CPIs; the session PDA (rent-only)
 // is the sole lent signer; protected accounts are hash-pinned pre/post CPI.
 //
+// 27 result lines (23 expect-calls + 4 state/layout assertions).
+//
 // Two runtime facts this suite pins (verified against chain truth, not assumed):
 // - System transfers debit only data-less accounts ("from must not carry
 //   data"), so session SOL is structurally immobile — even forwarded.
@@ -14,7 +16,7 @@
 // Usage:
 //   export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
 //   cd contracts/svm/smart-account
-//   PID_BACKEND=<key> cargo build-sbf   # no PID_TREASURY since ANT-635 (vault is the ["treasury"] PDA)
+//   cargo build-sbf   # no PID_BACKEND / PID_TREASURY (ANT-661: PDA vault)
 //   solana-test-validator --reset > /tmp/validator.log 2>&1 &
 //   solana program deploy target/deploy/peridot_smart_account.so \
 //     --program-id target/deploy/peridot_smart_account-keypair.json
@@ -37,6 +39,9 @@ const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 const INSTRUCTIONS = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 const LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const DOMAIN_SESSION = Buffer.from("PID|SOLANA|SESSION|v1");
+const DOMAIN_V3 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3");
+const POLICY_V1 = 1;
+const ACTIVATE_NETWORK_FEE = 100_000;
 // Authenticator-data prefix for fixtures. The program never compares these
 // bytes (ANT-197 domain-free); any 32-byte prefix verifies if key/message/
 // challenge/UV pass. Neutral value — never a real RP hash.
@@ -54,8 +59,12 @@ const i64 = (v) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); re
 const u16 = (v) => { const b = Buffer.alloc(2); b.writeUInt16LE(v); return b; };
 const u32 = (v) => { const b = Buffer.alloc(4); b.writeUInt32LE(v); return b; };
 
-const BACKEND_SECRET = [2,165,58,5,85,113,187,187,189,165,0,247,194,28,78,38,100,30,150,157,210,65,241,136,120,108,19,175,51,247,44,88,68,27,157,74,181,156,0,3,4,104,44,101,23,145,208,210,131,227,116,208,145,70,66,152,114,42,243,151,173,78,79,158];
-const backend = Keypair.fromSecretKey(Buffer.from(BACKEND_SECRET));
+// Program-bound revenue vault PDAs (ANT-635): no treasury keypair exists.
+// The vault-setup activate below credits the `[b"treasury"]` PDA (created
+// once via InitTreasury just below), exactly like production claims do —
+// permissionless, no allowlist involved.
+const [TREASURY_PDA] = PublicKey.findProgramAddressSync([Buffer.from("treasury")], PROGRAM);
+const [CONFIG_PDA] = PublicKey.findProgramAddressSync([Buffer.from("config")], PROGRAM);
 
 function lowS(sig) {
   const r = BigInt("0x" + sig.subarray(0, 32).toString("hex"));
@@ -201,7 +210,6 @@ async function main() {
   const userWallet = Keypair.generate();
   const attackerWallet = Keypair.generate();
   await conn.confirmTransaction(await conn.requestAirdrop(payer.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
-  await conn.confirmTransaction(await conn.requestAirdrop(backend.publicKey, 5 * LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(sessionKp.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(session3.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
 
@@ -214,24 +222,48 @@ async function main() {
   const sessionPda3 = sessionPdaOf(accountId32, session3.publicKey);
   console.log(`program ${PROGRAM.toBase58()} vault ${pda.toBase58()}`);
 
-  // ---- vault setup (initialize + fund + SPL position) ----
+  // ---- revenue vault init (ANT-635, disc 15, first-writer-wins) ----
+  // The PDA vault must exist and be program-owned before `activate` can
+  // credit it (`verify_treasury_pda` checks derivation + owner). `payer`
+  // is just a funded signer here; production uses the deployer key.
+  await expectOk(
+    new Transaction().add(new TransactionInstruction({
+      keys: [
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: CONFIG_PDA, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      programId: PROGRAM,
+      data: Buffer.concat([Buffer.from([15]), payer.publicKey.toBuffer()]),
+    })),
+    [payer],
+    "vault init treasury (program-bound PDA)",
+  );
+  // ---- vault setup (fund + permissionless activate + SPL position) ----
+  // ANT-612: direct initialize is dead, so the vault is claimed through the
+  // fee-bearing activate path with `payer` (a random keypair) as submitter —
+  // the same permissionless flow any user or volunteer relayer uses.
+  await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+    SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: pda, lamports: 2 * LAMPORTS_PER_SOL })
+  ), [payer], { commitment: "confirmed" }), "confirmed");
   {
-    const s = signPayload(owner, sha256(Buffer.concat([Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3"), Buffer.from([0]), accountId32, authorityComp])));
+    const actExpiry = exp();
+    const payload = sha256(Buffer.concat([DOMAIN_V3, Buffer.from([5]), accountId32, authorityComp, u16(POLICY_V1), i64(actExpiry)]));
+    const s = signPayload(owner, payload);
     const tx = new Transaction().add(new TransactionInstruction({
       keys: [
-        { pubkey: backend.publicKey, isSigner: true, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
         { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
-      data: Buffer.concat([Buffer.from([0]), accountId32, authorityComp, u16(s.clientDataJSON.length), s.clientDataJSON]),
+      data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, u16(POLICY_V1), i64(actExpiry), u64(ACTIVATE_NETWORK_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
     }), buildSecpIx(s.comp, s.sig, s.messageData));
-    await expectOk(tx, [backend], "vault initialize");
+    await expectOk(tx, [payer], "vault activate (permissionless submitter)");
   }
-  await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
-    SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: pda, lamports: 2 * LAMPORTS_PER_SOL })
-  ), [payer], { commitment: "confirmed" }), "confirmed");
 
   // SPL positions: vault-owned (defense target) + session-owned (working capital).
   const mintAuthority = Keypair.generate();
@@ -319,7 +351,7 @@ async function main() {
     assert.ok(Buffer.from(d.subarray(90, 122)).equals(FORWARDER.toBuffer()), "allowed program stored");
     assert.equal(d.readBigUInt64LE(155), fwdRec.slot, "recorded slot matches chain");
     assert.equal(await vaultNonce(), 2n, "owner nonce consumed twice");
-    results.push("PASS session record layout");
+    results.push("PASS session record layout"); passed++;
   }
 
   // ---- register with a lied upgrade snapshot → rejected (0x15) ----
@@ -358,7 +390,7 @@ async function main() {
     assert.equal(d.readBigUInt64LE(82), 1n, "seq advanced");
     assert.equal(d.readBigUInt64LE(196), tokRec.slot, "last_seen slot refreshed");
     assert.equal((await conn.getAccountInfo(pda)).lamports, vaultBefore, "vault untouched by gameplay");
-    results.push("PASS gameplay effects + upgrade-visibility snapshot");
+    results.push("PASS gameplay effects + upgrade-visibility snapshot"); passed++;
   }
 
   // ---- ADV: vault named in a game CPI → rejected (0x15), vault untouched ----
@@ -409,7 +441,7 @@ async function main() {
     assert.equal(gained, 50_000n, "attacker got exactly the session's 50k");
     assert.equal((await conn.getAccountInfo(pda)).lamports, vaultBefore, "vault immune to forwarding");
     assert.equal((await conn.getTokenAccountBalance(vaultAta.address)).value.amount, vaultAtaStart, "vault tokens immune");
-    results.push("PASS forwarding blast radius = session-owned tokens only");
+    results.push("PASS forwarding blast radius = session-owned tokens only"); passed++;
   }
 
   // ---- ADV: same forwarded drain with the ATA protected → 0x15, nothing moves ----
@@ -586,7 +618,7 @@ async function main() {
     assert.equal(gained, 7n, "gameplay moved exactly 7");
     const d = (await conn.getAccountInfo(sessionPda)).data;
     assert.equal(d.readBigUInt64LE(82), 3n, "seq advanced to 3");
-    results.push("PASS rent-pinned session PDA in protected set");
+    results.push("PASS rent-pinned session PDA in protected set"); passed++;
   }
 
   // ---- revoke → exec dies (0x12); close reclaims rent ----
@@ -602,7 +634,7 @@ async function main() {
       ],
       programId: PROGRAM,
       data: wdData(SESSION_DISC.revoke, [u64(nonce), sessionKp.publicKey.toBuffer(), i64(exp())], s.clientDataJSON),
-    }), buildSecpIx(s.comp, s.sig, s.messageData)), [backend], "revoke session");
+    }), buildSecpIx(s.comp, s.sig, s.messageData)), [payer], "revoke session");
     const transferData = Buffer.concat([Buffer.from([3]), u64(5)]);
     const gameData = forwarderCall(TOKEN_PROGRAM_ID, transferData, [
       [sessionAta.address, false, true], [attackerAta.address, false, true], [sessionPda, true, false],
@@ -637,7 +669,7 @@ async function main() {
     const cp = closePayload(accountId32, sessionKp.publicKey.toBuffer(), payer.publicKey.toBuffer(), nonce2, exp());
     const cs = signPayload(owner, cp);
     const destBalBefore = (await conn.getAccountInfo(payer.publicKey)).lamports;
-    await expectOk(closeTx(sessionPda, sessionKp.publicKey, payer.publicKey, nonce2, exp(), cs), [backend], "close revoked session");
+    await expectOk(closeTx(sessionPda, sessionKp.publicKey, payer.publicKey, nonce2, exp(), cs), [payer], "close revoked session");
     assert.equal(await conn.getAccountInfo(sessionPda), null, "session account closed");
     assert.ok((await conn.getAccountInfo(payer.publicKey)).lamports > destBalBefore, "rent reclaimed");
   }

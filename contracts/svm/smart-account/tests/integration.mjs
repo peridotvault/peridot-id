@@ -1,4 +1,4 @@
-// PeridotID smart-account program — V3 integration suite.
+// PeridotID smart-account program — V3 integration suite (ANT-612 permissionless).
 //
 // Runs against a local `solana-test-validator`. Covers the V3 authorization + fee
 // schema (contracts/WHITEPAPER.md §2, canonical): op-tagged + account-bound
@@ -7,15 +7,22 @@
 // list (squat, replay, substitution, rotation, close, tokens, rounding).
 // Domain-free since ANT-197: no RP-ID hash is stored or verified on-chain.
 //
+// Creation is permissionless (ANT-610 spec §5, ANT-612): ANY signer may submit
+// `activate`/`activateV4` — anti-squat is the user’s passkey signature alone,
+// and every claim still splits relayerFee → submitter + protocolFee → the
+// program-bound `[b"treasury"]` PDA vault (ANT-635). No treasury keypair, no
+// allowlist, no build-time recipient. Direct `initialize` (disc 0) is dead in
+// all builds (`InitializeDeprecated`).
+//
+//
 // Usage:
 //   export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
 //   cd contracts/svm/smart-account
-//   PID_BACKEND=5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ cargo build-sbf
-//   (no PID_TREASURY since ANT-635: the vault is the ["treasury"] PDA)
+//   cargo build-sbf   (no PID_BACKEND / PID_TREASURY since ANT-661: PDA vault)
 //   solana-test-validator --reset > /tmp/validator.log 2>&1 &
 //   solana program deploy target/deploy/peridot_smart_account.so \
 //     --program-id target/deploy/peridot_smart_account-keypair.json
-//   node tests/integration.mjs <program-id>
+//   node tests/integration.mjs <program-id>   # ~59 cases incl. vault admin/withdraw (count printed at end)
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import {
@@ -46,18 +53,17 @@ const sha256 = (b) => crypto.createHash("sha256").update(b).digest();
 const b64url = (b) => Buffer.from(b).toString("base64url");
 const pidToSeed32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8"));
 
-// Test-only backend keypair + program-bound revenue vault PDAs (ANT-635).
-// The program under test MUST be built with:
-//   PID_BACKEND=5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ (below secret)
-// Creation paths require BACKEND as payer/relayer; protocol fees go to the
-// ["treasury"] PDA (no treasury keypair exists anymore).
-const BACKEND_SECRET = [2,165,58,5,85,113,187,187,189,165,0,247,194,28,78,38,100,30,150,157,210,65,241,136,120,108,19,175,51,247,44,88,68,27,157,74,181,156,0,3,4,104,44,101,23,145,208,210,131,227,116,208,145,70,66,152,114,42,243,151,173,78,79,158];
-const backend = Keypair.fromSecretKey(Buffer.from(BACKEND_SECRET));
+// Program-bound revenue vault PDAs (ANT-635): no treasury keypair exists.
+// Protocol fees go to the `[b"treasury"]` PDA (derived per program id) on
+// every claim; the `[b"config"]` PDA holds the admin set (init-once below).
 const [TREASURY_PDA] = PublicKey.findProgramAddressSync([Buffer.from("treasury")], PROGRAM);
 const [CONFIG_PDA] = PublicKey.findProgramAddressSync([Buffer.from("config")], PROGRAM);
+// Volunteer submitter: a random payer with no special role, proving creation
+// needs no allowlist (ANT-612 AC-S1: activation by >=2 distinct payers).
 // Vault admin (test-only fresh key; production uses a cold/multisig key, never
-// the relayer hot key — spec section 12).
+// a relayer hot key — spec section 12).
 const adminKp = Keypair.generate();
+const volunteer = Keypair.generate();
 
 function lowS(sig) {
   const r = BigInt("0x" + sig.subarray(0, 32).toString("hex"));
@@ -284,7 +290,7 @@ async function main() {
   await conn.confirmTransaction(await conn.requestAirdrop(rentPayer.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(dest.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(TREASURY_PDA, LAMPORTS_PER_SOL), "confirmed");
-  await conn.confirmTransaction(await conn.requestAirdrop(backend.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
+  await conn.confirmTransaction(await conn.requestAirdrop(volunteer.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
 
   const chainNow = await conn.getBlockTime(await conn.getSlot());
   const exp = (delta = 300) => chainNow + delta;
@@ -311,8 +317,8 @@ async function main() {
     data: Buffer.concat([Buffer.from([15]), initialAdmin]),
   });
   await expectOk(
-    new Transaction().add(initTreasuryIx(backend.publicKey, adminKp.publicKey.toBuffer())),
-    [backend],
+    new Transaction().add(initTreasuryIx(rentPayer.publicKey, adminKp.publicKey.toBuffer())),
+    [rentPayer],
     "init treasury creates config + vault PDAs",
   );
   {
@@ -330,8 +336,8 @@ async function main() {
   }
   // Double-init fails (first-writer-wins, ConfigAlreadyInitialized).
   await expectErr(
-    new Transaction().add(initTreasuryIx(backend.publicKey, adminKp.publicKey.toBuffer())),
-    [backend],
+    new Transaction().add(initTreasuryIx(rentPayer.publicKey, adminKp.publicKey.toBuffer())),
+    [rentPayer],
     "double init rejected (ConfigAlreadyInitialized)",
   );
   // WithdrawRevenue (16): [treasury, config, admin signer, destination].
@@ -394,8 +400,8 @@ async function main() {
     results.push("PASS revenue withdraw state + rent floor"); passed++;
     // Re-fund the vault so later fee-accrual assertions stay positive.
     await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
-      SystemProgram.transfer({ fromPubkey: backend.publicKey, toPubkey: TREASURY_PDA, lamports: Number(amount) })
-    ), [backend], { commitment: "confirmed" }), "confirmed");
+      SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: TREASURY_PDA, lamports: Number(amount) })
+    ), [rentPayer], { commitment: "confirmed" }), "confirmed");
   }
   // AddAdmin (17) / RemoveAdmin (18): [config, admin signer].
   const addAdminIx = (adminPub, newAdmin) => new TransactionInstruction({
@@ -452,11 +458,12 @@ async function main() {
     "remove-last-admin rejected (CannotRemoveLastAdmin)",
   );
 
-  // ---- initialize: stranger payer rejected even with a valid self-signature ----
+
+  // ---- direct initialize is dead in ALL builds (ANT-612, AC-S3) ----
   await expectErr(
     initTx(accountId32, authorityComp, rentPayer.publicKey, pda, { privateKey, publicKey }),
     [rentPayer],
-    "stranger-funded initialize rejected (Forbidden)",
+    "direct initialize rejected for any payer (InitializeDeprecated)",
   );
 
   // ---- initialize: squat attempt (stranger claims victim id with own key) ----
@@ -466,49 +473,65 @@ async function main() {
   await expectErr(
     initTx(squatId, squatAuth, rentPayer.publicKey, squatPda, { privateKey: k2, publicKey: p2 }),
     [rentPayer],
-    "squat rejected (Forbidden)",
+    "squat via initialize rejected (InitializeDeprecated)",
   );
   assert.equal(await conn.getAccountInfo(squatPda), null, "squat created nothing");
 
-  // ---- initialize (backend-paid, passkey-signed, domain-free state) ----
-  await expectOk(
-    initTx(accountId32, authorityComp, backend.publicKey, pda, { privateKey, publicKey }),
-    [backend],
-    "initialize",
+  // ---- permissionless activate, payer 1 (AC-S1): a random submitter claims ----
+  // rentPayer holds no role: pre-fund covers rent + total, the claim splits
+  // relayerFee to the submitter and protocolFee to TREASURY.
+await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+    SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: pda, lamports: 150_000_000 })
+  ), [rentPayer], { commitment: "confirmed" }), "confirmed");
+  const beforePayer1 = (await conn.getAccountInfo(rentPayer.publicKey)).lamports;
+  const beforeTreasury1 = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
+await expectOk(
+    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
+    [rentPayer],
+    "permissionless activate claims PDA (payer 1)",
   );
+  assert.equal((await conn.getAccountInfo(TREASURY_PDA)).lamports - beforeTreasury1, Number(PROTOCOL_FEE), "payer-1 claim paid protocol fee to vault");
+  assert.ok((await conn.getAccountInfo(rentPayer.publicKey)).lamports - beforePayer1 >= Number(NETWORK_FEE) - 50_000, "payer-1 received network reimbursement");
+  results.push("PASS permissionless creation fee split (payer 1)"); passed++;
 
-  const acct = await conn.getAccountInfo(pda);
+const acct = await conn.getAccountInfo(pda);
   assert.equal(acct.data.length, 80, "state len 80 (domain-free)");
   assert.equal(acct.data[0], 2, "version = 2");
   assert.equal(acct.data[1], 1, "authority_type = secp256r1");
   assert.equal(acct.data.readBigUInt64LE(4), 0n, "nonce = 0");
   assert.equal(Buffer.from(acct.data.subarray(12, 45)).equals(authorityComp), true, "authority stored");
   assert.equal(Buffer.from(acct.data.subarray(48, 80)).equals(accountId32), true, "account_id stored");
-  results.push("PASS domain-free state layout");
+  results.push("PASS domain-free state layout"); passed++;
 
-  // ---- initialize again → AlreadyInitialized ----
+  // ---- activate again → AlreadyInitialized (no replay, no double fee) ----
   await expectErr(
-    initTx(accountId32, authorityComp, backend.publicKey, pda, { privateKey, publicKey }),
-    [backend],
-    "re-initialize rejected",
+    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
+    [rentPayer],
+    "re-activate rejected (AlreadyInitialized)",
   );
 
-  // ---- domain-free creation (ANT-197): a foreign-prefix assertion creates fine ----
-  // The RP-ID pin is gone: only backend payer + self-signature gate creation.
+  // ---- domain-free creation (ANT-197): a foreign-prefix assertion activates fine ----
+  // The RP-ID pin is gone and so is the payer allowlist: only the user passkey
+  // authorizes the claim. Volunteer payer (2nd distinct submitter, AC-S1).
   {
     const freeId = pidToSeed32("testfree@pid");
     const [freePda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), freeId], PROGRAM);
+await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: volunteer.publicKey, toPubkey: freePda, lamports: 150_000_000 })
+    ), [volunteer], { commitment: "confirmed" }), "confirmed");
     await expectOk(
-      initTx(freeId, authorityComp, backend.publicKey, freePda, { privateKey, publicKey },
+      activateIx(freeId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, volunteer.publicKey, freePda, { privateKey, publicKey },
         { prefix: sha256("other-rp") }),
-      [backend],
-      "foreign-prefix assertion accepted (domain-free)",
+      [volunteer],
+      "foreign-prefix assertion accepted (domain-free, payer 2)",
     );
     const freeAcct = await conn.getAccountInfo(freePda);
     assert.equal(freeAcct.data.length, 80, "foreign-prefix account is 80 bytes");
   }
 
-  // ---- activate: Peridot-sponsored claim + attested split (disc 5) ----
+  // ---- activate: permissionless claim + attested split, payer 3 (disc 5) ----
+  // AC-S1: a third distinct submitter (volunteer, no role) relays the claim and
+  // is reimbursed exactly; the vault still takes the protocol cut.
   {
     const actId = pidToSeed32("testactivate@pid");
     const [actPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), actId], PROGRAM);
@@ -517,18 +540,13 @@ async function main() {
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: actPda, lamports: funded })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
 
-    const beforeBackend = (await conn.getAccountInfo(backend.publicKey)).lamports;
+    const beforeVol = (await conn.getAccountInfo(volunteer.publicKey)).lamports;
     const beforeTreasury = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     const actExpiry = exp();
-    await expectErr(
-      activateIx(actId, authorityComp, POLICY_V1, actExpiry, NETWORK_FEE, rentPayer.publicKey, actPda, { privateKey, publicKey }),
-      [rentPayer],
-      "stranger-relayed activate rejected (Forbidden)",
-    );
     await expectOk(
-      activateIx(actId, authorityComp, POLICY_V1, actExpiry, NETWORK_FEE, backend.publicKey, actPda, { privateKey, publicKey }),
-      [backend],
-      "activate claims PDA and splits relayer/protocol",
+      activateIx(actId, authorityComp, POLICY_V1, actExpiry, NETWORK_FEE, volunteer.publicKey, actPda, { privateKey, publicKey }),
+      [volunteer],
+      "volunteer-submitted activate claims PDA and splits relayer/protocol",
     );
 
     const claimed = await conn.getAccountInfo(actPda);
@@ -536,18 +554,37 @@ async function main() {
     assert.equal(claimed.data.length, 80, "activate wrote 80-byte domain-free state");
     assert.equal(claimed.owner.toBase58(), PROGRAM.toBase58(), "activate transferred ownership to program");
     assert.equal(claimed.lamports, funded - Number(TOTAL_FEE), "total fee reimbursed out of PDA");
-    // Backend paid the tx fee (~5000) on top, so assert protocol exactly, relayer at-least.
+    // Volunteer paid the tx fee (~5000) on top, so assert protocol exactly, relayer at-least.
     const afterTreasury = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     assert.equal(afterTreasury - beforeTreasury, Number(PROTOCOL_FEE), "vault received exactly the protocol fee");
-    const afterBackend = (await conn.getAccountInfo(backend.publicKey)).lamports;
-    assert.ok(afterBackend - beforeBackend >= Number(NETWORK_FEE) - 50_000, "backend received network reimbursement");
-    results.push("PASS activate state + fee split");
+    const afterVol = (await conn.getAccountInfo(volunteer.publicKey)).lamports;
+    assert.ok(afterVol - beforeVol >= Number(NETWORK_FEE) - 50_000, "volunteer received network reimbursement");
+    results.push("PASS activate state + fee split"); passed++;
+  }
+
+  // ---- activate with a wrong-key signature fails (anti-squat, AC-S2) ----
+  // The claim binds (account_id, authority): a stranger's key cannot authorize
+  // the victim's id, so the funded deposit sits untouched and no account forms.
+  {
+    const vicId = pidToSeed32("testvictim@pid");
+    const [vicPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), vicId], PROGRAM);
+    await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: vicPda, lamports: 150_000_000 })
+    ), [rentPayer], { commitment: "confirmed" }), "confirmed");
+    const vicBefore = (await conn.getAccountInfo(vicPda)).lamports;
+    await expectErr(
+      activateIx(vicId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, vicPda, { privateKey: k2, publicKey: p2 }),
+      [rentPayer],
+      "wrong-key activate rejected (Unauthorized)",
+    );
+    assert.equal((await conn.getAccountInfo(vicPda)).lamports, vicBefore, "victim deposit untouched by wrong-key claim");
+    assert.equal((await conn.getAccountInfo(vicPda)).owner.toBase58(), SystemProgram.programId.toBase58(), "wrong-key claim created nothing");
   }
 
   // ---- activate an already-initialized account → rejected ----
   await expectErr(
-    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, backend.publicKey, pda, { privateKey, publicKey }),
-    [backend],
+    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
+    [rentPayer],
     "activate on initialized account rejected",
   );
 
@@ -564,7 +601,7 @@ async function main() {
     const evilTreasury = Keypair.generate();
     const swapIx = new TransactionInstruction({
       keys: [
-        { pubkey: backend.publicKey, isSigner: true, isWritable: true },
+        { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
         { pubkey: swapPda, isSigner: false, isWritable: true },
         { pubkey: evilTreasury.publicKey, isSigner: false, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -575,7 +612,7 @@ async function main() {
     });
     await expectErr(
       new Transaction().add(swapIx, buildSecpIx(s.comp, s.sig, s.messageData)),
-      [backend],
+      [rentPayer],
       "non-canonical vault rejected (InvalidDestination)",
     );
     assert.equal((await conn.getAccountInfo(swapPda)).owner.toBase58(), SystemProgram.programId.toBase58(), "swapped activate claimed nothing");
@@ -589,8 +626,8 @@ async function main() {
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: polPda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     await expectErr(
-      activateIx(polId, authorityComp, 2, exp(), NETWORK_FEE, backend.publicKey, polPda, { privateKey, publicKey }),
-      [backend],
+      activateIx(polId, authorityComp, 2, exp(), NETWORK_FEE, rentPayer.publicKey, polPda, { privateKey, publicKey }),
+      [rentPayer],
       "unknown policy rejected (UnknownFeePolicy)",
     );
   }
@@ -619,7 +656,7 @@ async function main() {
   );
   assert.equal((await conn.getAccountInfo(dest.publicKey)).lamports - dest0, 5_000_000, "dest received amount");
   assert.equal((await conn.getAccountInfo(TREASURY_PDA)).lamports - treasury0, Number(PROTOCOL_FEE), "protocol fee to canonical vault");
-  results.push("PASS attested fee split");
+  results.push("PASS attested fee split"); passed++;
 
   // ---- unauthorized transfer (wrong passkey) ----
   await expectErr(
@@ -693,10 +730,13 @@ async function main() {
   {
     const sibId = pidToSeed32("testsibling@pid");
     const [sibPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), sibId], PROGRAM);
+    await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: sibPda, lamports: 150_000_000 })
+    ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     await expectOk(
-      initTx(sibId, authorityComp, backend.publicKey, sibPda, { privateKey, publicKey }),
-      [backend],
-      "sibling initialized under shared authority",
+      activateIx(sibId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, sibPda, { privateKey, publicKey }),
+      [rentPayer],
+      "sibling claimed via permissionless activate",
     );
     await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: sibPda, lamports: 10_000_000 })
@@ -799,10 +839,13 @@ async function main() {
   {
     const closeId = pidToSeed32("testclose@pid");
     const [closePda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), closeId], PROGRAM);
+    await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: closePda, lamports: 150_000_000 })
+    ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     await expectOk(
-      initTx(closeId, authorityComp, backend.publicKey, closePda, { privateKey, publicKey }),
-      [backend],
-      "close-test account initialized",
+      activateIx(closeId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, closePda, { privateKey, publicKey }),
+      [rentPayer],
+      "close-test account claimed via permissionless activate",
     );
     await expectErr(
       closeIx(closePda, closeId, closePda, 0, exp(), { privateKey, publicKey }),
@@ -829,7 +872,7 @@ async function main() {
     const smartToken = await getOrCreateAssociatedTokenAccount(conn, mintAuth, mint, pda, true);
     const destToken = await getOrCreateAssociatedTokenAccount(conn, mintAuth, mint, dest.publicKey);
     await mintTo(conn, mintAuth, mint, smartToken.address, mintAuth, 10_000_000);
-    results.push("PASS token ATA + mint");
+    results.push("PASS token ATA + mint"); passed++;
     // nonce is 4 (withdraw 0, rotate 1, withdraw 2, dust withdraw 3; close used a throwaway).
     const ttNet = 100_000n;
     const ttAmount = 2_000_000n;
@@ -861,7 +904,7 @@ async function main() {
     assert.equal(destBal, 2, "dest ATA credited");
     const treasuryAfter = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     assert.equal(treasuryAfter - treasuryBefore, Number(protocolFeeOf(ttNet)), "token withdraw protocol fee exact");
-    results.push("PASS token withdraw state + protocol fee");
+    results.push("PASS token withdraw state + protocol fee"); passed++;
   }
 
   // ---- generic execute (disc 6) — SPL transfer via CPI with the PDA as authority ----
@@ -908,7 +951,7 @@ async function main() {
       assert.equal(destBal, "1000000", "execute credited the destination");
       const exTreasuryAfter = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
       assert.equal(exTreasuryAfter - exTreasuryBefore, Number(protocolFeeOf(exEst)), "execute protocol fee exact");
-      results.push("PASS execute token balances + protocol fee");
+      results.push("PASS execute token balances + protocol fee"); passed++;
       // Fee accuracy: quoted estimate vs landed meta.fee must agree within 10%.
       const landed = await conn.getTransaction(exSig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
       const actual = BigInt(landed.meta.fee);
