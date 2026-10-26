@@ -3,7 +3,7 @@
 // divergence fails here by design.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { RULE_CLASS_TAGS, ScopeTooLarge, scopeCanonical, scopeHash } from '../src/scope.mjs';
+import { RULE_CLASS_TAGS, ScopeTooLarge, ScopeInvalid, scopeCanonical, scopeHash } from '../src/scope.mjs';
 
 const C1 = '01'.repeat(32);
 const CAA = 'aa'.repeat(32);
@@ -66,6 +66,15 @@ describe('scope binding properties', () => {
       ScopeTooLarge,
     );
     assert.throws(() => scopeCanonical(RULE_CLASS_TAGS.GameMove, [C1], ['x'.repeat(65)]), ScopeTooLarge);
-    assert.throws(() => scopeCanonical(RULE_CLASS_TAGS.GameMove, ['zz'], ['f']), ScopeTooLarge);
+    assert.throws(
+      () => scopeCanonical(RULE_CLASS_TAGS.GameMove, Array.from({ length: 65 }, () => C1), ['f']),
+      ScopeTooLarge,
+    );
+  });
+  it('rejects programmer errors with ScopeInvalid (finding 4, ANT-704)', () => {
+    assert.throws(() => scopeCanonical('financial', [C1], ['f']), ScopeInvalid);
+    assert.throws(() => scopeCanonical('game-moveX', [C1], ['f']), ScopeInvalid);
+    assert.throws(() => scopeCanonical(RULE_CLASS_TAGS.GameMove, ['zz'], ['f']), ScopeInvalid);
+    assert.throws(() => scopeCanonical(RULE_CLASS_TAGS.GameMove, ['01'.repeat(31)], ['f']), ScopeInvalid);
   });
 });

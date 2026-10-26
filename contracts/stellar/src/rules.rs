@@ -78,12 +78,20 @@ pub fn rule_id_for(
 ///   from any non-empty set via the count prefix.
 /// - Oversize descriptors are rejected with `ScopeTooLarge` at build time
 ///   (fail-closed at setup, never at call).
+///
+/// Note (finding 6, ANT-704): an empty `fns` list canonicalizes fine; an
+/// allow-list that allows nothing authorizes nothing, but registration
+/// SHOULD reject empty scopes unless the op documents zero-fn semantics
+/// explicitly — enforced at contract registration review, not here.
 pub fn scope_canonical(
     class: RuleClass,
     contracts: &[[u8; 32]],
     fns: &[String],
 ) -> Result<Vec<u8>, RuleError> {
     if fns.len() > MAX_RULE_FNS {
+        return Err(RuleError::ScopeTooLarge);
+    }
+    if contracts.len() > MAX_CONTRACTS {
         return Err(RuleError::ScopeTooLarge);
     }
     for f in fns {
@@ -137,6 +145,11 @@ pub enum RuleError {
 /// Max bytes per function name in a canonical scope descriptor (T3).
 /// Mirrors the spirit of [`MAX_RULE_FNS`]: names are short entrypoints.
 pub const MAX_FN_BYTES: usize = 64;
+
+/// Max contracts per scope descriptor (finding 5, ANT-704): bounds the
+/// canonical encoding alongside [`MAX_RULE_FNS`] (`contracts.len() as u32`
+/// truncation is then unreachable in practice, rejected before it matters).
+pub const MAX_CONTRACTS: usize = 64;
 
 /// Recommended registration bound on allow-list size (spec §2.4).
 pub const MAX_RULE_FNS: usize = 64;
@@ -361,6 +374,8 @@ mod tests {
             "01853f84e337c9ff69a660bcedeb26f003cb7542d3529c1db3e456c5e7c73775"
         );
     }
+    /// T3 size gate: > 64 fns, any fn name > 64 bytes, or > 64 contracts
+    /// is rejected at build.
     #[test]
     fn oversize_scope_rejected() {
         let contracts = vec![[0x01u8; 32]];
@@ -377,5 +392,13 @@ mod tests {
         // Boundary: 64 fns of 64 bytes each is accepted.
         let max_fns: Vec<String> = (0..64).map(|i| format!("fn{i:0>62}")).collect();
         assert!(scope_canonical(RuleClass::GameMove, &contracts, &max_fns).is_ok());
+        // Finding 5 (ANT-704): > 64 contracts rejected; 64 accepted.
+        let many_contracts = vec![[0x01u8; 32]; 65];
+        assert_eq!(
+            scope_canonical(RuleClass::GameMove, &many_contracts, &["f".to_string()]),
+            Err(RuleError::ScopeTooLarge)
+        );
+        let max_contracts = vec![[0x01u8; 32]; 64];
+        assert!(scope_canonical(RuleClass::GameMove, &max_contracts, &["f".to_string()]).is_ok());
     }
 }

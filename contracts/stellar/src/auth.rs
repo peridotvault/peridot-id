@@ -67,6 +67,9 @@ pub enum AuthError {
     ExpiredOrTooFar,
     /// F1: caller-supplied network id ≠ host `env.ledger().network_id()`.
     BadNetwork,
+    /// Intent carries a reserved or out-of-range op tag (finding 3, ANT-704:
+    /// binding ≠ authorization — unknown ops are denied before hashing).
+    UnknownOp,
     /// G2: intent `snapshot_version` ≠ stored snapshot version (fail-closed
     /// both directions — stale AND future versions are rejected; the client
     /// re-fetches and re-signs).
@@ -155,7 +158,18 @@ pub fn snapshot_entry_live(entry: &RuleSnapshotEntry, current_ledger: u32) -> bo
 
 /// F1 enforcement hook: the host-provided network id must equal the id the
 /// signer committed to. In production `host_id` is
-/// `env.ledger().network_id()`; a mismatch means cross-network replay.
+/// `env.ledger().network_id()`.
+///
+/// # Caller discipline (finding 2, ANT-704).
+///
+/// Nothing in-crate forces `host_id` to be the host value — a contract
+/// passing `intent.network_id` twice compiles and silently disables F1.
+/// The contract MUST call `check_network(&env.ledger().network_id(),
+/// &intent.network_id)`; the G1 on-chain parity assertion (recomputed
+/// `signature_payload` == digest) at deploy covers the wiring. A test that
+/// passes equal-but-wrong ids cannot fail here by construction (equality is
+/// the accept condition) — the control is the contract call site, verified
+/// at contract review.
 pub fn check_network(host_id: &[u8; 32], intent_network_id: &[u8; 32]) -> Result<(), AuthError> {
     if host_id == intent_network_id {
         Ok(())
@@ -168,8 +182,15 @@ pub fn check_network(host_id: &[u8; 32], intent_network_id: &[u8; 32]) -> Result
 /// scope_hash ‖ expiry_ledger(le) ‖ fee_policy_version(le) ‖
 /// max_total_fee(le) ‖ network_id ‖ snapshot_version(le) ‖ rule_count(le) ‖
 /// oz_rule_ids…(u32le each). Digest = sha256(preimage).
-/// Rejects `oz_rule_ids.len() > MAX_RULE_IDS` (Theo R1) before hashing.
+/// Rejects `oz_rule_ids.len() > MAX_RULE_IDS` (Theo R1) and unknown op tags
+/// (finding 3, ANT-704) before hashing.
+///
+/// Note (finding 6, ANT-704): an empty `oz_rule_ids` set digests fine; what
+/// a rule-less intent authorizes is per-op and MUST be pinned explicitly at
+/// contract registration review — no op may treat "zero rules" as "all
+/// rules" by default.
 pub fn digest_for_intent_v2(intent: &StellarIntent) -> Result<[u8; 32], AuthError> {
+    check_op_tag(intent.op_tag)?;
     if intent.oz_rule_ids.len() > MAX_RULE_IDS {
         return Err(AuthError::TooManyRules);
     }
@@ -197,6 +218,19 @@ pub fn digest_for_intent_v2(intent: &StellarIntent) -> Result<[u8; 32], AuthErro
     Ok(digest)
 }
 
+/// Op-tag authorization (finding 3, ANT-704): only the confirmed op tags
+/// are signable. RESERVED `0x12` and the `0x00–0x0F` range are denied by
+/// default — binding an op into the digest is not authorization to execute
+/// it. Called by [`digest_for_intent_v2`] before hashing (fail-closed) and
+/// re-checked by the on-chain dispatcher.
+pub fn check_op_tag(op_tag: u8) -> Result<(), AuthError> {
+    match op_tag {
+        OP_INIT | OP_EXECUTE | OP_ROTATE => Ok(()),
+        _ => Err(AuthError::UnknownOp),
+    }
+}
+/// `checked_add` makes `u64::MAX` wrap acceptance impossible (rotation
+/// before wrap is mandatory).
 /// Theo R2: replay gate — `nonce` must be exactly `stored_seq + 1`.
 /// `checked_add` makes `u64::MAX` wrap acceptance impossible (rotation
 /// before wrap is mandatory).
@@ -218,10 +252,19 @@ pub fn check_expiry(current_ledger: u32, expiry_ledger: u32) -> Result<(), AuthE
     Ok(())
 }
 
-/// WebAuthn assertion check: RP-ID hash matches (including the embedded
-/// `authenticator_data[0..32]` cross-check, Tobias T2), UV flag set, and the
-/// signed challenge equals the intent digest.
-pub fn verify_webauthn_assertion(
+/// WebAuthn PRE-AUTH checks (NOT a signature verification).
+///
+/// # WARNING: does NOT verify the P-256 signature.
+///
+/// This checks RP-ID hash equality (including the embedded
+/// `authenticator_data[0..32]` cross-check, Tobias T2), the UV flag, and
+/// challenge equality ONLY. Anyone can forge `authenticator_data` with
+/// knowledge of the digest — a caller that treats this as authentication
+/// enables full account takeover. The Soroban `__check_auth` MUST verify
+/// the P-256 signature over `authData ‖ sha256(clientDataJSON)` against the
+/// registered credential pubkey BEFORE applying these checks (finding 1,
+/// ANT-704; contract-landing gate, not in-crate).
+pub fn verify_webauthn_preauth_checks(
     rp_id: &str,
     rp_id_hash: &[u8; 32],
     authenticator_data: &[u8],
@@ -464,6 +507,23 @@ mod tests {
         assert!(snapshot_entry_live(&snap.resolve(11).unwrap(), u32::MAX)); // no OZ expiry
     }
 
+    /// Finding 3 (ANT-704): reserved and out-of-range op tags are denied
+    /// before hashing (binding ≠ authorization); confirmed tags digest.
+    #[test]
+    fn unknown_op_tags_rejected() {
+        assert!(check_op_tag(OP_INIT).is_ok());
+        assert!(check_op_tag(OP_EXECUTE).is_ok());
+        assert!(check_op_tag(OP_ROTATE).is_ok());
+        assert_eq!(check_op_tag(OP_DELEGATE_RESERVED), Err(AuthError::UnknownOp));
+        assert_eq!(check_op_tag(0x00), Err(AuthError::UnknownOp));
+        assert_eq!(check_op_tag(0x0F), Err(AuthError::UnknownOp));
+        assert_eq!(check_op_tag(0xFF), Err(AuthError::UnknownOp));
+        // Denied at the digest gate too (fail-closed, no dispatcher needed).
+        let mut m = intent(vec![1], 1_000_000);
+        m.op_tag = OP_DELEGATE_RESERVED;
+        assert_eq!(digest_for_intent_v2(&m), Err(AuthError::UnknownOp));
+    }
+
     /// Theo R2: strict `stored + 1`, no wrap.
     #[test]
     fn nonce_gate_is_strict_plus_one() {
@@ -492,7 +552,7 @@ mod tests {
         let mut auth_data = vec![0u8; 37];
         auth_data[..32].copy_from_slice(&rp_hash);
         auth_data[32] = 0x04 | 0x01; // UV + UP
-        assert!(verify_webauthn_assertion(
+        assert!(verify_webauthn_preauth_checks(
             "vault.peridot.example",
             &rp_hash,
             &auth_data,
@@ -502,14 +562,14 @@ mod tests {
         .is_ok());
         // Wrong RP-ID.
         assert_eq!(
-            verify_webauthn_assertion("evil.example", &rp_hash, &auth_data, &digest, &digest),
+            verify_webauthn_preauth_checks("evil.example", &rp_hash, &auth_data, &digest, &digest),
             Err(AuthError::BadRpId)
         );
         // Tobias T2: embedded rpIdHash mismatches the claimed one.
         let mut tampered = auth_data.clone();
         tampered[0] ^= 0xFF;
         assert_eq!(
-            verify_webauthn_assertion(
+            verify_webauthn_preauth_checks(
                 "vault.peridot.example",
                 &rp_hash,
                 &tampered,
@@ -522,7 +582,7 @@ mod tests {
         let mut no_uv = auth_data.clone();
         no_uv[32] = 0x01;
         assert_eq!(
-            verify_webauthn_assertion(
+            verify_webauthn_preauth_checks(
                 "vault.peridot.example",
                 &rp_hash,
                 &no_uv,
@@ -534,7 +594,7 @@ mod tests {
         // Challenge (digest) mismatch — e.g. sponsor-mutated intent.
         let other = digest_for_intent_v2(&intent(vec![2], 1_000_000)).unwrap();
         assert_eq!(
-            verify_webauthn_assertion(
+            verify_webauthn_preauth_checks(
                 "vault.peridot.example",
                 &rp_hash,
                 &auth_data,

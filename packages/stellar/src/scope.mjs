@@ -18,12 +18,22 @@ export const RULE_CLASS_TAGS = Object.freeze({
 
 export const MAX_RULE_FNS = 64;
 export const MAX_FN_BYTES = 64;
+export const MAX_CONTRACTS = 64;
 
 export class ScopeTooLarge extends Error {
   constructor(message) {
     super(message);
     this.name = 'ScopeTooLarge';
     this.code = 'SCOPE_TOO_LARGE';
+  }
+}
+
+/** Programmer error (bad class tag, malformed contract hex) — distinct from oversize. */
+export class ScopeInvalid extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ScopeInvalid';
+    this.code = 'SCOPE_INVALID';
   }
 }
 
@@ -40,13 +50,20 @@ function u16le(n) {
 }
 
 /**
- * @param {string} classTag one of RULE_CLASS_TAGS values
- * @param {string[]} contractHexes 64-char lowercase hex strings (32B each), granted order
+ * @param {string} classTag one of RULE_CLASS_TAGS values (validated — finding 4, ANT-704)
+ * @param {string[]} contractHexes 64-char lowercase hex strings (32B each, granted order, ≤64)
  * @param {string[]} fns function names (utf-8, ≤64 bytes each, ≤64 entries)
  * @returns {Buffer} canonical descriptor bytes
+ * @throws {ScopeInvalid} on unknown class tag or malformed contract hex (programmer error)
  * @throws {ScopeTooLarge} on oversize descriptors (fail-closed at build)
  */
 export function scopeCanonical(classTag, contractHexes, fns) {
+  if (!Object.values(RULE_CLASS_TAGS).includes(classTag)) {
+    throw new ScopeInvalid(`unknown rule class tag: ${String(classTag).slice(0, 32)}`);
+  }
+  if (contractHexes.length > MAX_CONTRACTS) {
+    throw new ScopeTooLarge(`too many contracts: ${contractHexes.length} > ${MAX_CONTRACTS}`);
+  }
   if (fns.length > MAX_RULE_FNS) throw new ScopeTooLarge(`too many fns: ${fns.length} > ${MAX_RULE_FNS}`);
   for (const f of fns) {
     if (Buffer.byteLength(f, 'utf8') > MAX_FN_BYTES) {
@@ -55,7 +72,7 @@ export function scopeCanonical(classTag, contractHexes, fns) {
   }
   const parts = [Buffer.from(classTag, 'utf8'), Buffer.from([0x00]), u32le(contractHexes.length)];
   for (const h of contractHexes) {
-    if (!/^[0-9a-f]{64}$/.test(h)) throw new ScopeTooLarge(`contract must be 64-char hex: ${h.slice(0, 16)}…`);
+    if (!/^[0-9a-f]{64}$/.test(h)) throw new ScopeInvalid(`contract must be 64-char hex: ${String(h).slice(0, 16)}…`);
     parts.push(Buffer.from(h, 'hex'));
   }
   parts.push(u32le(fns.length));

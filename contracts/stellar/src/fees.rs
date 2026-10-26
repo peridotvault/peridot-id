@@ -201,6 +201,12 @@ pub fn should_bump(remaining_ledgers: u32) -> bool {
 
 /// Version-pinned bump entry set. `expected_version` is the indexer's
 /// current version; a run holding a stale list must abort (fail-closed).
+///
+/// Note (finding 7, ANT-704): the pin covers the entry LIST, not the
+/// `remaining` readings pairing — a caller passing a subset of readings
+/// silently bumps a subset. Ops convention (contractual): the cron MUST
+/// derive `remaining` from the same versioned fetch as the list, never from
+/// a cached or partial read.
 #[derive(Debug, Clone)]
 pub struct BumpSet {
     pub version: u32,
