@@ -5,6 +5,8 @@
 // boundary: the vault PDA never enters game CPIs; the session PDA (rent-only)
 // is the sole lent signer; protected accounts are hash-pinned pre/post CPI.
 //
+// 26 result lines (22 expect-calls + 4 state/layout assertions).
+//
 // Two runtime facts this suite pins (verified against chain truth, not assumed):
 // - System transfers debit only data-less accounts ("from must not carry
 //   data"), so session SOL is structurally immobile — even forwarded.
@@ -330,7 +332,7 @@ async function main() {
     assert.ok(Buffer.from(d.subarray(90, 122)).equals(FORWARDER.toBuffer()), "allowed program stored");
     assert.equal(d.readBigUInt64LE(155), fwdRec.slot, "recorded slot matches chain");
     assert.equal(await vaultNonce(), 2n, "owner nonce consumed twice");
-    results.push("PASS session record layout");
+    results.push("PASS session record layout"); passed++;
   }
 
   // ---- register with a lied upgrade snapshot → rejected (0x15) ----
@@ -369,7 +371,7 @@ async function main() {
     assert.equal(d.readBigUInt64LE(82), 1n, "seq advanced");
     assert.equal(d.readBigUInt64LE(196), tokRec.slot, "last_seen slot refreshed");
     assert.equal((await conn.getAccountInfo(pda)).lamports, vaultBefore, "vault untouched by gameplay");
-    results.push("PASS gameplay effects + upgrade-visibility snapshot");
+    results.push("PASS gameplay effects + upgrade-visibility snapshot"); passed++;
   }
 
   // ---- ADV: vault named in a game CPI → rejected (0x15), vault untouched ----
@@ -420,7 +422,7 @@ async function main() {
     assert.equal(gained, 50_000n, "attacker got exactly the session's 50k");
     assert.equal((await conn.getAccountInfo(pda)).lamports, vaultBefore, "vault immune to forwarding");
     assert.equal((await conn.getTokenAccountBalance(vaultAta.address)).value.amount, vaultAtaStart, "vault tokens immune");
-    results.push("PASS forwarding blast radius = session-owned tokens only");
+    results.push("PASS forwarding blast radius = session-owned tokens only"); passed++;
   }
 
   // ---- ADV: same forwarded drain with the ATA protected → 0x15, nothing moves ----
@@ -597,7 +599,7 @@ async function main() {
     assert.equal(gained, 7n, "gameplay moved exactly 7");
     const d = (await conn.getAccountInfo(sessionPda)).data;
     assert.equal(d.readBigUInt64LE(82), 3n, "seq advanced to 3");
-    results.push("PASS rent-pinned session PDA in protected set");
+    results.push("PASS rent-pinned session PDA in protected set"); passed++;
   }
 
   // ---- revoke → exec dies (0x12); close reclaims rent ----

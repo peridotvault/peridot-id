@@ -331,7 +331,7 @@ await expectOk(
   );
   assert.equal((await conn.getAccountInfo(treasuryKp.publicKey)).lamports - beforeTreasury1, Number(PROTOCOL_FEE), "payer-1 claim paid protocol fee to vault");
   assert.ok((await conn.getAccountInfo(rentPayer.publicKey)).lamports - beforePayer1 >= Number(NETWORK_FEE) - 50_000, "payer-1 received network reimbursement");
-  results.push("PASS permissionless creation fee split (payer 1)");
+  results.push("PASS permissionless creation fee split (payer 1)"); passed++;
 
 const acct = await conn.getAccountInfo(pda);
   assert.equal(acct.data.length, 80, "state len 80 (domain-free)");
@@ -340,7 +340,7 @@ const acct = await conn.getAccountInfo(pda);
   assert.equal(acct.data.readBigUInt64LE(4), 0n, "nonce = 0");
   assert.equal(Buffer.from(acct.data.subarray(12, 45)).equals(authorityComp), true, "authority stored");
   assert.equal(Buffer.from(acct.data.subarray(48, 80)).equals(accountId32), true, "account_id stored");
-  results.push("PASS domain-free state layout");
+  results.push("PASS domain-free state layout"); passed++;
 
   // ---- activate again → AlreadyInitialized (no replay, no double fee) ----
   await expectErr(
@@ -398,7 +398,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     assert.equal(afterTreasury - beforeTreasury, Number(PROTOCOL_FEE), "vault received exactly the protocol fee");
     const afterVol = (await conn.getAccountInfo(volunteer.publicKey)).lamports;
     assert.ok(afterVol - beforeVol >= Number(NETWORK_FEE) - 50_000, "volunteer received network reimbursement");
-    results.push("PASS activate state + fee split");
+    results.push("PASS activate state + fee split"); passed++;
   }
 
   // ---- activate with a wrong-key signature fails (anti-squat, AC-S2) ----
@@ -495,7 +495,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   );
   assert.equal((await conn.getAccountInfo(dest.publicKey)).lamports - dest0, 5_000_000, "dest received amount");
   assert.equal((await conn.getAccountInfo(treasuryKp.publicKey)).lamports - treasury0, Number(PROTOCOL_FEE), "protocol fee to canonical vault");
-  results.push("PASS attested fee split");
+  results.push("PASS attested fee split"); passed++;
 
   // ---- unauthorized transfer (wrong passkey) ----
   await expectErr(
@@ -711,7 +711,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     const smartToken = await getOrCreateAssociatedTokenAccount(conn, mintAuth, mint, pda, true);
     const destToken = await getOrCreateAssociatedTokenAccount(conn, mintAuth, mint, dest.publicKey);
     await mintTo(conn, mintAuth, mint, smartToken.address, mintAuth, 10_000_000);
-    results.push("PASS token ATA + mint");
+    results.push("PASS token ATA + mint"); passed++;
     // nonce is 4 (withdraw 0, rotate 1, withdraw 2, dust withdraw 3; close used a throwaway).
     const ttNet = 100_000n;
     const ttAmount = 2_000_000n;
@@ -743,7 +743,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     assert.equal(destBal, 2, "dest ATA credited");
     const treasuryAfter = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
     assert.equal(treasuryAfter - treasuryBefore, Number(protocolFeeOf(ttNet)), "token withdraw protocol fee exact");
-    results.push("PASS token withdraw state + protocol fee");
+    results.push("PASS token withdraw state + protocol fee"); passed++;
   }
 
   // ---- generic execute (disc 6) — SPL transfer via CPI with the PDA as authority ----
@@ -790,7 +790,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       assert.equal(destBal, "1000000", "execute credited the destination");
       const exTreasuryAfter = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
       assert.equal(exTreasuryAfter - exTreasuryBefore, Number(protocolFeeOf(exEst)), "execute protocol fee exact");
-      results.push("PASS execute token balances + protocol fee");
+      results.push("PASS execute token balances + protocol fee"); passed++;
       // Fee accuracy: quoted estimate vs landed meta.fee must agree within 10%.
       const landed = await conn.getTransaction(exSig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
       const actual = BigInt(landed.meta.fee);
