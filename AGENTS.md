@@ -50,7 +50,7 @@ cd contracts/svm # chain state lives here (test-ledger/), never at root
 solana-test-validator --reset > /tmp/validator.log 2>&1 &
 solana config set --url http://127.0.0.1:8899 && solana airdrop 5
 cd smart-account
-PID_BACKEND=<backend-pubkey> cargo build-sbf # backend allowlist baked in (build.rs)
+PID_TREASURY=<treasury-pubkey> cargo build-sbf # canonical vault baked in (build.rs); no BACKEND since ANT-612
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot_smart_account-keypair.json
 pnpm --filter @peridotvault/pid-api dev        # API on :3300
@@ -104,7 +104,8 @@ to the tunnel URL — localhost values never reach DOKU.
 - API: `pnpm --filter @peridotvault/pid-api exec jest` (318 tests).
 - EVM: `forge test --root contracts/evm` (65: 32 V3 + 33 V4 permission/adversarial);
   anvil loops `test/anvil-v3-e2e.mjs` + `test/anvil-v4-perm-e2e.mjs`.
-- Program: `cargo test` (27) + `tests/integration.mjs` (37 cases) +
+- Program: `PID_TREASURY=<key> cargo test` (52, incl. ANT-612 no-allowlist pins) +
+  `tests/integration.mjs` (44 cases: permissionless-creation proofs) +
   `tests/session.mjs <program-id> <forwarder-id>` (24 session cases; deploy
   `contracts/svm/mock-forwarder` first) against the local
   validator; devnet E2E `packages/sdk-js/test/devnet.e2e.mjs`.

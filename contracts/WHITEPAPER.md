@@ -153,8 +153,8 @@ Quote / drift / TTL / failure rules:
 
 Determinism: EVM tuple = canonical PID normalization/hash + salt + factory +
 implementation + clone initcode (chainId binds signatures only). SVM tuple =
-canonical PID normalization/hash + seeds + program ID (BACKEND/TREASURY/vault/RPC
-never enter derivation). State, nonce, balances, history stay chain-local. New
+canonical PID normalization/hash + seeds + program ID (TREASURY/vault/RPC
+never enter derivation — no BACKEND allowlist exists since ANT-612). State, nonce, balances, history stay chain-local. New
 factory bytecode ⇒ new factory/account addresses (testnet reset; nothing on mainnet).
 
 ## 3. EVM — `src/PeridotAccount.sol` (V3 semantics + V4 permission layer)
@@ -208,17 +208,17 @@ distinction, enforced on-chain and proven by the adversarial suite.
 - `state.rs::SmartAccount` (read) / `SmartAccountMut` (write) — v2 112B (`try_from_bytes` accepts v1 80B read-only; writers stamp v2), `authority()`, `account_id()`, `rp_id_hash()` (`MissingRpIdHash` on v1), `nonce()`, `initialize(id,key,rpId)`, `set_authority`, `increment_nonce`.
 - `verify_pda(account, program, account_id)` — real `find_program_address` on-chain; host stub returns 255 (covered by integration suite, not units).
 - `verify_nonce` — `state.nonce == ix.nonce` else `InvalidNonce`.
-- `errors.rs::PeridotError`: `…/Forbidden` (`Forbidden` = non-backend creation attempt), `FeeExceedsMax = 12` (reintroduced for the V4 fee-cap family — discriminant preserved from the retired slot; V3 verifiers never emit it), `UnknownFeePolicy = 13`, `MissingRpIdHash = 14`, `ExceedsMaxBps = 15`, `InvalidTarget = 16` (execute self-call), session errors 17–22 (`SessionNotFound/Revoked/Expired`, `BadSessionSeq`, `SessionScopeViolation`, `SessionTtlExceeded`), `SessionSpendExceeded = 24` (C3 per-execution session-PDA spend pin).
+- `errors.rs::PeridotError`: `…/Forbidden` (retained discriminant 11, no longer emitted — creation is permissionless since ANT-612), `FeeExceedsMax = 12` (reintroduced for the V4 fee-cap family — discriminant preserved from the retired slot; V3 verifiers never emit it), `UnknownFeePolicy = 13`, `MissingRpIdHash = 14`, `ExceedsMaxBps = 15`, `InvalidTarget = 16` (execute self-call), session errors 17–22 (`SessionNotFound/Revoked/Expired`, `BadSessionSeq`, `SessionScopeViolation`, `SessionTtlExceeded`), `SessionSpendExceeded = 24` (C3 per-execution session-PDA spend pin).
 - `fee.rs`: `FEE_POLICY_V1 = 1` (frozen), `FEE_POLICY_V2 = 2` (`PROTOCOL_FEE_BPS_V2 = 5000`, `CHAIN_MIN_LAMPORTS_V2 = 17_000`); `policy_protocol_bps()` (frozen v1); `policy_v2_row()` (v1 → `(5000, 0)`, v2 → `(5000, 17_000)`, unknown → `UnknownFeePolicy`); `split_attested_fee()` (frozen v1 formula); `split_attested_fee_v2()` (`MAX(floor(n×bps/10000), chain_min)`); `total_fee()` (saturating add).
 
 ## 6. SVM — instructions
 
-- `initialize` (BACKEND payer SIGNER, PDA WRITE, system, sysvar): payer == `config::BACKEND` (`Forbidden` otherwise — PID-ownership proof), PDA empty check, `verify_pda`, passkey auth over canonical `sha256(DOMAIN_V3 ‖ 0x00 ‖ account_id ‖ authority[33] ‖ rpIdHash[32])`, `create_account…_signed` (112B), write v2 state, log `AccountInitialized`. Only the new authority's key + the backend together can claim — no squat. **ANT-16(e) (board fee decision d4ebecff): DEPRECATED — direct `initialize` bypasses the 50% sponsored-creation fee; `activate` is the sole production creation path.** Production builds reject with `InitializeDeprecated` before any other check; testnet/devnet builds still succeed and additionally log `AccountInitializeDeprecated` for SDK-migration drift alerting.
+- `initialize` (disc 0 — DEAD in all builds since ANT-612): rejects with `InitializeDeprecated` before any other check; the historical shape (payer SIGNER, PDA WRITE, passkey auth over `sha256(DOMAIN_V3 ‖ 0x00 ‖ account_id ‖ authority)`, state write, `AccountInitialized` log) is retained for decoder/indexer stability only. **ANT-16(e) (board fee decision d4ebecff) + ANT-612 (ANT-610 spec §5.1): direct `initialize` bypassed the 50% sponsored-creation fee, so it is permanently disabled — `activate`/`activateV4` are the sole creation paths in every build.**
 - `withdraw_sol` (PDA, dest, revenue vault, relayer SIGNER, instructions sysvar; recipients canonical): relayer signer (any submitter — payload fully bound), owner/init/dest≠self checks, dest addr == arg check, nonce+PDA verify, canonical payload `sha256(DOMAIN_V3 ‖ 0x01 ‖ account_id ‖ nonce ‖ amount ‖ dest[32] ‖ expiry ‖ feePolicyVersion)` (no amounts — costs float), `check_expiry` (TTL ≤ 600), `verify_secp256r1_v2` (signer + RP-ID + UV + challenge), recompute split, `lamports ≥ amount+totalFee`, moves (relayerFee→relayer, protocolFee→vault; no System CPI), `increment_nonce`, log `TransactionExecuted`.
 - `withdraw_token` (+source ATA, mint, dest ATA, token program): as `withdraw_sol` plus `sourceAta[32]` in the payload; program asserts source ATA owned by PDA for mint; SPL `Transfer` CPI signed by PDA seeds for `amount`; SOL split `lamports ≥ totalFee` only (token balance enforced by token program).
 - `update_authority` (PDA, sysvar): canonical payload `sha256(DOMAIN_V3 ‖ 0x03 ‖ account_id ‖ nonce ‖ new_key[33] ‖ expiry)`, verified by **current** key, zero-key rejected, then `set_authority` + `increment_nonce`, log `AuthorityUpdated`. No fee fields.
 - `close` (PDA, dest, sysvar): canonical payload `sha256(DOMAIN_V3 ‖ 0x04 ‖ account_id ‖ nonce ‖ dest[32] ‖ expiry)`; `dest != PDA` required; drains all lamports to dest, `account.close()`, log `AccountClosed`. Teardown only — no V1 API.
-- `activate` (BACKEND relayer SIGNER, PDA, vault, system, sysvar): sponsored claim, **relayer == BACKEND** (`Forbidden` otherwise) + passkey auth over canonical `sha256(DOMAIN_V3 ‖ 0x05 ‖ account_id ‖ authority[33] ‖ rpIdHash[32] ‖ feePolicyVersion ‖ expiry)`. Rejects already-program-owned/non-empty; `create_account…_signed` creates (empty) or tops-up→assigns (pre-funded deposit); requires `lamports ≥ rent + totalFee`; splits relayerFee→relayer, protocolFee→vault; writes v2 state; log `AccountActivated`.
+- `activate` (submitter SIGNER — ANY payer, ANT-612 permissionless — PDA, vault, system, sysvar): fee-bearing claim + passkey auth over canonical `sha256(DOMAIN_V3 ‖ 0x05 ‖ account_id ‖ authority[33] ‖ rpIdHash[32] ‖ feePolicyVersion ‖ expiry)`. Anti-squat is the user passkey alone (only the new authority's key authorizes the claim). Rejects already-program-owned/non-empty; `create_account…_signed` creates (empty) or tops-up→assigns (pre-funded deposit); requires `lamports ≥ rent + totalFee`; splits relayerFee→submitter, protocolFee→canonical vault; writes v2 state; log `AccountActivated`. First-claimer-wins is inherent to deterministic addresses — see the residual-risk note in §12 (pid secrecy + fast activation mitigate).
 - `execute` (disc 6; PDA, relayer SIGNER, vault, target program, sysvar, + non-PDA metas): generic CPI, wallet parity with EVM `execute`. Deny-list of one (target ≠ program, `InvalidTarget`); passkey signs canonical `sha256(DOMAIN_V3 ‖ 0x06 ‖ account_id ‖ nonce ‖ expiry ‖ feePolicyVersion ‖ call_hash)` where `call_hash = sha256` over the exact target‖metas‖data bytes; instruction data `nonce ‖ target[32] ‖ meta_count u8 ‖ metas meta_count×(addr[32] ‖ flags u8: bit0 writable, bit1 signer) ‖ data_len u16 ‖ data ‖ expiry ‖ policy ‖ network_fee ‖ len ‖ clientDataJSON` (caps: 64 metas, 10_240B data; the tx size limit binds first). The program additionally requires the PDA among the metas with the signer bit (bound PDA metas map to account 0 — outer transactions deduplicate it), enforces address match per meta at CPI time, and settles the standard fee split (`lamports ≥ totalFee`; the call itself moves no SOL — inner programs debit their own accounts). Token-2022 needs no special case (target is opaque bytes).
 - Sessions (discs 7–10; §11, canonical): the vault PDA above never enters game CPIs. `register_session` (owner P-256, consumes owner nonce) binds an Ed25519 session key + one allowlisted game (+ verified upgrade snapshot) into a fresh 205B session PDA (`["peridot_id","session",account_id,session_key]`, program-created for exact rent); `session_execute` (session envelope signer + strict per-session `seq`, 24h hard expiry + 30min inactivity on the chain clock) runs one game CPI signed solely by the session PDA, with exact account count (no `remaining_accounts`), bounded protected accounts hash-pinned pre/post (owner/lamports/data, incl. delegate/close_authority), and per-execution upgrade-visibility refresh (record-and-log, no enforcement); `revoke_session` (owner P-256, immediate) and `close_session` (revoked-or-expired, rent reclaimed) consume the owner nonce. Gameplay pays its own fees (no relayer split).
 - Attested-fee model (explicit): the program enforces the rate, recipients, and formula over the backend-attested `networkFee` but MUST NOT pretend to determine the complete transaction fee from inside the program — the runtime deducts base fee + prioritization fees + rent from the fee payer, none of which is reliably introspectable on-chain. Attestation is quoted live, drift-bounded (≤120% of quote, fail-closed re-quote), TTL-bounded; reconciliation verifies attested ≈ actual (`meta.fee` + priority data) with alerts. The relayer absorbs spike underpayment between attest and mining.
@@ -236,7 +236,7 @@ distinction, enforced on-chain and proven by the adversarial suite.
 
 | Function | Same? | Note |
 |---|---|---|
-| init (`initialize` both) | Roughly | Both one-time + zero-key guard + co-signed claim (SVM: BACKEND + passkey; EVM: relayer-submitted + passkey-bound `deployAndInit`); SVM creates PDA via CPI, EVM called by factory proxy |
+| init (`initialize` both) | Roughly | Both one-time + zero-key guard + user-signed claim (SVM: passkey-only permissionless `activate` since ANT-612 — `initialize` dead; EVM: relayer-submitted + passkey-bound `deployAndInit`); SVM creates PDA via CPI, EVM called by factory proxy |
 | spend (`execute` vs `withdraw_sol/withdraw_token`) | **Yes (economics)** | Attested `networkFee` + fixed policy % (≤ on-chain maximum); relayerFee→fee payer, protocolFee→revenue vault; EVM adds gas sanity bound; both chains now have a generic `execute` (SVM disc 6 signs `call_hash`, EVM signs `to‖value‖keccak(data)`), SVM keeps typed withdraw handlers for the common paths |
 | `updateAuthority` both | **Yes, closest match** | Same nonce/expiry/challenge flow, signed by current key; no fee fields |
 | challenge/base64/find | **Yes (logic)** | Duplicated implementations, same algorithm |
@@ -257,8 +257,8 @@ distinction, enforced on-chain and proven by the adversarial suite.
   cases: unauthorized finance, escalation, reentry, 1271 misuse, replay, revocation,
   delegatecall-absence) + `node test/anvil-v3-e2e.mjs` (TS→contract loop) +
   `node test/anvil-v4-perm-e2e.mjs` (SDK grant→session-exec→revoke loop) ·
-  `cd contracts/svm/smart-account && PID_BACKEND=<key> PID_TREASURY=<key> cargo build-sbf && cargo test` (27) + `node tests/integration.mjs <id>` (37: squat/Forbidden/policy/attested-fee/rounding/execute cases) + `node tests/session.mjs <id> <forwarder-id>` (24 session cases: isolation, forwarding bounds, protected invariants, replay, lifecycle) + `node ../../packages/solana/test/adapter.e2e.mjs` · `pnpm typecheck` · `pnpm --filter @peridotvault/pid-api exec jest` (259).
-- Security model: creation = passkey-authorized (+ backend-gated on SVM `initialize`/`activate`; relayer-submission-gated + passkey-bound on EVM `deployAndInit`); spends = passkey-signed intents with fully-bound semantics (account, op, nonce, dest, value, calldata, chain, deadline, policy); EVM V4 adds owner-authorized permission grants plus session-signed executions inside owner-set scope (permission id, seq, target/data, caps, expiry, revocation); SVM sessions add owner-registered Ed25519 gameplay sessions inside PDA-isolated scope (session seq, allowlisted game, protected invariants, 24h/inactivity bounds, revocation); submission is permissionless by design. A compromised relayer may waste its own gas or submit valid user-signed intents (bounded by balance/TTL/drift/reconciliation) but MUST NOT forge authority, alter bound fields, change the fee policy, redirect funds or revenue, or settle anything but `networkFee + formula(networkFee)`.
+  `cd contracts/svm/smart-account && PID_TREASURY=<key> cargo build-sbf && PID_TREASURY=<key> cargo test` (52) + `node tests/integration.mjs <id>` (44: permissionless-creation/anti-squat/policy/attested-fee/rounding/execute cases) + `node tests/session.mjs <id> <forwarder-id>` (24 session cases: isolation, forwarding bounds, protected invariants, replay, lifecycle) + `node ../../packages/solana/test/adapter.e2e.mjs` · `pnpm typecheck` · `pnpm --filter @peridotvault/pid-api exec jest` (259).
+- Security model: creation = passkey-authorized (permissionless + fee-bearing on SVM `activate`/`activateV4` since ANT-612, `initialize` dead; relayer-submission-gated + passkey-bound on EVM `deployAndInit`); spends = passkey-signed intents with fully-bound semantics (account, op, nonce, dest, value, calldata, chain, deadline, policy); EVM V4 adds owner-authorized permission grants plus session-signed executions inside owner-set scope (permission id, seq, target/data, caps, expiry, revocation); SVM sessions add owner-registered Ed25519 gameplay sessions inside PDA-isolated scope (session seq, allowlisted game, protected invariants, 24h/inactivity bounds, revocation); submission is permissionless by design. A compromised relayer may waste its own gas or submit valid user-signed intents (bounded by balance/TTL/drift/reconciliation) but MUST NOT forge authority, alter bound fields, change the fee policy, redirect funds or revenue, or settle anything but `networkFee + formula(networkFee)`.
 
 ## 10. EVM permission layer (canonical)
 
@@ -403,9 +403,10 @@ owner-bound destinations.
 Proven — EVM (65 forge tests incl. 33 permission/adversarial, anvil V3+V4 E2E,
 byte-exact SDK vectors, 9 backend specs): §10 table for single-call scope,
 OWNER/PERMISSION disjointness, revocation immediacy, fee parity, no-delegatecall
-bytecode, SDK↔contract interop. Proven — SVM (27 host unit, 24 validator
-session cases incl. malicious-forwarder forwarding bounds, 37 existing
-integration cases, SDK/backend specs): §11 table for single-CPI scope, domain
+bytecode, SDK↔contract interop. Proven — SVM (52 host unit incl. ANT-612
+no-allowlist pins, 24 validator session cases incl. malicious-forwarder
+forwarding bounds, 44 integration cases incl. permissionless-creation proofs,
+SDK/backend specs): §11 table for single-CPI scope, domain
 disjointness, revocation immediacy, rent-exact lifecycle, loader classes,
 SDK↔program byte parity via independent reimplementation.
 
@@ -417,9 +418,24 @@ policy; inactivity-window adequacy; indexer coverage of `last_seen_*` drift;
 P-256 session gas-griefing bounds; 4337 mempool behavior. **Do not deploy to
 mainnet or burn/fire upgrade authority on the basis of this work alone.**
 
+Residual risk, permissionless creation (ANT-612, adjudicated at Security
+review — owner: Tobias): with deterministic addresses and no allowlist,
+first-claimer-wins is inherent — anyone who knows a victim's pid can claim the
+victim's unclaimed PDA with their OWN passkey (the on-chain check binds the
+caller-supplied authority to its own signature; it cannot tell rightful from
+squatting claimant). The squatter pays rent + protocol fee and is reimbursed
+only the network fee from the victim's pre-fund, so unfunded griefing costs
+real money; funded-victim griefing is profitable and bricks that address (PIDs
+are immutable). Same property holds for permissionless EVM `deployAndInit`.
+Mitigations in force: pid secrecy (account_id = sha256(pid) is unguessable
+while the pid stays private) + immediate activation after pre-funding (narrow race
+window: expiry TTL bounds the claim signature). Deliberate pid disclosure
+(e.g. public handles) widens the window — monitor funded-but-unclaimed PDAs
+and treat unexpected `AccountActivated` authorities as incidents.
+
 Unactioned pre-mainnet runbook (carried from the deleted tasks file, still open):
 
-- [ ] External program audit (internal baselines: 65 forge + 27 cargo + 37/24 validator cases).
+- [ ] External program audit (internal baselines: 65 forge + 52 cargo + 44/24 validator cases).
 - [ ] Upgrade authority custody — stakeholder hardware/multisig key + recorded holder/rotation.
 - [ ] Mainnet deploy (new keypair, production RPCs, OAuth app, prod DB).
 - [ ] Dependency audits (`pnpm audit` + `cargo audit`).

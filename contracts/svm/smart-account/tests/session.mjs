@@ -14,7 +14,7 @@
 // Usage:
 //   export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
 //   cd contracts/svm/smart-account
-//   PID_BACKEND=<key> PID_TREASURY=<key> cargo build-sbf
+//   PID_TREASURY=<key> cargo build-sbf   # no BACKEND: creation is permissionless (ANT-612)
 //   solana-test-validator --reset > /tmp/validator.log 2>&1 &
 //   solana program deploy target/deploy/peridot_smart_account.so \
 //     --program-id target/deploy/peridot_smart_account-keypair.json
@@ -37,6 +37,9 @@ const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 const INSTRUCTIONS = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 const LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const DOMAIN_SESSION = Buffer.from("PID|SOLANA|SESSION|v1");
+const DOMAIN_V3 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3");
+const POLICY_V1 = 1;
+const ACTIVATE_NETWORK_FEE = 100_000;
 // Authenticator-data prefix for fixtures. The program never compares these
 // bytes (ANT-197 domain-free); any 32-byte prefix verifies if key/message/
 // challenge/UV pass. Neutral value — never a real RP hash.
@@ -54,8 +57,10 @@ const i64 = (v) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); re
 const u16 = (v) => { const b = Buffer.alloc(2); b.writeUInt16LE(v); return b; };
 const u32 = (v) => { const b = Buffer.alloc(4); b.writeUInt32LE(v); return b; };
 
-const BACKEND_SECRET = [2,165,58,5,85,113,187,187,189,165,0,247,194,28,78,38,100,30,150,157,210,65,241,136,120,108,19,175,51,247,44,88,68,27,157,74,181,156,0,3,4,104,44,101,23,145,208,210,131,227,116,208,145,70,66,152,114,42,243,151,173,78,79,158];
-const backend = Keypair.fromSecretKey(Buffer.from(BACKEND_SECRET));
+// Canonical revenue vault (test-only). The vault-setup activate below credits it,
+// exactly like production claims do — no allowlist involved.
+const TREASURY_SECRET = [208,255,148,158,50,192,250,184,231,51,204,195,166,2,29,129,110,106,56,172,8,112,127,77,140,144,60,245,75,170,89,14,254,116,220,42,95,208,228,150,212,52,66,86,186,148,243,197,174,81,12,59,43,26,161,41,217,156,62,166,30,185,3,180];
+const treasuryKp = Keypair.fromSecretKey(Buffer.from(TREASURY_SECRET));
 
 function lowS(sig) {
   const r = BigInt("0x" + sig.subarray(0, 32).toString("hex"));
@@ -201,7 +206,7 @@ async function main() {
   const userWallet = Keypair.generate();
   const attackerWallet = Keypair.generate();
   await conn.confirmTransaction(await conn.requestAirdrop(payer.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
-  await conn.confirmTransaction(await conn.requestAirdrop(backend.publicKey, 5 * LAMPORTS_PER_SOL), "confirmed");
+  await conn.confirmTransaction(await conn.requestAirdrop(treasuryKp.publicKey, LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(sessionKp.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(session3.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
 
@@ -214,24 +219,30 @@ async function main() {
   const sessionPda3 = sessionPdaOf(accountId32, session3.publicKey);
   console.log(`program ${PROGRAM.toBase58()} vault ${pda.toBase58()}`);
 
-  // ---- vault setup (initialize + fund + SPL position) ----
+  // ---- vault setup (fund + permissionless activate + SPL position) ----
+  // ANT-612: direct initialize is dead, so the vault is claimed through the
+  // fee-bearing activate path with `payer` (a random keypair) as submitter —
+  // the same permissionless flow any user or volunteer relayer uses.
+  await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+    SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: pda, lamports: 2 * LAMPORTS_PER_SOL })
+  ), [payer], { commitment: "confirmed" }), "confirmed");
   {
-    const s = signPayload(owner, sha256(Buffer.concat([Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3"), Buffer.from([0]), accountId32, authorityComp])));
+    const actExpiry = exp();
+    const payload = sha256(Buffer.concat([DOMAIN_V3, Buffer.from([5]), accountId32, authorityComp, u16(POLICY_V1), i64(actExpiry)]));
+    const s = signPayload(owner, payload);
     const tx = new Transaction().add(new TransactionInstruction({
       keys: [
-        { pubkey: backend.publicKey, isSigner: true, isWritable: true },
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
         { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
-      data: Buffer.concat([Buffer.from([0]), accountId32, authorityComp, u16(s.clientDataJSON.length), s.clientDataJSON]),
+      data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, u16(POLICY_V1), i64(actExpiry), u64(ACTIVATE_NETWORK_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
     }), buildSecpIx(s.comp, s.sig, s.messageData));
-    await expectOk(tx, [backend], "vault initialize");
+    await expectOk(tx, [payer], "vault activate (permissionless submitter)");
   }
-  await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
-    SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: pda, lamports: 2 * LAMPORTS_PER_SOL })
-  ), [payer], { commitment: "confirmed" }), "confirmed");
 
   // SPL positions: vault-owned (defense target) + session-owned (working capital).
   const mintAuthority = Keypair.generate();
@@ -602,7 +613,7 @@ async function main() {
       ],
       programId: PROGRAM,
       data: wdData(SESSION_DISC.revoke, [u64(nonce), sessionKp.publicKey.toBuffer(), i64(exp())], s.clientDataJSON),
-    }), buildSecpIx(s.comp, s.sig, s.messageData)), [backend], "revoke session");
+    }), buildSecpIx(s.comp, s.sig, s.messageData)), [payer], "revoke session");
     const transferData = Buffer.concat([Buffer.from([3]), u64(5)]);
     const gameData = forwarderCall(TOKEN_PROGRAM_ID, transferData, [
       [sessionAta.address, false, true], [attackerAta.address, false, true], [sessionPda, true, false],
@@ -637,7 +648,7 @@ async function main() {
     const cp = closePayload(accountId32, sessionKp.publicKey.toBuffer(), payer.publicKey.toBuffer(), nonce2, exp());
     const cs = signPayload(owner, cp);
     const destBalBefore = (await conn.getAccountInfo(payer.publicKey)).lamports;
-    await expectOk(closeTx(sessionPda, sessionKp.publicKey, payer.publicKey, nonce2, exp(), cs), [backend], "close revoked session");
+    await expectOk(closeTx(sessionPda, sessionKp.publicKey, payer.publicKey, nonce2, exp(), cs), [payer], "close revoked session");
     assert.equal(await conn.getAccountInfo(sessionPda), null, "session account closed");
     assert.ok((await conn.getAccountInfo(payer.publicKey)).lamports > destBalBefore, "rent reclaimed");
   }

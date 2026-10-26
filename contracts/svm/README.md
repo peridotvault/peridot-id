@@ -36,18 +36,20 @@ solana --version  # 2.3.13
 
 ```sh
 cd contracts/svm/smart-account
-PID_BACKEND=<backend-pubkey-base58> PID_TREASURY=<treasury-pubkey-base58> cargo build-sbf   # -> target/deploy/peridot_smart_account.so
-cargo test        # unit tests (auth vectors, fee policy, domain separation)
+PID_TREASURY=<treasury-pubkey-base58> cargo build-sbf   # -> target/deploy/peridot_smart_account.so
+PID_TREASURY=<treasury-pubkey-base58> cargo test        # unit tests (auth vectors, fee policy, domain separation, ANT-612 pins)
 ```
 
-`PID_BACKEND` / `PID_TREASURY` are baked in by `build.rs` (`src/config.rs`): only
-`BACKEND` may pay for `initialize` / relay `activate` — the PID-ownership proof
-that makes squatting and prefund-drain impossible — and the protocol fee goes to the
-canonical `TREASURY` revenue vault (defaults to `BACKEND` when unset). Same program
-id on every cluster, backend/treasury consts per env; neither enters PDA derivation. Unset
-`PID_BACKEND` = creation disabled (fail-closed zeros). Local integration tests use
-the test key `5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ` (secret in
-`tests/integration.mjs`, test-only).
+`PID_TREASURY` is baked in by `build.rs` (`src/config.rs`) and REQUIRED — an
+unset treasury is a build-time hard error (no silent default; a zero recipient
+would burn protocol fees). Creation is permissionless (ANT-612, ANT-610 spec
+§5): ANY funded signer may submit `activate` / `activateV4` — anti-squat is the
+user's passkey signature alone (the payload binds `account_id ‖ authority`),
+and every claim still splits `relayerFee → submitter` + `protocolFee → TREASURY`.
+Direct `initialize` (disc 0) is dead in all builds (`InitializeDeprecated`).
+Same program id on every cluster, treasury const per env; neither enters PDA
+derivation. There is no `PID_BACKEND` anymore — `build.rs` does not read it
+(builds succeed with it set or unset).
 
 ## Localnet
 
@@ -61,7 +63,7 @@ solana config set --url http://127.0.0.1:8899 && solana airdrop 5
 cd smart-account
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot_smart_account-keypair.json
-node tests/integration.mjs <program-id>   # 37 cases (PID_BACKEND + PID_TREASURY test-key build)
+node tests/integration.mjs <program-id>   # 44 cases (PID_TREASURY test-key build; permissionless-creation proofs)
 # Session suite (needs the mock forwarder deployed; forwarder id passed as argv[3]):
 solana-keygen new -o /tmp/forwarder-keypair.json --no-bip39-passphrase
 solana program deploy ../mock-forwarder/target/deploy/peridot_mock_forwarder.so \
