@@ -158,6 +158,108 @@ pub fn ttl_secs_to_ledgers(ttl_secs: u64) -> u64 {
     ttl_secs.div_ceil(LEDGER_SECS)
 }
 
+// ── TTL-cron steady-state policy (Phase-1 P1, ANT-703 — TTL-cron + OQ-2) ──
+//
+// Off-chain cron skeleton (pure decision logic; the scheduler, RPC reads,
+// and the bump signer live outside this crate):
+// - Cadence ≥ 1 run/24h ([`CRON_MAX_INTERVAL_SECS`]); each run reads
+//   `live_until_ledger_seq` for every pilot entry via `getLedgerEntries`.
+// - Bump when remaining < ~17k ledgers ([`BUMP_THRESHOLD_LEDGERS`],
+//   ≈48h-equivalent) with a persistent `extend_ttl` to max.
+// - Dedicated bump-only signer (no rule rights, no session authority);
+//   the cron NEVER signs intents.
+// - Page after [`CRON_MAX_CONSECUTIVE_FAILURES`] consecutive failures.
+// - The bump entry set is version-pinned ([`BumpSet`]): entry-set drift
+//   (new rule/snapshot entries missing from the list ⇒ silent archival of
+//   subsets) fails loudly instead of silently — the indexer owns the list
+//   and bumps its version; a run against a stale version aborts the bump
+//   (same fail-closed shape as `StaleSnapshot`).
+//
+// OQ-2 rent methodology (testnet): (1) deploy the pilot-shape account
+// (factory account + ≥1 rule + snapshot entries); (2) `simulateTransaction`
+// at TTL 100%/50%/10% remaining, recording `rent`/`restore` lines;
+// (3) extend to max, idle 7 days under the cron, re-simulate; steady-state
+// = `rent_fee`/day at full-bump cadence + `restore_fee` (expected 0 while
+// the cron is healthy; one archival-restore drill measures the non-zero
+// path). Success bar: bump cost ≤ 2× typical `total_fee`; 7-day projection
+// in stroops + XLM. See `TTL_CRON.md` for the runbook.
+
+/// Bump when an entry has fewer than this many ledgers of TTL remaining
+/// (≈48h at ~5s/ledger — the spec §4.5 "~17k ledgers" threshold).
+pub const BUMP_THRESHOLD_LEDGERS: u32 = 17_000;
+
+/// Maximum interval between cron runs (≥ 1 run/24h).
+pub const CRON_MAX_INTERVAL_SECS: u64 = 86_400;
+
+/// Consecutive bump failures before paging (MTTR ≤ 15 min per spec §4.5).
+pub const CRON_MAX_CONSECUTIVE_FAILURES: u32 = 3;
+
+/// True when an entry's remaining TTL needs a bump this run.
+pub fn should_bump(remaining_ledgers: u32) -> bool {
+    remaining_ledgers < BUMP_THRESHOLD_LEDGERS
+}
+
+/// Version-pinned bump entry set. `expected_version` is the indexer's
+/// current version; a run holding a stale list must abort (fail-closed).
+#[derive(Debug, Clone)]
+pub struct BumpSet {
+    pub version: u32,
+    /// Entry hashes (account instance + `ContextRuleData(*)` + signer/policy
+    /// entries, including every G2 snapshot row) to `extend_ttl`.
+    pub entries: Vec<[u8; 32]>,
+}
+
+impl BumpSet {
+    /// Entries to bump this run: those below threshold. `false` return on
+    /// the version check means "abort the run, re-fetch the list" — never
+    /// bump a stale set (a new entry could be silently skipped).
+    pub fn plan_bump(
+        &self,
+        expected_version: u32,
+        remaining: &[(/* entry */ [u8; 32], /* remaining_ledgers */ u32)],
+    ) -> Option<Vec<[u8; 32]>> {
+        if self.version != expected_version {
+            return None;
+        }
+        Some(
+            remaining
+                .iter()
+                .filter(|(_, r)| should_bump(*r))
+                .map(|(e, _)| *e)
+                .collect(),
+        )
+    }
+}
+
+/// Cron liveness tracker: counts consecutive bump failures; page when the
+/// count exceeds [`CRON_MAX_CONSECUTIVE_FAILURES`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CronState {
+    pub consecutive_failures: u32,
+}
+
+impl CronState {
+    pub fn new() -> Self {
+        CronState { consecutive_failures: 0 }
+    }
+
+    /// Record one run outcome: success resets the counter, failure bumps it
+    /// (saturating — the counter is ops telemetry, never auth).
+    pub fn record_result(&mut self, ok: bool) {
+        if ok {
+            self.consecutive_failures = 0;
+        } else {
+            self.consecutive_failures = self.consecutive_failures.saturating_add(1);
+        }
+    }
+
+    /// True once the streak reaches the paging threshold: three consecutive
+    /// failures page immediately (spec §4.5 / R1 cron design).
+    pub fn needs_page(&self) -> bool {
+        self.consecutive_failures >= CRON_MAX_CONSECUTIVE_FAILURES
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,5 +358,35 @@ mod tests {
         assert_eq!(ttl_secs_to_ledgers(600), 120);
         assert_eq!(ttl_secs_to_ledgers(601), 121);
         assert!(MAX_TTL_SECS == 600);
+    }
+
+    /// TTL-cron skeleton (ANT-703): bump threshold, version-pinned bump set,
+    /// 3-strike paging.
+    #[test]
+    fn cron_bump_threshold_and_version_pin() {
+        assert!(should_bump(16_999));
+        assert!(!should_bump(17_000)); // boundary: bump only when BELOW ~17k
+        assert!(!should_bump(u32::MAX));
+        let set = BumpSet { version: 7, entries: vec![[0x01; 32], [0x02; 32]] };
+        let remaining = [([0x01; 32], 5_000u32), ([0x02; 32], 100_000u32)];
+        // Fresh version: only the low-TTL entry is bumped.
+        assert_eq!(set.plan_bump(7, &remaining), Some(vec![[0x01; 32]]));
+        // Stale version: abort the run (fail-closed — re-fetch, never bump blind).
+        assert_eq!(set.plan_bump(6, &remaining), None);
+        assert_eq!(set.plan_bump(8, &remaining), None);
+    }
+
+    #[test]
+    fn cron_pages_on_three_consecutive_failures() {
+        let mut s = CronState::new();
+        assert!(!s.needs_page());
+        s.record_result(false);
+        s.record_result(false);
+        assert!(!s.needs_page()); // two in a row: no page yet
+        s.record_result(false);
+        assert!(s.needs_page()); // third consecutive failure pages
+        s.record_result(true); // success resets the streak
+        assert!(!s.needs_page());
+        assert_eq!(s.consecutive_failures, 0);
     }
 }
