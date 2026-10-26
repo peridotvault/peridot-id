@@ -53,6 +53,26 @@ export const IX_V4 = {
   activate: 14,
 } as const;
 
+/**
+ * ANT-635 revenue-vault discriminators (must match `src/instructions/mod.rs`
+ * 15-18). Spec ANT-637 reserved 11-14, but those were already taken by the V4
+ * siblings, so the vault family starts at 15 (additive-only preserved).
+ */
+export const IX_VAULT = {
+  initTreasury: 15,
+  withdrawRevenue: 16,
+  addAdmin: 17,
+  removeAdmin: 18,
+} as const;
+
+/** Revenue-vault PDA seeds (must match `src/treasury.rs`). */
+export const TREASURY_SEED = "treasury";
+export const CONFIG_SEED = "config";
+/** Revenue-config PDA space: 8-byte header + 8 x 32-byte admin slots. */
+export const REVENUE_CONFIG_LEN = 264;
+/** Maximum live vault admins (floor 1 enforced on-chain). */
+export const MAX_VAULT_ADMINS = 8;
+
 /** V4 operation tags — equal to the V4 discriminators (auth.rs convention). */
 export const OP_V4 = {
   withdrawSol: 11,
