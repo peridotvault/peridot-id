@@ -10,6 +10,10 @@ import {
   SOLANA_TESTNET_PROGRAM_ID,
   SOLANA_TESTNET_REFERENCE,
   SOLANA_TESTNET_RPC,
+  STELLAR_NAMESPACE,
+  STELLAR_TESTNET_EXPLORER,
+  STELLAR_TESTNET_REFERENCE,
+  STELLAR_TESTNET_RPC,
 } from "../src/common/chains";
 
 const prisma = new PrismaClient();
@@ -114,6 +118,40 @@ async function main(): Promise<void> {
         create: { chainId: chain.id, type: "account_implementation", address: implementation, versionLabel: "v1" },
       });
     }
+  }
+
+  // Stellar testnet row (ANT-709 P1 S1 §5: AC5.5–AC5.8, testnet-only).
+  // Keyed by the F1 network_id hex (OQ-S1 proposed; 64-char, deterministic,
+  // already bound in every v2 digest). No schema migration: pure data-row
+  // expand; chain_accounts FKs by id so existing solana/eip155 rows are
+  // untouched (AC5.8 cross-row isolation). Re-runnable via natural-key upsert.
+  const stellar = await prisma.chain.upsert({
+    where: { namespace_reference: { namespace: STELLAR_NAMESPACE, reference: STELLAR_TESTNET_REFERENCE } },
+    update: {},
+    create: {
+      namespace: STELLAR_NAMESPACE,
+      reference: STELLAR_TESTNET_REFERENCE,
+      name: "stellar-testnet",
+      nativeSymbol: "XLM",
+      decimals: 7,
+      rpcUrls: [process.env.STELLAR_TESTNET_RPC ?? STELLAR_TESTNET_RPC],
+      explorerUrl: STELLAR_TESTNET_EXPLORER,
+      isTestnet: true,
+      isActive: true,
+    },
+  });
+  // AC5.7: one `factory`-type contract = the §1 deployed factory address.
+  // Bootstrap from env `STELLAR_FACTORY_ADDRESS` (filled post-deploy; row
+  // seeds without a contract until then). Re-seed heals rotations
+  // (update: address) while solana + eip155 rows are byte-unchanged (AC5.8,
+  // ANT-70 heal-precedent). No `program`-type row is required for stellar.
+  const stellarFactory = process.env.STELLAR_FACTORY_ADDRESS;
+  if (stellarFactory) {
+    await prisma.chainContract.upsert({
+      where: { chainId_type: { chainId: stellar.id, type: "factory" } },
+      update: { address: stellarFactory },
+      create: { chainId: stellar.id, type: "factory", address: stellarFactory, versionLabel: "v1" },
+    });
   }
   console.log("chain registry seeded");
 

@@ -40,6 +40,25 @@ export const SOLANA_DEVNET_RPC = "https://api.devnet.solana.com";
 /** Public testnet RPC — seed default for the solana-testnet registry row. */
 export const SOLANA_TESTNET_RPC = "https://api.testnet.solana.com";
 
+/** Stellar namespace (S1 §5: `namespace: "stellar"`). */
+export const STELLAR_NAMESPACE = "stellar";
+/**
+ * Registry key of the stellar-testnet row (S1 §5.2, OQ-S1 proposed).
+ * Stellar has no EIP-155 chain-id and no Solana genesis-hash convention to
+ * copy, so the F1 `network_id` hex is the deterministic key: it is already
+ * bound in every v2 digest and is exactly 64 chars.
+ * `sha256("Test SDF Network ; September 2015")` — == `env.ledger().network_id()`
+ * on testnet (host truth) and `networkId(TESTNET_PASSPHRASE)` in
+ * `packages/stellar` (AC5.3 parity). If the CTO picks the raw passphrase
+ * string per OQ-S1, re-key this constant and the seed mechanically.
+ */
+export const STELLAR_TESTNET_REFERENCE =
+  "cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472";
+/** Horizon testnet RPC — seed default for the stellar-testnet row. */
+export const STELLAR_TESTNET_RPC = "https://horizon-testnet.stellar.org";
+/** Explorer base for the stellar-testnet row. */
+export const STELLAR_TESTNET_EXPLORER = "https://stellarchain.io/testnet";
+
 /**
  * Server-side Solana network selection (ANT-15 req 1). The server resolves
  * this against active registry rows — never trust a client-supplied chain id.
