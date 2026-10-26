@@ -18,11 +18,10 @@
 //! `PID_TREASURY` (base58) becomes `config::TREASURY`, the single canonical
 //! recipient of protocol markup. It has NO default: an unset `PID_TREASURY`
 //! is a build-time hard error — the revenue recipient must be a deliberate
-//! choice, never a silent zero address that would burn fees. ANT-612 removed
-//! the `PID_BACKEND`/`config::BACKEND` creation allowlist entirely:
-//! creation (`activate`/`activate_v4`) accepts any signer payer and binds
-//! ownership purely via the user's passkey signature, while every creation
-//! still routes through the fee-bearing path that credits `TREASURY`.
+//! choice, never a silent zero address that would burn fees. Creation is
+//! permissionless (ANT-612): `activate`/`activate_v4` accept any signer payer
+//! and bind ownership purely via the user's passkey signature, while every
+//! creation still routes through the fee-bearing path that credits `TREASURY`.
 //! Neither constant enters PDA derivation: builds are env-specific by design
 //! (program id per cluster via `PID_PROGRAM_ID`, treasury const per cluster).
 //! Local tests set `PID_TREASURY` to the test keypair.
@@ -76,10 +75,12 @@ const DEFAULT_PROGRAM_ID: &str = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
 
 fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("config.rs");
-    // ANT-612: no creation allowlist. `PID_TREASURY` is required — an unset
-    // treasury fails the build instead of silently defaulting (a zero/default
-    // recipient would burn protocol fees). AC-S4: building with `PID_BACKEND`
-    // set or unset both succeed; the variable is simply unread.
+    // ANT-612: creation is permissionless (no creation gate).
+    // `PID_TREASURY` is required — an unset treasury fails the build instead
+    // of silently defaulting (a zero/default recipient would burn protocol
+    // fees). AC-S4: no creation-gate env is read here, so a stale legacy
+    // variable can neither break nor gate the build — set or unset, the
+    // result is identical; only `PID_TREASURY` is baked in.
     let treasury = match parse_pubkey("PID_TREASURY", "PID_TREASURY") {
         Some(raw) => raw,
         None => panic!(

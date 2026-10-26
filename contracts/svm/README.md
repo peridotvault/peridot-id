@@ -48,8 +48,8 @@ user's passkey signature alone (the payload binds `account_id ‖ authority`),
 and every claim still splits `relayerFee → submitter` + `protocolFee → TREASURY`.
 Direct `initialize` (disc 0) is dead in all builds (`InitializeDeprecated`).
 Same program id on every cluster, treasury const per env; neither enters PDA
-derivation. There is no `PID_BACKEND` anymore — `build.rs` does not read it
-(builds succeed with it set or unset).
+derivation. Creation is permissionless: `build.rs` bakes in no creation gate —
+only `PID_TREASURY` and the program-id inputs.
 
 ## Localnet
 

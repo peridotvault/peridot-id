@@ -16,7 +16,7 @@
 // Usage:
 //   export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
 //   cd contracts/svm/smart-account
-//   PID_TREASURY=<key> cargo build-sbf   # no BACKEND: creation is permissionless (ANT-612)
+//   PID_TREASURY=<key> cargo build-sbf   # creation is permissionless (ANT-612)
 //   solana-test-validator --reset > /tmp/validator.log 2>&1 &
 //   solana program deploy target/deploy/peridot_smart_account.so \
 //     --program-id target/deploy/peridot_smart_account-keypair.json

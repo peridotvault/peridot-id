@@ -301,32 +301,34 @@ mod ant16e_deprecation_tests {
     }
 }
 
-/// ANT-612 regression (ANT-610 spec AC-S4): no BACKEND allowlist remains
-/// anywhere in program source or build. Creation binds ownership purely via
-/// the user's passkey signature; the fee recipient (`TREASURY`) is the only
-/// baked canonical address.
+/// ANT-612 regression (ANT-610 spec AC-S4): no creation gate remains anywhere
+/// in program source or build. Creation binds ownership purely via the user's
+/// passkey signature; the fee recipient (`TREASURY`) is the only baked
+/// canonical address.
 #[cfg(test)]
 mod ant612_permissionless_tests {
-    /// True when `src` references the removed creation allowlist as code.
-    /// Comment lines (`//`, `//!`, `///`, `*`-interiors) are ignored:
-    /// migration notes may name the removed allowlist (AC-S4 permits this),
-    /// but no compiled code may.
-    fn code_references_allowlist(src: &str) -> bool {
-        // Built from parts (never a literal) so this pin's own source never
-        // self-matches the scan.
-        use alloc::string::String;
-        let needle: String = ["BACK", "END"].into_iter().collect();
+    /// True when `src` references a creation gate as code. Comment lines
+    /// (`//`, `//!`, `///`, `*`-interiors) are ignored: migration notes may
+    /// describe the removed gate (AC-S4 permits this), but no compiled code
+    /// may. Needles are built from parts (never literals) so this pin's own
+    /// source never self-matches the scan.
+    fn code_references_gate(src: &str) -> bool {
+        use alloc::{string::String, vec::Vec};
+        let needles: Vec<String> = [["BACK", "END"], ["ALLOW", "LIST"]]
+            .into_iter()
+            .map(|parts| parts.into_iter().collect())
+            .collect();
         src.lines().any(|line| {
             let t = line.trim_start();
             if t.starts_with("//") || t.starts_with('*') {
                 return false;
             }
-            line.contains(&needle)
+            needles.iter().any(|n| line.contains(n))
         })
     }
 
     #[test]
-    fn no_backend_in_creation_paths() {
+    fn no_gate_in_creation_paths() {
         for (file, src) in [
             (
                 "instructions/activate.rs",
@@ -346,21 +348,69 @@ mod ant612_permissionless_tests {
             ("lib.rs", include_str!("lib.rs")),
         ] {
             assert!(
-                !code_references_allowlist(src),
-                "{file}: must not reference the removed allowlist in code (ANT-612 permissionless creation)"
+                !code_references_gate(src),
+                "{file}: must not reference a creation gate in code (ANT-612 permissionless creation)"
             );
         }
     }
 
+    /// Every `VAR` in `std::env::var("VAR")` and `rerun-if-env-changed=VAR`
+    /// lines inside build.rs source.
+    fn referenced_env_vars(src: &str) -> alloc::vec::Vec<alloc::string::String> {
+        use alloc::string::String;
+        let mut out: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+        for line in src.lines() {
+            // `std::env::var("OUT_DIR")` / `parse_pubkey("PID_TREASURY", ..)`
+            // style reads: the first quoted literal on the line names the var.
+            // (Single-line reads only — build.rs keeps every env read on one
+            // line; a multi-line read would silently escape this pin, so keep
+            // it that way.)
+            let probe = if let Some(rest) = line.split_once("env::var(\"") {
+                rest.1.split('"').next()
+            } else if let Some(rest) = line.split_once("parse_pubkey(\"") {
+                rest.1.split('"').next()
+            } else if let Some(rest) = line.split_once("rerun-if-env-changed=") {
+                rest.1
+                    .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .next()
+            } else {
+                None
+            };
+            if let Some(var) = probe {
+                let var = String::from(var);
+                if !out.contains(&var) {
+                    out.push(var);
+                }
+            }
+        }
+        out
+    }
+
     #[test]
-    fn no_backend_in_build_script() {
-        // build.rs is outside `src/` so it is pinned textually: the variable
-        // must be unread (AC-S4: builds succeed with PID_BACKEND set or unset).
+    fn no_gate_env_in_build_script() {
+        // build.rs is outside `src/` so it is pinned textually: no
+        // creation-gate env may be read (AC-S4). The allow-set below lists
+        // every env var build.rs may touch; any new read fails closed here
+        // first — which is what makes a stale legacy variable harmless both
+        // set and unset (it is simply never read).
         let src = include_str!("../build.rs");
         assert!(
-            !code_references_allowlist(src),
-            "build.rs: must not read the removed allowlist env or emit its const in code"
+            !code_references_gate(src),
+            "build.rs: must not reference a creation gate in code"
         );
+        for var in referenced_env_vars(src) {
+            assert!(
+                [
+                    "OUT_DIR",
+                    "PID_TREASURY",
+                    "PID_PROGRAM_ID",
+                    "PID_PROGRAM_ID_REQUIRED",
+                    "SOLANA_CLUSTER",
+                ]
+                .contains(&var.as_str()),
+                "build.rs: unexpected env read `{var}` (creation must stay permissionless)"
+            );
+        }
         assert!(
             src.contains("PID_TREASURY"),
             "build.rs: treasury must remain build-configured"
@@ -394,8 +444,8 @@ mod ant612_permissionless_tests {
             ),
         ] {
             assert!(
-                !code_references_allowlist(src),
-                "{file}: spend path must not gain an allowlist gate"
+                !code_references_gate(src),
+                "{file}: spend path must not gain a creation gate"
             );
         }
     }

@@ -84,7 +84,7 @@ pub fn process(
     if !rent_payer.is_signer() {
         return Err(PeridotError::NotSigner.into());
     }
-    // ANT-612: the BACKEND allowlist is gone (any submitter may relay
+    // ANT-612: creation is permissionless (any submitter may relay
     // `activate`; anti-squat is the passkey signature). This instruction
     // rejects above regardless, so no payer check remains here.
     if smart_account.data_len() != 0 {

@@ -3,7 +3,7 @@
 //!
 //! The user deposits SOL directly to their deterministic (uninitialized) PDA address. When
 //! sufficiently funded, ANY submitter (the user themselves, the official relayer,
-//! or a volunteer third party — ANT-612 removed the BACKEND allowlist) may relay activation:
+//! or a volunteer third party — creation is permissionless since ANT-612) may relay activation:
 //! a signer payer fronts the transaction, the pre-funded PDA covers rent plus fees, and this
 //! instruction claims the account and reimburses the attested `network_fee` in full to the
 //! submitter plus `protocol_fee` (recomputed on-chain from the signed fee-policy version) to the
@@ -75,7 +75,7 @@ pub fn process(
     // ANT-612 (ANT-610 spec section 5): permissionless creation. Any signer may
     // submit; anti-squat is the passkey signature below (only the new
     // authority authorizes the claim), and every claim still pays the protocol
-    // fee to the canonical vault. No BACKEND allowlist remains.
+    // fee to the canonical vault. No creation gate remains.
     // The PDA may not already be program-owned or initialized.
     if smart_account.data_len() != 0 || smart_account.owned_by(program_id) {
         return Err(PeridotError::AlreadyInitialized.into());
