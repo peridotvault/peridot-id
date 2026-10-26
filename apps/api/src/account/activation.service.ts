@@ -619,7 +619,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       ? "active"
       : this.classify(balance, required, chain.status);
 
-    const solChain = await this.chains.solanaChain().catch(() => undefined);
+    const solChain = await this.chains.solanaChain(selection).catch(() => undefined);
     const chainTime = await adapter.chainTime().catch(() => 0);
     const quotedAt = new Date(chainTime * 1000);
     const expiresAt = new Date(quotedAt.getTime() + QUOTE_TTL_SECS * 1000);
