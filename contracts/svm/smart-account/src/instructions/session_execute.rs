@@ -437,12 +437,17 @@ mod tests {
     fn v4_discriminants_are_additive() {
         // New V4 spend paths are 11-14; V3 0-10 unchanged (old SDK decoders
         // keep working; op-tags equal discriminators per auth.rs convention).
+        // ANT-635 vault instructions extend the range at 15-18 (ANT-638).
         use super::super::Instruction;
         assert_eq!(Instruction::try_from(6).unwrap(), Instruction::Execute);
         assert_eq!(Instruction::try_from(11).unwrap(), Instruction::WithdrawSolV4);
         assert_eq!(Instruction::try_from(12).unwrap(), Instruction::WithdrawTokenV4);
         assert_eq!(Instruction::try_from(13).unwrap(), Instruction::ExecuteV4);
         assert_eq!(Instruction::try_from(14).unwrap(), Instruction::ActivateV4);
-        assert!(Instruction::try_from(15).is_err());
+        assert_eq!(Instruction::try_from(15).unwrap(), Instruction::InitTreasury);
+        assert_eq!(Instruction::try_from(16).unwrap(), Instruction::WithdrawRevenue);
+        assert_eq!(Instruction::try_from(17).unwrap(), Instruction::AddAdmin);
+        assert_eq!(Instruction::try_from(18).unwrap(), Instruction::RemoveAdmin);
+        assert!(Instruction::try_from(19).is_err());
     }
 }

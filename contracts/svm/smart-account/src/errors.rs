@@ -64,6 +64,20 @@ pub enum PeridotError {
     /// a compromised session or hostile game cannot drain session rent/fees.
     /// Additive-only (new discriminant 24).
     SessionSpendExceeded = 24,
+    /// ANT-635 revenue vault (ANT-638): signer not in the live config allowlist.
+    /// Additive-only (new discriminant 25). Note: spec ANT-637 numbered these
+    /// 24-27, but 24 was already taken by `SessionSpendExceeded`, so the vault
+    /// family starts at 25.
+    NotAdmin = 25,
+    /// ANT-635 revenue vault: `InitTreasury` on an already-initialized
+    /// config/treasury PDA. Additive-only (new discriminant 26).
+    ConfigAlreadyInitialized = 26,
+    /// ANT-635 revenue vault: `AddAdmin` at MAX_ADMINS (8). Additive-only
+    /// (new discriminant 27).
+    TooManyAdmins = 27,
+    /// ANT-635 revenue vault: `RemoveAdmin` targeting the last live admin
+    /// (floor-1, EVM `PeridotFactory` parity). Additive-only (28).
+    CannotRemoveLastAdmin = 28,
 }
 
 impl From<PeridotError> for ProgramError {
