@@ -81,7 +81,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setRole(me.role ?? "user");
       setIdentityId(me.pid);
       return true;
-    } catch {
+    } catch (e) {
+      // A blocked fetch (e.g. CSP connect-src) is indistinguishable from a
+      // missing session downstream — log the cause for DevTools diagnosis.
+      // eslint-disable-next-line no-console
+      console.warn("[workspace] session check failed:", e);
       setStatus("anonymous");
       return false;
     }
