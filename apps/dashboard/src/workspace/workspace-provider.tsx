@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Peridot } from "@peridotvault/pid-sdk-js";
 import type { PeridotClient, Role } from "@peridotvault/pid-sdk-js";
+import { PopupClosedError } from "@peridotvault/pid-sdk-js";
 import { Topbar, type WorkspaceTab } from "./topbar";
 import { resolveBrowserUrl } from "../lib/api-base";
 import {
@@ -60,7 +61,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
-  const refreshSession = useCallback(async () => {
+  // Resolves true when an owner session is established. Every anonymous
+  // outcome resolves false so callers can surface it — the session check must
+  // never fail silently (ANT-694: sandbox login showed no error because the
+  // popup completed but the cookie never stuck).
+  const refreshSession = useCallback(async (): Promise<boolean> => {
     try {
       let me = await client.identity.me();
       // Access tokens are short-lived; the scoped refresh cookie revives the
@@ -70,13 +75,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       }
       if ("statusCode" in me) {
         setStatus("anonymous");
-      } else {
-        setStatus("owner");
-        setRole(me.role ?? "user");
-        setIdentityId(me.pid);
+        return false;
       }
+      setStatus("owner");
+      setRole(me.role ?? "user");
+      setIdentityId(me.pid);
+      return true;
     } catch {
       setStatus("anonymous");
+      return false;
     }
   }, [client]);
 
@@ -86,16 +93,30 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   // First-party sign-in: the wallet app (popup) handles Google + passkey + the
   // account switcher. No client_id/secret — the session cookie is shared.
+  // ANT-694: every failure surfaces in `error`. Only a user-closed popup
+  // stays quiet; a completed popup with no session (wrong-API build, blocked
+  // third-party cookies, scope mismatch) reports instead of going silent.
   const signIn = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
       await client.auth.loginPopup({ firstParty: true, sessionScope: SESSION_SCOPE });
-      await refreshSession();
+      const established = await refreshSession();
+      if (!established) {
+        setError(
+          "Sign-in finished but no session was established. " +
+            "This dashboard may be talking to a different API than the wallet popup " +
+            "(sandbox vs production), or the browser blocked the session cookie. " +
+            "Allow cookies for this site and try again.",
+        );
+      }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // User closed / cancelled the popup stays quiet; real failures surface.
-      if (!/closed|cancel|denied|rejected/i.test(msg)) setError(msg || "Sign-in failed");
+      if (e instanceof PopupClosedError) {
+        // User closed the popup before completing — stays quiet.
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg || "Sign-in failed");
+      }
     } finally {
       setBusy(false);
     }
