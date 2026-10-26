@@ -87,6 +87,18 @@ function clearFailsafe(): void {
 }
 
 /**
+ * Open the transition window without changing the mode (chain-selection
+ * switches reuse the same signing-block + failsafe: data hooks reload on the
+ * notification and close the window via endNetworkTransition()).
+ */
+export function beginNetworkTransition(): void {
+  switching = true;
+  emit();
+  clearFailsafe();
+  failsafe = setTimeout(endNetworkTransition, TRANSITION_FAILSAFE_MS);
+}
+
+/**
  * Persist a mode change and open the transition window. Data hooks reload
  * on the notification and close the window via endNetworkTransition(); the
  * failsafe closes it unconditionally so signing can never stick blocked.
@@ -103,10 +115,7 @@ export function setNetworkMode(mode: NetworkMode): void {
   } catch {
     /* non-fatal */
   }
-  switching = true;
-  emit();
-  clearFailsafe();
-  failsafe = setTimeout(endNetworkTransition, TRANSITION_FAILSAFE_MS);
+  beginNetworkTransition();
 }
 
 /** Idempotent: closes the transition window (notifies only on change). */
