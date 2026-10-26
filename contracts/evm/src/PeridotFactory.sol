@@ -10,7 +10,8 @@ import {PeridotAccount} from "./PeridotAccount.sol";
 /// Deploy THIS factory at one address on every chain (keyless CREATE2 deploy of
 /// the implementation first, then the factory with identical constructor args)
 /// and every account keeps one address on Monad / BSC / Arbitrum.
-/// @dev V3: `deployAndInit` is relayer-submitted but user-authorized — the user's
+/// @dev V3: `deployAndInit` is permissionless but user-authorized — any submitter
+/// (official relayer, volunteer, or the user self-relaying) may call; the user's
 /// passkey binds salt, authority, policy, deadline, chainid and
 /// this factory (no amounts). There is intentionally NO bare `deploy`: a
 /// deployed-but-uninitialized proxy plus ungated `initialize` is a squat vector,
@@ -20,19 +21,23 @@ import {PeridotAccount} from "./PeridotAccount.sol";
 /// (`withdrawRevenue`); there is deliberately NO path for the factory or its
 /// admins to touch user accounts, authorities, nonces, or fee policy. The
 /// factory is never a wallet authority.
+/// @dev Kill-switch replacing the relayer gate (ANT-610 §3.2): `deploysPaused`
+/// (admin-only, default off) halts new creation; spend + revenue paths
+/// are untouched.
 contract PeridotFactory {
     address public immutable implementation;
-    /// @dev Only this address may submit `deployAndInit`. It chooses nothing:
-    /// authority, fee policy and recipients are all fixed by the user's signed
-    /// authorization + this factory's immutables. Zero address = deploys disabled.
-    address public relayer;
 
     /// @dev Revenue administrators. Constructor-seeded; managed by existing
     /// admins only, with a floor of one (the last admin cannot be removed).
     mapping(address => bool) public admins;
 
+    /// @dev Creation kill-switch (ANT-610 §3.2). `false` = creation enabled.
+    /// Only creation halts when `true`; existing accounts (`execute`) and
+    /// `withdrawRevenue` are untouched.
+    bool public deploysPaused;
+
     event Deployed(address indexed account, bytes32 indexed salt);
-    event RelayerUpdated(address indexed relayer);
+    event DeploysPaused(bool paused);
     event AdminAdded(address indexed admin);
     event AdminRemoved(address indexed admin);
     event RevenueWithdrawn(address indexed destination, uint256 amount);
@@ -45,6 +50,7 @@ contract PeridotFactory {
     error InsufficientRevenue();
     error RevenueTransferFailed();
     error GasAnomaly();
+    error Paused();
 
     modifier onlyAdmin() {
         if (!admins[msg.sender]) revert NotAdmin();
@@ -55,10 +61,9 @@ contract PeridotFactory {
     /// Enforces the floor of one: the vault must never become unmanageable.
     uint256 public adminCount;
 
-    constructor(address _implementation, address _relayer, address[] memory _admins) {
+    constructor(address _implementation, address[] memory _admins) {
         if (_admins.length == 0) revert ZeroAddress();
         implementation = _implementation;
-        relayer = _relayer;
         for (uint256 i = 0; i < _admins.length; i++) {
             if (_admins[i] == address(0)) revert ZeroAddress();
             if (!admins[_admins[i]]) {
@@ -72,11 +77,11 @@ contract PeridotFactory {
     /// @notice Accept protocol revenue (called by accounts paying protocolFee).
     receive() external payable {}
 
-    /// @notice Rotate the relayer (current relayer only). Zero disables deploys.
-    function updateRelayer(address _relayer) external {
-        if (msg.sender != relayer) revert Unauthorized();
-        relayer = _relayer;
-        emit RelayerUpdated(_relayer);
+    /// @notice Pause/unpause creation (admin only). Paused creation reverts
+    /// `Paused()`; existing accounts and revenue are unaffected.
+    function setDeploysPaused(bool paused) external onlyAdmin {
+        deploysPaused = paused;
+        emit DeploysPaused(paused);
     }
 
     /// @notice Add a revenue administrator (existing admin only).
@@ -111,10 +116,13 @@ contract PeridotFactory {
         emit RevenueWithdrawn(destination, amount);
     }
 
-    /// @notice Deploy + passkey-bound initialize atomically.
+    /// @notice Deploy + passkey-bound initialize atomically. Permissionless
+    /// (ANT-610): ANY submitter may call — the account itself verifies the
+    /// activation authorization, so no front-run window exists on the authority,
+    /// the policy, or the recipients.
     /// Mirrors SVM `activate`: the account is pre-funded at its counterfactual address;
     /// the submitter attests `networkFee`, the account recomputes `protocolFee`
-    /// from policy — relayerFee → the submitting relayer (`msg.sender` here;
+    /// from policy — relayerFee → the submitting caller (`msg.sender` here;
     /// `msg.sender` inside `initialize` is this factory), protocolFee → this
     /// factory vault. Reverts unless the activation authorization (verified by
     /// the account itself) is valid: no front-run window on the authority,
@@ -136,7 +144,7 @@ contract PeridotFactory {
         bytes32 s
     ) external returns (address account) {
         uint256 startGas = gasleft();
-        if (msg.sender != relayer) revert Unauthorized();
+        if (deploysPaused) revert Paused();
         account = Clones.cloneDeterministic(implementation, salt);
         (bool ok, ) = account.call(
             abi.encodeCall(
@@ -181,7 +189,7 @@ contract PeridotFactory {
         bytes32 s
     ) external returns (address account) {
         uint256 startGas = gasleft();
-        if (msg.sender != relayer) revert Unauthorized();
+        if (deploysPaused) revert Paused();
         account = Clones.cloneDeterministic(implementation, salt);
         (bool ok, ) = account.call(
             abi.encodeCall(
