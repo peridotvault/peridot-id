@@ -1,12 +1,14 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { ActivationService } from "./activation.service";
 import { SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE } from "../common/chains";
-import { mockSecurity, mockIdempotency, mockBreaker, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
+import { mockSecurity, mockIdempotency, mockBreaker, solanaRelayerConfig, minimalChainsStub, COSE_HEX } from "../../test/factories";
 
 
 const IDENTITY_ID = "pid_01HASH";
 const SMART_ADDR = "CNostmskLqp9bRX2StVVQ7cTJymAgNRweH1UxMsJQib7";
 const RELAYER = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
+// ANT-635: fee vault is the ["treasury"] PDA per program id (valid base58).
+const TREASURY_PDA = "VzTreasuryPDA11111111111111111111111111111";
 const COST = 1592460;
 const NETWORK = 800880 + 20000; // rent + message fee from the mocked estimate
 const PROTOCOL = Math.floor((NETWORK * 5000) / 10000); // 410440
@@ -37,6 +39,7 @@ const adapterMock = {
     marginLamports: BigInt(0),
   })),
   activateV3: jest.fn(async () => "sig1"),
+  treasuryAddress: jest.fn(() => new MockPublicKey(TREASURY_PDA)),
   parseTransaction: jest.fn(async () => ({ signature: "sig1", fee: NETWORK })),
   chainTime: jest.fn(async () => 1000000000),
   getStatus: jest.fn(async () => ({ confirmed: true, error: undefined, signature: "sig1" })) as jest.Mock<Promise<{ confirmed: boolean; error?: string; signature: string }>>,
@@ -116,7 +119,7 @@ describe("ActivationService", () => {
           confirmedAt: expect.any(Date),
           txHash: "sig1",
           direction: "out",
-          counterparty: TREASURY,
+          counterparty: TREASURY_PDA,
           amount: BigInt(NETWORK + PROTOCOL),
         }),
       }),

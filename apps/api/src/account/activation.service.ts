@@ -32,7 +32,6 @@ import {
   QUOTE_TTL_SECS,
   relayerKeypair,
   solanaAdapter,
-  treasuryPubkey,
 } from "../common/solana-relay";
 import { PID_ACTIVATION_CONFIRM_INTERVAL_MS, PID_ACTIVATION_CONFIRM_ATTEMPTS, PID_ACTIVATION_POLL_MS } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
@@ -133,10 +132,6 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
 
   private relayer(): Keypair {
     return relayerKeypair(this.pidSolana, this.config);
-  }
-
-  private treasury(): PublicKey {
-    return treasuryPubkey(this.pidSolana, this.config);
   }
 
   private async adapter(selection?: SolanaSelection): Promise<SolanaAdapter> {
@@ -467,7 +462,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
               networkFee,
               dto.expiry,
               this.relayer(),
-              this.treasury(),
+              undefined,
               this.toAssertion(dto.assertion),
             )
             .then((sig) => ({ signature: sig, result: null })),
@@ -540,7 +535,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
             amount: BigInt(totalFee),
             asset: "SOL",
             direction: "out",
-            counterparty: this.treasury().toBase58(),
+            counterparty: adapter.treasuryAddress().toBase58(),
             chain: "solana",
             network: await this.networkLabel(selection),
             txHash: signature,
@@ -633,7 +628,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       networkFeeLamports: Number(quoted.networkEst),
       protocolFeeBps: quoted.bps,
       chainTime,
-      treasury: this.treasury().toBase58(),
+      treasury: adapter.treasuryAddress().toBase58(),
       feePolicyVersion: quoted.version,
       ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
       networkFee: quoted.networkEst.toString(),

@@ -14,6 +14,7 @@ import {
   PID_PROGRAM_ID,
 } from "@peridotvault/pid-core";
 import {
+  assertCanonicalTreasury,
   buildActivateInstruction,
   buildActivateInstructionV2,
   buildActivateInstructionV3,
@@ -31,6 +32,7 @@ import {
   buildWithdrawTokenInstructionV2,
   buildWithdrawSolInstructionV3,
   buildWithdrawTokenInstructionV3,
+  deriveTreasuryPda,
 } from "./instructions.js";
 import type { NftItem, ParsedTx, SolanaRpc, TokenBalance } from "./rpc.js";
 import { getNftsOf } from "./rpc.js";
@@ -58,6 +60,23 @@ export class SolanaAdapter {
 
   getAddress(pid: string): PublicKey {
     return deriveSmartAccountAddress(pid, this.programId).address;
+  }
+
+  /**
+   * ANT-635 revenue vault: the `["treasury"]` PDA bound to this adapter's
+   * program id (per cluster). Fee builders and quote envelopes use this —
+   * never a build const or env var.
+   */
+  treasuryAddress(): PublicKey {
+    const [address] = deriveTreasuryPda(this.programId);
+    return address;
+  }
+
+  /** Resolve the fee vault: derive when omitted, validate when explicit (migration guard). */
+  private resolveTreasury(treasury?: PublicKey): PublicKey {
+    if (!treasury) return this.treasuryAddress();
+    assertCanonicalTreasury(treasury, this.programId);
+    return treasury;
   }
 
   /** The current on-chain nonce (u64 LE at state offset 4) — required for the next withdrawal. */
@@ -141,11 +160,12 @@ export class SolanaAdapter {
     feePolicyVersion: number,
     feeLamports: bigint,
     relayer: Keypair,
-    treasury: PublicKey,
+    treasury: PublicKey | undefined,
     expiry: number,
     assertion: PasskeyAssertion,
   ): Promise<string> {
     const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
     const programIx = buildActivateInstructionV2(
       pidToSeed32(pid),
       authorityCompressed,
@@ -155,7 +175,7 @@ export class SolanaAdapter {
       feeLamports,
       relayer.publicKey,
       smartAccount,
-      treasury,
+      vault,
       assertion.clientDataJSON,
       this.programId,
     );
@@ -176,10 +196,11 @@ export class SolanaAdapter {
     networkFeeLamports: bigint,
     expiry: number,
     relayer: Keypair,
-    treasury: PublicKey,
+    treasury: PublicKey | undefined,
     assertion: PasskeyAssertion,
   ): Promise<string> {
     const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
     const programIx = buildActivateInstructionV3(
       pidToSeed32(pid),
       authorityCompressed,
@@ -188,7 +209,7 @@ export class SolanaAdapter {
       networkFeeLamports,
       relayer.publicKey,
       smartAccount,
-      treasury,
+      vault,
       assertion.clientDataJSON,
       this.programId,
     );
@@ -213,7 +234,7 @@ export class SolanaAdapter {
     const dummyAuthority = new Uint8Array(33);
     const smartAccount = this.getAddress(pid);
     const dummyRelayer = Keypair.generate().publicKey;
-    const dummyTreasury = Keypair.generate().publicKey;
+    const vault = this.treasuryAddress();
     const ix = buildActivateInstructionV2(
       pidToSeed32(pid),
       dummyAuthority,
@@ -223,7 +244,7 @@ export class SolanaAdapter {
       0n,
       dummyRelayer,
       smartAccount,
-      dummyTreasury,
+      vault,
       new Uint8Array([0x7b, 0x7d]),
       this.programId,
     );
@@ -285,13 +306,14 @@ export class SolanaAdapter {
     expiry: number,
     assertion: PasskeyAssertion,
     relayer: Keypair,
-    treasury: PublicKey,
+    treasury: PublicKey | undefined,
   ): Promise<string> {
     const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
     const programIx = buildWithdrawSolInstructionV2(
       smartAccount,
       destination,
-      treasury,
+      vault,
       relayer.publicKey,
       nonce,
       amount,
@@ -323,13 +345,14 @@ export class SolanaAdapter {
     expiry: number,
     assertion: PasskeyAssertion,
     relayer: Keypair,
-    treasury: PublicKey,
+    treasury: PublicKey | undefined,
   ): Promise<string> {
     const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
     const programIx = buildWithdrawSolInstructionV3(
       smartAccount,
       destination,
-      treasury,
+      vault,
       relayer.publicKey,
       nonce,
       amount,
@@ -356,16 +379,17 @@ export class SolanaAdapter {
     expiry: number,
     assertion: PasskeyAssertion,
     relayer: Keypair,
-    treasury: PublicKey,
+    treasury: PublicKey | undefined,
   ): Promise<string> {
     const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
     const sourceAta = await getAssociatedTokenAddress(mint, smartAccount, true);
     const programIx = buildWithdrawTokenInstructionV2(
       smartAccount,
       sourceAta,
       destinationAta,
       mint,
-      treasury,
+      vault,
       relayer.publicKey,
       nonce,
       amount,
@@ -395,16 +419,17 @@ export class SolanaAdapter {
     expiry: number,
     assertion: PasskeyAssertion,
     relayer: Keypair,
-    treasury: PublicKey,
+    treasury: PublicKey | undefined,
   ): Promise<string> {
     const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
     const sourceAta = await getAssociatedTokenAddress(mint, smartAccount, true);
     const programIx = buildWithdrawTokenInstructionV3(
       smartAccount,
       sourceAta,
       destinationAta,
       mint,
-      treasury,
+      vault,
       relayer.publicKey,
       nonce,
       amount,
@@ -437,12 +462,13 @@ export class SolanaAdapter {
     expiry: number,
     assertion: PasskeyAssertion,
     relayer: Keypair,
-    treasury: PublicKey,
+    treasury: PublicKey | undefined,
   ): Promise<string> {
     const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
     const programIx = buildExecuteInstructionV3(
       smartAccount,
-      treasury,
+      vault,
       relayer.publicKey,
       nonce,
       target,
@@ -573,10 +599,11 @@ export class SolanaAdapter {
     const pid = "dummy";
     const smartAccount = this.getAddress(pid);
     const dummy = Keypair.generate().publicKey;
+    const vault = this.treasuryAddress();
     const ix = buildWithdrawSolInstructionV2(
       smartAccount,
       dummy,
-      dummy,
+      vault,
       dummy,
       0n,
       0n,
@@ -616,9 +643,10 @@ export class SolanaAdapter {
       new Uint8Array(64),
       new Uint8Array([0x7b, 0x7d]),
     );
+    const vault = this.treasuryAddress();
     const programIx = buildExecuteInstructionV3(
       smartAccount,
-      dummy,
+      vault,
       dummy,
       0n,
       target,

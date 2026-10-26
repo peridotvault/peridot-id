@@ -1,7 +1,7 @@
 // Adapter acceptance (V3): passkey-signed initialize → deposit → sponsored withdraw.
 // Runs against the local validator with the TEST backend build:
 //   PID_BACKEND=5as9TQo7Ua5iEBCKRbPhFUiRQX5dRJpjEQ9V91WddzaZ \
-//   PID_TREASURY=J8HubZoRgyr4z29Rv97zXdEzWqMJQz69LFvWa82m25s9 cargo build-sbf
+//   PID_BACKEND=<key> cargo build-sbf   # ANT-635: no PID_TREASURY — vault is the ["treasury"] PDA
 //   solana-test-validator --reset --bpf-program CiwLJ1h... <so> &
 //   node packages/solana/test/adapter.e2e.mjs
 import crypto from "node:crypto";
@@ -12,8 +12,7 @@ const { SolanaRpc, SolanaAdapter, buildWebAuthnMessage, buildWithdrawPayloadV3, 
 
 const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
-// Canonical revenue vault (must match the program's PID_TREASURY build const).
-const TREASURY = new PublicKey("J8HubZoRgyr4z29Rv97zXdEzWqMJQz69LFvWa82m25s9");
+// ANT-635: no treasury const — the fee vault is the ["treasury"] PDA per program id.
 const conn = new Connection("http://127.0.0.1:8899", "confirmed");
 const rpc = new SolanaRpc("http://127.0.0.1:8899");
 const adapter = new SolanaAdapter(rpc);
@@ -78,8 +77,9 @@ async function main() {
   const networkFee = 100_000n;
   const payload = await buildWithdrawPayloadV3(seed32, nonce, 5_000_000n, dest.publicKey, expiry, 1);
   const assertion = await signer.sign(payload);
+  // Omit treasury: the adapter derives the ["treasury"] PDA per program id.
   const wSig = await adapter.sponsoredWithdrawSolV3(
-    accountId, authorityComp, dest.publicKey, 5_000_000n, 1, networkFee, nonce, expiry, assertion, backend, TREASURY,
+    accountId, authorityComp, dest.publicKey, 5_000_000n, 1, networkFee, nonce, expiry, assertion, backend,
   );
   await conn.confirmTransaction(wSig, "confirmed");
   const status = await adapter.getStatus(wSig);
