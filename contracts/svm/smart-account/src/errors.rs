@@ -27,7 +27,10 @@ pub enum PeridotError {
     Expired = 9,
     /// The WebAuthn challenge / clientDataJSON binding is invalid.
     InvalidChallenge = 10,
-    /// The caller is not the authorized backend (creation paths only).
+    /// Retained for decoder compatibility only (discriminant 11 unchanged).
+    /// No longer emitted: ANT-612 removed the creation allowlist, so
+    /// creation paths are permissionless (passkey-authorized) and this error
+    /// has no producer. Kept so old SDK decoders never misread slot 11.
     Forbidden = 11,
     /// V4 fee-cap family (ANT-544 B5, ANT-556): the attested
     /// `network_fee + protocol_fee` exceeded the user-approved `max_total_fee`.

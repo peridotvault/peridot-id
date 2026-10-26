@@ -1,5 +1,4 @@
-//! Build script: bakes the program ID, backend allowlist, and canonical
-//! treasury into the program.
+//! Build script: bakes the program ID and canonical treasury into the program.
 //!
 //! `PID_PROGRAM_ID` (base58, this program's on-chain address for the target
 //! cluster) becomes `program_id::ID` (ANT-211: previously a hardcoded
@@ -16,20 +15,17 @@
 //! PDAs are bound to (seeds, program id) — so always build with the
 //! `PID_PROGRAM_ID` of the cluster you deploy to.)
 //!
-//! `PID_BACKEND` (base58, the Peridot relayer pubkey for this environment)
-//! becomes `config::BACKEND`. Creation paths (`initialize`, `activate`) require
-//! the payer/relayer to equal it — this is what binds a PID to a real user
-//! (only the backend knows the pid↔identity mapping), so a stranger can neither
-//! squat a PDA nor divert a pre-funded deposit.
-//!
-//! `PID_TREASURY` (base58) becomes `config::TREASURY`, the single canonical V1
-//! recipient of protocol markup. It defaults to `PID_BACKEND` when unset. Neither
-//! constant enters PDA derivation: builds are env-specific by design (program
-//! id per cluster via `PID_PROGRAM_ID`, backend/treasury consts per cluster).
-//! Local tests set both to the test keypair.
-//!
-//! Unset `PID_BACKEND` fails closed to `[0u8; 32]` (no caller matches — creation
-//! disabled).
+//! `PID_TREASURY` (base58) becomes `config::TREASURY`, the single canonical
+//! recipient of protocol markup. It has NO default: an unset `PID_TREASURY`
+//! is a build-time hard error — the revenue recipient must be a deliberate
+//! choice, never a silent zero address that would burn fees. ANT-612 removed
+//! the `PID_BACKEND`/`config::BACKEND` creation allowlist entirely:
+//! creation (`activate`/`activate_v4`) accepts any signer payer and binds
+//! ownership purely via the user's passkey signature, while every creation
+//! still routes through the fee-bearing path that credits `TREASURY`.
+//! Neither constant enters PDA derivation: builds are env-specific by design
+//! (program id per cluster via `PID_PROGRAM_ID`, treasury const per cluster).
+//! Local tests set `PID_TREASURY` to the test keypair.
 
 use std::path::PathBuf;
 
@@ -80,30 +76,23 @@ const DEFAULT_PROGRAM_ID: &str = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
 
 fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("config.rs");
-    let backend = match parse_pubkey("PID_BACKEND", "PID_BACKEND") {
-        Some(raw) => raw,
-        None => {
-            println!("cargo:warning=PID_BACKEND unset — creation paths disabled (fail-closed zeros)");
-            vec![0u8; 32]
-        }
-    };
+    // ANT-612: no creation allowlist. `PID_TREASURY` is required — an unset
+    // treasury fails the build instead of silently defaulting (a zero/default
+    // recipient would burn protocol fees). AC-S4: building with `PID_BACKEND`
+    // set or unset both succeed; the variable is simply unread.
     let treasury = match parse_pubkey("PID_TREASURY", "PID_TREASURY") {
         Some(raw) => raw,
-        None => {
-            println!("cargo:warning=PID_TREASURY unset — defaulting canonical treasury to PID_BACKEND");
-            backend.clone()
-        }
+        None => panic!(
+            "PID_TREASURY must be set explicitly (base58 canonical revenue vault); \
+             refusing to bake a default recipient"
+        ),
     };
-    let backend_lit = backend.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
     let treasury_lit = treasury.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
     std::fs::write(
         &out,
-        format!(
-            "pub const BACKEND: [u8; 32] = [{backend_lit}];\npub const TREASURY: [u8; 32] = [{treasury_lit}];\n",
-        ),
+        format!("pub const TREASURY: [u8; 32] = [{treasury_lit}];\n"),
     )
     .unwrap();
-    println!("cargo:rerun-if-env-changed=PID_BACKEND");
     println!("cargo:rerun-if-env-changed=PID_TREASURY");
 
     // ANT-211: the program ID is build-configurable so a clean-source checkout

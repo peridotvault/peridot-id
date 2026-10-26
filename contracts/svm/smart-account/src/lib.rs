@@ -30,9 +30,10 @@ pub mod secp256r1;
 pub mod sha256;
 pub mod state;
 
-/// Backend allowlist + canonical treasury, baked at build time by `build.rs`
-/// from `PID_BACKEND` / `PID_TREASURY`. Creation paths require the payer/relayer
-/// to equal `BACKEND` (PID-ownership proof); fee markup goes to `TREASURY`.
+/// Canonical treasury, baked at build time by `build.rs` from `PID_TREASURY`
+/// (required — the build fails without an explicit recipient). Every creation
+/// (`activate`/`activate_v4`) credits the protocol fee here; any signer may
+/// submit (ANT-612 permissionless creation, ANT-610 spec section 5).
 pub mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
 }
@@ -237,22 +238,22 @@ mod ant211_program_id_tests {
     }
 }
 
-/// ANT-16(e) (child of ANT-12) hardening regression: direct `initialize` is
-/// deprecated (ANT-22 Option A) — creation must route through `activate`, the
-/// sole fee-bearing sponsored-creation path. Testnet/devnet builds keep
-/// `initialize` functional plus a deprecation event; production builds reject
-/// via `check_initialize_allowed` before any other validation.
+/// ANT-16(e) (child of ANT-12) hardening regression, finalized by ANT-612
+/// (ANT-610 spec section 5.1): direct `initialize` is permanently disabled
+/// (ANT-22 Option A) — creation must route through `activate`/`activate_v4`,
+/// the sole fee-bearing creation paths. Every build rejects via
+/// `check_initialize_allowed` before any other validation.
 #[cfg(test)]
 mod ant16e_deprecation_tests {
     use super::assert_effect_before_interaction;
 
     #[test]
     fn initialize_gate_runs_before_creation_cpi() {
-        // t-e1 mechanism pin: the production gate must precede the PDA
+        // t-e1 mechanism pin: the gate must precede the PDA
         // creation CPI, so no fee-free account can be minted where `activate`
         // (and its 50% sponsored-creation fee) was due. The `true` arm itself
         // is a two-line pure function (`check_initialize_allowed`); behavior
-        // on a production build is covered by the session.mjs/integration
+        // on every build is covered by the session.mjs/integration
         // creation suites in CI (validator-gated, not host-runnable).
         assert_effect_before_interaction(
             "initialize.rs",
@@ -275,8 +276,8 @@ mod ant16e_deprecation_tests {
 
     #[test]
     fn initialize_emits_deprecation_event() {
-        // t-e2 pin: testnet/devnet `initialize` succeeds exactly as before
-        // PLUS the deprecation event for drift alerting (ANT-16(c) sink).
+        // t-e2 pin: the success + deprecation event shapes are retained for
+        // indexer stability even though the path is unreachable.
         let src = include_str!("instructions/initialize.rs");
         assert!(
             src.contains("PeridotEvent::AccountInitialized"),
@@ -289,13 +290,113 @@ mod ant16e_deprecation_tests {
     }
 
     #[test]
-    fn testnet_gate_is_open() {
-        // This build is the testnet/devnet build: `initialize` stays
-        // functional. Production flips the const (ANT-22 Q1, owner: CTO).
+    fn production_gate_is_closed_permanently() {
+        // ANT-612: the fee-free path is dead in EVERY build, not just
+        // production. There is no toggle back.
         assert!(
-            !crate::instructions::initialize::DEPRECATE_DIRECT_INITIALIZE,
-            "testnet build must keep direct initialize functional"
+            crate::instructions::initialize::DEPRECATE_DIRECT_INITIALIZE,
+            "direct initialize must be deprecated on all builds"
         );
-        assert!(crate::instructions::initialize::check_initialize_allowed().is_ok());
+        assert!(crate::instructions::initialize::check_initialize_allowed().is_err());
+    }
+}
+
+/// ANT-612 regression (ANT-610 spec AC-S4): no BACKEND allowlist remains
+/// anywhere in program source or build. Creation binds ownership purely via
+/// the user's passkey signature; the fee recipient (`TREASURY`) is the only
+/// baked canonical address.
+#[cfg(test)]
+mod ant612_permissionless_tests {
+    /// True when `src` references the removed creation allowlist as code.
+    /// Comment lines (`//`, `//!`, `///`, `*`-interiors) are ignored:
+    /// migration notes may name the removed allowlist (AC-S4 permits this),
+    /// but no compiled code may.
+    fn code_references_allowlist(src: &str) -> bool {
+        // Built from parts (never a literal) so this pin's own source never
+        // self-matches the scan.
+        use alloc::string::String;
+        let needle: String = ["BACK", "END"].into_iter().collect();
+        src.lines().any(|line| {
+            let t = line.trim_start();
+            if t.starts_with("//") || t.starts_with('*') {
+                return false;
+            }
+            line.contains(&needle)
+        })
+    }
+
+    #[test]
+    fn no_backend_in_creation_paths() {
+        for (file, src) in [
+            (
+                "instructions/activate.rs",
+                include_str!("instructions/activate.rs"),
+            ),
+            (
+                "instructions/activate_v4.rs",
+                include_str!("instructions/activate_v4.rs"),
+            ),
+            (
+                "instructions/initialize.rs",
+                include_str!("instructions/initialize.rs"),
+            ),
+            ("errors.rs", include_str!("errors.rs")),
+            // lib.rs asserts on its own prose via this helper, so it is safe
+            // to include: only code references count.
+            ("lib.rs", include_str!("lib.rs")),
+        ] {
+            assert!(
+                !code_references_allowlist(src),
+                "{file}: must not reference the removed allowlist in code (ANT-612 permissionless creation)"
+            );
+        }
+    }
+
+    #[test]
+    fn no_backend_in_build_script() {
+        // build.rs is outside `src/` so it is pinned textually: the variable
+        // must be unread (AC-S4: builds succeed with PID_BACKEND set or unset).
+        let src = include_str!("../build.rs");
+        assert!(
+            !code_references_allowlist(src),
+            "build.rs: must not read the removed allowlist env or emit its const in code"
+        );
+        assert!(
+            src.contains("PID_TREASURY"),
+            "build.rs: treasury must remain build-configured"
+        );
+    }
+
+    #[test]
+    fn treasury_is_required_not_defaulted() {
+        // A silent-default treasury would burn protocol fees to a zero or
+        // unrelated address; the build must fail closed instead.
+        let src = include_str!("../build.rs");
+        assert!(
+            src.contains("PID_TREASURY must be set explicitly"),
+            "build.rs: unset PID_TREASURY must be a hard error"
+        );
+    }
+
+    #[test]
+    fn spend_paths_have_no_new_gates() {
+        // Spec section 5: spend paths were already permissionless — verify no
+        // creation-style gate crept in (submitter binding stays passkey-only).
+        for (file, src) in [
+            ("execute.rs", include_str!("instructions/execute.rs")),
+            ("execute_v4.rs", include_str!("instructions/execute_v4.rs")),
+            ("withdraw_sol.rs", include_str!("instructions/withdraw_sol.rs")),
+            ("withdraw_sol_v4.rs", include_str!("instructions/withdraw_sol_v4.rs")),
+            ("withdraw_token.rs", include_str!("instructions/withdraw_token.rs")),
+            (
+                "withdraw_token_v4.rs",
+                include_str!("instructions/withdraw_token_v4.rs"),
+            ),
+        ] {
+            assert!(
+                !code_references_allowlist(src),
+                "{file}: spend path must not gain an allowlist gate"
+            );
+        }
     }
 }

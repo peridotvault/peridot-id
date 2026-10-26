@@ -1,8 +1,8 @@
 //! Activate a user's smart account, V4 authorization (ANT-544 B5, ANT-556).
 //!
 //! V4 sibling of `activate` (which stays frozen): identical claim semantics
-//! (pre-funded PDA, backend allowlist, rent floor) plus the user-approved
-//! `max_total_fee` bound on `network_fee + protocol_fee`. The passkey signs the
+//! (pre-funded PDA, permissionless submitter — ANT-612 — plus rent floor) plus
+//! the user-approved `max_total_fee` bound on `network_fee + protocol_fee`. The passkey signs the
 //! V4 domain-separated payload
 //! (op-tag ‖ account_id ‖ authority ‖ policy ‖ max_total_fee ‖ expiry) and the
 //! program enforces `total ≤ max_total_fee` (`FeeExceedsMax`) before claiming.
@@ -11,7 +11,7 @@
 
 use crate::{
     auth,
-    config::{BACKEND, TREASURY},
+    config::TREASURY,
     errors::PeridotError,
     fee::{policy_v2_row, split_attested_fee_v2, total_fee},
     state::{verify_pda, SmartAccountMut, STATE_LEN_V2},
@@ -37,7 +37,8 @@ const MAX_TOTAL_FEE_OFFSET: usize = 83;
 const CLIENT_JSON_LEN_OFFSET: usize = 91;
 
 /// Accounts:
-///   0. `[WRITE, SIGNER]` relayer (Peridot float; pays the network fee / rent, receives the exact reimbursement)
+///   0. `[WRITE, SIGNER]` submitter (any payer — ANT-612 permissionless;
+///      receives the exact network-fee reimbursement)
 ///   1. `[WRITE]` smart account PDA (must be uninitialized / system-owned)
 ///   2. `[WRITE]` canonical revenue vault (receives the protocol fee; must equal `config::TREASURY`)
 ///   3. `[]` system program
@@ -59,11 +60,9 @@ pub fn process(
     if !relayer.is_signer() {
         return Err(PeridotError::NotSigner.into());
     }
-    // PID-ownership proof (see initialize): only the backend may claim PDAs, so a
-    // stranger can neither squat a funded deposit nor divert it to own treasury.
-    if relayer.address().as_array() != &BACKEND {
-        return Err(PeridotError::Forbidden.into());
-    }
+    // ANT-612 (ANT-610 spec section 5): permissionless creation — any signer
+    // may submit. Anti-squat is the passkey signature below; the protocol fee
+    // still flows to the canonical vault on every claim.
     // The PDA may not already be program-owned or initialized.
     if smart_account.data_len() != 0 || smart_account.owned_by(program_id) {
         return Err(PeridotError::AlreadyInitialized.into());
@@ -119,7 +118,7 @@ pub fn process(
     }
 
     // Claim the account: create (if empty) or top-up→assign→allocate (if pre-funded).
-    // Payer = relayer. Rent is paid only up to the rent-exempt amount for the state.
+    // Payer = submitter (any signer). Rent is paid only up to the rent-exempt amount for the state.
     create_account_with_minimum_balance_signed(
         smart_account,
         STATE_LEN_V2,
@@ -135,7 +134,7 @@ pub fn process(
         return Err(PeridotError::InsufficientFunds.into());
     }
 
-    // Reimburse exact network cost (relayer) + protocol fee (revenue vault).
+    // Reimburse exact network cost (submitter) + protocol fee (revenue vault).
     let from = *smart_account;
     let t = *treasury;
     let r = *relayer;
