@@ -20,7 +20,7 @@ import {
 } from "@solana/spl-token";
 import { concat, u16le, u64le, i64le, fromAscii, serializeExecuteCall, serializeSessionMetas } from "@peridotvault/pid-core";
 import type { Bytes, ExecuteMeta, SessionMeta } from "@peridotvault/pid-core";
-import { IX, IX_SESSION, IX_V4, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
+import { IX, IX_SESSION, IX_V4, IX_VAULT, TREASURY_SEED, CONFIG_SEED, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
 
 /**
  * Build the passkey-signed `initialize(account_id, authority, clientDataJSON)` instruction (disc 0).
@@ -101,6 +101,7 @@ export function buildActivateInstruction(
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: relayer, isSigner: true, isWritable: true },
@@ -135,6 +136,7 @@ export function buildActivateInstructionV2(
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: relayer, isSigner: true, isWritable: true },
@@ -168,6 +170,7 @@ export function buildActivateInstructionV3(
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: relayer, isSigner: true, isWritable: true },
@@ -224,6 +227,7 @@ export function buildWithdrawSolInstruction(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -256,6 +260,7 @@ export function buildWithdrawSolInstructionV2(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -288,6 +293,7 @@ export function buildWithdrawTokenInstruction(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -325,6 +331,7 @@ export function buildWithdrawTokenInstructionV2(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -363,6 +370,7 @@ export function buildWithdrawSolInstructionV4(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -396,6 +404,7 @@ export function buildWithdrawTokenInstructionV4(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -432,6 +441,7 @@ export function buildActivateInstructionV4(
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: relayer, isSigner: true, isWritable: true },
@@ -475,6 +485,7 @@ export function buildExecuteInstructionV4(
     }
   }
   const call = serializeExecuteCall(target, metas, data);
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -514,6 +525,7 @@ export function buildWithdrawSolInstructionV3(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -547,6 +559,7 @@ export function buildWithdrawTokenInstructionV3(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -637,6 +650,7 @@ export function buildExecuteInstructionV3(
     }
   }
   const call = serializeExecuteCall(target, metas, data);
+    assertCanonicalTreasury(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -878,5 +892,144 @@ export function buildCloseSessionInstruction(
       u16le(clientDataJSON.length),
       clientDataJSON,
     ) as unknown as Buffer,
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* ANT-635 program-bound revenue vault (disc 15-18).                   */
+/*                                                                     */
+/* The protocol fee lands in the `[b"treasury"]` PDA vault, derived    */
+/* from the program id at runtime — there is no treasury const or env  */
+/* anymore. These builders derive the PDAs internally (exact §5a       */
+/* account orderings); the `treasury` params on the legacy fee         */
+/* builders above are migration-validated against the derived PDA.     */
+/* ------------------------------------------------------------------ */
+
+function seedBytes(s: string): Uint8Array {
+  return new TextEncoder().encode(s);
+}
+
+/** Derive the `[b"treasury"]` PDA vault for a program id. */
+export function deriveTreasuryPda(
+  programId: PublicKey = PID_PROGRAM_ID,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([seedBytes(TREASURY_SEED)], programId);
+}
+
+/** Derive the `[b"config"]` revenue-config PDA for a program id. */
+export function deriveRevenueConfigPda(
+  programId: PublicKey = PID_PROGRAM_ID,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([seedBytes(CONFIG_SEED)], programId);
+}
+
+/**
+ * Migration validator for the legacy explicit-`treasury` params: throws
+ * unless the passed address equals the derived `[b"treasury"]` PDA.
+ * (The program enforces this on-chain too — fail-closed both sides.)
+ */
+export function assertCanonicalTreasury(
+  treasury: PublicKey,
+  programId: PublicKey = PID_PROGRAM_ID,
+): void {
+  const [expected] = deriveTreasuryPda(programId);
+  if (!treasury.equals(expected)) {
+    throw new Error(
+      `treasury must be the canonical ["treasury"] PDA ${expected.toBase58()} (ANT-635)`,
+    );
+  }
+}
+
+/**
+ * Build `InitTreasury(initial_admin)` (disc 15). Accounts (§5a):
+ * `[initer signer/writable, config PDA writable, treasury PDA writable,
+ * system program]`. No auth payload — the initer (deployer/upgrade-authority
+ * holder) funds the rent-exempt minimums and gains nothing by itself.
+ */
+export function buildInitTreasuryInstruction(
+  initer: PublicKey,
+  initialAdmin: PublicKey,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  const [config] = deriveRevenueConfigPda(programId);
+  const [treasury] = deriveTreasuryPda(programId);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: initer, isSigner: true, isWritable: true },
+      { pubkey: config, isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat([IX_VAULT.initTreasury], initialAdmin.toBytes()) as unknown as Buffer,
+  });
+}
+
+/**
+ * Build `WithdrawRevenue(amount)` (disc 16). Accounts (§5a):
+ * `[treasury writable, config writable, admin signer/writable,
+ * destination writable]`. Never drains below the 0-byte rent-exempt floor.
+ */
+export function buildWithdrawRevenueInstruction(
+  admin: PublicKey,
+  destination: PublicKey,
+  amountLamports: bigint,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  const [config] = deriveRevenueConfigPda(programId);
+  const [treasury] = deriveTreasuryPda(programId);
+  if (destination.equals(treasury) || destination.equals(config)) {
+    throw new Error("withdraw destination must not be the vault or config PDA (D2)");
+  }
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: config, isSigner: false, isWritable: true },
+      { pubkey: admin, isSigner: true, isWritable: true },
+      { pubkey: destination, isSigner: false, isWritable: true },
+    ],
+    programId,
+    data: concat([IX_VAULT.withdrawRevenue], u64le(amountLamports)) as unknown as Buffer,
+  });
+}
+
+/**
+ * Build `AddAdmin(new_admin)` (disc 17). Accounts (§5a):
+ * `[config writable, existing admin signer/writable]`.
+ */
+export function buildAddAdminInstruction(
+  admin: PublicKey,
+  newAdmin: PublicKey,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  const [config] = deriveRevenueConfigPda(programId);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: config, isSigner: false, isWritable: true },
+      { pubkey: admin, isSigner: true, isWritable: true },
+    ],
+    programId,
+    data: concat([IX_VAULT.addAdmin], newAdmin.toBytes()) as unknown as Buffer,
+  });
+}
+
+/**
+ * Build `RemoveAdmin(admin)` (disc 18). Accounts (§5a):
+ * `[config writable, existing admin signer/writable]`. Floor-1 enforced
+ * on-chain (`CannotRemoveLastAdmin`).
+ */
+export function buildRemoveAdminInstruction(
+  admin: PublicKey,
+  target: PublicKey,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  const [config] = deriveRevenueConfigPda(programId);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: config, isSigner: false, isWritable: true },
+      { pubkey: admin, isSigner: true, isWritable: true },
+    ],
+    programId,
+    data: concat([IX_VAULT.removeAdmin], target.toBytes()) as unknown as Buffer,
   });
 }

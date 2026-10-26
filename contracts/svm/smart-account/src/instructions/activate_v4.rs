@@ -11,10 +11,10 @@
 
 use crate::{
     auth,
-    config::TREASURY,
     errors::PeridotError,
     fee::{policy_v2_row, split_attested_fee_v2, total_fee},
     state::{verify_pda, SmartAccountMut, STATE_LEN_V2},
+    treasury::verify_treasury_pda,
 };
 use pinocchio::{
     account::AccountView,
@@ -40,7 +40,7 @@ const CLIENT_JSON_LEN_OFFSET: usize = 91;
 ///   0. `[WRITE, SIGNER]` submitter (any payer — ANT-612 permissionless;
 ///      receives the exact network-fee reimbursement)
 ///   1. `[WRITE]` smart account PDA (must be uninitialized / system-owned)
-///   2. `[WRITE]` canonical revenue vault (receives the protocol fee; must equal `config::TREASURY`)
+///   2. `[WRITE]` canonical revenue vault (receives the protocol fee; must be the `[b"treasury"]` PDA vault (ANT-635))
 ///   3. `[]` system program
 ///   4. `[]` instructions sysvar (for secp256r1 introspection)
 pub fn process(
@@ -70,9 +70,11 @@ pub fn process(
     if treasury.address() == smart_account.address() {
         return Err(PeridotError::InvalidDestination.into());
     }
-    if treasury.address().as_array() != &TREASURY {
-        return Err(PeridotError::InvalidDestination.into());
-    }
+    // ANT-635 (ANT-638): the protocol fee lands in the program-bound PDA vault
+    // `[b"treasury"]` (verified against the runtime program_id), not a
+    // build-baked const. Fee math unchanged. Creation stays permissionless
+    // (ANT-612): any signer may submit; no gate remains.
+    verify_treasury_pda(treasury, program_id)?;
 
     let account_id = data.read_array::<32>(ACCOUNT_ID_OFFSET)?;
     let authority = data.read_array::<33>(AUTHORITY_OFFSET)?;
