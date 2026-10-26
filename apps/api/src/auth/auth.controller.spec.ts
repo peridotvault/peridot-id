@@ -1,8 +1,9 @@
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, Logger } from "@nestjs/common";
 import { Request } from "express";
 import { AuthController } from "./auth.controller";
 import { OAUTH_STATE_COOKIE } from "../common/cookies";
 import { newOAuthNonce, oauthStateSecret, signOAuthState } from "./oauth-state";
+import { SsoCodeInvalidError } from "./sso.service";
 
 /** ANT-387: missing/malformed `handle` on GET /v1/auth/pid/available is a 400, not 200 available:false. */
 describe("AuthController.pidAvailable (GET /v1/auth/pid/available)", () => {
@@ -102,5 +103,45 @@ describe("AuthController.googleCallback first-party (GET /v1/auth/google/callbac
     expect(resolveReturnTo).not.toHaveBeenCalled();
     expect(issue).not.toHaveBeenCalled();
     expect(redirect).toHaveBeenCalledWith(WALLET);
+  });
+});
+
+/** ANT-693: POST /v1/auth/exchange failures are observable (correlation id +
+ * server-side reason) while the public error stays uniform (no oracle). */
+describe("AuthController.exchange (POST /v1/auth/exchange)", () => {
+  const make = (sso: unknown): AuthController =>
+    new AuthController({} as never, {} as never, sso as never, {} as never, {} as never, {} as never, {} as never);
+
+  it("passes successful exchanges through untouched", async () => {
+    const payload = { pid: "ifal@pid" };
+    const consume = jest.fn(async () => payload);
+    const controller = make({ consume });
+    await expect(
+      controller.exchange({ code: "valid-code-0000000000000000", redirectUri: "https://app.example/cb" } as never),
+    ).resolves.toEqual(payload);
+    expect(consume).toHaveBeenCalledWith("valid-code-0000000000000000", "https://app.example/cb", undefined, undefined, undefined);
+  });
+
+  it("returns a uniform error with correlation id and logs the machine reason", async () => {
+    const consume = jest.fn(async () => {
+      throw new SsoCodeInvalidError("redirect_mismatch");
+    });
+    const controller = make({ consume });
+    const warn = jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+    try {
+      await controller.exchange({ code: "valid-code-0000000000000000", redirectUri: "https://evil.example/cb" } as never);
+      throw new Error("expected exchange to fail");
+    } catch (e) {
+      expect(e).toBeInstanceOf(BadRequestException);
+      const body = (e as BadRequestException).getResponse() as Record<string, unknown>;
+      expect(body["error"]).toBe("sso_code_invalid");
+      expect(String(body["message"])).toMatch(/redirect_uri/);
+      expect(typeof body["correlationId"]).toBe("string");
+      expect((body["correlationId"] as string).length).toBeGreaterThan(0);
+    }
+
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/reason=redirect_mismatch/));
+    warn.mockRestore();
   });
 });

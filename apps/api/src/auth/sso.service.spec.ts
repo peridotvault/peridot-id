@@ -1,4 +1,4 @@
-import { CODE_TTL_MS, decodeState, encodeState, isLoopbackReturnTo, pkceS256Challenge, pkceVerifyS256, SsoService } from "./sso.service";
+import { CODE_TTL_MS, decodeState, encodeState, isLoopbackReturnTo, pkceS256Challenge, pkceVerifyS256, SsoCodeInvalidError, SsoService } from "./sso.service";
 import { PidAppsService } from "./apps.service";
 import { mockSecurity } from "../../test/factories";
 
@@ -411,5 +411,37 @@ describe("SsoService", () => {
       "sso_pkce_invalid",
     );
     expect(pkceVerifyS256("short", CHALLENGE)).toBe(false);
+  });
+
+  // ANT-693: every exchange rejection carries a machine-readable reason for
+  // the server log while the public message stays uniform (no oracle).
+  it("tags exchange failures with a machine reason (public message stays uniform)", async () => {
+    const { service } = setup();
+    const take = async (p: Promise<unknown>): Promise<SsoCodeInvalidError> => {
+      try {
+        await p;
+      } catch (e) {
+        return e as SsoCodeInvalidError;
+      }
+      throw new Error("expected exchange to fail");
+    };
+
+    // Unknown code.
+    const unknown = await take(service.consume("missing-code-000000000000", "https://live2dev.com/auth/callback"));
+    expect(unknown).toBeInstanceOf(SsoCodeInvalidError);
+    expect(unknown.message).toBe("sso_code_invalid");
+    expect(unknown.reason).toBe("unknown_or_consumed");
+
+    // Redirect drift on a live code.
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    expect((await take(service.consume(code, "https://evil.com/auth/callback"))).reason).toBe("redirect_mismatch");
+
+    // Successful exchange, then replay of the consumed code.
+    await service.consume(code, "https://live2dev.com/auth/callback");
+    expect((await take(service.consume(code, "https://live2dev.com/auth/callback"))).reason).toBe("unknown_or_consumed");
+
+    // Client mismatch on an app-bound code.
+    const appCode = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    expect((await take(service.consume(appCode, "https://mygame.dev/callback", "pidapp_other"))).reason).toBe("client_mismatch");
   });
 });
