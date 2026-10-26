@@ -10,8 +10,7 @@ import { SolanaAdapter, SolanaRpc, b64url, buildWebAuthnMessage, buildWithdrawPa
 import { pidToSeed32 } from "@peridotvault/pid-core";
 const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
-// Canonical revenue vault (must match the program's PID_TREASURY build const).
-const TREASURY = new PublicKey("J8HubZoRgyr4z29Rv97zXdEzWqMJQz69LFvWa82m25s9");
+// ANT-635: no treasury const — the fee vault is the ["treasury"] PDA per program id.
 const conn = new Connection("http://127.0.0.1:8899", "confirmed");
 const PID = "ifal@pid";
 function compressedPub(pub){const der=pub.export({format:"der",type:"spki"});const raw=der.subarray(der.length-65);const X=raw.subarray(1,33);return Buffer.concat([Buffer.from([(raw[64]&1)?0x03:0x02]),X]);}
@@ -77,7 +76,8 @@ const fee = 100_000n;
 const networkFee = 100_000n;
 const payload = await buildWithdrawPayloadV3(pidToSeed32(PID), nonce, 5_000_000n, dest.publicKey, expiry, 1);
 const assertion = await signer.sign(payload);
-const wSig = await adapter.sponsoredWithdrawSolV3(PID, AUTHORITY_COMP, dest.publicKey, 5_000_000n, 1, networkFee, nonce, expiry, assertion, backend, TREASURY);
+// Omit treasury: the adapter derives the ["treasury"] PDA per program id.
+const wSig = await adapter.sponsoredWithdrawSolV3(PID, AUTHORITY_COMP, dest.publicKey, 5_000_000n, 1, networkFee, nonce, expiry, assertion, backend);
 await conn.confirmTransaction(wSig, "confirmed");
 const st = await adapter.getStatus(wSig);
 assert.equal(st.confirmed, true);

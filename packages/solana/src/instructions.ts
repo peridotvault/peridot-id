@@ -20,7 +20,49 @@ import {
 } from "@solana/spl-token";
 import { concat, u16le, u64le, i64le, fromAscii, serializeExecuteCall, serializeSessionMetas } from "@peridotvault/pid-core";
 import type { Bytes, ExecuteMeta, SessionMeta } from "@peridotvault/pid-core";
-import { IX, IX_SESSION, IX_V4, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
+import { IX, IX_SESSION, IX_V4, IX_VAULT, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
+
+/**
+ * ANT-635 program-bound revenue vault (PDA, per program id per cluster).
+ * Seeds MUST match `contracts/svm/smart-account/src/treasury.rs`
+ * (`TREASURY_SEED` / `CONFIG_SEED`); derivation MUST use the runtime
+ * `programId` (never a baked const) so gate and derivation cannot split-brain.
+ */
+export const TREASURY_SEED = "treasury";
+export const CONFIG_SEED = "config";
+
+function seedBytes(seed: string): Uint8Array {
+  return new TextEncoder().encode(seed);
+}
+
+/** Treasury vault PDA (`["treasury"]`) for a program id, plus canonical bump. */
+export function deriveTreasuryPda(
+  programId: PublicKey = PID_PROGRAM_ID,
+): { address: PublicKey; bump: number } {
+  const [address, bump] = PublicKey.findProgramAddressSync([seedBytes(TREASURY_SEED)], programId);
+  return { address, bump };
+}
+
+/** Revenue config PDA (`["config"]`) for a program id, plus canonical bump. */
+export function deriveConfigPda(
+  programId: PublicKey = PID_PROGRAM_ID,
+): { address: PublicKey; bump: number } {
+  const [address, bump] = PublicKey.findProgramAddressSync([seedBytes(CONFIG_SEED)], programId);
+  return { address, bump };
+}
+
+/**
+ * Migration guard (ANT-639): fee builders keep their explicit `treasury`
+ * param but MUST receive the derived PDA — anything else throws instead of
+ * landing an `InvalidDestination` on-chain.
+ */
+export function assertTreasuryPda(treasury: PublicKey, programId: PublicKey): PublicKey {
+  const expected = deriveTreasuryPda(programId).address;
+  if (!treasury.equals(expected)) {
+    throw new Error(`treasury must be the derived PDA ${expected.toBase58()} (got ${treasury.toBase58()})`);
+  }
+  return treasury;
+}
 
 /**
  * Build the passkey-signed `initialize(account_id, authority, clientDataJSON)` instruction (disc 0).
@@ -99,6 +141,7 @@ export function buildActivateInstruction(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
   return new TransactionInstruction({
@@ -133,6 +176,7 @@ export function buildActivateInstructionV2(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
   return new TransactionInstruction({
@@ -166,6 +210,7 @@ export function buildActivateInstructionV3(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
   return new TransactionInstruction({
@@ -224,6 +269,7 @@ export function buildWithdrawSolInstruction(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -256,6 +302,7 @@ export function buildWithdrawSolInstructionV2(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -288,6 +335,7 @@ export function buildWithdrawTokenInstruction(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -325,6 +373,7 @@ export function buildWithdrawTokenInstructionV2(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -363,6 +412,7 @@ export function buildWithdrawSolInstructionV4(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -396,6 +446,7 @@ export function buildWithdrawTokenInstructionV4(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -430,6 +481,7 @@ export function buildActivateInstructionV4(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
   return new TransactionInstruction({
@@ -466,6 +518,7 @@ export function buildExecuteInstructionV4(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   if (target.equals(programId)) throw new Error("execute target cannot be the smart-account program");
   const smartStr = smartAccount.toBase58();
   const relayerStr = relayer.toBase58();
@@ -514,6 +567,7 @@ export function buildWithdrawSolInstructionV3(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -547,6 +601,7 @@ export function buildWithdrawTokenInstructionV3(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -628,6 +683,7 @@ export function buildExecuteInstructionV3(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  assertTreasuryPda(treasury, programId);
   if (target.equals(programId)) throw new Error("execute target cannot be the smart-account program");
   const smartStr = smartAccount.toBase58();
   const relayerStr = relayer.toBase58();
@@ -878,5 +934,106 @@ export function buildCloseSessionInstruction(
       u16le(clientDataJSON.length),
       clientDataJSON,
     ) as unknown as Buffer,
+  });
+}
+
+/**
+ * ANT-635 `InitTreasury` (disc 15): creates the config PDA (`["config"]`,
+ * 264-byte v1) + treasury PDA (`["treasury"]`, 0 bytes), owner = program id.
+ * The initer (deployer/upgrade-authority keypair) funds rent and gains nothing
+ * by itself; `initialAdmin` becomes `admins[0]`. PDAs are derived internally —
+ * there is no legacy const to thread through. Account order MUST match
+ * `init_treasury.rs`: initer (signer) | config | treasury | system program.
+ */
+export function buildInitTreasuryInstruction(
+  initer: PublicKey,
+  initialAdmin32: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (initialAdmin32.length !== 32) throw new Error("initialAdmin must be 32 bytes");
+  const { address: config } = deriveConfigPda(programId);
+  const { address: treasury } = deriveTreasuryPda(programId);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: initer, isSigner: true, isWritable: true },
+      { pubkey: config, isSigner: false, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat([IX_VAULT.initTreasury], initialAdmin32) as unknown as Buffer,
+  });
+}
+
+/**
+ * ANT-635 `WithdrawRevenue` (disc 16): admin-gated revenue withdrawal from
+ * the treasury PDA. Never drains below rent-exemption (enforced on-chain).
+ * Account order MUST match `withdraw_revenue.rs`: treasury | config | admin
+ * (signer) | destination. D2 is enforced on-chain; fail-fast here too.
+ */
+export function buildWithdrawRevenueInstruction(
+  admin: PublicKey,
+  destination: PublicKey,
+  amount: bigint,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  const { address: treasury } = deriveTreasuryPda(programId);
+  const { address: config } = deriveConfigPda(programId);
+  if (destination.equals(treasury) || destination.equals(config)) {
+    throw new Error("withdraw destination must differ from the treasury/config PDAs");
+  }
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: config, isSigner: false, isWritable: true },
+      { pubkey: admin, isSigner: true, isWritable: true },
+      { pubkey: destination, isSigner: false, isWritable: true },
+    ],
+    programId,
+    data: concat([IX_VAULT.withdrawRevenue], u64le(amount)) as unknown as Buffer,
+  });
+}
+
+/**
+ * ANT-635 `AddAdmin` (disc 17): existing admin appends `newAdmin` to the
+ * config allowlist (cap 8, enforced on-chain). Account order MUST match
+ * `add_admin.rs`: config | admin (signer).
+ */
+export function buildAddAdminInstruction(
+  admin: PublicKey,
+  newAdmin32: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (newAdmin32.length !== 32) throw new Error("newAdmin must be 32 bytes");
+  const { address: config } = deriveConfigPda(programId);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: config, isSigner: false, isWritable: true },
+      { pubkey: admin, isSigner: true, isWritable: true },
+    ],
+    programId,
+    data: concat([IX_VAULT.addAdmin], newAdmin32) as unknown as Buffer,
+  });
+}
+
+/**
+ * ANT-635 `RemoveAdmin` (disc 18): existing admin removes `target` from the
+ * allowlist (floor-1 enforced on-chain). Account order MUST match
+ * `remove_admin.rs`: config | admin (signer).
+ */
+export function buildRemoveAdminInstruction(
+  admin: PublicKey,
+  target32: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (target32.length !== 32) throw new Error("target admin must be 32 bytes");
+  const { address: config } = deriveConfigPda(programId);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: config, isSigner: false, isWritable: true },
+      { pubkey: admin, isSigner: true, isWritable: true },
+    ],
+    programId,
+    data: concat([IX_VAULT.removeAdmin], target32) as unknown as Buffer,
   });
 }

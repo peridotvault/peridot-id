@@ -158,11 +158,12 @@ export function relayerKeypair(ps: PidSolanaModule, config: ConfigService): Keyp
   return Keypair.fromSecretKey(fromHex(secret));
 }
 
-export function treasuryPubkey(ps: PidSolanaModule, config: ConfigService): PublicKey {
-  const { PublicKey } = ps;
-  const override = config.get<string>("PID_TREASURY_PUBKEY");
-  return override ? new PublicKey(override) : relayerKeypair(ps, config).publicKey;
-}
+/**
+ * ANT-635: the Solana revenue vault is the `["treasury"]` PDA bound to the
+ * program id (per cluster) — derived by `SolanaAdapter.treasuryAddress()`,
+ * never an env const. `PID_TREASURY_PUBKEY` is deleted; no override exists.
+ * (DOKU_* / PID_FIAT_LEDGER_TREASURY_PID are the unrelated fiat rails.)
+ */
 
 export function solanaAdapter(ps: PidSolanaModule, rpcUrl: string, programId: string): SolanaAdapter {
   const { SolanaAdapter, SolanaRpc, PublicKey } = ps;

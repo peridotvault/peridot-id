@@ -87,14 +87,12 @@ export function solanaRelayerConfig(extra: Record<string, unknown> = {}) {
     get: jest.fn((key: string, def?: unknown) => values[key] ?? def),
     getOrThrow: jest.fn((key: string) => {
       if (key === "PID_RELAYER_SECRET") return "11".repeat(32);
-      if (key === "PID_TREASURY_PUBKEY") return TREASURY;
       throw new Error(`Missing config: ${key}`);
     }),
   };
 }
 
-export const TREASURY = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
-export const RELAYER = TREASURY;
+export const RELAYER = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
 
 // Valid ES256 COSE_Key (map(5), matches real simplewebauthn output). Shared by
 // specs that use the key opaquely (verification is mocked); specs asserting on

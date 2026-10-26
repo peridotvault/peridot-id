@@ -5,7 +5,8 @@
 //   passkey-authorized withdrawal → verify balance + nonce on devnet.
 //
 // Requires the devnet program built with PID_BACKEND = this backend, and:
-//   PID_RELAYER_SECRET=64-byte-hex  PID_TREASURY_PUBKEY=base58  (dev backend keypair)
+//   PID_RELAYER_SECRET=64-byte-hex  (dev backend keypair)
+// ANT-635: no PID_TREASURY_PUBKEY — the fee vault is the ["treasury"] PDA per program id.
 // The Google-OAuth browser leg (Playwright + virtual authenticator) is the documented
 // follow-up in docs/tasks/011-e2e-devnet-transaction.md; here the API is mocked and the
 // passkey is synthetic, so the on-chain contract is the thing under test.
@@ -15,13 +16,11 @@ import crypto from "node:crypto";
 import assert from "node:assert/strict";
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { PeridotWallet } from "@peridotvault/pid-sdk-js";
-import { SolanaAdapter, SolanaRpc, b64url, buildWebAuthnMessage, pidToSeed32, toHex } from "@peridotvault/pid-solana";
+import { SolanaAdapter, SolanaRpc, b64url, buildWebAuthnMessage, deriveTreasuryPda, pidToSeed32, toHex } from "@peridotvault/pid-solana";
 const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
 
 const BACKEND_SECRET = process.env.PID_RELAYER_SECRET;
 assert.ok(BACKEND_SECRET && /^[0-9a-fA-F]{128}$/.test(BACKEND_SECRET), "PID_RELAYER_SECRET (64-byte hex) required");
-assert.ok(process.env.PID_TREASURY_PUBKEY, "PID_TREASURY_PUBKEY required");
-const TREASURY = process.env.PID_TREASURY_PUBKEY;
 const backend = Keypair.fromSecretKey(Buffer.from(BACKEND_SECRET, "hex"));
 
 const RPC = "https://api.devnet.solana.com";
@@ -29,6 +28,9 @@ const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC63
 const conn = new Connection(RPC, "confirmed");
 const PID = "ifal@pid";
 const PROGRAM_ID = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
+// ANT-635: the fee vault is the ["treasury"] PDA bound to the program id (per cluster).
+const TREASURY_PDA = deriveTreasuryPda(new PublicKey(PROGRAM_ID)).address.toBase58();
+console.log("treasury PDA:", TREASURY_PDA);
 const CHAIN_VIEW = {
   id: "chain-sol",
   namespace: "solana",
@@ -93,7 +95,7 @@ async function main() {
         const rpc = new SolanaRpc(RPC);
         const adapter = new SolanaAdapter(rpc);
         const fee = await adapter.estimateWithdrawFee();
-        return { ok: true, data: { networkFeeLamports: fee.toString(), protocolFeeBps: 5000, feePolicyVersion: 1, totalFeeLamports: (fee + fee / 2n).toString(), chainTime: Math.floor(Date.now() / 1000), treasury: TREASURY } };
+        return { ok: true, data: { networkFeeLamports: fee.toString(), protocolFeeBps: 5000, feePolicyVersion: 1, totalFeeLamports: (fee + fee / 2n).toString(), chainTime: Math.floor(Date.now() / 1000), treasury: TREASURY_PDA } };
       }
       return { ok: true, data: {} };
     },
@@ -145,11 +147,11 @@ async function main() {
   const nonce = await direct.getNonce(PID);
   const expiry = Math.floor(Date.now() / 1000) + 300;
   const networkFee = await direct.estimateWithdrawFee();
-  const treasury = new PublicKey(TREASURY);
   const payload = await buildWithdrawPayloadV3(pidToSeed32(PID), nonce, 5_000_000n, dest.publicKey, expiry, 1);
   const assertion = await signer.sign(payload);
+  // Omit treasury: the adapter derives the ["treasury"] PDA per program id.
   const wSig = await direct.sponsoredWithdrawSolV3(
-    PID, authorityComp, dest.publicKey, 5_000_000n, 1, networkFee, nonce, expiry, assertion, backend, treasury,
+    PID, authorityComp, dest.publicKey, 5_000_000n, 1, networkFee, nonce, expiry, assertion, backend,
   );
   await conn.confirmTransaction(wSig, "confirmed");
   const wStatus = await direct.getStatus(wSig);

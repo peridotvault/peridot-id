@@ -31,7 +31,6 @@ import {
   QUOTE_TTL_SECS,
   relayerKeypair,
   solanaAdapter,
-  treasuryPubkey,
 } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -207,10 +206,6 @@ export class SponsoredWithdrawService {
     return relayerKeypair(this.pidSolana, this.config);
   }
 
-  private treasury(): PublicKey {
-    return treasuryPubkey(this.pidSolana, this.config);
-  }
-
   /** Parse a user-supplied base-unit amount, mapping garbage to 400 (never 500). */
   private amountOr400(value: string, what: string): bigint {
     if (!/^\d+$/.test(value)) throw new BadRequestException(`${what} must be a positive integer`);
@@ -327,7 +322,7 @@ export class SponsoredWithdrawService {
     const chainTime = await adapter.chainTime();
     const solChain = await this.chains.solanaChain(selection).catch(() => undefined);
     return {
-      ...this.quoteEnvelope(networkFee, version, chainTime, this.treasury().toBase58()),
+      ...this.quoteEnvelope(networkFee, version, chainTime, adapter.treasuryAddress().toBase58()),
       ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
@@ -568,7 +563,7 @@ export class SponsoredWithdrawService {
               expiry,
               assertion,
               this.relayer(),
-              this.treasury(),
+              undefined,
             )
             .then((sig) => ({ signature: sig, result: null })),
         resolveState: () => this.resolveSvmState(adapter, pid, chain.address, chainNonce),
@@ -605,7 +600,7 @@ export class SponsoredWithdrawService {
               expiry,
               assertion as never,
               this.relayer(),
-              this.treasury(),
+              undefined,
             )
             .then((sig) => ({ signature: sig, result: null })),
         resolveState: () => this.resolveSvmState(adapter, pid, chain.address, chainNonce),
@@ -804,7 +799,7 @@ export class SponsoredWithdrawService {
     const chainTime = await adapter.chainTime();
     const solChain = await this.chains.solanaChain(selection).catch(() => undefined);
     return {
-      ...this.quoteEnvelope(networkFee, version, chainTime, this.treasury().toBase58()),
+      ...this.quoteEnvelope(networkFee, version, chainTime, adapter.treasuryAddress().toBase58()),
       ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
@@ -1005,7 +1000,7 @@ export class SponsoredWithdrawService {
             dto.expiry,
             assertion,
             this.relayer(),
-            this.treasury(),
+            undefined,
           )
           .then((sig) => ({ signature: sig, result: null })),
       resolveState: () => this.resolveSvmState(adapter, pid, chain.address, chainNonce),

@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { SponsoredWithdrawService } from "./sponsored-withdraw.service";
 import { SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE } from "../common/chains";
-import { mockSecurity, mockIdempotency, mockBreaker, solanaRelayerConfig, minimalChainsStub, COSE_HEX, TREASURY } from "../../test/factories";
+import { mockSecurity, mockIdempotency, mockBreaker, solanaRelayerConfig, minimalChainsStub, COSE_HEX } from "../../test/factories";
 
 
 const ACCOUNT_ID = "50997bcf-f3e3-406b-bc77-7108593ef5cb";
@@ -9,6 +9,8 @@ const IDENTITY_ID = "pid_01HASH";
 const SMART_ADDR = "CNostmskLqp9bRX2StVVQ7cTJymAgNRweH1UxMsJQib7";
 const RELAYER = "3KKrsVy9Xc5QdnxnekmZpLM5wqCarrraBm1zGFTeDL5W";
 const DEST = "DeSt1111111111111111111111111111111111111";
+// ANT-635: fee vault is the ["treasury"] PDA per program id (valid base58).
+const TREASURY_PDA = "VzTreasuryPDA11111111111111111111111111111";
 
 class MockPublicKey {
   constructor(public readonly addr: string) {
@@ -36,6 +38,7 @@ const adapterMock = {
   getTokenBalancesOf: jest.fn(async () => [
     { mint: "USDCmint11111111111111111111111111111111", amount: "10000000", decimals: 6, account: "AtAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaAAA" },
   ]),
+  treasuryAddress: jest.fn(() => new MockPublicKey(TREASURY_PDA)),
   parseTransaction: jest.fn(async () => ({ signature: "sig", fee: 5000 })),
   getHistory: jest.fn(async (): Promise<{ signature: string; err: unknown }[]> => []),
   sponsoredWithdrawSolV3: jest.fn(async () => "sig-sponsor-sol") as jest.Mock,
@@ -120,6 +123,8 @@ describe("SponsoredWithdrawService", () => {
     expect(BigInt(q.totalFeeLamports)).toBe(22000n);
     expect(q.feePolicyVersion).toBe(2);
     expect(q.chainTime).toBe(1_000_000);
+    // ANT-635: the quote names the ["treasury"] PDA, never an env const.
+    expect(q.treasury).toBe(TREASURY_PDA);
   });
 
   it("quote rejects a not-activated wallet", async () => {
@@ -139,8 +144,8 @@ describe("SponsoredWithdrawService", () => {
     expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][0]).toBe("pid_01HASH");
     expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][4]).toBe(2); // policy version
     expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][5]).toBe(5000n); // attested networkFee
-    // treasury() falls back to the relayer pubkey by default (production).
-    expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][10]).toEqual(new MockPublicKey(RELAYER));
+    // ANT-635: the service omits treasury — the adapter derives the ["treasury"] PDA.
+    expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][10]).toBeUndefined();
   });
 
   it("rejects a stale nonce before broadcasting", async () => {
@@ -351,7 +356,7 @@ describe("SponsoredWithdrawService", () => {
     expect(call[0]).toBe("pid_01HASH");
     expect(call[5]).toBe(2); // policy version
     expect(call[6]).toBe(10000n); // attested networkFee
-    expect(call[11]).toEqual(new MockPublicKey(RELAYER)); // treasury falls back to relayer
+    expect(call[11]).toBeUndefined(); // ANT-635: adapter derives the ["treasury"] PDA
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
       "execute.submitted",

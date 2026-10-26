@@ -93,7 +93,6 @@ services:
       # rotating domains with existing credentials.
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
       PID_RELAYER_SECRET: ${PID_RELAYER_SECRET}
-      PID_TREASURY_PUBKEY: ${PID_TREASURY_PUBKEY}
       DOKU_MODE: ${DOKU_MODE:-sandbox}
       DOKU_CLIENT_ID: ${DOKU_CLIENT_ID}
       DOKU_SECRET_KEY: ${DOKU_SECRET_KEY}

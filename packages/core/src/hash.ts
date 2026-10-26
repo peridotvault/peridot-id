@@ -53,6 +53,18 @@ export const IX_V4 = {
   activate: 14,
 } as const;
 
+/**
+ * ANT-635 program-bound revenue vault discriminators (must match
+ * `src/instructions/mod.rs` 15-18 — the ANT-637 spec's 11-14 collided with
+ * the V4 fee-capped siblings, so the vault takes the next free slots).
+ */
+export const IX_VAULT = {
+  initTreasury: 15,
+  withdrawRevenue: 16,
+  addAdmin: 17,
+  removeAdmin: 18,
+} as const;
+
 /** V4 operation tags — equal to the V4 discriminators (auth.rs convention). */
 export const OP_V4 = {
   withdrawSol: 11,
