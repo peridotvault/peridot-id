@@ -68,6 +68,12 @@ esac
 if [ "$ENV" = "test" ]; then
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-sandbox.peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox-dashboard.peridot.id}"
+  # ANT-693: the wallet bakes VITE_API_URL at build time (compose → Dockerfile.app).
+  # Without a per-stack default the sandbox wallet silently baked the prod API
+  # fallback, minting pid_codes in the prod DB that sandbox-api can never
+  # consume (`sso_code_invalid` on every exchange). Same canonical-API rule as
+  # DASHBOARD_API_URL below — pre-set env vars still win.
+  export VITE_API_URL="${VITE_API_URL:-https://sandbox-api.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox-api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
   export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-sandbox}"
@@ -75,6 +81,7 @@ if [ "$ENV" = "test" ]; then
 else
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-dashboard.peridot.id}"
+  export VITE_API_URL="${VITE_API_URL:-https://api.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://peridot.id}"
   export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-production}"

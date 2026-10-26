@@ -35,6 +35,30 @@ export function pkceVerifyS256(verifier: string, challenge: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** Machine-readable SSO code failure causes (ANT-693). The public exchange
+ * error stays uniform (`sso_code_invalid`) so callers can't probe which check
+ * failed (no oracle for code scanners); the reason is server-log-only and
+ * travels with a per-request correlation id for sandbox debugging. */
+export type SsoCodeFailureReason =
+  | "unknown_or_consumed"
+  | "expired"
+  | "redirect_mismatch"
+  | "pkce_mismatch"
+  | "pkce_confusion"
+  | "client_mismatch"
+  | "app_unknown"
+  | "secret_invalid"
+  | "replay";
+
+export class SsoCodeInvalidError extends Error {
+  readonly reason: SsoCodeFailureReason;
+  constructor(reason: SsoCodeFailureReason) {
+    super("sso_code_invalid");
+    this.name = "SsoCodeInvalidError";
+    this.reason = reason;
+  }
+}
+
 export interface SsoIdentity {
   pid: string;
   /** @deprecated one-release shim for relying parties — identical to `pid`, removed next release. */
@@ -243,34 +267,37 @@ export class SsoService {
     codeVerifier?: string,
   ): Promise<SsoIdentity> {
     const row = await this.prisma.ssoCode.findUnique({ where: { code } });
-    if (!row || row.consumedAt || row.expiresAt < new Date()) {
-      throw new Error("sso_code_invalid");
+    if (!row || row.consumedAt) {
+      throw new SsoCodeInvalidError("unknown_or_consumed");
+    }
+    if (row.expiresAt < new Date()) {
+      throw new SsoCodeInvalidError("expired");
     }
     // OAuth-style redirect binding (M1): the RP must present the exact
     // redirect_uri the code was issued for. Missing/mismatched yields the
     // same uniform error as an unknown code — no oracle for code scanners.
     if (!redirectUri || row.redirectTo !== redirectUri) {
-      throw new Error("sso_code_invalid");
+      throw new SsoCodeInvalidError("redirect_mismatch");
     }
     // PKCE verification (ANT-284): a challenged code only exchanges with its
     // verifier; an unchallenged code must not carry one (confusion guard).
     // Same uniform error either way — no oracle for challenge scanners.
     if (row.codeChallenge) {
       if (!codeVerifier || row.codeChallengeMethod !== PKCE_METHOD_S256 || !pkceVerifyS256(codeVerifier, row.codeChallenge)) {
-        throw new Error("sso_code_invalid");
+        throw new SsoCodeInvalidError("pkce_mismatch");
       }
     } else if (codeVerifier) {
-      throw new Error("sso_code_invalid");
+      throw new SsoCodeInvalidError("pkce_confusion");
     }
     // Codes bound to an app only exchange with the same client_id — and with a
     // valid (unexpired) secret when one is set (confidential clients).
     // Uniform error, no oracle.
     if (row.clientId) {
-      if (row.clientId !== clientId) throw new Error("sso_code_invalid");
+      if (row.clientId !== clientId) throw new SsoCodeInvalidError("client_mismatch");
       const app = await this.apps.findActive(row.clientId);
-      if (!app) throw new Error("sso_code_invalid");
+      if (!app) throw new SsoCodeInvalidError("app_unknown");
       if (!this.apps.clientSecretValid(app, clientSecret ?? "")) {
-        throw new Error("sso_code_invalid");
+        throw new SsoCodeInvalidError("secret_invalid");
       }
     }
 
@@ -279,7 +306,7 @@ export class SsoService {
       where: { id: row.id, consumedAt: null },
       data: { consumedAt: new Date() },
     });
-    if (updated.count === 0) throw new Error("sso_code_invalid");
+    if (updated.count === 0) throw new SsoCodeInvalidError("replay");
 
     // A fresh full login records (or heals) the origin's grant: exchanging a code
     // is explicit re-consent. The one-tap `authorize` path stays blocked while

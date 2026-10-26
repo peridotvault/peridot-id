@@ -20,7 +20,8 @@ import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { isPendingGoogleClaim } from "./google.strategy";
 import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto, GrantScopeDto } from "./dto/auth.dto";
 import { PidAppsService } from "./apps.service";
-import { encodeState, SsoService } from "./sso.service";
+import { encodeState, SsoCodeInvalidError, SsoService } from "./sso.service";
+import { randomBytes } from "node:crypto";
 import { oauthStateSecret, verifyOAuthState } from "./oauth-state";
 import { resolveServiceUrls } from "../common/app-config";
 
@@ -216,8 +217,22 @@ export class AuthController {
   async exchange(@Body() dto: ExchangeDto) {
     try {
       return await this.ssoService.consume(dto.code, dto.redirectUri, dto.clientId, dto.clientSecret, dto.codeVerifier);
-    } catch {
-      throw new BadRequestException("Code is invalid, expired, or already used");
+    } catch (err) {
+      // ANT-693: the public error stays uniform (no oracle for code scanners),
+      // but the failure is now observable: server log carries the machine
+      // reason + correlation id, and the caller gets both plus an actionable
+      // checklist (redirect_uri exactness, secret, single-use/TTL) instead of
+      // a bare silent 400. Sandbox debugging starts from the correlation id.
+      const reason = err instanceof SsoCodeInvalidError ? err.reason : "internal";
+      const correlationId = randomBytes(8).toString("hex");
+      this.logger.warn(`exchange failed: reason=${reason} correlationId=${correlationId}`);
+      throw new BadRequestException({
+        error: "sso_code_invalid",
+        message:
+          "Code is invalid, expired, or already used. Check: redirect_uri must exactly match the login target, " +
+          "the app secret must be current when the app has one, and each code is single-use (60s TTL).",
+        correlationId,
+      });
     }
   }
 
