@@ -25,7 +25,14 @@
 #   REJECT_NOTIFY (default 10) REJECT_PAGE (default 50)          Q2 per bucket / 15 min.
 #   ROTATION_NOTIFY (default 3) ROTATION_PAGE (default 10)        Q5 per chain / 15 min.
 #   DRIFT_NOTIFY (default 20) DRIFT_PAGE (default 100)            Q7 per (chain,entryPoint) / 15 min.
-#   Per-chain absorbed-loss caps, native base units (defaults = OQ-3 proposal):
+#   Per-chain absorbed-loss caps, native base units (defaults = OQ-3 proposal).
+#   Two env families are canonical (ANT-601 reconciliation — either family
+#   alone suffices; the mechanism honors both with the same precedence):
+#   canonical BREAKER_CAP_<CHAIN>, fallback alias
+#   PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN>, or the global
+#   PID_RELAYER_BREAKER_CAP_LAMPORTS. Resolution per chain:
+#   BREAKER_CAP_<CHAIN> > PID_…_<CHAIN> > PID global > compiled default below.
+#   Keep both families identical when both are set.
 #   BREAKER_CAP_SOLANA (default 1000000)          lamports / 1h
 #   BREAKER_CAP_STELLAR (default 1000000)         stroops / 1h
 #   BREAKER_CAP_ETHEREUM (default 20000000000000000)  wei / 1h (0.02 ETH)
@@ -50,11 +57,11 @@ REVOCATION_FLOOR="${REVOCATION_FLOOR:-5}"
 REJECT_NOTIFY="${REJECT_NOTIFY:-10}"; REJECT_PAGE="${REJECT_PAGE:-50}"
 ROTATION_NOTIFY="${ROTATION_NOTIFY:-3}"; ROTATION_PAGE="${ROTATION_PAGE:-10}"
 DRIFT_NOTIFY="${DRIFT_NOTIFY:-20}"; DRIFT_PAGE="${DRIFT_PAGE:-100}"
-CAP_SOLANA="${BREAKER_CAP_SOLANA:-1000000}"
-CAP_STELLAR="${BREAKER_CAP_STELLAR:-1000000}"
-CAP_ETHEREUM="${BREAKER_CAP_ETHEREUM:-20000000000000000}"
-CAP_BASE="${BREAKER_CAP_BASE:-500000000000000}"
-CAP_BSC="${BREAKER_CAP_BSC:-2000000000000000}"
+CAP_SOLANA="${BREAKER_CAP_SOLANA:-${PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA:-${PID_RELAYER_BREAKER_CAP_LAMPORTS:-1000000}}}"
+CAP_STELLAR="${BREAKER_CAP_STELLAR:-${PID_RELAYER_BREAKER_CAP_LAMPORTS_STELLAR:-${PID_RELAYER_BREAKER_CAP_LAMPORTS:-1000000}}}"
+CAP_ETHEREUM="${BREAKER_CAP_ETHEREUM:-${PID_RELAYER_BREAKER_CAP_LAMPORTS_ETHEREUM:-${PID_RELAYER_BREAKER_CAP_LAMPORTS:-20000000000000000}}}"
+CAP_BASE="${BREAKER_CAP_BASE:-${PID_RELAYER_BREAKER_CAP_LAMPORTS_BASE:-${PID_RELAYER_BREAKER_CAP_LAMPORTS:-500000000000000}}}"
+CAP_BSC="${BREAKER_CAP_BSC:-${PID_RELAYER_BREAKER_CAP_LAMPORTS_BSC:-${PID_RELAYER_BREAKER_CAP_LAMPORTS:-2000000000000000}}}"
 CAP_UNKNOWN="$CAP_SOLANA"
 
 Q1="SELECT COALESCE(se.metadata ->> 'chain', 'unknown'), COUNT(*) FILTER (WHERE se.\"createdAt\" > now() - interval '10 minutes'), COUNT(*) FILTER (WHERE se.\"createdAt\" <= now() - interval '10 minutes') FROM security_events se WHERE se.\"eventType\" IN ('credential.rotated', 'credential.revoked') AND se.\"createdAt\" > now() - interval '1 hour' GROUP BY 1;"

@@ -1,13 +1,25 @@
 // H3 circuit breaker (ANT-589): per-chain spend-rate guard on absorbed loss.
 //
-// Normative contract: deploy/relayer-breaker/README.md — caps from env in
-// native base units (integer strings): BREAKER_CAP_SOLANA / _STELLAR /
-// _ETHEREUM / _BASE / _BSC. Rolling window 1h (R-NFR-5/9), summed from
-// relayer.pnl.absorbed (+ legacy *.reconciled.relayerAbsorbed) — the same Q4
-// the alert check evaluates, so the breaker and the page can never disagree
-// about the sum. Absorbed-loss definition: absorbed = max(0, actual − attested)
-// per sponsored tx. Compiled default: 0 = breaker disabled (no env = no
-// behavior change; caps are operator-owned, Trevor + CTO = OQ-3).
+// Cap VALUES are Trevor+CTO owned (OQ-3). Canonical env contract
+// (deploy/relayer-breaker/README.md): per-chain `BREAKER_CAP_<CHAIN>`
+// (chain key uppercased: SOLANA / STELLAR / ETHEREUM / BASE / BSC).
+// ANT-601 reconciliation: the pre-rewrite `PID_RELAYER_BREAKER_CAP_LAMPORTS`
+// family stays honored as a fallback alias — per-chain
+// `PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN>`, then global
+// `PID_RELAYER_BREAKER_CAP_LAMPORTS` — so operators who configured the PID
+// family (PR #107 era) keep enforcement instead of silently going disabled.
+// Resolution: `BREAKER_CAP_<CHAIN>` → `PID_…_<CHAIN>` → global `PID_…`.
+// First set, non-empty value wins; unset/invalid everywhere means "0" =
+// breaker disabled for that chain. The alert check
+// (`deploy/alerts/relayer-h1-check.sh`) mirrors this exact precedence, so
+// the breaker and the page can never disagree about the cap.
+//
+// Rolling window 1h (R-NFR-5/9), summed from relayer.pnl.absorbed
+// (+ legacy *.reconciled.relayerAbsorbed) — the same Q4 the alert check
+// evaluates, so the breaker and the page can never disagree about the sum.
+// Absorbed-loss definition: absorbed = max(0, actual − attested) per
+// sponsored tx. Compiled default: 0 = breaker disabled (no env = no behavior
+// change; caps are operator-owned, Trevor + CTO = OQ-3).
 //
 // Transitions emit the canonical H3 rows with the exact contract keys:
 //   relayer.breaker.opened { chain, absorbedSum, cap, window, reason }
@@ -19,11 +31,12 @@
 // Rebase note (ANT-598): supersedes the PR #107 draft breaker (PID_RELAYER_*
 // env, absorbedWindow snapshot key, pid-first requireClosed). Canonical env is
 // BREAKER_CAP_<CHAIN>, snapshot key is absorbedSum, matching the ops contract
-// (deploy/relayer-breaker/README.md + 56c0adf). withBoundedRetries is ported
-// from #107; its park emission uses the canonical relay.parked_unreadable
-// row (the only monitored park event) — this path has no nonce by
-// construction (generic RPC retries, not resolve-then-act), so `op` rides
-// along for triage instead.
+// (deploy/relayer-breaker/README.md + 56c0adf). The PID_RELAYER_* family is
+// kept only as a fallback alias (ANT-601) so pre-rewrite operators keep
+// enforcement. withBoundedRetries is ported from #107; its park emission uses
+// the canonical relay.parked_unreadable row (the only monitored park event) —
+// this path has no nonce by construction (generic RPC retries, not
+// resolve-then-act), so `op` rides along for triage instead.
 
 import { Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -59,15 +72,36 @@ export class CircuitBreakerService {
     private readonly security: SecurityEventService,
   ) {}
 
-  /** Configured cap for a chain (bigint base units). Zero/negative/missing = breaker disabled. */
+  /**
+   * Configured cap for a chain (bigint base units). Zero/negative/missing =
+   * breaker disabled. Resolution order (ANT-601): canonical per-chain
+   * `BREAKER_CAP_<CHAIN>`, then fallback alias per-chain `PID_…_<CHAIN>`,
+   * then global `PID_RELAYER_BREAKER_CAP_LAMPORTS`. Empty strings count as
+   * unset so a stray empty export cannot shadow a real value.
+   */
   capFor(chain: string): bigint {
-    const raw = this.config.get<string>(`BREAKER_CAP_${chain.toUpperCase()}`, "0");
+    const upper = chain.toUpperCase();
+    const raw =
+      this.firstSet(
+        `BREAKER_CAP_${upper}`,
+        `PID_RELAYER_BREAKER_CAP_LAMPORTS_${upper}`,
+        "PID_RELAYER_BREAKER_CAP_LAMPORTS",
+      ) ?? "0";
     try {
       const cap = BigInt(raw ?? "0");
       return cap > 0n ? cap : 0n;
     } catch {
       return 0n;
     }
+  }
+
+  /** First configured, non-empty value across the given env keys, if any. */
+  private firstSet(...keys: string[]): string | undefined {
+    for (const key of keys) {
+      const value = this.config.get<string>(key);
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return undefined;
   }
 
   /** Absorbed P&L recorded post-reconcile; opens the breaker on cap breach. */
