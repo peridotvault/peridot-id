@@ -1,7 +1,7 @@
 // Admin chain-registry management. Every write invalidates the registry cache
 // and emits a security event (who changed what). Deactivation (not delete)
 // keeps history and lets the wallet hide a chain instantly.
-import { ConflictException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { TokenRegistryService } from "../chain/token-registry.service";
@@ -10,6 +10,8 @@ import { WasabiStorageService } from "../common/wasabi-storage";
 import { encryptSecret } from "../common/secret-crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
+import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
+import { normalizeFeeChain } from "../relayer/relayer-events";
 import { CreateChainDto, CreateTokenDto, PreviewTokenDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto } from "./admin.dto";
 
 @Injectable()
@@ -21,6 +23,7 @@ export class AdminService {
     private readonly wasabi: WasabiStorageService,
     private readonly security: SecurityEventService,
     @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly breaker?: CircuitBreakerService,
   ) {}
 
   listChains() {
@@ -120,6 +123,35 @@ export class AdminService {
     await this.prisma.evmRelayerKey.deleteMany({ where: { chainId } });
     await this.security.log(pid, "admin.evm_relayer.deleted", { chainId });
     return { ok: true as const };
+  }
+
+  /**
+   * Manually open the relayer circuit breaker (runbook §2/§3 freeze path).
+   * Emits the canonical relayer.breaker.opened row (chain/absorbedSum/cap/window/reason).
+   */
+  async openRelayerBreaker(pid: string, chain: string, reason: string) {
+    if (!this.breaker) throw new ServiceUnavailableException("Relayer breaker is not configured");
+    const feeChain = normalizeFeeChain(chain);
+    if (feeChain === "unknown") throw new BadRequestException(`Unknown fee chain: ${chain}`);
+    if (!reason || reason.length > 500) throw new BadRequestException("reason is required (1..500 chars)");
+    const snapshot = await this.breaker.openBreaker(pid, feeChain, reason);
+    await this.security.log(pid, "admin.relayer_breaker.opened", { chain: feeChain, reason });
+    return snapshot;
+  }
+
+  /**
+   * Manually resume the relayer breaker (runbook §4). The closer names
+   * themselves and pastes the five evidence items; operator + evidence land on
+   * the canonical relayer.breaker.closed row.
+   */
+  async closeRelayerBreaker(pid: string, chain: string, evidence: string) {
+    if (!this.breaker) throw new ServiceUnavailableException("Relayer breaker is not configured");
+    const feeChain = normalizeFeeChain(chain);
+    if (feeChain === "unknown") throw new BadRequestException(`Unknown fee chain: ${chain}`);
+    if (!evidence || evidence.length > 2000) throw new BadRequestException("evidence is required (1..2000 chars)");
+    const snapshot = await this.breaker.closeBreaker(pid, feeChain, evidence);
+    await this.security.log(pid, "admin.relayer_breaker.closed", { chain: feeChain, operator: pid });
+    return snapshot;
   }
 
   /**

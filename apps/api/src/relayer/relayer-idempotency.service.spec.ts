@@ -81,7 +81,8 @@ describe("RelayerIdempotencyService", () => {
     await service.recordSubmission(PID, "7", "solana", "withdraw", "sig-1");
     const retry = await service.claimSlot(PID, "7", "solana", "hash-a", "withdraw");
     expect(retry).toEqual({ decision: "duplicate", signature: "sig-1" });
-    expect(security.log).toHaveBeenCalledWith(PID, "broadcast.duplicate_suppressed", expect.objectContaining({ signature: "sig-1" }));
+    // No duplicate_suppressed row: benign dedup has no canonical H2 home.
+    expect(security.log).not.toHaveBeenCalled();
   });
 
   it("serializes concurrent identical claims via the unique index (F2)", async () => {
@@ -120,11 +121,8 @@ describe("RelayerIdempotencyService", () => {
     await expect(service.claimSlot(PID, "7", "solana", "hash-B-DIFFERENT", "withdraw")).rejects.toBeInstanceOf(
       ConflictException,
     );
-    expect(security.log).toHaveBeenCalledWith(
-      PID,
-      "broadcast.conflicting_bytes_rejected",
-      expect.objectContaining({ nonce: "7" }),
-    );
+    // No conflicting-bytes row: closed H2 contract; the 409 is the trail.
+    expect(security.log).not.toHaveBeenCalled();
   });
 
   it("rebroadcasts identical bytes ONLY on proven non-landing (H-AC7 not-landed)", async () => {
@@ -146,7 +144,7 @@ describe("RelayerIdempotencyService", () => {
     expect(broadcast).toHaveBeenCalledTimes(2);
     expect(security.log).toHaveBeenCalledWith(
       PID,
-      "broadcast.resolved_not_landed_rebroadcast",
+      "relay.resolve_not_landed_rebroadcast",
       expect.objectContaining({ nonce: "7" }),
     );
   });
@@ -167,7 +165,7 @@ describe("RelayerIdempotencyService", () => {
     expect(broadcast).toHaveBeenCalledTimes(1);
     expect(security.log).toHaveBeenCalledWith(
       PID,
-      "broadcast.resolved_landed",
+      "relay.resolve_landed",
       expect.objectContaining({ signature: "sig-1" }),
     );
   });
@@ -189,10 +187,11 @@ describe("RelayerIdempotencyService", () => {
     expect(broadcast).toHaveBeenCalledTimes(1);
     expect(security.log).toHaveBeenCalledWith(
       PID,
-      "broadcast.parked_unreadable",
+      "relay.parked_unreadable",
       expect.objectContaining({ nonce: "7" }),
     );
-    expect(security.log).toHaveBeenCalledWith(PID, "relayer.parked", expect.objectContaining({ chain: "solana" }));
+    // No generic relayer.parked row: parked_unreadable is the monitored signal.
+    expect(security.log).toHaveBeenCalledTimes(1);
   });
 
   it("exhausts the resolve bound then parks (R-NFR-11)", async () => {

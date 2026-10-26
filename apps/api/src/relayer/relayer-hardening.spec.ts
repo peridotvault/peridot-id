@@ -9,17 +9,15 @@ const PID = "pid_01HASH";
 
 function breakerSetup(cap?: string, extraEnv: Record<string, string> = {}) {
   const security = mockSecurity();
+  const env: Record<string, string> = { ...extraEnv };
+  if (cap !== undefined) env["BREAKER_CAP_SOLANA"] = cap;
   const config = {
-    get: jest.fn((key: string, def?: unknown) => {
-      if (key in extraEnv) return extraEnv[key];
-      if (key === "PID_RELAYER_BREAKER_CAP_LAMPORTS") return cap ?? "0";
-      return def;
-    }),
+    get: jest.fn((key: string, def?: unknown) => env[key] ?? def),
     getOrThrow: jest.fn(() => {
       throw new Error("Missing config");
     }),
   };
-  const service = new CircuitBreakerService(config as never, {} as never, security as never);
+  const service = new CircuitBreakerService(config as never, security as never);
   return { service, security };
 }
 
@@ -28,7 +26,7 @@ describe("CircuitBreakerService", () => {
     const { service, security } = breakerSetup("1000000");
     const snap = await service.recordAbsorbed(PID, "solana", 1000n);
     expect(snap.open).toBe(false);
-    expect(snap.absorbedWindow).toBe("1000");
+    expect(snap.absorbedSum).toBe("1000");
     expect(security.log).not.toHaveBeenCalledWith(PID, "relayer.breaker.opened", expect.anything());
   });
 
@@ -41,9 +39,9 @@ describe("CircuitBreakerService", () => {
     expect(security.log).toHaveBeenCalledWith(
       PID,
       "relayer.breaker.opened",
-      expect.objectContaining({ chain: "solana", absorbedWindow: "5500", cap: "5000" }),
+      expect.objectContaining({ chain: "solana", absorbedSum: "5500", cap: "5000" }),
     );
-    await expect(service.requireClosed(PID, "solana", "withdraw")).rejects.toBeInstanceOf(
+    await expect(service.requireClosed("solana", "withdraw")).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
     // Re-quote path is unaffected: only sponsored broadcasts gate here.
@@ -56,13 +54,13 @@ describe("CircuitBreakerService", () => {
     expect(service.isOpen("solana")).toBe(true);
     const snap = await service.closeBreaker(PID, "solana", "operator reviewed incident #1");
     expect(snap.open).toBe(false);
-    expect(snap.absorbedWindow).toBe("0");
+    expect(snap.absorbedSum).toBe("0");
     expect(security.log).toHaveBeenCalledWith(
       PID,
       "relayer.breaker.closed",
       expect.objectContaining({ evidence: "operator reviewed incident #1" }),
     );
-    await expect(service.requireClosed(PID, "solana", "withdraw")).resolves.toBeUndefined();
+    await expect(service.requireClosed("solana", "withdraw")).resolves.toBeUndefined();
   });
 
   it("parks after bounded attempts instead of storming (R-NFR-7)", async () => {
@@ -74,7 +72,7 @@ describe("CircuitBreakerService", () => {
     expect(fn).toHaveBeenCalledTimes(3);
     expect(security.log).toHaveBeenCalledWith(
       PID,
-      "relayer.parked",
+      "relay.parked_unreadable",
       expect.objectContaining({ op: "getNonce", reason: "retry-bound-exhausted" }),
     );
   });
@@ -86,9 +84,9 @@ describe("CircuitBreakerService", () => {
     expect(security.log).not.toHaveBeenCalled();
   });
 
-  it("honors the BREAKER_CAP_<CHAIN> alias when the PID family is unset (ANT-601)", async () => {
-    // No PID_* set at all: the mock returns def (undefined) for PID keys.
-    const { service, security } = breakerSetup(undefined, { BREAKER_CAP_SOLANA: "5000" });
+  it("honors the PID per-chain alias when BREAKER_CAP is unset (ANT-601)", async () => {
+    // No BREAKER_CAP_* set: pre-rewrite PID-family operators keep enforcement.
+    const { service, security } = breakerSetup(undefined, { PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA: "5000" });
     const snap = await service.recordAbsorbed(PID, "solana", 6000n);
     expect(snap.open).toBe(true);
     expect(snap.cap).toBe("5000");
@@ -99,41 +97,52 @@ describe("CircuitBreakerService", () => {
     );
   });
 
-  it("prefers PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN> over the BREAKER_CAP alias (ANT-601)", async () => {
+  it("prefers canonical BREAKER_CAP_<CHAIN> over the PID alias (ANT-601)", async () => {
     const { service } = breakerSetup(undefined, {
-      PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA: "9000",
       BREAKER_CAP_SOLANA: "5000",
+      PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA: "9000",
     });
-    // 6000 >= 5000 (alias) but < 9000 (PID winner): stays closed, cap is the PID value.
+    // 6000 >= 5000 (canonical) even though < 9000 (alias): opens, cap is the BREAKER value.
     const snap = await service.recordAbsorbed(PID, "solana", 6000n);
-    expect(snap.open).toBe(false);
-    expect(snap.cap).toBe("9000");
+    expect(snap.open).toBe(true);
+    expect(snap.cap).toBe("5000");
   });
 
   it("falls back to the global PID default when no per-chain value is set (ANT-601)", async () => {
-    const { service } = breakerSetup("7000");
+    const { service } = breakerSetup(undefined, { PID_RELAYER_BREAKER_CAP_LAMPORTS: "7000" });
     const snap = await service.recordAbsorbed(PID, "solana", 6000n);
     expect(snap.open).toBe(false);
     expect(snap.cap).toBe("7000");
   });
 
   it("prefers any per-chain value over the global default, regardless of family (ANT-601)", async () => {
-    const { service } = breakerSetup("7000", { BREAKER_CAP_SOLANA: "5000" });
+    const { service } = breakerSetup(undefined, {
+      PID_RELAYER_BREAKER_CAP_LAMPORTS: "7000",
+      PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA: "5000",
+    });
     // Chain-specific alias (5000) beats the global default (7000): specificity first, family second.
     const snap = await service.recordAbsorbed(PID, "solana", 6000n);
     expect(snap.open).toBe(true);
     expect(snap.cap).toBe("5000");
   });
 
-  it("treats empty and unparsable cap values as disabled, never as enforced (ANT-601)", async () => {
-    const { service } = breakerSetup(undefined, {
-      PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA: "",
-      BREAKER_CAP_SOLANA: "not-a-number",
+  it("treats empty and unparsable cap values as unset/disabled, never as enforced (ANT-601)", async () => {
+    // Empty canonical value is skipped (counts as unset) → PID alias wins.
+    const aliased = breakerSetup(undefined, {
+      BREAKER_CAP_SOLANA: "",
+      PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA: "5000",
     });
-    // Empty PID override is skipped (counts as unset); unparsable alias fails safe to 0.
-    const snap = await service.recordAbsorbed(PID, "solana", 999_999_999n);
-    expect(snap.open).toBe(false);
-    expect(snap.cap).toBe("0");
+    const snapAlias = await aliased.service.recordAbsorbed(PID, "solana", 6000n);
+    expect(snapAlias.open).toBe(true);
+    expect(snapAlias.cap).toBe("5000");
+    // Garbage everywhere fails safe to 0 = disabled.
+    const broken = breakerSetup(undefined, {
+      BREAKER_CAP_SOLANA: "not-a-number",
+      PID_RELAYER_BREAKER_CAP_LAMPORTS: "also-bad",
+    });
+    const snapBroken = await broken.service.recordAbsorbed(PID, "solana", 999_999_999n);
+    expect(snapBroken.open).toBe(false);
+    expect(snapBroken.cap).toBe("0");
   });
 });
 
@@ -150,11 +159,9 @@ describe("RevocationMonitor", () => {
       snap = await monitor.recordRevocation(PID, "solana", t0 + i * 60_000);
     }
     expect(snap.spike).toBe(true);
-    expect(security.log).toHaveBeenCalledWith(
-      PID,
-      "revocation.spike",
-      expect.objectContaining({ chain: "solana" }),
-    );
+    // No revocation.spike row: the spike is derived from revocation counts
+    // (P1/A1), so the monitor stays silent and only flags.
+    expect(security.log).not.toHaveBeenCalled();
   });
 
   it("stays quiet on isolated revocations", async () => {

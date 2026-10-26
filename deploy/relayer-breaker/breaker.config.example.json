@@ -18,14 +18,14 @@
     "bsc": "0.002 BNB/hr; ~100x typical 21k-gas tx at 1 gwei"
   },
   "env": {
-    "solana": { "mechanism": "PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA", "alerts": "BREAKER_CAP_SOLANA" },
-    "stellar": { "mechanism": "PID_RELAYER_BREAKER_CAP_LAMPORTS_STELLAR", "alerts": "BREAKER_CAP_STELLAR" },
-    "ethereum": { "mechanism": "PID_RELAYER_BREAKER_CAP_LAMPORTS_ETHEREUM", "alerts": "BREAKER_CAP_ETHEREUM" },
-    "base": { "mechanism": "PID_RELAYER_BREAKER_CAP_LAMPORTS_BASE", "alerts": "BREAKER_CAP_BASE" },
-    "bsc": { "mechanism": "PID_RELAYER_BREAKER_CAP_LAMPORTS_BSC", "alerts": "BREAKER_CAP_BSC" },
+    "solana": { "canonical": "BREAKER_CAP_SOLANA", "fallback_alias": "PID_RELAYER_BREAKER_CAP_LAMPORTS_SOLANA" },
+    "stellar": { "canonical": "BREAKER_CAP_STELLAR", "fallback_alias": "PID_RELAYER_BREAKER_CAP_LAMPORTS_STELLAR" },
+    "ethereum": { "canonical": "BREAKER_CAP_ETHEREUM", "fallback_alias": "PID_RELAYER_BREAKER_CAP_LAMPORTS_ETHEREUM" },
+    "base": { "canonical": "BREAKER_CAP_BASE", "fallback_alias": "PID_RELAYER_BREAKER_CAP_LAMPORTS_BASE" },
+    "bsc": { "canonical": "BREAKER_CAP_BSC", "fallback_alias": "PID_RELAYER_BREAKER_CAP_LAMPORTS_BSC" },
     "global_default": "PID_RELAYER_BREAKER_CAP_LAMPORTS (applies to any chain without a per-chain value; unset = 0 = breaker disabled)"
   },
-  "env_precedence": "per-chain PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN> > per-chain BREAKER_CAP_<CHAIN> > global PID_RELAYER_BREAKER_CAP_LAMPORTS; first set non-empty value wins, identical on mechanism and alert sides (ANT-601). Either family alone enforces; keep both identical when both are set.",
+  "env_precedence": "per-chain BREAKER_CAP_<CHAIN> (canonical) > per-chain PID_RELAYER_BREAKER_CAP_LAMPORTS_<CHAIN> (fallback alias) > global PID_RELAYER_BREAKER_CAP_LAMPORTS; first set non-empty value wins, identical on mechanism and alert sides (ANT-601). Either family alone enforces; keep both identical when both are set.",
   "receivers": {
     "page": "ALERT_PAGE_URL (on-call; formula_mismatch also pages Security/Tobias)",
     "notify": "ALERT_WEBHOOK_URL (#relayer-ops)"

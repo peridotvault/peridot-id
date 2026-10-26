@@ -15,7 +15,11 @@ import { ConflictException, Injectable, Logger, ServiceUnavailableException } fr
 import { PrismaService } from "../prisma/prisma.service";
 import { isP2002 } from "../prisma/prisma-error";
 import { SecurityEventService } from "../security/security-event.service";
-import { RelayerEvents, ResolveOutcome, SponsoredEntryPoint, backoffWithJitter } from "./relayer-events";
+import { RelayerH1Events, ResolveOutcome, SponsoredEntryPoint, backoffWithJitter } from "./relayer-events";
+// ANT-598: canonical H2 vocabulary. Draft names (broadcast.*, relayer.parked)
+// have no monitoring home per the ops revert 56c0adf and are not emitted:
+// dedup/conflicting-bytes/rebroadcast paths keep their behavior, the canonical
+// relay.* rows carry the paging signal.
 
 export const BROADCAST_CHAIN_SOLANA = "solana";
 export const BROADCAST_CHAIN_EIP155 = "eip155";
@@ -103,24 +107,14 @@ export class RelayerIdempotencyService {
     if (existing.txBytesHash === txBytesHash) {
       // Same signed intent retried while nonce unconsumed + unexpired: no new
       // broadcast. The earlier submission (if any) IS the execution.
-      if (existing.signature) {
-        await this.security.log(pid, RelayerEvents.duplicateSuppressed, {
-          entryPoint,
-          chain,
-          nonce,
-          signature: existing.signature,
-        });
-      }
+      // Benign dedup (no new broadcast): no canonical H2 row covers it, so no
+      // emission — the caller's duplicate fast-path is the observable outcome.
       return { decision: "duplicate", signature: existing.signature };
     }
     // DIFFERENT bytes under the SAME nonce: FORBIDDEN in all cases — never a
-    // conflicting submission; a superseding intent needs a fresh nonce.
-    await this.security.log(pid, RelayerEvents.conflictingBytesRejected, {
-      entryPoint,
-      chain,
-      nonce,
-      status: existing.status,
-    });
+    // conflicting submission; a superseding intent needs a fresh nonce. No
+    // canonical H2 row covers this path (closed contract): the 409 + Nest
+    // error log are the trail.
     throw new ConflictException(
       "A different transaction under the same authorization is forbidden — re-quote for a fresh nonce",
     );
@@ -170,7 +164,7 @@ export class RelayerIdempotencyService {
     const ageMs = Date.now() - new Date(inflight.updatedAt).getTime();
     if (BigInt(inflight.nonce) !== currentNonce || ageMs > ROTATION_SLOT_TTL_MS) {
       await this.recordOutcome(pid, inflight.nonce, chain, "rotate", "expired");
-      await this.security.log(pid, RelayerEvents.rotationUnconfirmed, {
+      await this.security.log(pid, RelayerH1Events.rotationUnconfirmed, {
         chain,
         nonce: inflight.nonce,
         signature: inflight.signature,
@@ -178,7 +172,7 @@ export class RelayerIdempotencyService {
       });
       return;
     }
-    await this.security.log(pid, RelayerEvents.rotationUnconfirmed, {
+    await this.security.log(pid, RelayerH1Events.rotationUnconfirmed, {
       chain,
       nonce: inflight.nonce,
       signature: inflight.signature,
@@ -234,8 +228,7 @@ export class RelayerIdempotencyService {
     if ("unreadable" in resolution) {
       // Chain state UNREADABLE after the bound: park + alert, never blind-broadcast.
       await this.recordOutcome(pid, nonce, chain, entryPoint, "parked-unreadable");
-      await this.security.log(pid, RelayerEvents.parkedUnreadable, { entryPoint, chain, nonce });
-      await this.security.log(pid, RelayerEvents.parked, {
+      await this.security.log(pid, RelayerH1Events.parkedUnreadable, {
         entryPoint,
         chain,
         nonce,
@@ -251,7 +244,7 @@ export class RelayerIdempotencyService {
       // A null signature means proven-landed but unattributed (nonce consumed,
       // history unreadable) — reconcile what can be reconciled, alert the rest.
       await this.recordOutcome(pid, nonce, chain, entryPoint, "resolved-landed", resolution.signature ?? undefined);
-      await this.security.log(pid, RelayerEvents.resolvedLanded, {
+      await this.security.log(pid, RelayerH1Events.resolveLanded, {
         entryPoint,
         chain,
         nonce,
@@ -262,13 +255,7 @@ export class RelayerIdempotencyService {
     // Proven non-landing: the ONE allowed identical-bytes rebroadcast.
     const out = await opts.broadcast();
     await this.recordOutcome(pid, nonce, chain, entryPoint, "resolved-not-landed-rebroadcast", out.signature);
-    await this.security.log(pid, RelayerEvents.rebroadcast, {
-      entryPoint,
-      chain,
-      nonce,
-      signature: out.signature,
-    });
-    await this.security.log(pid, RelayerEvents.resolvedNotLandedRebroadcast, {
+    await this.security.log(pid, RelayerH1Events.resolveNotLandedRebroadcast, {
       entryPoint,
       chain,
       nonce,

@@ -1,0 +1,46 @@
+{
+  "title": "PeridotID relayer absorbed-loss USD caps (ANT-602, OQ-3 condition 3)",
+  "window": "1h",
+  "unit": "USD (decimal strings, e.g. \"1.50\" = $1.50/hr)",
+  "method": "derived from the native OQ-3 caps at the reference rates below; re-tune with the native caps after 7 days of sustained traffic (cap = 100 x p99 single-tx absorbed, native AND usd), CTO sign-off. No mainnet values change without the audit gate (R-NFR-10) and a board order.",
+  "referenceRates": {
+    "note": "EXAMPLE rates used ONLY to derive the initial USD caps. Runtime conversion ALWAYS uses relayer_price_rates (fresh ≤ PRICE_STALE_AFTER_SEC), never these numbers.",
+    "solana": "200.00 (USD/SOL)",
+    "stellar": "0.30 (USD/XLM)",
+    "ethereum": "3000.00 (USD/ETH)",
+    "base": "3000.00 (USD/ETH)",
+    "bsc": "600.00 (USD/BNB)"
+  },
+  "caps": {
+    "solana": "0.20",
+    "stellar": "0.03",
+    "ethereum": "60.00",
+    "base": "1.50",
+    "bsc": "1.20"
+  },
+  "derivation": {
+    "solana": "1000000 lamports = 0.001 SOL @ $200 = $0.20/hr",
+    "stellar": "1000000 stroops = 0.1 XLM @ $0.30 = $0.03/hr",
+    "ethereum": "20000000000000000 wei = 0.02 ETH @ $3000 = $60.00/hr",
+    "base": "500000000000000 wei = 0.0005 ETH @ $3000 = $1.50/hr",
+    "bsc": "2000000000000000 wei = 0.002 BNB @ $600 = $1.20/hr"
+  },
+  "env": {
+    "solana": "USD_CAP_SOLANA",
+    "stellar": "USD_CAP_STELLAR",
+    "ethereum": "USD_CAP_ETHEREUM",
+    "base": "USD_CAP_BASE",
+    "bsc": "USD_CAP_BSC",
+    "staleAfterSec": "PRICE_STALE_AFTER_SEC (default 900)"
+  },
+  "priceFeed": {
+    "table": "relayer_price_rates (deploy/alerts/relayer-price-rates-ddl.sql, applied once per DB)",
+    "refreshCadence": "every 5 min (same tick as alert checks)",
+    "apiKeyEnv": "PRICE_API_KEY (runtime-injected, never in repo)",
+    "stalenessRule": "rate older than PRICE_STALE_AFTER_SEC → PAGE on staleness, SKIP usd burn eval for that chain (fail-closed; native-unit Q4 still pages)"
+  },
+  "receivers": {
+    "page": "ALERT_PAGE_URL (on-call; staleness pages on-call, not Security)",
+    "notify": "ALERT_WEBHOOK_URL (#relayer-ops)"
+  }
+}
