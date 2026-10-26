@@ -1,5 +1,4 @@
-//! Build script: bakes the program ID, backend allowlist, and canonical
-//! treasury into the program.
+//! Build script: bakes the program ID and backend allowlist into the program.
 //!
 //! `PID_PROGRAM_ID` (base58, this program's on-chain address for the target
 //! cluster) becomes `program_id::ID` (ANT-211: previously a hardcoded
@@ -10,11 +9,11 @@
 //! `SOLANA_CLUSTER=testnet*/mainnet*`) makes an unset `PID_PROGRAM_ID` a
 //! build-time hard error instead of a silent fallback (ANT-215, Tobias
 //! ANT-212 Finding 3). PDA derivation
-//! (`state::verify_pda`) uses the runtime `program_id`, so the gate ID and
-//! derivation cannot split-brain within one binary, and rebuilding for the
-//! same address preserves existing accounts. (A *new* address means new PDAs —
-//! PDAs are bound to (seeds, program id) — so always build with the
-//! `PID_PROGRAM_ID` of the cluster you deploy to.)
+//! (`state::verify_pda`, `treasury::verify_*_pda`) uses the runtime
+//! `program_id`, so the gate ID and derivation cannot split-brain within one
+//! binary, and rebuilding for the same address preserves existing accounts.
+//! (A *new* address means new PDAs — PDAs are bound to (seeds, program id) —
+//! so always build with the `PID_PROGRAM_ID` of the cluster you deploy to.)
 //!
 //! `PID_BACKEND` (base58, the Peridot relayer pubkey for this environment)
 //! becomes `config::BACKEND`. Creation paths (`initialize`, `activate`) require
@@ -22,11 +21,13 @@
 //! (only the backend knows the pid↔identity mapping), so a stranger can neither
 //! squat a PDA nor divert a pre-funded deposit.
 //!
-//! `PID_TREASURY` (base58) becomes `config::TREASURY`, the single canonical V1
-//! recipient of protocol markup. It defaults to `PID_BACKEND` when unset. Neither
-//! constant enters PDA derivation: builds are env-specific by design (program
-//! id per cluster via `PID_PROGRAM_ID`, backend/treasury consts per cluster).
-//! Local tests set both to the test keypair.
+//! ANT-635 (ANT-638): `PID_TREASURY` / `config::TREASURY` are REMOVED. The
+//! protocol-fee recipient is the program-bound PDA vault `[b"treasury"]`
+//! (`treasury.rs`), derived at runtime per program id — no build-time const,
+//! no env var. Any lingering `config::TREASURY` reference is a build break by
+//! design. Neither constant enters PDA derivation: builds are env-specific by
+//! design (program id per cluster via `PID_PROGRAM_ID`, backend const per
+//! cluster). Local tests no longer set `PID_TREASURY`.
 //!
 //! Unset `PID_BACKEND` fails closed to `[0u8; 32]` (no caller matches — creation
 //! disabled).
@@ -87,24 +88,16 @@ fn main() {
             vec![0u8; 32]
         }
     };
-    let treasury = match parse_pubkey("PID_TREASURY", "PID_TREASURY") {
-        Some(raw) => raw,
-        None => {
-            println!("cargo:warning=PID_TREASURY unset — defaulting canonical treasury to PID_BACKEND");
-            backend.clone()
-        }
-    };
     let backend_lit = backend.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
-    let treasury_lit = treasury.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
-    std::fs::write(
-        &out,
-        format!(
-            "pub const BACKEND: [u8; 32] = [{backend_lit}];\npub const TREASURY: [u8; 32] = [{treasury_lit}];\n",
-        ),
-    )
-    .unwrap();
+    std::fs::write(&out, format!("pub const BACKEND: [u8; 32] = [{backend_lit}];\n"))
+        .unwrap();
     println!("cargo:rerun-if-env-changed=PID_BACKEND");
-    println!("cargo:rerun-if-env-changed=PID_TREASURY");
+    // ANT-635: PID_TREASURY deleted — the vault is the runtime-derived
+    // ["treasury"] PDA. A stale PID_TREASURY in the env is ignored loudly so
+    // operators notice the migration instead of assuming it still binds.
+    if std::env::var("PID_TREASURY").is_ok() {
+        println!("cargo:warning=PID_TREASURY is obsolete (ANT-635 vault is the [b\"treasury\"] PDA) — ignoring");
+    }
 
     // ANT-211: the program ID is build-configurable so a clean-source checkout
     // can target any cluster. `PID_PROGRAM_ID` unset keeps the local/devnet

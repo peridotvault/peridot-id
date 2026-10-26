@@ -29,10 +29,12 @@ pub mod programdata;
 pub mod secp256r1;
 pub mod sha256;
 pub mod state;
+pub mod treasury;
 
-/// Backend allowlist + canonical treasury, baked at build time by `build.rs`
-/// from `PID_BACKEND` / `PID_TREASURY`. Creation paths require the payer/relayer
-/// to equal `BACKEND` (PID-ownership proof); fee markup goes to `TREASURY`.
+/// Backend allowlist, baked at build time by `build.rs` from `PID_BACKEND`.
+/// Creation paths require the payer/relayer to equal `BACKEND`
+/// (PID-ownership proof); fee markup goes to the program-bound `[b"treasury"]`
+/// PDA vault (`treasury.rs`, ANT-635) — no treasury const remains.
 pub mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
 }
@@ -92,6 +94,10 @@ pub fn process_instruction(
             Instruction::WithdrawTokenV4 => instructions::withdraw_token_v4::process(program_id, accounts, &instruction_data),
             Instruction::ExecuteV4 => instructions::execute_v4::process(program_id, accounts, &instruction_data),
             Instruction::ActivateV4 => instructions::activate_v4::process(program_id, accounts, &instruction_data),
+            Instruction::InitTreasury => instructions::init_treasury::process(program_id, accounts, &instruction_data),
+            Instruction::WithdrawRevenue => instructions::withdraw_revenue::process(program_id, accounts, &instruction_data),
+            Instruction::AddAdmin => instructions::add_admin::process(program_id, accounts, &instruction_data),
+            Instruction::RemoveAdmin => instructions::remove_admin::process(program_id, accounts, &instruction_data),
         }
 }
 
@@ -297,5 +303,157 @@ mod ant16e_deprecation_tests {
             "testnet build must keep direct initialize functional"
         );
         assert!(crate::instructions::initialize::check_initialize_allowed().is_ok());
+    }
+}
+
+/// ANT-635 revenue vault regression (ANT-638): additive-only pins.
+/// New instructions take discriminants 15-18 (spec ANT-637 reserved 11-14,
+/// but those were already taken by the V4 siblings); new errors take 25-28
+/// (spec error 24 collided with `SessionSpendExceeded`). Existing 0-14 and
+/// 0-24 are frozen so old SDK decoders keep working.
+#[cfg(test)]
+mod ant635_vault_pins {
+    use crate::errors::PeridotError;
+    use crate::instructions::Instruction;
+
+    #[test]
+    fn existing_instruction_discriminants_frozen() {
+        assert_eq!(Instruction::Initialize as u8, 0);
+        assert_eq!(Instruction::WithdrawSol as u8, 1);
+        assert_eq!(Instruction::WithdrawToken as u8, 2);
+        assert_eq!(Instruction::UpdateAuthority as u8, 3);
+        assert_eq!(Instruction::Close as u8, 4);
+        assert_eq!(Instruction::Activate as u8, 5);
+        assert_eq!(Instruction::Execute as u8, 6);
+        assert_eq!(Instruction::RegisterSession as u8, 7);
+        assert_eq!(Instruction::SessionExecute as u8, 8);
+        assert_eq!(Instruction::RevokeSession as u8, 9);
+        assert_eq!(Instruction::CloseSession as u8, 10);
+        assert_eq!(Instruction::WithdrawSolV4 as u8, 11);
+        assert_eq!(Instruction::WithdrawTokenV4 as u8, 12);
+        assert_eq!(Instruction::ExecuteV4 as u8, 13);
+        assert_eq!(Instruction::ActivateV4 as u8, 14);
+    }
+
+    #[test]
+    fn vault_instruction_discriminants_pinned() {
+        assert_eq!(Instruction::InitTreasury as u8, 15);
+        assert_eq!(Instruction::WithdrawRevenue as u8, 16);
+        assert_eq!(Instruction::AddAdmin as u8, 17);
+        assert_eq!(Instruction::RemoveAdmin as u8, 18);
+        assert_eq!(Instruction::try_from(15u8).unwrap(), Instruction::InitTreasury);
+        assert_eq!(Instruction::try_from(16u8).unwrap(), Instruction::WithdrawRevenue);
+        assert_eq!(Instruction::try_from(17u8).unwrap(), Instruction::AddAdmin);
+        assert_eq!(Instruction::try_from(18u8).unwrap(), Instruction::RemoveAdmin);
+        assert!(Instruction::try_from(19u8).is_err());
+    }
+
+    #[test]
+    fn vault_errors_pinned_additive() {
+        // New vault errors (spec 24-27 shifted to 25-28: 24 was taken).
+        assert_eq!(PeridotError::NotAdmin as u32, 25);
+        assert_eq!(PeridotError::ConfigAlreadyInitialized as u32, 26);
+        assert_eq!(PeridotError::TooManyAdmins as u32, 27);
+        assert_eq!(PeridotError::CannotRemoveLastAdmin as u32, 28);
+        // Pre-existing errors frozen.
+        assert_eq!(PeridotError::AlreadyInitialized as u32, 0);
+        assert_eq!(PeridotError::Forbidden as u32, 11);
+        assert_eq!(PeridotError::InitializeDeprecated as u32, 23);
+        assert_eq!(PeridotError::SessionSpendExceeded as u32, 24);
+    }
+
+    #[test]
+    fn fee_paths_verify_pda_vault_not_const() {
+        // D5 pin: no fee call-site may reference the removed treasury const
+        // in code (comments may still name it for migration notes).
+        for (file, src) in [
+            ("activate.rs", include_str!("instructions/activate.rs")),
+            ("activate_v4.rs", include_str!("instructions/activate_v4.rs")),
+            ("withdraw_sol.rs", include_str!("instructions/withdraw_sol.rs")),
+            ("withdraw_sol_v4.rs", include_str!("instructions/withdraw_sol_v4.rs")),
+            ("withdraw_token.rs", include_str!("instructions/withdraw_token.rs")),
+            (
+                "withdraw_token_v4.rs",
+                include_str!("instructions/withdraw_token_v4.rs"),
+            ),
+            ("execute.rs", include_str!("instructions/execute.rs")),
+            ("execute_v4.rs", include_str!("instructions/execute_v4.rs")),
+        ] {
+            assert!(
+                src.contains("verify_treasury_pda(treasury, program_id)?"),
+                "{file}: must verify the [b\"treasury\"] PDA"
+            );
+            assert!(
+                !src.contains("&TREASURY"),
+                "{file}: must not reference the removed const in code"
+            );
+        }
+    }
+
+    #[test]
+    fn vault_emits_additive_events() {
+        assert!(include_str!("instructions/init_treasury.rs")
+            .contains("PeridotEvent::TreasuryInitialized"));
+        assert!(include_str!("instructions/withdraw_revenue.rs")
+            .contains("PeridotEvent::RevenueWithdrawn"));
+        assert!(include_str!("instructions/add_admin.rs").contains("PeridotEvent::AdminAdded"));
+        assert!(include_str!("instructions/remove_admin.rs")
+            .contains("PeridotEvent::AdminRemoved"));
+    }
+
+    #[test]
+    fn vault_never_touches_user_or_session_state() {
+        // D1/D3 pin: vault instructions must not reference user/session state
+        // or the backend allowlist as code (deny-comments may still name them
+        // for audit traceability — only code references count).
+        for (file, src) in [
+            (
+                "init_treasury.rs",
+                include_str!("instructions/init_treasury.rs"),
+            ),
+            (
+                "withdraw_revenue.rs",
+                include_str!("instructions/withdraw_revenue.rs"),
+            ),
+            ("add_admin.rs", include_str!("instructions/add_admin.rs")),
+            (
+                "remove_admin.rs",
+                include_str!("instructions/remove_admin.rs"),
+            ),
+        ] {
+            for needle in [
+                "SmartAccount",
+                "SessionAccount",
+                "BACKEND",
+                "verify_secp256r1",
+            ] {
+                let code_hits = src
+                    .lines()
+                    .filter(|l| {
+                        let t = l.trim_start();
+                        !(t.starts_with("//") || t.starts_with("//!") || t.starts_with('*'))
+                            && l.contains(needle)
+                    })
+                    .collect::<alloc::vec::Vec<_>>();
+                assert!(
+                    code_hits.is_empty(),
+                    "{file}: must not reference `{needle}` in code (D1/D3)"
+                );
+            }
+            // D4 pin: WithdrawRevenue performs NO CPI / NO invoke_signed
+            // (direct set_lamports only); the deny-comment names it.
+            // InitTreasury DOES invoke_signed in code (system create_account
+            // with PDA seeds) — that is its only CPI and it is expected.
+            if file == "withdraw_revenue.rs" {
+                let hits = src
+                    .lines()
+                    .filter(|l| l.contains("invoke_signed"))
+                    .collect::<alloc::vec::Vec<_>>();
+                assert!(
+                    hits.iter().all(|l| l.trim_start().starts_with("//")),
+                    "{file}: invoke_signed must appear in comments only (D4)"
+                );
+            }
+        }
     }
 }

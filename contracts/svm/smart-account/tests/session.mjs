@@ -14,7 +14,7 @@
 // Usage:
 //   export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
 //   cd contracts/svm/smart-account
-//   PID_BACKEND=<key> PID_TREASURY=<key> cargo build-sbf
+//   PID_BACKEND=<key> cargo build-sbf   # no PID_TREASURY since ANT-635 (vault is the ["treasury"] PDA)
 //   solana-test-validator --reset > /tmp/validator.log 2>&1 &
 //   solana program deploy target/deploy/peridot_smart_account.so \
 //     --program-id target/deploy/peridot_smart_account-keypair.json
