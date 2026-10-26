@@ -5,7 +5,7 @@
 // boundary: the vault PDA never enters game CPIs; the session PDA (rent-only)
 // is the sole lent signer; protected accounts are hash-pinned pre/post CPI.
 //
-// 26 result lines (22 expect-calls + 4 state/layout assertions).
+// 27 result lines (23 expect-calls + 4 state/layout assertions).
 //
 // Two runtime facts this suite pins (verified against chain truth, not assumed):
 // - System transfers debit only data-less accounts ("from must not carry
@@ -16,7 +16,7 @@
 // Usage:
 //   export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
 //   cd contracts/svm/smart-account
-//   PID_TREASURY=<key> cargo build-sbf   # no BACKEND: creation is permissionless (ANT-612)
+//   cargo build-sbf   # no PID_BACKEND / PID_TREASURY (ANT-661: PDA vault)
 //   solana-test-validator --reset > /tmp/validator.log 2>&1 &
 //   solana program deploy target/deploy/peridot_smart_account.so \
 //     --program-id target/deploy/peridot_smart_account-keypair.json
@@ -59,10 +59,12 @@ const i64 = (v) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); re
 const u16 = (v) => { const b = Buffer.alloc(2); b.writeUInt16LE(v); return b; };
 const u32 = (v) => { const b = Buffer.alloc(4); b.writeUInt32LE(v); return b; };
 
-// Canonical revenue vault (test-only). The vault-setup activate below credits it,
-// exactly like production claims do — no allowlist involved.
-const TREASURY_SECRET = [208,255,148,158,50,192,250,184,231,51,204,195,166,2,29,129,110,106,56,172,8,112,127,77,140,144,60,245,75,170,89,14,254,116,220,42,95,208,228,150,212,52,66,86,186,148,243,197,174,81,12,59,43,26,161,41,217,156,62,166,30,185,3,180];
-const treasuryKp = Keypair.fromSecretKey(Buffer.from(TREASURY_SECRET));
+// Program-bound revenue vault PDAs (ANT-635): no treasury keypair exists.
+// The vault-setup activate below credits the `[b"treasury"]` PDA (created
+// once via InitTreasury just below), exactly like production claims do —
+// permissionless, no allowlist involved.
+const [TREASURY_PDA] = PublicKey.findProgramAddressSync([Buffer.from("treasury")], PROGRAM);
+const [CONFIG_PDA] = PublicKey.findProgramAddressSync([Buffer.from("config")], PROGRAM);
 
 function lowS(sig) {
   const r = BigInt("0x" + sig.subarray(0, 32).toString("hex"));
@@ -208,7 +210,6 @@ async function main() {
   const userWallet = Keypair.generate();
   const attackerWallet = Keypair.generate();
   await conn.confirmTransaction(await conn.requestAirdrop(payer.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
-  await conn.confirmTransaction(await conn.requestAirdrop(treasuryKp.publicKey, LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(sessionKp.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(session3.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
 
@@ -221,6 +222,24 @@ async function main() {
   const sessionPda3 = sessionPdaOf(accountId32, session3.publicKey);
   console.log(`program ${PROGRAM.toBase58()} vault ${pda.toBase58()}`);
 
+  // ---- revenue vault init (ANT-635, disc 15, first-writer-wins) ----
+  // The PDA vault must exist and be program-owned before `activate` can
+  // credit it (`verify_treasury_pda` checks derivation + owner). `payer`
+  // is just a funded signer here; production uses the deployer key.
+  await expectOk(
+    new Transaction().add(new TransactionInstruction({
+      keys: [
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: CONFIG_PDA, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ],
+      programId: PROGRAM,
+      data: Buffer.concat([Buffer.from([15]), payer.publicKey.toBuffer()]),
+    })),
+    [payer],
+    "vault init treasury (program-bound PDA)",
+  );
   // ---- vault setup (fund + permissionless activate + SPL position) ----
   // ANT-612: direct initialize is dead, so the vault is claimed through the
   // fee-bearing activate path with `payer` (a random keypair) as submitter —
@@ -236,7 +255,7 @@ async function main() {
       keys: [
         { pubkey: payer.publicKey, isSigner: true, isWritable: true },
         { pubkey: pda, isSigner: false, isWritable: true },
-        { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],

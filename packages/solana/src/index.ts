@@ -58,6 +58,10 @@ export {
   SECP256R1_PRECOMPILE,
   serializeExecuteCall,
   sha256,
+  TREASURY_SEED,
+  CONFIG_SEED,
+  REVENUE_CONFIG_LEN,
+  MAX_VAULT_ADMINS,
 } from "@peridotvault/pid-core";
 export {
   b64url,
@@ -105,12 +109,10 @@ export {
   buildWithdrawTokenInstructionV2,
   buildWithdrawTokenInstructionV3,
   buildWithdrawTokenInstructionV4,
-  CONFIG_SEED,
-  deriveConfigPda,
+  assertCanonicalTreasury,
+  deriveRevenueConfigPda,
   deriveTreasuryPda,
-  assertTreasuryPda,
   smartAccountAta,
-  TREASURY_SEED,
 } from "./instructions.js";
 export { SolanaRpc } from "./rpc.js";
 export type { ChainRpc, NftItem, ParsedTx, TokenBalance, TokenInfo } from "./rpc.js";

@@ -4,15 +4,19 @@ use pinocchio::error::ProgramError;
 
 pub mod activate;
 pub mod activate_v4;
+pub mod add_admin;
 pub mod close;
 pub mod close_session;
 pub mod execute;
 pub mod execute_v4;
 pub mod initialize;
+pub mod init_treasury;
 pub mod register_session;
+pub mod remove_admin;
 pub mod revoke_session;
 pub mod session_execute;
 pub mod update_authority;
+pub mod withdraw_revenue;
 pub mod withdraw_sol;
 pub mod withdraw_sol_v4;
 pub mod withdraw_token;
@@ -40,6 +44,17 @@ pub enum Instruction {
     WithdrawTokenV4 = 12,
     ExecuteV4 = 13,
     ActivateV4 = 14,
+    /// ANT-635 program-bound revenue vault (ANT-638): creates the config PDA
+    /// (`["config"]`, 264-byte v1) + treasury PDA (`["treasury"]`, 0 bytes).
+    /// Additive-only: V3 discriminants 0-10 and V4 11-14 are untouched
+    /// (spec ANT-637 reserved 11-14, but those were already taken by V4).
+    InitTreasury = 15,
+    /// ANT-635: admin-gated revenue withdrawal from the treasury PDA.
+    WithdrawRevenue = 16,
+    /// ANT-635: add a live admin to the config PDA (cap 8).
+    AddAdmin = 17,
+    /// ANT-635: remove a live admin (floor-1 enforced).
+    RemoveAdmin = 18,
 }
 
 impl TryFrom<u8> for Instruction {
@@ -62,6 +77,10 @@ impl TryFrom<u8> for Instruction {
             12 => Ok(Self::WithdrawTokenV4),
             13 => Ok(Self::ExecuteV4),
             14 => Ok(Self::ActivateV4),
+            15 => Ok(Self::InitTreasury),
+            16 => Ok(Self::WithdrawRevenue),
+            17 => Ok(Self::AddAdmin),
+            18 => Ok(Self::RemoveAdmin),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
@@ -89,10 +108,16 @@ impl TryFrom<u8> for Instruction {
 /// Every V3 authorization payload starts with the one-byte op-tag (`auth::OP_*`,
 /// equal to the discriminator) followed by `account_id`, so a signature for one
 /// operation or one account can never authorize another. Fee recipients are
-/// canonical (`config::TREASURY` revenue vault for the protocol fee, the relayer
-/// signer for the exact network-cost reimbursement) — no per-call treasury.
+/// canonical (the `[b"treasury"]` PDA revenue vault for the protocol fee — see
+/// `crate::treasury` — the relayer signer for the exact network-cost
+/// reimbursement) — no per-call treasury.
 /// The `len u16` prefixes the raw WebAuthn clientDataJSON passed for on-chain
 /// verification.
+/// New vault instructions (ANT-635, additive discriminants 15-18):
+/// - InitTreasury (15): `initial_admin [u8; 32]`
+/// - WithdrawRevenue (16): `amount u64`
+/// - AddAdmin (17): `new_admin [u8; 32]`
+/// - RemoveAdmin (18): `admin [u8; 32]`
 /// Withdraws/activations are relayer-sponsored: `protocol_fee` is recomputed as
 /// `floor(network_fee × bps / 10_000)` per the signed fee-policy version.
 pub struct InstructionData<'a> {

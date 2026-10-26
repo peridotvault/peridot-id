@@ -29,11 +29,15 @@ pub mod programdata;
 pub mod secp256r1;
 pub mod sha256;
 pub mod state;
+pub mod treasury;
 
-/// Canonical treasury, baked at build time by `build.rs` from `PID_TREASURY`
-/// (required — the build fails without an explicit recipient). Every creation
-/// (`activate`/`activate_v4`) credits the protocol fee here; any signer may
-/// submit (ANT-612 permissionless creation, ANT-610 spec section 5).
+/// No baked address const (ANT-661 merge of ANT-612 + ANT-635): creation is
+/// permissionless (any signer may submit `activate`/`activate_v4`, ANT-612)
+/// and the protocol fee flows to the program-bound `[b"treasury"]` PDA vault
+/// (`treasury.rs`, ANT-635), derived at runtime per program id. `config.rs`
+/// (emitted by `build.rs`) is intentionally empty; legacy `PID_BACKEND` /
+/// `PID_TREASURY` env values are stale-probe warnings only — never baked,
+/// never gating.
 pub mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
 }
@@ -93,6 +97,10 @@ pub fn process_instruction(
             Instruction::WithdrawTokenV4 => instructions::withdraw_token_v4::process(program_id, accounts, &instruction_data),
             Instruction::ExecuteV4 => instructions::execute_v4::process(program_id, accounts, &instruction_data),
             Instruction::ActivateV4 => instructions::activate_v4::process(program_id, accounts, &instruction_data),
+            Instruction::InitTreasury => instructions::init_treasury::process(program_id, accounts, &instruction_data),
+            Instruction::WithdrawRevenue => instructions::withdraw_revenue::process(program_id, accounts, &instruction_data),
+            Instruction::AddAdmin => instructions::add_admin::process(program_id, accounts, &instruction_data),
+            Instruction::RemoveAdmin => instructions::remove_admin::process(program_id, accounts, &instruction_data),
         }
 }
 
@@ -301,32 +309,35 @@ mod ant16e_deprecation_tests {
     }
 }
 
-/// ANT-612 regression (ANT-610 spec AC-S4): no BACKEND allowlist remains
-/// anywhere in program source or build. Creation binds ownership purely via
-/// the user's passkey signature; the fee recipient (`TREASURY`) is the only
-/// baked canonical address.
+/// ANT-612 regression (ANT-610 spec AC-S4) as merged with ANT-635 by ANT-661:
+/// no creation gate remains anywhere in program source or build. Creation
+/// binds ownership purely via the user's passkey signature; the fee recipient
+/// is the program-bound `[b"treasury"]` PDA vault (derived at runtime per
+/// program id) — no address const is baked anymore.
 #[cfg(test)]
 mod ant612_permissionless_tests {
-    /// True when `src` references the removed creation allowlist as code.
-    /// Comment lines (`//`, `//!`, `///`, `*`-interiors) are ignored:
-    /// migration notes may name the removed allowlist (AC-S4 permits this),
-    /// but no compiled code may.
-    fn code_references_allowlist(src: &str) -> bool {
-        // Built from parts (never a literal) so this pin's own source never
-        // self-matches the scan.
-        use alloc::string::String;
-        let needle: String = ["BACK", "END"].into_iter().collect();
+    /// True when `src` references a creation gate as code. Comment lines
+    /// (`//`, `//!`, `///`, `*`-interiors) are ignored: migration notes may
+    /// describe the removed gate (AC-S4 permits this), but no compiled code
+    /// may. Needles are built from parts (never literals) so this pin's own
+    /// source never self-matches the scan.
+    fn code_references_gate(src: &str) -> bool {
+        use alloc::{string::String, vec::Vec};
+        let needles: Vec<String> = [["BACK", "END"], ["ALLOW", "LIST"]]
+            .into_iter()
+            .map(|parts| parts.into_iter().collect())
+            .collect();
         src.lines().any(|line| {
             let t = line.trim_start();
             if t.starts_with("//") || t.starts_with('*') {
                 return false;
             }
-            line.contains(&needle)
+            needles.iter().any(|n| line.contains(n))
         })
     }
 
     #[test]
-    fn no_backend_in_creation_paths() {
+    fn no_gate_in_creation_paths() {
         for (file, src) in [
             (
                 "instructions/activate.rs",
@@ -346,35 +357,113 @@ mod ant612_permissionless_tests {
             ("lib.rs", include_str!("lib.rs")),
         ] {
             assert!(
-                !code_references_allowlist(src),
-                "{file}: must not reference the removed allowlist in code (ANT-612 permissionless creation)"
+                !code_references_gate(src),
+                "{file}: must not reference a creation gate in code (ANT-612 permissionless creation)"
+            );
+        }
+    }
+
+    /// Every `VAR` in `std::env::var("VAR")` and `rerun-if-env-changed=VAR`
+    /// lines inside build.rs source.
+    fn referenced_env_vars(src: &str) -> alloc::vec::Vec<alloc::string::String> {
+        use alloc::string::String;
+        let mut out: alloc::vec::Vec<String> = alloc::vec::Vec::new();
+        for line in src.lines() {
+            // `std::env::var("OUT_DIR")` / `parse_pubkey("PID_TREASURY", ..)`
+            // style reads: the first quoted literal on the line names the var.
+            // (Single-line reads only — build.rs keeps every env read on one
+            // line; a multi-line read would silently escape this pin, so keep
+            // it that way.)
+            let probe = if let Some(rest) = line.split_once("env::var(\"") {
+                rest.1.split('"').next()
+            } else if let Some(rest) = line.split_once("parse_pubkey(\"") {
+                rest.1.split('"').next()
+            } else if let Some(rest) = line.split_once("rerun-if-env-changed=") {
+                rest.1
+                    .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .next()
+            } else {
+                None
+            };
+            if let Some(var) = probe {
+                let var = String::from(var);
+                if !out.contains(&var) {
+                    out.push(var);
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn no_gate_env_in_build_script() {
+        // build.rs is outside `src/` so it is pinned textually. ANT-661: both
+        // legacy envs remain as probe-only stale warnings (never baked, never
+        // gating) — the allow-set below lists every env var build.rs may
+        // touch; any new read fails closed here first. The gate scan runs on
+        // build.rs with the explicit stale-probe lines excluded (they are
+        // pinned warning-only by `legacy_envs_are_stale_warnings_only`
+        // below); everything else must stay gate-free. Gate-adjacent literals
+        // are built from parts so this pin never self-matches the scan.
+        let backend_var: alloc::string::String =
+            ["PID_", "BACK", "END"].into_iter().collect();
+        let src = include_str!("../build.rs");
+        let probe_free: alloc::string::String = src
+            .lines()
+            .filter(|l| !l.contains(backend_var.as_str()))
+            .collect::<alloc::vec::Vec<_>>()
+            .join("\n");
+        assert!(
+            !code_references_gate(&probe_free),
+            "build.rs: must not reference a creation gate in code outside the stale probes"
+        );
+        for var in referenced_env_vars(src) {
+            assert!(
+                [
+                    "OUT_DIR",
+                    "PID_TREASURY",
+                    "PID_PROGRAM_ID",
+                    "PID_PROGRAM_ID_REQUIRED",
+                    "SOLANA_CLUSTER",
+                ]
+                .contains(&var.as_str())
+                    || var == backend_var,
+                "build.rs: unexpected env read `{var}` (creation must stay permissionless)"
             );
         }
     }
 
     #[test]
-    fn no_backend_in_build_script() {
-        // build.rs is outside `src/` so it is pinned textually: the variable
-        // must be unread (AC-S4: builds succeed with PID_BACKEND set or unset).
+    fn legacy_envs_are_stale_warnings_only() {
+        // ANT-661 (ANT-635 requirement): no address const is baked — neither
+        // the legacy gate const nor the treasury const. Both legacy envs must
+        // warn loudly when set and change nothing when unset. Gate-adjacent
+        // literals are built from parts so this pin never self-matches the
+        // gate scan above.
+        let backend_var: alloc::string::String =
+            ["PID_", "BACK", "END"].into_iter().collect();
+        let backend_const: alloc::string::String =
+            ["pub const BACK", "END"].into_iter().collect();
         let src = include_str!("../build.rs");
         assert!(
-            !code_references_allowlist(src),
-            "build.rs: must not read the removed allowlist env or emit its const in code"
+            !src.contains(backend_const.as_str()),
+            "build.rs: must not bake a backend const"
+        );
+        assert!(
+            !src.contains("pub const TREASURY"),
+            "build.rs: must not bake a treasury const"
+        );
+        assert!(
+            src.contains("is obsolete"),
+            "build.rs: stale legacy envs must warn loudly"
+        );
+        assert!(
+            src.contains(backend_var.as_str()),
+            "build.rs: stale backend env must be probed for the warning"
         );
         assert!(
             src.contains("PID_TREASURY"),
-            "build.rs: treasury must remain build-configured"
-        );
-    }
-
-    #[test]
-    fn treasury_is_required_not_defaulted() {
-        // A silent-default treasury would burn protocol fees to a zero or
-        // unrelated address; the build must fail closed instead.
-        let src = include_str!("../build.rs");
-        assert!(
-            src.contains("PID_TREASURY must be set explicitly"),
-            "build.rs: unset PID_TREASURY must be a hard error"
+            "build.rs: stale treasury env must be probed for the warning"
         );
     }
 
@@ -394,9 +483,165 @@ mod ant612_permissionless_tests {
             ),
         ] {
             assert!(
-                !code_references_allowlist(src),
-                "{file}: spend path must not gain an allowlist gate"
+                !code_references_gate(src),
+                "{file}: spend path must not gain a creation gate"
             );
+        }
+    }
+}
+
+/// ANT-635 revenue vault regression (ANT-638): additive-only pins.
+/// New instructions take discriminants 15-18 (spec ANT-637 reserved 11-14,
+/// but those were already taken by the V4 siblings); new errors take 25-28
+/// (spec error 24 collided with `SessionSpendExceeded`). Existing 0-14 and
+/// 0-24 are frozen so old SDK decoders keep working.
+#[cfg(test)]
+mod ant635_vault_pins {
+    use crate::errors::PeridotError;
+    use crate::instructions::Instruction;
+
+    #[test]
+    fn existing_instruction_discriminants_frozen() {
+        assert_eq!(Instruction::Initialize as u8, 0);
+        assert_eq!(Instruction::WithdrawSol as u8, 1);
+        assert_eq!(Instruction::WithdrawToken as u8, 2);
+        assert_eq!(Instruction::UpdateAuthority as u8, 3);
+        assert_eq!(Instruction::Close as u8, 4);
+        assert_eq!(Instruction::Activate as u8, 5);
+        assert_eq!(Instruction::Execute as u8, 6);
+        assert_eq!(Instruction::RegisterSession as u8, 7);
+        assert_eq!(Instruction::SessionExecute as u8, 8);
+        assert_eq!(Instruction::RevokeSession as u8, 9);
+        assert_eq!(Instruction::CloseSession as u8, 10);
+        assert_eq!(Instruction::WithdrawSolV4 as u8, 11);
+        assert_eq!(Instruction::WithdrawTokenV4 as u8, 12);
+        assert_eq!(Instruction::ExecuteV4 as u8, 13);
+        assert_eq!(Instruction::ActivateV4 as u8, 14);
+    }
+
+    #[test]
+    fn vault_instruction_discriminants_pinned() {
+        assert_eq!(Instruction::InitTreasury as u8, 15);
+        assert_eq!(Instruction::WithdrawRevenue as u8, 16);
+        assert_eq!(Instruction::AddAdmin as u8, 17);
+        assert_eq!(Instruction::RemoveAdmin as u8, 18);
+        assert_eq!(Instruction::try_from(15u8).unwrap(), Instruction::InitTreasury);
+        assert_eq!(Instruction::try_from(16u8).unwrap(), Instruction::WithdrawRevenue);
+        assert_eq!(Instruction::try_from(17u8).unwrap(), Instruction::AddAdmin);
+        assert_eq!(Instruction::try_from(18u8).unwrap(), Instruction::RemoveAdmin);
+        assert!(Instruction::try_from(19u8).is_err());
+    }
+
+    #[test]
+    fn vault_errors_pinned_additive() {
+        // New vault errors (spec 24-27 shifted to 25-28: 24 was taken).
+        assert_eq!(PeridotError::NotAdmin as u32, 25);
+        assert_eq!(PeridotError::ConfigAlreadyInitialized as u32, 26);
+        assert_eq!(PeridotError::TooManyAdmins as u32, 27);
+        assert_eq!(PeridotError::CannotRemoveLastAdmin as u32, 28);
+        // Pre-existing errors frozen.
+        assert_eq!(PeridotError::AlreadyInitialized as u32, 0);
+        assert_eq!(PeridotError::Forbidden as u32, 11);
+        assert_eq!(PeridotError::InitializeDeprecated as u32, 23);
+        assert_eq!(PeridotError::SessionSpendExceeded as u32, 24);
+    }
+
+    #[test]
+    fn fee_paths_verify_pda_vault_not_const() {
+        // D5 pin: no fee call-site may reference the removed treasury const
+        // in code (comments may still name it for migration notes).
+        for (file, src) in [
+            ("activate.rs", include_str!("instructions/activate.rs")),
+            ("activate_v4.rs", include_str!("instructions/activate_v4.rs")),
+            ("withdraw_sol.rs", include_str!("instructions/withdraw_sol.rs")),
+            ("withdraw_sol_v4.rs", include_str!("instructions/withdraw_sol_v4.rs")),
+            ("withdraw_token.rs", include_str!("instructions/withdraw_token.rs")),
+            (
+                "withdraw_token_v4.rs",
+                include_str!("instructions/withdraw_token_v4.rs"),
+            ),
+            ("execute.rs", include_str!("instructions/execute.rs")),
+            ("execute_v4.rs", include_str!("instructions/execute_v4.rs")),
+        ] {
+            assert!(
+                src.contains("verify_treasury_pda(treasury, program_id)?"),
+                "{file}: must verify the [b\"treasury\"] PDA"
+            );
+            assert!(
+                !src.contains("&TREASURY"),
+                "{file}: must not reference the removed const in code"
+            );
+        }
+    }
+
+    #[test]
+    fn vault_emits_additive_events() {
+        assert!(include_str!("instructions/init_treasury.rs")
+            .contains("PeridotEvent::TreasuryInitialized"));
+        assert!(include_str!("instructions/withdraw_revenue.rs")
+            .contains("PeridotEvent::RevenueWithdrawn"));
+        assert!(include_str!("instructions/add_admin.rs").contains("PeridotEvent::AdminAdded"));
+        assert!(include_str!("instructions/remove_admin.rs")
+            .contains("PeridotEvent::AdminRemoved"));
+    }
+
+    #[test]
+    fn vault_never_touches_user_or_session_state() {
+        // D1/D3 pin: vault instructions must not reference user/session state
+        // or the backend allowlist as code (deny-comments may still name them
+        // for audit traceability — only code references count).
+        for (file, src) in [
+            (
+                "init_treasury.rs",
+                include_str!("instructions/init_treasury.rs"),
+            ),
+            (
+                "withdraw_revenue.rs",
+                include_str!("instructions/withdraw_revenue.rs"),
+            ),
+            ("add_admin.rs", include_str!("instructions/add_admin.rs")),
+            (
+                "remove_admin.rs",
+                include_str!("instructions/remove_admin.rs"),
+            ),
+        ] {
+            // Gate-adjacent needle built from parts so this module never
+            // self-matches the ANT-612 gate scan (which also scans lib.rs).
+            let gate_needle: alloc::string::String =
+                ["BACK", "END"].into_iter().collect();
+            for needle in [
+                "SmartAccount",
+                "SessionAccount",
+                gate_needle.as_str(),
+                "verify_secp256r1",
+            ] {
+                let code_hits = src
+                    .lines()
+                    .filter(|l| {
+                        let t = l.trim_start();
+                        !(t.starts_with("//") || t.starts_with("//!") || t.starts_with('*'))
+                            && l.contains(needle)
+                    })
+                    .collect::<alloc::vec::Vec<_>>();
+                assert!(
+                    code_hits.is_empty(),
+                    "{file}: must not reference `{needle}` in code (D1/D3)"
+                );
+            }
+            // D4 pin: WithdrawRevenue performs NO CPI / NO invoke_signed
+            // (direct set_lamports only); the deny-comment names it.
+            // InitTreasury DOES invoke_signed in code (system create_account
+            // with PDA seeds) — that is its only CPI and it is expected.
+            if file == "withdraw_revenue.rs" {
+                let hits = src
+                    .lines()
+                    .filter(|l| l.contains("invoke_signed"))
+                    .collect::<alloc::vec::Vec<_>>();
+                assert!(
+                    hits.iter().all(|l| l.trim_start().starts_with("//")),
+                    "{file}: invoke_signed must appear in comments only (D4)"
+                );
+            }
         }
     }
 }

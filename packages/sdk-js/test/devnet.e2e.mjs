@@ -29,7 +29,7 @@ const conn = new Connection(RPC, "confirmed");
 const PID = "ifal@pid";
 const PROGRAM_ID = "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT";
 // ANT-635: the fee vault is the ["treasury"] PDA bound to the program id (per cluster).
-const TREASURY_PDA = deriveTreasuryPda(new PublicKey(PROGRAM_ID)).address.toBase58();
+const TREASURY_PDA = deriveTreasuryPda(new PublicKey(PROGRAM_ID))[0].toBase58();
 console.log("treasury PDA:", TREASURY_PDA);
 const CHAIN_VIEW = {
   id: "chain-sol",

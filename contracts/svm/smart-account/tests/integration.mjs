@@ -8,18 +8,21 @@
 // Domain-free since ANT-197: no RP-ID hash is stored or verified on-chain.
 //
 // Creation is permissionless (ANT-610 spec §5, ANT-612): ANY signer may submit
-// `activate`/`activateV4` — anti-squat is the user's passkey signature alone,
-// and every claim still splits relayerFee → submitter + protocolFee → TREASURY.
-// Direct `initialize` (disc 0) is dead in all builds (`InitializeDeprecated`).
+// `activate`/`activateV4` — anti-squat is the user’s passkey signature alone,
+// and every claim still splits relayerFee → submitter + protocolFee → the
+// program-bound `[b"treasury"]` PDA vault (ANT-635). No treasury keypair, no
+// allowlist, no build-time recipient. Direct `initialize` (disc 0) is dead in
+// all builds (`InitializeDeprecated`).
+//
 //
 // Usage:
 //   export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
 //   cd contracts/svm/smart-account
-//   PID_TREASURY=J8HubZoRgyr4z29Rv97zXdEzWqMJQz69LFvWa82m25s9 cargo build-sbf
+//   cargo build-sbf   (no PID_BACKEND / PID_TREASURY since ANT-661: PDA vault)
 //   solana-test-validator --reset > /tmp/validator.log 2>&1 &
 //   solana program deploy target/deploy/peridot_smart_account.so \
 //     --program-id target/deploy/peridot_smart_account-keypair.json
-//   node tests/integration.mjs <program-id>   # 44 cases (36 expect-calls + 8 state/fee assertions)
+//   node tests/integration.mjs <program-id>   # ~59 cases incl. vault admin/withdraw (count printed at end)
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import {
@@ -50,15 +53,16 @@ const sha256 = (b) => crypto.createHash("sha256").update(b).digest();
 const b64url = (b) => Buffer.from(b).toString("base64url");
 const pidToSeed32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8"));
 
-// Canonical revenue-vault keypair (test-only).
-// The program under test MUST be built with:
-//   PID_TREASURY=J8HubZoRgyr4z29Rv97zXdEzWqMJQz69LFvWa82m25s9 (below secret)
-// Creation is permissionless: ANY funded signer may submit `activate`;
-// protocol fees go to TREASURY on every claim.
-const TREASURY_SECRET = [208,255,148,158,50,192,250,184,231,51,204,195,166,2,29,129,110,106,56,172,8,112,127,77,140,144,60,245,75,170,89,14,254,116,220,42,95,208,228,150,212,52,66,86,186,148,243,197,174,81,12,59,43,26,161,41,217,156,62,166,30,185,3,180];
-const treasuryKp = Keypair.fromSecretKey(Buffer.from(TREASURY_SECRET));
+// Program-bound revenue vault PDAs (ANT-635): no treasury keypair exists.
+// Protocol fees go to the `[b"treasury"]` PDA (derived per program id) on
+// every claim; the `[b"config"]` PDA holds the admin set (init-once below).
+const [TREASURY_PDA] = PublicKey.findProgramAddressSync([Buffer.from("treasury")], PROGRAM);
+const [CONFIG_PDA] = PublicKey.findProgramAddressSync([Buffer.from("config")], PROGRAM);
 // Volunteer submitter: a random payer with no special role, proving creation
 // needs no allowlist (ANT-612 AC-S1: activation by >=2 distinct payers).
+// Vault admin (test-only fresh key; production uses a cold/multisig key, never
+// a relayer hot key — spec section 12).
+const adminKp = Keypair.generate();
 const volunteer = Keypair.generate();
 
 function lowS(sig) {
@@ -140,7 +144,7 @@ function executeIx(pda, relayerPub, nonce, target, metas, data, policy, networkF
     keys: [
       { pubkey: pda, isSigner: false, isWritable: true },
       { pubkey: relayerPub, isSigner: true, isWritable: true },
-      { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
+      { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
       { pubkey: new PublicKey(target), isSigner: false, isWritable: false },
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ...metas.filter(([a]) => !a.equals(pda.toBuffer())).map(([a, f]) => ({
@@ -176,7 +180,7 @@ function withdrawIx(pda, destPub, relayerPub, nonce, amount, destBytes, policy, 
     keys: [
       { pubkey: pda, isSigner: false, isWritable: true },
       { pubkey: destPub, isSigner: false, isWritable: true },
-      { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
+      { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
       { pubkey: relayerPub, isSigner: true, isWritable: true },
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
     ],
@@ -223,7 +227,7 @@ function activateIx(accountId32, authorityComp, policy, expiry, networkFee, rela
     keys: [
       { pubkey: relayerPub, isSigner: true, isWritable: true },
       { pubkey: pda, isSigner: false, isWritable: true },
-      { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
+      { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
     ],
@@ -285,7 +289,7 @@ async function main() {
   const TOTAL_FEE = NETWORK_FEE + PROTOCOL_FEE; // 150000
   await conn.confirmTransaction(await conn.requestAirdrop(rentPayer.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(dest.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
-  await conn.confirmTransaction(await conn.requestAirdrop(treasuryKp.publicKey, LAMPORTS_PER_SOL), "confirmed");
+  await conn.confirmTransaction(await conn.requestAirdrop(TREASURY_PDA, LAMPORTS_PER_SOL), "confirmed");
   await conn.confirmTransaction(await conn.requestAirdrop(volunteer.publicKey, 10 * LAMPORTS_PER_SOL), "confirmed");
 
   const chainNow = await conn.getBlockTime(await conn.getSlot());
@@ -297,6 +301,163 @@ async function main() {
   const [pda] = PublicKey.findProgramAddressSync(
     [Buffer.from("peridot_id"), Buffer.from("account"), accountId32], PROGRAM);
   console.log(`program ${PROGRAM.toBase58()} pda ${pda.toBase58()}`);
+  console.log(`treasury ${TREASURY_PDA.toBase58()} config ${CONFIG_PDA.toBase58()}`);
+
+  // ---- ANT-635 revenue vault (disc 15-18): init + admin mgmt + withdraw ----
+  // InitTreasury (15): [initer signer/writable, config PDA, treasury PDA, system].
+  await conn.confirmTransaction(await conn.requestAirdrop(adminKp.publicKey, 2 * LAMPORTS_PER_SOL), "confirmed");
+  const initTreasuryIx = (initerPub, initialAdmin) => new TransactionInstruction({
+    keys: [
+      { pubkey: initerPub, isSigner: true, isWritable: true },
+      { pubkey: CONFIG_PDA, isSigner: false, isWritable: true },
+      { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId: PROGRAM,
+    data: Buffer.concat([Buffer.from([15]), initialAdmin]),
+  });
+  await expectOk(
+    new Transaction().add(initTreasuryIx(rentPayer.publicKey, adminKp.publicKey.toBuffer())),
+    [rentPayer],
+    "init treasury creates config + vault PDAs",
+  );
+  {
+    const cfg = await conn.getAccountInfo(CONFIG_PDA);
+    assert.ok(cfg, "config PDA exists");
+    assert.equal(cfg.data.length, 264, "config len 264");
+    assert.equal(cfg.data[0], 1, "config version = 1");
+    assert.equal(cfg.data[1], 1, "admin_count = 1");
+    assert.ok(Buffer.from(cfg.data.subarray(8, 40)).equals(adminKp.publicKey.toBuffer()), "admins[0] = initial admin");
+    assert.equal(cfg.owner.toBase58(), PROGRAM.toBase58(), "config owned by program");
+    const vault = await conn.getAccountInfo(TREASURY_PDA);
+    assert.ok(vault, "treasury PDA exists");
+    assert.equal(vault.owner.toBase58(), PROGRAM.toBase58(), "treasury owned by program");
+    results.push("PASS treasury config layout v1"); passed++;
+  }
+  // Double-init fails (first-writer-wins, ConfigAlreadyInitialized).
+  await expectErr(
+    new Transaction().add(initTreasuryIx(rentPayer.publicKey, adminKp.publicKey.toBuffer())),
+    [rentPayer],
+    "double init rejected (ConfigAlreadyInitialized)",
+  );
+  // WithdrawRevenue (16): [treasury, config, admin signer, destination].
+  const withdrawRevenueIx = (adminPub, destPub, amount) => new TransactionInstruction({
+    keys: [
+      { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+      { pubkey: CONFIG_PDA, isSigner: false, isWritable: true },
+      { pubkey: adminPub, isSigner: true, isWritable: true },
+      { pubkey: destPub, isSigner: false, isWritable: true },
+    ],
+    programId: PROGRAM,
+    data: Buffer.concat([Buffer.from([16]), u64(amount)]),
+  });
+  // Non-admin signer rejected (NotAdmin, no lamports move).
+  {
+    const stranger = Keypair.generate();
+    await conn.confirmTransaction(await conn.requestAirdrop(stranger.publicKey, LAMPORTS_PER_SOL), "confirmed");
+    const before = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
+    await expectErr(
+      new Transaction().add(withdrawRevenueIx(stranger.publicKey, dest.publicKey, 1000n)),
+      [stranger],
+      "non-admin withdraw rejected (NotAdmin)",
+    );
+    assert.equal((await conn.getAccountInfo(TREASURY_PDA)).lamports, before, "vault untouched by non-admin");
+  }
+  // Overdraw incl. rent floor rejected (InsufficientFunds).
+  {
+    const bal = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
+    await expectErr(
+      new Transaction().add(withdrawRevenueIx(adminKp.publicKey, dest.publicKey, BigInt(bal))),
+      [adminKp],
+      "overdraw (rent floor) rejected (InsufficientFunds)",
+    );
+  }
+  // Destination = treasury PDA rejected (D2); destination owned by program rejected (D2).
+  await expectErr(
+    new Transaction().add(withdrawRevenueIx(adminKp.publicKey, TREASURY_PDA, 1000n)),
+    [adminKp],
+    "vault-as-destination rejected (D2)",
+  );
+  await expectErr(
+    new Transaction().add(withdrawRevenueIx(adminKp.publicKey, pda, 1000n)),
+    [adminKp],
+    "program-owned destination rejected (D2)",
+  );
+  // Admin happy path: withdraw-all-but-rent is the max.
+  {
+    const rentFloor = await conn.getMinimumBalanceForRentExemption(0);
+    const bal = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
+    const destBefore = (await conn.getAccountInfo(dest.publicKey)).lamports;
+    const amount = BigInt(bal) - BigInt(rentFloor);
+    assert.ok(amount > 0n, "vault holds more than the rent floor");
+    await expectOk(
+      new Transaction().add(withdrawRevenueIx(adminKp.publicKey, dest.publicKey, amount)),
+      [adminKp],
+      "admin withdraw revenue valid",
+    );
+    assert.equal((await conn.getAccountInfo(dest.publicKey)).lamports - destBefore, Number(amount), "destination credited");
+    assert.equal((await conn.getAccountInfo(TREASURY_PDA)).lamports, rentFloor, "rent floor preserved");
+    results.push("PASS revenue withdraw state + rent floor"); passed++;
+    // Re-fund the vault so later fee-accrual assertions stay positive.
+    await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: TREASURY_PDA, lamports: Number(amount) })
+    ), [rentPayer], { commitment: "confirmed" }), "confirmed");
+  }
+  // AddAdmin (17) / RemoveAdmin (18): [config, admin signer].
+  const addAdminIx = (adminPub, newAdmin) => new TransactionInstruction({
+    keys: [
+      { pubkey: CONFIG_PDA, isSigner: false, isWritable: true },
+      { pubkey: adminPub, isSigner: true, isWritable: true },
+    ],
+    programId: PROGRAM,
+    data: Buffer.concat([Buffer.from([17]), newAdmin]),
+  });
+  const removeAdminIx = (adminPub, target) => new TransactionInstruction({
+    keys: [
+      { pubkey: CONFIG_PDA, isSigner: false, isWritable: true },
+      { pubkey: adminPub, isSigner: true, isWritable: true },
+    ],
+    programId: PROGRAM,
+    data: Buffer.concat([Buffer.from([18]), target]),
+  });
+  const secondAdmin = Keypair.generate();
+  await expectOk(
+    new Transaction().add(addAdminIx(adminKp.publicKey, secondAdmin.publicKey.toBuffer())),
+    [adminKp],
+    "add admin valid",
+  );
+  {
+    const cfg = await conn.getAccountInfo(CONFIG_PDA);
+    assert.equal(cfg.data[1], 2, "admin_count = 2");
+    results.push("PASS admin added"); passed++;
+  }
+  // Non-admin cannot add.
+  {
+    const stranger = Keypair.generate();
+    await conn.confirmTransaction(await conn.requestAirdrop(stranger.publicKey, LAMPORTS_PER_SOL), "confirmed");
+    await expectErr(
+      new Transaction().add(addAdminIx(stranger.publicKey, stranger.publicKey.toBuffer())),
+      [stranger],
+      "non-admin add rejected (NotAdmin)",
+    );
+  }
+  await expectOk(
+    new Transaction().add(removeAdminIx(adminKp.publicKey, secondAdmin.publicKey.toBuffer())),
+    [adminKp],
+    "remove admin valid",
+  );
+  {
+    const cfg = await conn.getAccountInfo(CONFIG_PDA);
+    assert.equal(cfg.data[1], 1, "admin_count back to 1");
+    results.push("PASS admin removed"); passed++;
+  }
+  // Floor-1: removing the last admin fails (CannotRemoveLastAdmin).
+  await expectErr(
+    new Transaction().add(removeAdminIx(adminKp.publicKey, adminKp.publicKey.toBuffer())),
+    [adminKp],
+    "remove-last-admin rejected (CannotRemoveLastAdmin)",
+  );
+
 
   // ---- direct initialize is dead in ALL builds (ANT-612, AC-S3) ----
   await expectErr(
@@ -323,13 +484,13 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: pda, lamports: 150_000_000 })
   ), [rentPayer], { commitment: "confirmed" }), "confirmed");
   const beforePayer1 = (await conn.getAccountInfo(rentPayer.publicKey)).lamports;
-  const beforeTreasury1 = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
+  const beforeTreasury1 = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
 await expectOk(
     activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
     [rentPayer],
     "permissionless activate claims PDA (payer 1)",
   );
-  assert.equal((await conn.getAccountInfo(treasuryKp.publicKey)).lamports - beforeTreasury1, Number(PROTOCOL_FEE), "payer-1 claim paid protocol fee to vault");
+  assert.equal((await conn.getAccountInfo(TREASURY_PDA)).lamports - beforeTreasury1, Number(PROTOCOL_FEE), "payer-1 claim paid protocol fee to vault");
   assert.ok((await conn.getAccountInfo(rentPayer.publicKey)).lamports - beforePayer1 >= Number(NETWORK_FEE) - 50_000, "payer-1 received network reimbursement");
   results.push("PASS permissionless creation fee split (payer 1)"); passed++;
 
@@ -380,7 +541,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
 
     const beforeVol = (await conn.getAccountInfo(volunteer.publicKey)).lamports;
-    const beforeTreasury = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
+    const beforeTreasury = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     const actExpiry = exp();
     await expectOk(
       activateIx(actId, authorityComp, POLICY_V1, actExpiry, NETWORK_FEE, volunteer.publicKey, actPda, { privateKey, publicKey }),
@@ -394,7 +555,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     assert.equal(claimed.owner.toBase58(), PROGRAM.toBase58(), "activate transferred ownership to program");
     assert.equal(claimed.lamports, funded - Number(TOTAL_FEE), "total fee reimbursed out of PDA");
     // Volunteer paid the tx fee (~5000) on top, so assert protocol exactly, relayer at-least.
-    const afterTreasury = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
+    const afterTreasury = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     assert.equal(afterTreasury - beforeTreasury, Number(PROTOCOL_FEE), "vault received exactly the protocol fee");
     const afterVol = (await conn.getAccountInfo(volunteer.publicKey)).lamports;
     assert.ok(afterVol - beforeVol >= Number(NETWORK_FEE) - 50_000, "volunteer received network reimbursement");
@@ -479,7 +640,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   // ---- withdraw: valid (relayer-sponsored, attested split) ----
   const destBytes = dest.publicKey.toBuffer();
   const expiry = exp();
-  const treasury0 = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
+  const treasury0 = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
   const dest0 = (await conn.getAccountInfo(dest.publicKey)).lamports;
   // Save the valid nonce-0 assertion for the cross-account replay case below.
   const replayAssertion = signPayload({ privateKey, publicKey },
@@ -494,7 +655,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     "withdraw valid",
   );
   assert.equal((await conn.getAccountInfo(dest.publicKey)).lamports - dest0, 5_000_000, "dest received amount");
-  assert.equal((await conn.getAccountInfo(treasuryKp.publicKey)).lamports - treasury0, Number(PROTOCOL_FEE), "protocol fee to canonical vault");
+  assert.equal((await conn.getAccountInfo(TREASURY_PDA)).lamports - treasury0, Number(PROTOCOL_FEE), "protocol fee to canonical vault");
   results.push("PASS attested fee split"); passed++;
 
   // ---- unauthorized transfer (wrong passkey) ----
@@ -536,7 +697,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       keys: [
         { pubkey: pda, isSigner: false, isWritable: true },
         { pubkey: dest.publicKey, isSigner: false, isWritable: true },
-        { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
         { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
@@ -555,7 +716,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       keys: [
         { pubkey: pda, isSigner: false, isWritable: true },
         { pubkey: dest.publicKey, isSigner: false, isWritable: true },
-        { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
         { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
@@ -585,7 +746,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       keys: [
         { pubkey: sibPda, isSigner: false, isWritable: true },
         { pubkey: dest.publicKey, isSigner: false, isWritable: true },
-        { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
         { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
@@ -729,19 +890,19 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
         { pubkey: destToken.address, isSigner: false, isWritable: true },
         { pubkey: TOKEN_PROG, isSigner: false, isWritable: false },
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
-        { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
         { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
       ],
       programId: PROGRAM,
       data: wdData(2, [u64(4), u64(ttAmount), tokenAtaBytes, i64(ttExpiry), u16(POLICY_V1), u64(ttNet)], ttAssertion.clientDataJSON),
     });
-    const treasuryBefore = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
+    const treasuryBefore = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     await expectOk(new Transaction().add(tokenIx, buildSecpIx(ttComp, ttSig, ttAssertion.messageData)), [rentPayer], "sponsored withdraw token valid");
     const smartBal = (await conn.getTokenAccountBalance(smartToken.address)).value.uiAmount;
     const destBal = (await conn.getTokenAccountBalance(destToken.address)).value.uiAmount;
     assert.equal(smartBal, 8, "smart ATA debited by token amount");
     assert.equal(destBal, 2, "dest ATA credited");
-    const treasuryAfter = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
+    const treasuryAfter = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     assert.equal(treasuryAfter - treasuryBefore, Number(protocolFeeOf(ttNet)), "token withdraw protocol fee exact");
     results.push("PASS token withdraw state + protocol fee"); passed++;
   }
@@ -772,7 +933,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     const exEst = BigInt((await conn.getFeeForMessage(exProbe.compileMessage(), "confirmed")).value ?? 0);
     assert.ok(exEst > 0n, "estimate is nonzero");
     // Attest the estimate exactly (proves quotes land); nonce 5.
-    const exTreasuryBefore = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
+    const exTreasuryBefore = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     const exTx = executeIx(pda, rentPayer.publicKey, 5, TOKEN_PROG.toBuffer(), exMetas, exData, POLICY_V1, exEst, exExpiry, { privateKey: k2, publicKey: p2 }, accountId32);
     let exSig = null;
     try {
@@ -788,7 +949,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       const destBal = (await conn.getTokenAccountBalance(destToken.address)).value.amount;
       assert.equal(smartBal, "4000000", "execute debited the PDA-owned source");
       assert.equal(destBal, "1000000", "execute credited the destination");
-      const exTreasuryAfter = (await conn.getAccountInfo(treasuryKp.publicKey)).lamports;
+      const exTreasuryAfter = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
       assert.equal(exTreasuryAfter - exTreasuryBefore, Number(protocolFeeOf(exEst)), "execute protocol fee exact");
       results.push("PASS execute token balances + protocol fee"); passed++;
       // Fee accuracy: quoted estimate vs landed meta.fee must agree within 10%.
@@ -823,7 +984,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
         keys: [
           { pubkey: pda, isSigner: false, isWritable: true },
           { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
-          { pubkey: treasuryKp.publicKey, isSigner: false, isWritable: true },
+          { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
           { pubkey: TOKEN_PROG, isSigner: false, isWritable: false },
           { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
           { pubkey: smartToken.address, isSigner: false, isWritable: true },

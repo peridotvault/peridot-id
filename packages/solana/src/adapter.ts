@@ -14,7 +14,7 @@ import {
   PID_PROGRAM_ID,
 } from "@peridotvault/pid-core";
 import {
-  assertTreasuryPda,
+  assertCanonicalTreasury,
   buildActivateInstruction,
   buildActivateInstructionV2,
   buildActivateInstructionV3,
@@ -68,12 +68,15 @@ export class SolanaAdapter {
    * never a build const or env var.
    */
   treasuryAddress(): PublicKey {
-    return deriveTreasuryPda(this.programId).address;
+    const [address] = deriveTreasuryPda(this.programId);
+    return address;
   }
 
   /** Resolve the fee vault: derive when omitted, validate when explicit (migration guard). */
   private resolveTreasury(treasury?: PublicKey): PublicKey {
-    return treasury ? assertTreasuryPda(treasury, this.programId) : this.treasuryAddress();
+    if (!treasury) return this.treasuryAddress();
+    assertCanonicalTreasury(treasury, this.programId);
+    return treasury;
   }
 
   /** The current on-chain nonce (u64 LE at state offset 4) — required for the next withdrawal. */

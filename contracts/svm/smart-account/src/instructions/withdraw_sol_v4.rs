@@ -14,10 +14,10 @@
 
 use crate::{
     auth,
-    config::TREASURY,
     errors::PeridotError,
     fee::{policy_v2_row, split_attested_fee_v2, total_fee},
     state::{verify_nonce, verify_pda, SmartAccount, SmartAccountMut},
+    treasury::verify_treasury_pda,
 };
 use pinocchio::{account::AccountView, error::ProgramError, Address, ProgramResult};
 
@@ -37,7 +37,7 @@ const CLIENT_JSON_LEN_OFFSET: usize = 74;
 /// Accounts:
 ///   0. `[WRITE]` smart account PDA
 ///   1. `[WRITE]` destination (receives the SOL)
-///   2. `[WRITE]` canonical revenue vault (receives the protocol fee; must equal `config::TREASURY`)
+///   2. `[WRITE]` canonical revenue vault (receives the protocol fee; must be the `[b"treasury"]` PDA vault (ANT-635))
 ///   3. `[WRITE, SIGNER]` relayer (pays the network fee; receives the exact reimbursement)
 ///   4. `[]` instructions sysvar (for secp256r1 introspection)
 pub fn process(
@@ -69,9 +69,10 @@ pub fn process(
     }
     // Fee recipients are canonical, never caller-chosen: protocol fee goes to the
     // build-time revenue vault, reimbursement goes to the relayer signer.
-    if treasury.address().as_array() != &TREASURY {
-        return Err(PeridotError::InvalidDestination.into());
-    }
+    // ANT-635 (ANT-638): the protocol fee lands in the program-bound PDA vault
+    // `[b"treasury"]` (verified against the runtime program_id), not the
+    // build-baked `config::TREASURY` const (removed). Fee math unchanged (D5).
+    verify_treasury_pda(treasury, program_id)?;
 
     let nonce = data.read_u64_at(NONCE_OFFSET)?;
     let amount = data.read_u64_at(AMOUNT_OFFSET)?;
