@@ -7,6 +7,7 @@ import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { UserTokenGuard } from "../common/user-token.guard";
 import { BatchQueueService, BatchMetrics, BatchQuoteView, BatchStatusView } from "./batch-queue.service";
 import { EstimateBatchDto, SubmitBatchDto } from "./dto/batch.dto";
+import { PrismaService } from "../prisma/prisma.service";
 
 /**
  * Phase-1a intent queue (ANT-762). EVM op shapes (to/value/data) adapted from
@@ -19,6 +20,7 @@ export class BatchQueueController {
   constructor(
     private readonly batches: BatchQueueService,
     private readonly chains: ChainRegistryService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private selection(chainRefHeader?: string, chainRefQuery?: string | string[]) {
@@ -55,14 +57,29 @@ export class BatchQueueController {
     return this.batches.submitBatch(user.pid, dto);
   }
 
-  /** Flush due batches (ops/cron driver — no in-process timers by design). */
+  /**
+   * Flush due batches (ops/cron driver — no in-process timers by design).
+   *
+   * ANT-767 F2: no permissionless global flush. Admin/ops callers
+   * (Identity.role=admin, active, user token) flush every due batch;
+   * ordinary user tokens flush ONLY their own pid's due batches. This keeps
+   * the QA smoke plan (ANT-766 POST /flush as an authed user) working for
+   * self-batches while removing cross-user settlement-timing control.
+   */
   @Post("flush")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, UserTokenGuard)
-  flush(@CurrentUser() user: AuthenticatedUser): Promise<BatchStatusView[]> {
-    void user;
-    return this.batches.flushDueBatches();
+  async flush(@CurrentUser() user: AuthenticatedUser): Promise<BatchStatusView[]> {
+    if (!user.app) {
+      const identity = await this.prisma.identity
+        .findUnique({ where: { pid: user.pid }, select: { role: true, status: true } })
+        .catch(() => null);
+      if (identity?.role === "admin" && identity.status === "active") {
+        return this.batches.flushDueBatches();
+      }
+    }
+    return this.batches.flushDueBatches(new Date(), user.pid);
   }
 
   /** Phase-1b go/no-go metrics (batch/fill/S/failure-revert rates). */

@@ -42,6 +42,8 @@ export const MAX_CALLDATA_BYTES_PER_BATCH = 64 * 1024;
 export const DEFAULT_QUEUE_WINDOW_SECS = 900;
 /** Batch gas ceiling (chain block-gas headroom minus relayer safety margin). */
 export const BATCH_GAS_CEILING = 30_000_000;
+/** Max serialized bytes for a single op's opaque signed intent (explicit cap — ANT-767 F4). */
+export const MAX_INTENT_BYTES = 8 * 1024;
 /** Chain identity for ledger rows (Monad testnet only — no mainnet). */
 export const BATCH_NAMESPACE = "evm";
 export const DEFAULT_BATCH_REFERENCE = "10143";
@@ -253,6 +255,15 @@ export function validateBatchOps(
     if (!op.intent || typeof op.intent !== "object") {
       throw batchError("INVALID_CALLDATA", "Each op must carry its signed single-call intent");
     }
+    let intentBytes = 0;
+    try {
+      intentBytes = Buffer.byteLength(JSON.stringify(op.intent), "utf8");
+    } catch {
+      throw batchError("INVALID_CALLDATA", "Op intent is not serializable");
+    }
+    if (intentBytes > MAX_INTENT_BYTES) {
+      throw batchError("INTENT_TOO_LARGE", `Op intent exceeds ${MAX_INTENT_BYTES} bytes`);
+    }
     void opts;
   }
   if (totalCalldata > MAX_CALLDATA_BYTES_PER_BATCH) {
@@ -263,14 +274,21 @@ export function validateBatchOps(
   }
 }
 
-/** Stateless quote id: qb.<quotedBaseline36>.<opsHash8>.<expiresSec>.<feeVersion>. */
+/**
+ * Stateless quote id: qb.<quotedBaseline36>.<opsHashFull64>.<expiresSec>.<feeVersion>.
+ * Full-hash binding (ANT-767 F4): the 64-hex body is the complete sha256 ops
+ * hash (minus 0x). Legacy 8-hex ids (`qb.<b36>.<8hex>.<exp>.<ver>`) are still
+ * accepted by decodeQuoteId for quotes issued before the upgrade.
+ */
 export function encodeQuoteId(baseline: bigint, opsHash: string, expiresSec: number, feeVersion: number): string {
-  return `qb.${baseline.toString(36)}.${opsHash.slice(2, 10)}.${expiresSec.toString(36)}.${feeVersion}`;
+  const full = opsHash.startsWith("0x") ? opsHash.slice(2).toLowerCase() : opsHash.toLowerCase();
+  return `qb.${baseline.toString(36)}.${full}.${expiresSec.toString(36)}.${feeVersion}`;
 }
 
 export function decodeQuoteId(quoteId: string): {
   baseline: bigint;
   opsHash8: string;
+  opsHashFull?: string;
   expiresSec: number;
   feeVersion: number;
 } {
@@ -282,7 +300,14 @@ export function decodeQuoteId(quoteId: string): {
   if (!Number.isSafeInteger(baseline) || baseline < 0 || !Number.isSafeInteger(expiresSec) || !Number.isSafeInteger(feeVersion)) {
     throw batchError("QUOTE_MISMATCH", "Quote id is malformed");
   }
-  return { baseline: BigInt(baseline), opsHash8: parts[2], expiresSec, feeVersion };
+  const hashBody = parts[2].toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(hashBody)) {
+    return { baseline: BigInt(baseline), opsHash8: hashBody.slice(0, 8), opsHashFull: hashBody, expiresSec, feeVersion };
+  }
+  if (/^[0-9a-f]{8}$/.test(hashBody)) {
+    return { baseline: BigInt(baseline), opsHash8: hashBody, expiresSec, feeVersion };
+  }
+  throw batchError("QUOTE_MISMATCH", "Quote id is malformed");
 }
 
 @Injectable()
@@ -367,7 +392,11 @@ export class BatchQueueService {
     const nowSec = Math.floor(now.getTime() / 1000);
     if (quote.expiresSec <= nowSec) throw batchError("QUOTE_EXPIRED", "Quote expired — re-estimate and try again");
     const opsHash = hashOps(ops);
-    if (opsHash.slice(2, 10) !== quote.opsHash8) {
+    if (quote.opsHashFull) {
+      if (opsHash.slice(2).toLowerCase() !== quote.opsHashFull) {
+        throw batchError("QUOTE_MISMATCH", "Ops changed since the quote — re-estimate and try again");
+      }
+    } else if (opsHash.slice(2, 10) !== quote.opsHash8) {
       throw batchError("QUOTE_MISMATCH", "Ops changed since the quote — re-estimate and try again");
     }
     const policy = await this.fees.activePolicy();
@@ -430,7 +459,8 @@ export class BatchQueueService {
       view = await this.settleBatch(created.id, now);
     } else {
       // Opportunistic flush: due batches settle without any timer.
-      await this.flushDueBatches(now).catch((err) => this.logger.warn(`opportunistic flush failed: ${String(err)}`));
+      // ANT-767 F2: pid-scoped so a submit never flushes other users' batches.
+      await this.flushDueBatches(now, pid).catch((err) => this.logger.warn(`opportunistic flush failed: ${String(err)}`));
       view = await this.getBatchStatus(pid, created.id);
     }
     return view;
@@ -454,14 +484,21 @@ export class BatchQueueService {
   }
 
   /**
-   * Flush every due queued batch (timed window per spec §5) plus reap stale
+   * Flush due queued batches (timed window per spec §5) plus reap stale
    * `submitted` rows (crash between broadcast and settle). Every accepted
    * batch reaches a terminal state or explicit expiry — nothing is silently
    * dropped.
+   *
+   * ANT-767 F2: `pid` scopes the flush to one user's batches. The explicit
+   * POST /flush passes no pid only for admin/ops callers (controller gates);
+   * every user path (including the opportunistic submit flush) passes the
+   * caller's pid so one JWT can never force-settle another user's batches.
    */
-  async flushDueBatches(now = new Date()): Promise<BatchStatusView[]> {
+  async flushDueBatches(now = new Date(), pid?: string): Promise<BatchStatusView[]> {
     const due = await this.prisma.queuedBatch.findMany({
-      where: { status: "queued", settleDueAt: { lte: now } },
+      where: pid
+        ? { status: "queued", pid, settleDueAt: { lte: now } }
+        : { status: "queued", settleDueAt: { lte: now } },
       orderBy: { settleDueAt: "asc" },
       take: FLUSH_BATCH_LIMIT,
     });
@@ -471,7 +508,9 @@ export class BatchQueueService {
     }
     const staleCutoff = new Date(now.getTime() - STALE_SUBMITTED_FACTOR * this.windowSecs() * 1000);
     const stale = await this.prisma.queuedBatch.findMany({
-      where: { status: "submitted", updatedAt: { lt: staleCutoff } },
+      where: pid
+        ? { status: "submitted", pid, updatedAt: { lt: staleCutoff } }
+        : { status: "submitted", updatedAt: { lt: staleCutoff } },
       take: FLUSH_BATCH_LIMIT,
     });
     for (const row of stale) {

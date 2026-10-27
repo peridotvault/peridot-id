@@ -1,7 +1,7 @@
 // Phase-1a intent queue specs (ANT-762): validation, quote/settle math,
 // idempotency, session-at-settlement, failure paths, flush, metrics.
 // Follows the apps/api focused-spec pattern (mocked Prisma/fees, fake ports).
-import { BatchQueueService, StoredOp, testPorts, validateBatchOps } from "./batch-queue.service";
+import { BatchQueueService, StoredOp, decodeQuoteId, encodeQuoteId, hashOps, testPorts, validateBatchOps } from "./batch-queue.service";
 
 const PID = "test-user@pid";
 const FROM = "0x1111111111111111111111111111111111111111";
@@ -76,9 +76,10 @@ function harness(ports = testPorts()) {
         Object.assign(row, data, { updatedAt: new Date() });
         return row;
       }),
-      findMany: jest.fn(async ({ where }: { where?: { status?: string; settleDueAt?: { lte: Date }; updatedAt?: { lt: Date }; createdAt?: { gte: Date } } }) => {
+      findMany: jest.fn(async ({ where }: { where?: { status?: string; pid?: string; settleDueAt?: { lte: Date }; updatedAt?: { lt: Date }; createdAt?: { gte: Date } } }) => {
         let rows = [...store.values()];
         if (where?.status) rows = rows.filter((r) => r.status === where.status);
+        if (where?.pid) rows = rows.filter((r) => r.pid === where.pid);
         if (where?.settleDueAt) rows = rows.filter((r) => r.settleDueAt <= where.settleDueAt!.lte);
         if (where?.updatedAt) rows = rows.filter((r) => r.updatedAt < where.updatedAt!.lt);
         if (where?.createdAt) rows = rows.filter((r) => r.createdAt >= where.createdAt!.gte);
@@ -353,5 +354,74 @@ describe("timed flush + cancel + metrics", () => {
     expect(m.settledBatches).toBe(1);
     expect(m.fillRate).toBe(1);
     expect(m.savingsSamples).toBe(1);
+  });
+});
+
+describe("ANT-767 F2 pid-scoped flush + F4 hardening", () => {
+  it("pid-scoped flush settles only the caller's batches", async () => {
+    const { svc, store } = harness();
+    const t0 = new Date("2026-10-27T00:00:00Z");
+    const due = new Date(t0.getTime() + 901_000);
+    const otherPid = "other-user@pid";
+    const qa = await svc.estimateBatch(PID, { from: FROM, ops: [op()], atomic: true }, t0);
+    const mine = await svc.submitBatch(
+      PID, { from: FROM, ops: [op()], atomic: true, quoteId: qa.quoteId, idempotencyKey: "idem-mine" }, t0,
+    );
+    expect(mine.lifecycle).toBe("queued");
+    // Second user's batch inserted directly (same harness store, different pid).
+    const qb = await svc.estimateBatch(otherPid, { from: FROM, ops: [op()], atomic: true }, t0);
+    const created = await (svc as unknown as { prisma: { queuedBatch: { create: (a: unknown) => Promise<{ id: string }> } } }).prisma.queuedBatch.create({
+      data: {
+        pid: otherPid,
+        status: "queued",
+        atomic: true,
+        ops: { from: FROM, ops: [op()], sessionKey: null },
+        quoteId: qb.quoteId,
+        idempotencyKey: "idem-other",
+        quotedBaseline: 1000n,
+        quotedMaxTotal: 1500n,
+        feePolicyVersion: 2,
+        sessionExpiresAt: null,
+        validUntil: due,
+        bypassQueue: false,
+        settleDueAt: due,
+      },
+    });
+    void created;
+    const flushedMine = await svc.flushDueBatches(due, PID);
+    expect(flushedMine).toHaveLength(1);
+    expect(flushedMine[0].lifecycle).toBe("settled");
+    // Other user's batch is untouched by the pid-scoped flush.
+    const otherRow = [...store.values()].find((r) => r.pid === otherPid)!;
+    expect(otherRow.status).toBe("queued");
+    // Global (admin/ops) flush still settles everything remaining.
+    const flushedAll = await svc.flushDueBatches(due);
+    expect(flushedAll).toHaveLength(1);
+    expect([...store.values()].find((r) => r.pid === otherPid)!.status).toBe("settled");
+  });
+
+  it("binds the full ops hash and still accepts legacy 8-hex quote ids", async () => {
+    const { svc } = harness();
+    const t0 = new Date("2026-10-27T00:00:00Z");
+    const opsList = [op(), op({ to: TARGET_B })];
+    const quote = await svc.estimateBatch(PID, { from: FROM, ops: opsList, atomic: true }, t0);
+    const decoded = decodeQuoteId(quote.quoteId);
+    expect(decoded.opsHashFull).toBe(hashOps(opsList).slice(2));
+    // A tampered op that collides on 8 hex chars is still rejected by the full binding.
+    const tampered = { ...opsList[1], data: `${GAME_DATA}00` };
+    await expect(
+      svc.submitBatch(PID, { from: FROM, ops: [opsList[0], tampered], atomic: true, quoteId: quote.quoteId, idempotencyKey: "idem-tamper" }, t0),
+    ).rejects.toThrow(expect.objectContaining({ message: expect.stringContaining("QUOTE_MISMATCH") }));
+    // Legacy 8-hex ids decode for quotes issued before the upgrade.
+    const legacy = `qb.${(2000).toString(36)}.${hashOps(opsList).slice(2, 10)}.${Math.floor((t0.getTime() + 900_000) / 1000).toString(36)}.2`;
+    expect(decodeQuoteId(legacy).opsHash8).toBe(hashOps(opsList).slice(2, 10));
+    expect(decodeQuoteId(legacy).opsHashFull).toBeUndefined();
+    expect(encodeQuoteId(2000n, hashOps(opsList), 123, 2).split(".")[2]).toHaveLength(64);
+  });
+
+  it("rejects oversized per-op intents with an explicit cap", () => {
+    const bigIntent = { sig: "x".repeat(9 * 1024) };
+    expect(() => validateBatchOps([op({ intent: bigIntent })], { atomic: true }))
+      .toThrow(expect.objectContaining({ message: expect.stringContaining("INTENT_TOO_LARGE") }));
   });
 });
