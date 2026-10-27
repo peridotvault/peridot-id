@@ -67,10 +67,23 @@ node --test "test/*.test.mjs"   # 10 unit tests (determinism + shapes; chain is 
 7. **Classic payments cannot fund contract addresses** (`MuxedAccount` is
    ed25519-only), so the deny uses amount 0 — immaterial to the gate, which
    fires on fn-name during `__check_auth` before the token executes.
-8. **Delegated (G-key) nested self-auth is unresolved on testnet**: outer
-   `signature_payload` byte-matches the host, but the nested
-   `__check_auth(preimage)` entry fails with `Auth/InvalidAction` (host
-   28.0.2 reviewed; OZ's own test only exercises nested auth with a *contract*
-   delegate + mock sig, never a real ed25519 nested signature). All AC2.8/AC3.4
-   flows here use passkey-only self-auth (single-entry) and do not depend on
-   the nested path. Flagged as follow-up for Tobias (auth-path semantics).
+8. **Delegated (G-key) nested self-auth — DIAGNOSED (ANT-716, construction
+    bug, operator-side fix in `lib.mjs`)**: the nested entry's credential
+    signature for an Account (G-address) delegate must be
+    `Vec<AccountEd25519Signature>` — one `ScMap{public_key: Bytes(32),
+    signature: Bytes(64)}` per signer, signing the 32-byte *nested*
+    `signature_payload` hash — exactly what the host's
+    `check_account_authentication` (env-host 28.0.2) parses. Raw `Bytes` (or
+    `Void`, the OZ-test contract-delegate pattern) dies with
+    `Value/UnexpectedType` → `Auth/InvalidAction` despite a byte-matching
+    outer payload; the OZ `auth_entries.rs` tests only ever exercise
+    *contract* delegates (host routes those to `__check_auth` without parsing
+    the signature), never a real ed25519 nested signature. Live testnet proof
+    (enforce-sim vs pilot #2): raw-Bytes nested sig → `UnexpectedType`;
+    same entry with `AccountEd25519Signature` shape (zero sig) → reaches
+    `failed ED25519 verification`; correct shape + valid sig passes in
+    try-runtime (host 28.0.2). New builders:
+    `delegatedAccountSigVecScVal` + `delegatedNestedInvocation` (+ unit
+    tests). Full delegated operator flow still needs a live Delegated(G) rule
+    with a known secret for a testnet green run — follow-up, not a gate (all
+    AC2.8/AC3.4 flows stay passkey-only single-entry).
