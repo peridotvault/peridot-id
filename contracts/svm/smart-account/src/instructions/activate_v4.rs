@@ -6,13 +6,13 @@
 //! V4 domain-separated payload
 //! (op-tag ‖ account_id ‖ authority ‖ policy ‖ max_total_fee ‖ expiry) and the
 //! program enforces `total ≤ max_total_fee` (`FeeExceedsMax`) before claiming.
-//! The fee formula follows the signed policy version (v1 frozen row, v2 with
-//! the 17_000-lamport floor).
+//! The fee formula follows the signed policy version (v1/v2 both pure 50%;
+//! ANT-747 removed the floor leg).
 
 use crate::{
     auth,
     errors::PeridotError,
-    fee::{policy_v2_row, split_attested_fee_v2, total_fee},
+    fee::{policy_protocol_bps_v4, split_attested_fee, total_fee},
     state::{verify_pda, SmartAccountMut, STATE_LEN_V2},
     treasury::verify_treasury_pda,
 };
@@ -88,7 +88,7 @@ pub fn process(
     let bump = verify_pda(smart_account, program_id, account_id)?;
 
     // Version gate before signature verification (safe pre-verify, mirrors V3).
-    let (bps, chain_min) = policy_v2_row(policy_version)?;
+    let bps = policy_protocol_bps_v4(policy_version)?;
     // Only the new authority authorizes the claim, the fee policy, and the cap.
     let payload = auth::payload_hash_v4(&[
         &[auth::OP_ACTIVATE_V4],
@@ -110,7 +110,7 @@ pub fn process(
     ];
     let signer = pinocchio::cpi::Signer::from(&seeds[..]);
 
-    let (relayer_fee, protocol_fee) = split_attested_fee_v2(network_fee, bps, chain_min);
+    let (relayer_fee, protocol_fee) = split_attested_fee(network_fee, bps);
     let total = total_fee(relayer_fee, protocol_fee);
     // User-approved bound (ANT-544 B5): checked BEFORE the claim CPI so an
     // over-cap activation never touches chain state (no squat window either way —

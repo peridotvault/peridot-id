@@ -94,12 +94,7 @@ contract PeridotPermissionTest is Test {
     uint16 constant POLICY_V1 = 1;
     uint16 constant POLICY_V2 = 2;
 
-    // v2 chain-minimum rows asserted by the formula tests (ANT-544 B2, native units).
-    // NOTE: 0.00000075 ETH = 750_000_000_000 wei (the spec's base-units column
-    // reads 750_000_000 — a 1000× typo against its own B3 totals; see contract
-    // `_chainMinV2` + Theo courier).
-    uint256 constant CHAINMIN_ETH_BASE = 750_000_000_000;
-    uint256 constant CHAINMIN_BSC = 2_300_000_000_000;
+    // ANT-747: on-chain floors removed — v2 settles pure 50% on every chain.
 
     bytes32 constant VEC_ACT_R = 0xe833d5ba603d6a180091a10e6cc56ae051abce1624970cbe8bf278d8e6858636;
     bytes32 constant VEC_ACT_S = 0x6a961eb397aa853a23248b4af0d4d84c3d103a4451959793117939d73bf69a30;
@@ -580,8 +575,8 @@ contract PeridotPermissionTest is Test {
         account.executeV4(target, 0, data, DEADLINE, policy, maxTotalFee, netFee, auth, client, r, s);
     }
 
-    /// @dev Ethereum row: network 0.000021 ETH → 50% leg wins (0.0000105).
-    function test_FeeV2EthPercentLegWins() public {
+    /// @dev ANT-747: v2 settles pure 50% — network 0.000021 ETH → 0.0000105 protocol.
+    function test_FeeV2PurePercent() public {
         EvilTarget evil = new EvilTarget(address(account));
         vm.deal(address(account), 1 ether);
         uint256 relayerBefore = address(this).balance;
@@ -594,43 +589,47 @@ contract PeridotPermissionTest is Test {
         assertEq(address(factory).balance, factoryBefore + protocol, "vault gets 50% protocol fee");
     }
 
-    /// @dev Base row: network 0.0000002 ETH → floor leg wins (0.00000075).
-    /// Total 0.00000095 ETH — the ANT-544 B3 worked example, unit-exact.
-    function test_FeeV2BaseFloorLegWins() public {
+    /// @dev ANT-747 regression: tiny Base-class fee settles WITHOUT any floor —
+    /// network 0.0000002 ETH → protocol 0.0000001 ETH (total 0.0000003), not the
+    /// removed 0.00000075 floor (old total would have been 0.00000095).
+    function test_FeeV2LowFeeNoFloor() public {
         EvilTarget evil = new EvilTarget(address(account));
         vm.deal(address(account), 1 ether);
         uint256 relayerBefore = address(this).balance;
         uint256 factoryBefore = address(factory).balance;
         uint256 netFee = 200_000_000_000; // 0.0000002 ETH
-        _execV4Owner(address(evil), abi.encodeCall(EvilTarget.poke, (1)), POLICY_V2, 950_000_000_000, netFee);
-        assertEq(address(factory).balance, factoryBefore + CHAINMIN_ETH_BASE, "vault gets chain floor");
+        uint256 protocol = 100_000_000_000; // pure 50%
+        _execV4Owner(address(evil), abi.encodeCall(EvilTarget.poke, (1)), POLICY_V2, netFee + protocol, netFee);
+        assertEq(address(factory).balance, factoryBefore + protocol, "vault gets pure 50%, no floor");
         assertEq(address(this).balance, relayerBefore + netFee, "relayer gets exact network fee");
     }
 
-    /// @dev BSC row (chainid 56): network 0.0000021 BNB → floor 0.0000023 wins,
-    /// total 0.0000044 — the ANT-544 B3 worked example, unit-exact.
-    function test_FeeV2BscFloorLegWins() public {
+    /// @dev ANT-747 regression: BSC-class tiny fee, same rule — network
+    /// 0.0000021 BNB → protocol 0.00000105 BNB (total 0.00000315), not the
+    /// removed 0.0000023 floor (old total would have been 0.0000044).
+    function test_FeeV2BscLowFeeNoFloor() public {
         vm.chainId(56);
         EvilTarget evil = new EvilTarget(address(account));
         vm.deal(address(account), 1 ether);
         uint256 relayerBefore = address(this).balance;
         uint256 factoryBefore = address(factory).balance;
         uint256 netFee = 2_100_000_000_000;
-        _execV4Owner(address(evil), abi.encodeCall(EvilTarget.poke, (1)), POLICY_V2, 4_400_000_000_000, netFee);
-        assertEq(address(factory).balance, factoryBefore + CHAINMIN_BSC, "vault gets BSC floor");
+        uint256 protocol = 1_050_000_000_000; // pure 50%
+        _execV4Owner(address(evil), abi.encodeCall(EvilTarget.poke, (1)), POLICY_V2, netFee + protocol, netFee);
+        assertEq(address(factory).balance, factoryBefore + protocol, "vault gets pure 50%, no BSC floor");
         assertEq(address(this).balance, relayerBefore + netFee, "relayer gets exact network fee");
         vm.chainId(31337);
     }
 
-    /// @dev Unlisted chainids fall back to the percentage leg (no invented floor).
-    function test_FeeV2UnlistedChainPercentOnly() public {
-        vm.chainId(10); // Optimism: no B2 row → percentage leg only.
+    /// @dev Every chain settles the percentage leg — no chain carries a floor.
+    function test_FeeV2AllChainsPercentOnly() public {
+        vm.chainId(10); // Optimism: percentage leg only.
         EvilTarget evil = new EvilTarget(address(account));
         vm.deal(address(account), 1 ether);
         uint256 factoryBefore = address(factory).balance;
         uint256 netFee = 0.0000002 ether;
         _execV4Owner(address(evil), abi.encodeCall(EvilTarget.poke, (1)), POLICY_V2, netFee + 0.0000001 ether, netFee);
-        assertEq(address(factory).balance, factoryBefore + 0.0000001 ether, "no floor on unlisted chains");
+        assertEq(address(factory).balance, factoryBefore + 0.0000001 ether, "no floor on any chain");
         vm.chainId(31337);
     }
 

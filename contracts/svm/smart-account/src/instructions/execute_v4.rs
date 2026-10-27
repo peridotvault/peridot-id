@@ -7,7 +7,7 @@
 //! (op-tag ‖ account_id ‖ nonce ‖ expiry ‖ policy ‖ max_total_fee ‖
 //! call_hash) and the program enforces `total ≤ max_total_fee`
 //! (`FeeExceedsMax`) before the CPI. The fee formula follows the signed policy
-//! version (v1 frozen row, v2 with the 17_000-lamport floor).
+//! version (v1/v2 both pure 50%; ANT-747 removed the floor leg).
 //!
 //! Relayer-substitution resistance comes from `call_hash`: the passkey signs
 //! `sha256` over the exact target ‖ metas ‖ data bytes, so the relayer cannot
@@ -17,7 +17,7 @@
 use crate::{
     auth,
     errors::PeridotError,
-    fee::{policy_v2_row, split_attested_fee_v2, total_fee},
+    fee::{policy_protocol_bps_v4, split_attested_fee, total_fee},
     state::{verify_nonce, verify_pda, SmartAccount, SmartAccountMut},
     treasury::verify_treasury_pda,
 };
@@ -162,7 +162,7 @@ pub fn process(
     let bump = verify_pda(smart_account, program_id, account_id)?;
 
     // Version gate before signature verification (safe pre-verify, mirrors V3).
-    let (bps, chain_min) = policy_v2_row(policy_version)?;
+    let bps = policy_protocol_bps_v4(policy_version)?;
     let call_hash = auth::sha256(call_bytes);
     let payload = auth::payload_hash_v4(&[
         &[auth::OP_EXECUTE_V4],
@@ -176,7 +176,7 @@ pub fn process(
     auth::check_expiry(expiry)?;
     auth::verify_secp256r1_v2(instructions, &authority, client_json, &payload)?;
 
-    let (relayer_fee, protocol_fee) = split_attested_fee_v2(network_fee, bps, chain_min);
+    let (relayer_fee, protocol_fee) = split_attested_fee(network_fee, bps);
     let total = total_fee(relayer_fee, protocol_fee);
     // User-approved bound (ANT-544 B5): revert before the CPI when the attested
     // total exceeds what the passkey authorized.

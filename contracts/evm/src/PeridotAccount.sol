@@ -35,16 +35,20 @@ contract PeridotAccount {
     /// @dev Fee policy v1: 50% protocol fee (5000 bps of the attested network fee).
     /// Never hardcoded at call sites; new versions arrive via contract upgrade,
     /// never via per-call fields. FROZEN: v1 semantics never change (ANT-544 B-AC9).
+    /// @dev ANT-747 (parent ANT-743): on-chain minimum-fee floors are REMOVED.
+    /// v2 keeps its version number (in-flight signed intents keep settling) but
+    /// settles the pure percentage leg only — identical to v1. No chain table,
+    /// no MAX formula: low-cost chains (Monad etc.) settle without floors.
     uint16 internal constant FEE_POLICY_V1 = 1;
     uint256 internal constant PROTOCOL_FEE_BPS_V1 = 5000;
     uint256 internal constant MAX_PROTOCOL_FEE_BPS = 5000;
 
-    /// @dev Fee policy v2 (ANT-544 FR-B, ANT-556): percentage leg unchanged
-    /// (5000 bps) plus a per-chain native-unit floor:
-    /// `protocolFee = MAX(floor(networkFee × bps / 10_000), chainMin)`.
-    /// Rows are immutable once published; new minima ship as a new version.
+    /// @dev Fee policy v2 (ANT-544 FR-B, ANT-556): accepted for settlements
+    /// signed before ANT-747; percentage leg 5000 bps, floor leg REMOVED
+    /// (ANT-747). `protocolFee = floor(networkFee × bps / 10_000)` — the v2
+    /// row is `(5000, 0)` on every chain.
     uint16 internal constant FEE_POLICY_V2 = 2;
-    uint256 internal constant PROTOCOL_FEE_BPS_V2 = 5000;
+    uint256 internal constant PROTOCOL_FEE_BPS_V2 = 5000; // ANT-747: floor leg removed; percentage leg only.
 
     /// @dev Sanity-bound multiplier: attested networkFee must fit within 2× the
     /// measured execution cost. A bound, not pricing — covers verification/payout
@@ -347,7 +351,8 @@ contract PeridotAccount {
     /// factory's passkey-bound `deployAndInitV4`. V4 sibling of `initialize`
     /// (which stays frozen): the activation authorization binds `maxTotalFee`
     /// under DOMAIN_V4, and the contract enforces `networkFee + protocolFee ≤
-    /// maxTotalFee` (FeeExceedsMax) with the v2 MAX formula before any payout.
+    /// maxTotalFee` (FeeExceedsMax) with the pure-percentage fee formula
+    /// (ANT-747: floor leg removed) before any payout.
     /// @dev `nonReentrant` for uniformity (ANT-563 note): not exploitable
     /// without it (`msg.sender == _factory`, payouts only to factory-trusted
     /// targets, `initialized` set before calls), but every other external-call
@@ -372,7 +377,7 @@ contract PeridotAccount {
         if (msg.sender != _factory) revert Unauthorized();
         if (block.timestamp > deadline) revert Expired();
         if (deadline - block.timestamp > MAX_TTL) revert Expired();
-        (uint256 bps, uint256 chainMin) = _policyV2Row(feePolicyVersion);
+        uint256 bps = _policyProtocolBpsV4(feePolicyVersion);
         bytes32 expected = keccak256(
             abi.encodePacked(
                 DOMAIN_V4,
@@ -390,7 +395,7 @@ contract PeridotAccount {
         _verifyWithKey(x, y, expected, authenticatorData, clientDataJSON, r, s);
         authorityX = x;
         authorityY = y;
-        uint256 protocolFee = _protocolFeeV2(networkFee, bps, chainMin);
+        uint256 protocolFee = _protocolFee(networkFee, bps);
         uint256 totalFee_ = networkFee + protocolFee;
         if (totalFee_ > maxTotalFee) revert FeeExceedsMax();
         factory = _factory;
@@ -458,8 +463,9 @@ contract PeridotAccount {
     /// @notice Execute a call authorized by the passkey (v2, ANT-556).
     /// @dev V4 authorization family (`DOMAIN_V4`, frozen-V3 sibling): the owner
     /// signs `maxTotalFee` (user-approved bound on `networkFee + protocolFee`);
-    /// the contract recomputes `protocolFee` with the v2 MAX formula and
-    /// enforces `totalFee ≤ maxTotalFee` (FeeExceedsMax) before any value moves.
+    /// the contract recomputes `protocolFee` with the pure-percentage formula
+    /// (ANT-747: floor leg removed) and enforces `totalFee ≤ maxTotalFee`
+    /// (FeeExceedsMax) before any value moves.
     /// The frozen V3 `execute` above is untouched (ANT-544 B-AC9).
     function executeV4(
         address to,
@@ -479,7 +485,6 @@ contract PeridotAccount {
         if (to == address(this)) revert InvalidTarget();
         if (block.timestamp > deadline) revert Expired();
         if (deadline - block.timestamp > MAX_TTL) revert Expired();
-        (uint256 bps, uint256 chainMin) = _policyV2Row(feePolicyVersion);
         bytes32 expected = keccak256(
             abi.encodePacked(
                 DOMAIN_V4,
@@ -496,7 +501,7 @@ contract PeridotAccount {
             )
         );
         _verify(expected, authenticatorData, clientDataJSON, r, s);
-        uint256 protocolFee = _protocolFeeV2(networkFee, bps, chainMin);
+        uint256 protocolFee = _protocolFee(networkFee, _policyProtocolBpsV4(feePolicyVersion));
         uint256 totalFee_ = networkFee + protocolFee;
         if (totalFee_ > maxTotalFee) revert FeeExceedsMax();
         if (address(this).balance < value + totalFee_) revert InsufficientFunds();
@@ -566,62 +571,31 @@ contract PeridotAccount {
     /// @dev Resolve the protocol-fee bps for a signed policy version, enforcing
     /// the protocol maximum. Version-gating is safe before signature verification:
     /// unknown versions revert identically for every caller.
+    /// FROZEN v1 gate (ANT-544 B-AC9): the V3/frozen entrypoints accept v1
+    /// only; the fee-capped V4 entrypoints use `_policyProtocolBpsV4` below.
+    /// ANT-747: both gates settle the pure 50% percentage leg (no floors).
     function _policyProtocolBps(uint16 feePolicyVersion) internal pure returns (uint256 bps) {
         if (feePolicyVersion != FEE_POLICY_V1) revert UnknownFeePolicy();
         bps = PROTOCOL_FEE_BPS_V1;
         if (bps > MAX_PROTOCOL_FEE_BPS) revert ExceedsMaxBps();
     }
 
+    /// @dev Policy gate for the fee-capped V4 entrypoints (ANT-556 + ANT-747):
+    /// accepts v1 and v2 — both settle the pure 50% percentage leg, so
+    /// pre-ANT-747 v2-signed intents keep settling at the identical price
+    /// minus the removed floor leg. Unknown versions revert pre-verify.
+    function _policyProtocolBpsV4(uint16 feePolicyVersion) internal pure returns (uint256 bps) {
+        if (feePolicyVersion == FEE_POLICY_V1) bps = PROTOCOL_FEE_BPS_V1;
+        else if (feePolicyVersion == FEE_POLICY_V2) bps = PROTOCOL_FEE_BPS_V2;
+        else revert UnknownFeePolicy();
+        if (bps > MAX_PROTOCOL_FEE_BPS) revert ExceedsMaxBps();
+    }
+
     /// @dev protocolFee = floor(networkFee × bps / 10_000). Floor favors the user;
     /// relayerFee is exactly networkFee, so the split never loses dust.
-    /// FROZEN v1 helper (legacy paths keep byte-identical behavior).
+    /// Single money path for every policy version (ANT-747: no floors).
     function _protocolFee(uint256 networkFee, uint256 bps) internal pure returns (uint256) {
         return (networkFee * bps) / 10000;
-    }
-
-    /// @dev Fee-policy v2 row (ANT-544 B1/B2, ANT-556): `(bps, chainMin)`.
-    /// v1 keeps its frozen semantics `(5000, 0)`; v2 adds the per-chain floor.
-    /// Unknown versions revert identically for every caller (safe pre-verify).
-    function _policyV2Row(uint16 feePolicyVersion) internal view returns (uint256 bps, uint256 chainMin) {
-        if (feePolicyVersion == FEE_POLICY_V1) return (PROTOCOL_FEE_BPS_V1, 0);
-        if (feePolicyVersion != FEE_POLICY_V2) revert UnknownFeePolicy();
-        bps = PROTOCOL_FEE_BPS_V2;
-        if (bps > MAX_PROTOCOL_FEE_BPS) revert ExceedsMaxBps();
-        return (bps, _chainMinV2());
-    }
-
-    /// @dev v2 protocol fee: `MAX(floor(networkFee × bps / 10_000), chainMin)`.
-    /// Floor division favors the user; the floor leg guarantees protocol
-    /// revenue on tiny-fee chains (ANT-544 B2 table).
-    function _protocolFeeV2(uint256 networkFee, uint256 bps, uint256 chainMin)
-        internal
-        pure
-        returns (uint256)
-    {
-        uint256 pct = (networkFee * bps) / 10000;
-        return pct > chainMin ? pct : chainMin;
-    }
-
-    /// @dev Immutable v2 chain-minimum table (native wei, ANT-544 B2).
-    /// Listed rows are exact in NATIVE units; unlisted chainids return 0
-    /// (percentage leg only) so testnets and future chains fail OPEN on
-    /// revenue but never overcharge the user — onboarding a mainnet floor
-    /// ships as a new policy version.
-    /// @dev ANT-556 correction: ANT-544 B2's "In base units" column lists
-    /// 750_000_000 wei for 0.00000075 ETH — off by 1000× (0.00000075 ETH =
-    /// 750_000_000_000 wei; the B3 worked-example totals only reconcile with
-    /// the ETH-denominated values). This table implements the self-consistent
-    /// ETH values (750 gwei); flagged to Theo (spec owner) for a spec corrigendum.
-    /// Flagged for Tobias review (audit-surface).
-    function _chainMinV2() internal view returns (uint256) {
-        uint256 cid = block.chainid;
-        // Ethereum + Base (mainnet, sepolia) + local anvil (Eth-like default).
-        if (cid == 1 || cid == 11155111 || cid == 8453 || cid == 84532 || cid == 31337) {
-            return 750_000_000_000;
-        }
-        // BSC mainnet + testnet.
-        if (cid == 56 || cid == 97) return 2_300_000_000_000;
-        return 0;
     }
 
     /// @dev Sanity-bound the attested networkFee against the FULL execution
@@ -980,15 +954,10 @@ contract PeridotAccount {
         if (a.feeRecipient == address(0)) revert ZeroAuthority();
         // Version gate before signature verification: unknown policies revert
         // identically for every caller and reveal nothing about the key.
-        // v1 keeps its frozen row; v2 resolves (bps, chainMin) for the MAX formula.
-        uint256 bps;
-        uint256 chainMin;
-        if (isV2) {
-            (bps, chainMin) = _policyV2Row(a.feePolicyVersion);
-        } else {
-            bps = _policyProtocolBps(a.feePolicyVersion);
-            chainMin = 0;
-        }
+        // ANT-747: v1 and v2 share the pure-percentage formula (no floors).
+        // The frozen v1 entrypoint keeps the v1-only gate; the fee-capped v2
+        // entrypoint accepts v1 + v2 (pre-ANT-747 v2 intents keep settling).
+        uint256 bps = isV2 ? _policyProtocolBpsV4(a.feePolicyVersion) : _policyProtocolBps(a.feePolicyVersion);
         Permission storage p = _permissions[a.permissionId];
         if (p.sessionX == 0 && p.sessionY == 0) revert PermissionNotFound();
         if (p.revoked) revert AlreadyRevoked();
@@ -1032,11 +1001,9 @@ contract PeridotAccount {
         _verifyWithKey(p.sessionX, p.sessionY, expected, a.authenticatorData, a.clientDataJSON, a.r, a.s);
         _enforceScope(p, a.target, a.value, a.data);
         p.seq = a.seq + 1;
-        uint256 protocolFee;
-        uint256 totalFee_;
+        uint256 protocolFee = _protocolFee(a.networkFee, bps);
+        uint256 totalFee_ = a.networkFee + protocolFee;
         if (isV2) {
-            protocolFee = _protocolFeeV2(a.networkFee, bps, chainMin);
-            totalFee_ = a.networkFee + protocolFee;
             // User-approved per-execution bound (ANT-544 B5): revert before any
             // value moves when the attested total exceeds what was authorized.
             if (totalFee_ > a.maxTotalFee) revert FeeExceedsMax();
@@ -1044,9 +1011,6 @@ contract PeridotAccount {
             // compromised session key cannot grief fees past the grant.
             if (p.feeSpent + totalFee_ > p.feeLimit) revert LimitExceeded();
             p.feeSpent += totalFee_;
-        } else {
-            protocolFee = _protocolFee(a.networkFee, bps);
-            totalFee_ = a.networkFee + protocolFee;
         }
         if (address(this).balance < a.value + totalFee_) revert InsufficientFunds();
         (bool ok, bytes memory result) = a.target.call{value: a.value}(a.data);
@@ -1248,7 +1212,8 @@ contract PeridotAccount {
     /// `abi.encode(target, value, data, deadline, feePolicyVersion, maxTotalFee,
     /// networkFee, authenticatorData, clientDataJSON, r, s)`. The owner signs
     /// `maxTotalFee`; the contract enforces `networkFee + protocolFee ≤
-    /// maxTotalFee` (FeeExceedsMax) with the v2 MAX fee formula. Single-call only.
+    /// maxTotalFee` (FeeExceedsMax) with the pure-percentage fee formula
+    /// (ANT-747: floor leg removed). Single-call only.
     function executeV4(bytes32 mode, bytes calldata executionCalldata) external payable nonReentrant {
         if (mode != MODE_SINGLE_DEFAULT) revert UnsupportedExecutionMode();
         Exec7579Args memory a;
@@ -1279,7 +1244,7 @@ contract PeridotAccount {
         if (a.target == address(this)) revert InvalidTarget();
         if (block.timestamp > a.deadline) revert Expired();
         if (a.deadline - block.timestamp > MAX_TTL) revert Expired();
-        (uint256 bps, uint256 chainMin) = _policyV2Row(a.feePolicyVersion);
+        uint256 bps = _policyProtocolBpsV4(a.feePolicyVersion);
         bytes32 expected = keccak256(
             abi.encodePacked(
                 DOMAIN_PERM_V2, OP_EXEC7579, block.chainid, address(this), nonce, a.target, a.value,
@@ -1287,7 +1252,7 @@ contract PeridotAccount {
             )
         );
         _verify(expected, a.authenticatorData, a.clientDataJSON, a.r, a.s);
-        uint256 protocolFee = _protocolFeeV2(a.networkFee, bps, chainMin);
+        uint256 protocolFee = _protocolFee(a.networkFee, bps);
         uint256 totalFee_ = a.networkFee + protocolFee;
         if (totalFee_ > a.maxTotalFee) revert FeeExceedsMax();
         if (address(this).balance < a.value + totalFee_) revert InsufficientFunds();
