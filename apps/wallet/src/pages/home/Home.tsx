@@ -90,7 +90,6 @@ export function Home({
 
       <SendChoiceModal
         visible={choice}
-        activated={d.activated}
         onPickOnChain={() => {
           setChoice(false);
           goSend();
@@ -443,16 +442,16 @@ function ActionButton({ icon: Icon, label, onPress, disabled }: { icon: typeof A
 }
 
 // Send entry point: one button opens this chooser instead of routing direct.
-// On-chain needs an activated Solana account; IDR (fiat ledger) never does.
+// On-chain sends need no separate setup step — a first send sets up the
+// account automatically inside the send flow (ANT-731 WS4); IDR (fiat
+// ledger) never touches the chain at all.
 function SendChoiceModal({
   visible,
-  activated,
   onPickOnChain,
   onPickIdr,
   onClose,
 }: {
   visible: boolean;
-  activated: boolean;
   onPickOnChain: () => void;
   onPickIdr: () => void;
   onClose: () => void;
@@ -462,10 +461,9 @@ function SendChoiceModal({
       <p style={s.hint}>Choose where to send from.</p>
       <UIButton
         title="Send On-Chain"
-        note={activated ? "To Solana address" : "Activate account first"}
-        icon={<ArrowUpRight size={16} className={activated ? "text-foreground" : "text-muted-foreground"} />}
+        note="To Solana address"
+        icon={<ArrowUpRight size={16} className="text-foreground" />}
         onPress={onPickOnChain}
-        disabled={!activated}
       />
       <UIButton
         title="Send IDR"

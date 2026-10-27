@@ -36,6 +36,11 @@ export interface FeeQuoteV2 {
   protocolFeeBps?: number;
   treasury?: string;
   chain?: ChainEcho;
+  // --- lazy first-action envelope (WS1 spec §7.1; WS2/WS3/WS-backend) ---
+  // Present on v2 backends once they ship lazy activation; absent on older
+  // backends. Never trust client hints: `required` is server-computed from
+  // deployment state / the activation state machine.
+  activation?: QuoteActivation;
   // --- legacy v1 aliases (pre-v2 backend) ---
   networkFeeLamports?: string;
   /** Legacy alias of the platform fee amount. */
@@ -43,6 +48,23 @@ export interface FeeQuoteV2 {
   platformFeeLamports?: string;
   totalFeeLamports?: string;
   maxTotalFeeLamports?: string;
+}
+
+/** Lazy first-action envelope (WS1 spec §7.1). Always present on v2 lazy
+ * backends so clients never branch on version; `mode: "none"` +
+ * `required: false` means the account is already active (identical to today).
+ */
+export interface QuoteActivation {
+  /** Server-computed: this quote's intent triggers account creation. */
+  required: boolean;
+  /** The creation cost is inside totalFee (always true on v2). */
+  includedInTotal: boolean;
+  /** Network-fee share of the creation, base units (informational). */
+  estimate: string;
+  /** How the estimate was derived (e.g. gas table × gas price), if given. */
+  estimateBasis?: string;
+  /** Relayer composition for this intent. */
+  mode: "evm-sequenced" | "svm-composite" | "svm-fallback-2step" | "none";
 }
 
 /** One fee quote with every UI field resolved. All amounts: base-unit decimal strings. */
@@ -68,6 +90,12 @@ export interface NormalizedFeeQuote {
   platformFeeDerived: boolean;
   /** True when maxTotalFee fell back to the quoted total (no offered bound). */
   maxTotalFeeDefaulted: boolean;
+  /**
+   * Lazy first-action envelope, passed through verbatim when the backend
+   * sends a well-formed one (WS1 spec §7.1). Undefined on pre-lazy
+   * backends — the UI treats that as "unknown, not required".
+   */
+  activation?: QuoteActivation;
   raw: unknown;
 }
 
@@ -91,6 +119,35 @@ function parseBaseUnits(value: unknown): bigint | null {
 function firstPresent(...values: Array<string | undefined>): string | undefined {
   for (const v of values) if (typeof v === "string" && v !== "") return v;
   return undefined;
+}
+
+/**
+ * Validate the lazy first-action envelope (WS1 spec §7.1). Returns the
+ * envelope when well-formed, else undefined — unknown shapes never reach
+ * the UI as a half-parsed "required" flag.
+ */
+function parseQuoteActivation(value: unknown): QuoteActivation | undefined {
+  if (value == null || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  if (typeof v.required !== "boolean") return undefined;
+  if (typeof v.includedInTotal !== "boolean") return undefined;
+  if (typeof v.estimate !== "string" || !/^\d+$/.test(v.estimate)) return undefined;
+  if (
+    v.mode !== "evm-sequenced" &&
+    v.mode !== "svm-composite" &&
+    v.mode !== "svm-fallback-2step" &&
+    v.mode !== "none"
+  ) {
+    return undefined;
+  }
+  if (v.estimateBasis !== undefined && typeof v.estimateBasis !== "string") return undefined;
+  return {
+    required: v.required,
+    includedInTotal: v.includedInTotal,
+    estimate: v.estimate,
+    ...(typeof v.estimateBasis === "string" ? { estimateBasis: v.estimateBasis } : {}),
+    mode: v.mode,
+  };
 }
 
 function parseMs(iso: string | undefined): number | null {
@@ -140,6 +197,11 @@ export function normalizeFeeQuote(raw: FeeQuoteV2): NormalizedFeeQuote {
   const quotedAtMs = parseMs(raw.quotedAt) ?? Math.floor((chainTime as number) * 1000);
   const expiresAtMs = parseMs(raw.expiresAt) ?? quotedAtMs + QUOTE_TTL_SECS * 1000;
 
+  // Lazy first-action envelope (WS1 §7.1): pass through only when
+  // well-formed (boolean required + mode enum + numeric estimate string).
+  // Anything else → undefined (pre-lazy backend), never a guessed shape.
+  const activation = parseQuoteActivation(raw.activation);
+
   return {
     networkFee: network.toString(),
     platformFee: platformFee.toString(),
@@ -158,6 +220,7 @@ export function normalizeFeeQuote(raw: FeeQuoteV2): NormalizedFeeQuote {
     chain: raw.chain,
     platformFeeDerived,
     maxTotalFeeDefaulted,
+    activation,
     raw,
   };
 }
