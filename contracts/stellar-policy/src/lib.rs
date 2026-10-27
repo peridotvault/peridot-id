@@ -37,10 +37,16 @@
 //! - Case handling is contractual (R4): `"Transfer"` is NOT deny-listed and
 //!   passes this policy — the token contract itself rejects unknown fns, so
 //!   there is no bypass, only a different (target-side) error. Pinned below.
-//! - Layer 2 is fail-open on malformed execute args (wrong arity or
-//!   non-symbol target fn): an undecodable dispatch is not judged here —
-//!   the rule's own scoping (e.g. `CallContract`) decides. Deny-list
-//!   matching itself stays exact and fail-closed.
+//! - Layer 2 is scoped to account-originated `execute` calls
+//!   (`call.contract == smart_account`) and fail-closed within that scope:
+//!   args that do not decode as `(Address, Symbol, Vec<Val>)` (wrong arity
+//!   or non-symbol target fn) are DENIED. `execute`-named entrypoints on any
+//!   OTHER contract pass — rule scoping (not this policy) decides those, so
+//!   unrelated contracts with an `execute` fn are never DoS'd. OZ
+//!   `stellar-accounts =0.8.0` [`ExecutionEntryPoint`] always builds the
+//!   fixed 3-shape, so fail-closed costs nothing legitimate and leaves no
+//!   latent bypass if a future account version accepts other arities.
+//!   Deny-list matching itself stays exact and fail-closed.
 //!
 //! Testnet-only. Not audited, never mainnet.
 //!
@@ -113,7 +119,7 @@ impl Policy for NonFinancialOnlyPolicy {
         context: Context,
         _authenticated_signers: Vec<Signer>,
         _context_rule: ContextRule,
-        _smart_account: Address,
+        smart_account: Address,
     ) {
         // Deny check runs FIRST (R4), before any allow reasoning.
         if let Context::Contract(call) = context {
@@ -123,21 +129,35 @@ impl Policy for NonFinancialOnlyPolicy {
                     panic_with_error!(e, PolicyError::UnauthorizedFinancialOp);
                 }
             }
-            // Layer 2: ExecutionEntryPoint dispatch — deny when the execute
-            // TARGET fn is financial. Shape: execute(target: Address,
-            // target_fn: Symbol, target_args: Vec). Fail-open on undecodable
-            // args (rule scoping decides those); fail-closed on the match.
-            if call.fn_name == Symbol::new(e, "execute") && call.args.len() == 3 {
-                if let Ok(target_fn) = Symbol::try_from_val(e, &call.args.get_unchecked(1)) {
-                    for denied in FINANCIAL_FNS {
-                        if target_fn == Symbol::new(e, denied) {
-                            panic_with_error!(e, PolicyError::UnauthorizedFinancialOp);
+            // Layer 2: ExecutionEntryPoint dispatch — scoped to
+            // account-originated `execute` (call.contract == smart_account).
+            // Within scope the args MUST decode as (Address, Symbol,
+            // Vec<Val>); undecodable dispatches DENY (fail-closed). Gas:
+            // short-circuit on fn_name first, then the address equality;
+            // decode attempts are symbol/type checks only, no alloc.
+            if call.fn_name == Symbol::new(e, "execute") && call.contract == smart_account {
+                let decoded_target_fn = if call.args.len() == 3
+                    && Address::try_from_val(e, &call.args.get_unchecked(0)).is_ok()
+                    && Vec::<Val>::try_from_val(e, &call.args.get_unchecked(2)).is_ok()
+                {
+                    Symbol::try_from_val(e, &call.args.get_unchecked(1)).ok()
+                } else {
+                    None
+                };
+                match decoded_target_fn {
+                    None => panic_with_error!(e, PolicyError::UnauthorizedFinancialOp),
+                    Some(target_fn) => {
+                        for denied in FINANCIAL_FNS {
+                            if target_fn == Symbol::new(e, denied) {
+                                panic_with_error!(e, PolicyError::UnauthorizedFinancialOp);
+                            }
                         }
                     }
                 }
             }
         }
-        // Non-contract contexts (creates) and nonfinancial fns pass.
+        // Non-contract contexts (creates), nonfinancial fns, and
+        // non-account `execute`-named entrypoints pass (rule scoping).
     }
 
     fn install(
@@ -184,13 +204,33 @@ mod test {
     }
 
     /// An `execute(target, target_fn, target_args)` dispatch context as the
-    /// OZ ExecutionEntryPoint builds it: the authorized call is `execute` on
-    /// the account, carrying the inner dispatch in its args.
-    fn execute_context(e: &Env, target: Address, target_fn: &str) -> Context {
+    /// OZ ExecutionEntryPoint builds it: the authorized call is `execute` ON
+    /// THE ACCOUNT (`call.contract == smart_account`), carrying the inner
+    /// dispatch in its args. Layer 2 only judges this account-originated
+    /// shape (ANT-715).
+    fn account_execute_context(
+        e: &Env,
+        account: &Address,
+        target: Address,
+        target_fn: &str,
+    ) -> Context {
         let mut args = Vec::new(e);
         args.push_back(target.into_val(e));
         args.push_back(Symbol::new(e, target_fn).into_val(e));
         args.push_back(Vec::<Val>::new(e).into_val(e));
+        Context::Contract(ContractContext {
+            contract: account.clone(),
+            fn_name: Symbol::new(e, "execute"),
+            args,
+        })
+    }
+
+    /// Malformed execute dispatch (wrong arity) on a NON-ACCOUNT contract:
+    /// passes policy — rule scoping (not this policy) decides undecodable
+    /// calls that are not account-originated (ANT-715: anti-DoS scoping).
+    fn malformed_execute_context(e: &Env) -> Context {
+        let mut args = Vec::new(e);
+        args.push_back(Symbol::new(e, "transfer").into_val(e));
         Context::Contract(ContractContext {
             contract: Address::generate(e),
             fn_name: Symbol::new(e, "execute"),
@@ -198,13 +238,28 @@ mod test {
         })
     }
 
-    /// Malformed execute dispatch (wrong arity): layer 2 must fail open —
-    /// the rule's own scoping (not this policy) decides undecodable calls.
-    fn malformed_execute_context(e: &Env) -> Context {
+    /// Malformed ACCOUNT-originated execute (wrong arity): layer 2 must
+    /// fail closed (ANT-715) — DENY.
+    fn malformed_account_execute_arity_context(e: &Env, account: &Address) -> Context {
         let mut args = Vec::new(e);
         args.push_back(Symbol::new(e, "transfer").into_val(e));
         Context::Contract(ContractContext {
-            contract: Address::generate(e),
+            contract: account.clone(),
+            fn_name: Symbol::new(e, "execute"),
+            args,
+        })
+    }
+
+    /// Malformed ACCOUNT-originated execute (non-symbol target fn, e.g. a
+    /// `String` "transfer" where a `Symbol` belongs): layer 2 must fail
+    /// closed (ANT-715) — DENY.
+    fn malformed_account_execute_non_symbol_fn_context(e: &Env, account: &Address) -> Context {
+        let mut args = Vec::new(e);
+        args.push_back(Address::generate(e).into_val(e));
+        args.push_back(soroban_sdk::String::from_str(e, "transfer").into_val(e));
+        args.push_back(Vec::<Val>::new(e).into_val(e));
+        Context::Contract(ContractContext {
+            contract: account.clone(),
             fn_name: Symbol::new(e, "execute"),
             args,
         })
@@ -280,20 +335,21 @@ mod test {
         }
     }
 
-    /// Layer 2: every deny-listed TARGET fn through an execute dispatch
-    /// must fail — this is the AC3.4 on-chain shape
+    /// Layer 2: every deny-listed TARGET fn through an ACCOUNT-originated
+    /// execute dispatch must fail — this is the AC3.4 on-chain shape
     /// (`execute(SAC, transfer, ...)` under the nonfinancial-only rule).
     #[test]
     fn execute_dispatch_to_financial_target_rejected() {
         let (e, policy) = env_with_policy();
         let c = NonFinancialOnlyPolicyClient::new(&e, &policy);
+        let account = Address::generate(&e);
         let target = Address::generate(&e);
         for f in FINANCIAL_FNS {
             let res = c.try_enforce(
-                &execute_context(&e, target.clone(), f),
+                &account_execute_context(&e, &account, target.clone(), f),
                 &Vec::new(&e),
                 &dummy_rule(&e),
-                &Address::generate(&e),
+                &account,
             );
             assert!(matches!(res, Err(Ok(_))), "execute dispatch to `{}` must be denied", f);
         }
@@ -305,24 +361,84 @@ mod test {
     fn execute_dispatch_to_nonfinancial_target_passes() {
         let (e, policy) = env_with_policy();
         let c = NonFinancialOnlyPolicyClient::new(&e, &policy);
+        let account = Address::generate(&e);
         let target = Address::generate(&e);
         for f in ["canonicalize_key", "get_snapshot_version", "read_state"] {
             c.enforce(
-                &execute_context(&e, target.clone(), f),
+                &account_execute_context(&e, &account, target.clone(), f),
                 &Vec::new(&e),
                 &dummy_rule(&e),
-                &Address::generate(&e),
+                &account,
             );
         }
     }
 
-    /// Layer 2 fails open on undecodable dispatches (rule scoping decides).
+    /// Non-account malformed `execute` passes policy (rule scoping decides
+    /// undecodable calls that are not account-originated).
     #[test]
     fn malformed_execute_dispatch_passes_policy() {
         let (e, policy) = env_with_policy();
         let c = NonFinancialOnlyPolicyClient::new(&e, &policy);
         c.enforce(
             &malformed_execute_context(&e),
+            &Vec::new(&e),
+            &dummy_rule(&e),
+            &Address::generate(&e),
+        );
+    }
+
+    /// ANT-715 fail-closed pin: account-originated `execute` with the wrong
+    /// arity is DENIED, even though nothing decodes as financial.
+    #[test]
+    fn malformed_account_execute_wrong_arity_denied() {
+        let (e, policy) = env_with_policy();
+        let c = NonFinancialOnlyPolicyClient::new(&e, &policy);
+        let account = Address::generate(&e);
+        let res = c.try_enforce(
+            &malformed_account_execute_arity_context(&e, &account),
+            &Vec::new(&e),
+            &dummy_rule(&e),
+            &account,
+        );
+        assert!(matches!(res, Err(Ok(_))), "malformed account-execute (wrong arity) must be denied");
+    }
+
+    /// ANT-715 fail-closed pin: account-originated `execute` whose target
+    /// fn is not a `Symbol` (here a `String` "transfer") is DENIED — a
+    /// non-symbol slot can never be a legitimate ExecutionEntryPoint
+    /// dispatch, so there is nothing to allow-list.
+    #[test]
+    fn malformed_account_execute_non_symbol_target_fn_denied() {
+        let (e, policy) = env_with_policy();
+        let c = NonFinancialOnlyPolicyClient::new(&e, &policy);
+        let account = Address::generate(&e);
+        let res = c.try_enforce(
+            &malformed_account_execute_non_symbol_fn_context(&e, &account),
+            &Vec::new(&e),
+            &dummy_rule(&e),
+            &account,
+        );
+        assert!(matches!(res, Err(Ok(_))), "malformed account-execute (non-symbol target fn) must be denied");
+    }
+
+    /// ANT-715 anti-DoS scoping pin: a well-formed `execute`-shaped call on
+    /// any OTHER contract (even one carrying a financial-looking target fn)
+    /// still passes policy — layer 2 never judges non-account entrypoints.
+    #[test]
+    fn non_account_execute_shaped_call_passes() {
+        let (e, policy) = env_with_policy();
+        let c = NonFinancialOnlyPolicyClient::new(&e, &policy);
+        let mut args = Vec::new(&e);
+        args.push_back(Address::generate(&e).into_val(&e));
+        args.push_back(Symbol::new(&e, "transfer").into_val(&e));
+        args.push_back(Vec::<Val>::new(&e).into_val(&e));
+        let ctx = Context::Contract(ContractContext {
+            contract: Address::generate(&e),
+            fn_name: Symbol::new(&e, "execute"),
+            args,
+        });
+        c.enforce(
+            &ctx,
             &Vec::new(&e),
             &dummy_rule(&e),
             &Address::generate(&e),
