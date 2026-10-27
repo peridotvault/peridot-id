@@ -9,6 +9,7 @@ import { AuthModule } from "./auth/auth.module";
 import { CredentialModule } from "./credentials/credential.module";
 import { EnvModule } from "./env/env.module";
 import { ExperienceModule } from "./experience/experience.module";
+import { FeeModule } from "./fee/fee.module";
 import { XP_INTAKE_APP_PID_THROTTLER, XP_INTAKE_APP_THROTTLER, xpIntakeAppPidTracker, xpIntakeAppTracker } from "./experience/rate-limit";
 import { FiatModule } from "./fiat/fiat.module";
 import { IdentityModule } from "./identity/identity.module";
@@ -50,6 +51,7 @@ import { HealthModule } from "./health/health.module";
     CredentialModule,
     EnvModule,
     ExperienceModule,
+    FeeModule,
     FiatModule,
     IntentModule,
     PermissionsModule,

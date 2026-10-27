@@ -93,7 +93,9 @@ creation kill-switch (default off; spend + revenue paths unaffected). `ADMINS`
 (required, comma-separated) seeds the revenue administrators —
 same value on every chain; the factory itself accumulates protocol revenue
 (`withdrawRevenue`, admin-only). (Localnet deploys against anvil's own chain id;
-API wiring below is for testnet and up.) Wire the API (`apps/api/.env`):
+API wiring below is for testnet and up.) Wire the API (DB-first, ANT-193 —
+chain config lives in the `chains` registry, fee minima in the chain fee
+policy; both are dashboard-managed via the admin API, never `.env`):
 
 ```sh
 EVM_FACTORY_ADDRESS=<factory>
@@ -101,8 +103,10 @@ EVM_IMPLEMENTATION_ADDRESS=<implementation>
 ```
 
 Without the relayer key, `POST /v1/account/evm/:chainRef/activate` only confirms
-an out-of-band deployment to ACTIVE (`EVM_RELAYER_SECRET` enables API-driven
-`deployAndInit`, which now requires the user's V3 activation assertion in the body).
+an out-of-band deployment to ACTIVE (set the per-chain key via the dashboard
+admin endpoint `PUT /v1/admin/chains/:id/evm-relayer` — the key is DB-managed
+in `evm_relayer_keys`, never an env var — to enable API-driven `deployAndInit`,
+which now requires the user's V3 activation assertion in the body).
 Protocol revenue lands in the factory vault itself (no treasury address anywhere);
 `requiredWei`/`networkFeeWei` cover the attested network cost so READY means funded.
 
@@ -127,15 +131,20 @@ Phase-1 chains — same flow on each, same addresses everywhere:
     ```
    Deploying the factory through the same keyless deployer keeps the factory
    address identical too. Verify both addresses on each chain's explorer.
-3. Put the outputs in `apps/api/.env` (`EVM_FACTORY_ADDRESS`,
-   `EVM_IMPLEMENTATION_ADDRESS`, one `EVM_RPC_URL_<ref>` per chain) and seed them
-   into the `chains` registry (admin API or `db:seed` env).
+3. Register the outputs in the `chains` registry (dashboard admin API —
+   chains list, contract upserts for `factory` / `account_implementation`,
+   RPC URLs per chain). The `db:seed` env vars (`EVM_FACTORY_ADDRESS`,
+   `EVM_IMPLEMENTATION_ADDRESS`, `EVM_RPC_URL_<ref>`) are bootstrap-only for
+   fresh local DBs; the registry rows are the source of truth afterwards.
+   Chain fee minima come from the chain fee policy (dashboard admin API
+   `POST /v1/admin/fee-policies`, public read `GET /v1/fee-policy`) —
+   `serviceFee = max(networkFee × bps / 10_000, MIN_FEE[chain])`.
 
 ## Mainnet
 
 Target chains TBD — the flow is identical to testnet: same bytecode everywhere,
 same deployer discipline, verify on each explorer, register RPCs + factory in
-API env and the `chains` registry. Key management: deployer keys live in a
+the `chains` registry (dashboard admin API, never env). Key management: deployer keys live in a
 hardware wallet/keystore and pass via env only — never committed, never pasted
 into chat/logs.
 

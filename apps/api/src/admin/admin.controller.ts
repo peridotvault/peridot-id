@@ -4,7 +4,7 @@ import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CloseBreakerDto, CloseRelayerBreakerDto, CreateChainDto, CreateTokenDto, OpenRelayerBreakerDto, PreviewChainDto, PreviewTokenDto, SetEvmRelayerDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto, VerifyAppDto } from "./admin.dto";
+import { CloseBreakerDto, CloseRelayerBreakerDto, CreateChainDto, CreateFeePolicyDto, CreateTokenDto, OpenRelayerBreakerDto, PreviewChainDto, PreviewTokenDto, SetEvmRelayerDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto, VerifyAppDto } from "./admin.dto";
 import { AdminService } from "./admin.service";
 import { ChainPreviewService } from "./chain-preview.service";
 import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
@@ -211,5 +211,38 @@ export class AdminController {
   ) {
     if (!file?.buffer) throw new BadRequestException("logo file required (field: logo)");
     return this.adminService.setTokenLogo(user.pid, id, file);
+  }
+
+  // --- Chain fee-policy v2 (ANT-730, dashboard-managed MIN_FEE) ---
+
+  /** Every fee-policy version, newest first (admin view with all minima). */
+  @Get("fee-policies")
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  feePolicies() {
+    return this.adminService.listFeePolicies();
+  }
+
+  /** Publish a new (inactive) policy version. Published rows are never mutated. */
+  @Post("fee-policies")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  createFeePolicy(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateFeePolicyDto) {
+    return this.adminService.createFeePolicy(user.pid, dto);
+  }
+
+  /** Activate one version (fresh quotes pick it up within the 30s cache TTL). */
+  @Post("fee-policies/:version/activate")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  activateFeePolicy(@CurrentUser() user: AuthenticatedUser, @Param("version", ParseIntPipe) version: number) {
+    return this.adminService.activateFeePolicy(user.pid, version);
+  }
+
+  /** Daily quote-vs-actual aggregates for the internal subsidy dashboard (NFR-4). */
+  @Get("subsidy-ledger/summary")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  subsidySummary(@Query("days", new ParseIntPipe({ optional: true })) days?: number) {
+    return this.adminService.subsidyDailySummary(days);
   }
 }

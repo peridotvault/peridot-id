@@ -63,7 +63,7 @@ function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function setup(relayerSecret?: string) {
+function setup(relayerSecret?: string, fees?: unknown) {
   // ANT-193: no EVM_* env — factory/impl/RPC come from the chains mock (DB
   // rows in prod), the relayer key from relayerSecretFor (evm_relayer_keys).
   const values: Record<string, string> = {
@@ -133,7 +133,7 @@ function setup(relayerSecret?: string) {
     relayerSecretFor: jest.fn(async () => relayerSecret ?? null),
     invalidate: jest.fn(),
   };
-  const service = new EvmActivationService(prisma as never, config as never, security as never, chains as never, mockIdempotency() as never, mockBreaker() as never);
+  const service = new EvmActivationService(prisma as never, config as never, security as never, chains as never, mockIdempotency() as never, mockBreaker() as never, fees as never);
   return { service, prisma, config, security };
 }
 
@@ -553,5 +553,73 @@ describe("EvmActivationService", () => {
         clientDataJSON: Buffer.from("{}").toString("base64url"),
       },
     })).rejects.toThrow(/maxTotalFee/i);
+  });
+});
+
+describe("EvmActivationService — DB fee legs (ANT-730)", () => {
+  const DB_MIN = 10n ** 18n; // above any percentage leg at 1 gwei — proves the DB leg wins
+  const dbFees = {
+    activePolicy: jest.fn<Promise<{ version: number; bps: number }>, []>(),
+    minFeeForVersion: jest.fn<Promise<{ minFee: bigint; bps: number }>, []>(),
+    checkSubmitVersion: jest.fn<Promise<unknown>, []>(),
+    recordSubsidy: jest.fn<Promise<void>, []>(),
+  };
+
+  beforeEach(() => {
+    dbFees.activePolicy.mockResolvedValue({ version: 2, bps: 5000 });
+    dbFees.minFeeForVersion.mockResolvedValue({ minFee: DB_MIN, bps: 5000 });
+    dbFees.checkSubmitVersion.mockResolvedValue({ ok: true as const });
+    dbFees.recordSubsidy.mockResolvedValue(undefined);
+  });
+
+  it("viewOf separates network vs DB service fee (AC-7/AC-8)", async () => {
+    const { service } = setup(undefined, dbFees);
+    const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
+    // network = 350000 × 1 gwei = 3.5e14; pct = 1.75e14 < DB min 1e18.
+    expect(view.feePolicyVersion).toBe(2);
+    expect(view.networkFeeWei).toBe("350000000000000");
+    expect(view.serviceFeeWei).toBe("1000000000000000000");
+    expect(view.chainMinBaseUnits).toBe("1000000000000000000");
+    expect(view.platformFee).toBe("1000000000000000000");
+    expect(view.networkFee).toBe("350000000000000");
+    expect(view.totalFee).toBe("1000350000000000000");
+    expect(view.totalFeeWei).toBe("1000350000000000000");
+    expect(view.requiredWei).toBe("1000350000000000000");
+    expect(view.protocolFeeBps).toBe(5000);
+  });
+
+  it("activate rejects a superseded version as StaleQuote (410)", async () => {
+    // Frozen-equivalent leg so the account classifies READY and reaches the gate.
+    dbFees.minFeeForVersion.mockResolvedValue({ minFee: 2_300_000_000_000n, bps: 5000 });
+    dbFees.checkSubmitVersion.mockResolvedValue({
+      ok: false as const,
+      code: "StaleQuote",
+      status: 410 as const,
+      message: "Fee policy superseded — re-quote and try again",
+    });
+    balance = "0x" + (525_000_000_000_000n).toString(16); // frozen total at 1 gwei
+    const { service, security } = setup("0x" + "11".repeat(32), dbFees);
+    const err = await service
+      .activate({ pid: IDENTITY_ID }, "97", {
+        quotedNetworkFeeWei: "350000000000000",
+        feePolicyVersion: 2,
+        maxTotalFeeWei: "525000000000000",
+        deadline: 1000000300,
+        assertion: {
+          id: "cred-1",
+          r: "0x" + "11".repeat(32),
+          s: "0x" + "22".repeat(32),
+          authenticatorData: "00".repeat(37),
+          clientDataJSON: Buffer.from("{}").toString("base64url"),
+        },
+      })
+      .catch((e) => e);
+    expect(err.getStatus()).toBe(410);
+    expect(err.getResponse()).toMatchObject({ code: "StaleQuote" });
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      expect.anything(),
+      expect.objectContaining({ entryPoint: "activate", cause: "policy-unknown" }),
+    );
   });
 });

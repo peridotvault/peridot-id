@@ -8,22 +8,24 @@
 import {
   BadRequestException,
   ConflictException,
+  GoneException,
   Injectable,
   Logger,
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { ChainAccountStatus } from "@prisma/client";
 import { createHash } from "node:crypto";
-import { EvmAdapter, EvmRpc, buildViewCalldata, splitEvmFeeV2, toHex } from "@peridotvault/pid-evm";
+import { EvmAdapter, EvmRpc, buildViewCalldata, evmChainMinV2, splitEvmFeeV2, toHex } from "@peridotvault/pid-evm";
 import { ChainRegistryService, type RegistryChain } from "../chain/chain-registry.service";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
 import { ACCOUNT_TYPE_SMART, EIP155_NAMESPACE } from "../common/chains";
 import {
-  feePolicyVersion as configuredPolicyVersion,
+  platformFeeWithMin,
   protocolFeeBps,
   protocolFeeOf,
   exceedsDriftBound,
@@ -31,6 +33,7 @@ import {
 } from "../common/solana-relay";
 import { coseToRawXy } from "../credentials/cose";
 import { PID_EVM_POLL_MS } from "../common/app-config";
+import { FeePolicyService } from "../fee/fee-policy.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
@@ -62,6 +65,25 @@ export interface EvmActivationView {
   totalFeeWei: string;
   /** Suggested user-approved bound for submit (`maxTotalFeeWei >= totalFeeWei`, V4 B5). */
   maxTotalFeeWei: string;
+  /**
+   * v2 service fee, separated from the network fee for wallet rendering
+   * (ANT-730): `serviceFee = max(networkFee × bps / 10_000, MIN_FEE[chain])`
+   * in wei. Canonical alias of the protocol-fee leg — `serviceFee`,
+   * `platformFee` (SVM quotes), and `protocolFee` name the same value.
+   */
+  serviceFeeWei: string;
+  /** MIN_FEE leg applied for this chain under the quoted version (wei, "0" when none). */
+  chainMinBaseUnits: string;
+  /** Canonical alias of networkFeeWei (base units, decimal string). */
+  networkFee: string;
+  /** Canonical alias of serviceFeeWei (base units, decimal string). */
+  platformFee: string;
+  /** Canonical alias of totalFeeWei (base units, decimal string). */
+  totalFee: string;
+  /** Canonical alias of maxTotalFeeWei (base units, decimal string). */
+  maxTotalFee: string;
+  /** Present on submit results when the signed version trails the active policy by one (NFR-6). */
+  feePolicyWarning?: string;
 }
 
 const ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
@@ -83,6 +105,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     private readonly chains: ChainRegistryService,
     private readonly idempotency: RelayerIdempotencyService,
     private readonly breaker: CircuitBreakerService,
+    @Optional() private readonly fees?: FeePolicyService,
   ) {}
 
   onModuleInit(): void {
@@ -120,6 +143,12 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     return 2;
   }
 
+  /** Active quoting version (DB-first via the fee-policy service, frozen 2 fallback). */
+  private async activeVersion(): Promise<number> {
+    const policy = await this.fees?.activePolicy().catch(() => undefined);
+    return policy?.version ?? this.policyVersion();
+  }
+
   /** H1.ii: semantic intent rejections emit intent.rejected (EVM intents carry no nonce — key omitted). */
   private async reject(pid: string, chain: FeeChain | "unknown", cause: IntentRejectionCause, err: Error): Promise<never> {
     await this.security.log(pid, RelayerH1Events.intentRejected, {
@@ -137,12 +166,31 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     return cid;
   }
 
-  /** Protocol fee for a policy version (1 = frozen 50% no-floor; 2 = V2 MAX with chainMin). */
-  private protocolFeeFor(networkFee: bigint, version: number, chainId: number): bigint {
-    if (version === 1) return protocolFeeOf(networkFee, protocolFeeBps(version));
-    if (version === 2) return splitEvmFeeV2(networkFee, chainId).protocolFee;
+  /**
+   * Service (protocol) fee for a policy version with the applied minimum.
+   * DB-first (ANT-730): the dashboard-managed MIN_FEE row for
+   * `(eip155, reference)` under the signed version; absent service/row falls
+   * back to the frozen legs (v1 = 50% no-floor, v2 = `splitEvmFeeV2`). Submit
+   * paths settle under the SIGNED version, so v1 traffic keeps v1 math.
+   */
+  private async serviceFeeFor(
+    networkFee: bigint,
+    version: number,
+    chainReference: string,
+  ): Promise<{ serviceFee: bigint; chainMin: bigint; bps: number }> {
+    const leg = await this.fees?.minFeeForVersion(EIP155_NAMESPACE, chainReference, version).catch(() => undefined);
+    if (leg) return { serviceFee: platformFeeWithMin(networkFee, leg.bps, leg.minFee), chainMin: leg.minFee, bps: leg.bps };
+    if (version === 1) {
+      const bps = protocolFeeBps(version);
+      return { serviceFee: protocolFeeOf(networkFee, bps), chainMin: 0n, bps };
+    }
+    if (version === 2) {
+      const chainId = this.chainIdFor({ reference: chainReference });
+      return { serviceFee: splitEvmFeeV2(networkFee, chainId).protocolFee, chainMin: evmChainMinV2(chainId), bps: protocolFeeBps(version) };
+    }
     throw new BadRequestException("Unsupported fee policy — re-quote and try again");
   }
+
 
   /** Realtime network-cost estimate for the deploy (no margin — the protocol fee is separate). */
   private async networkFeeWei(chainReference: string): Promise<bigint> {
@@ -204,7 +252,9 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
           if (ca.status === "active") continue;
           const balance = await rpc.getBalance(ca.address);
           const networkFee = await this.networkFeeWei(ca.chain.reference).catch(() => 0n);
-          const required = networkFee + protocolFeeOf(networkFee, protocolFeeBps(this.policyVersion()));
+          const version = await this.activeVersion();
+          const { serviceFee } = await this.serviceFeeFor(networkFee, version, ca.chain.reference);
+          const required = networkFee + serviceFee;
           const next = this.classify(balance, required, ca.status);
           if (next !== ca.status) {
             await this.prisma.chainAccount.update({ where: { id: ca.id }, data: { status: next } });
@@ -276,9 +326,12 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`evm view failed for ${row.address}: ${(err as Error).message}`);
     }
     const networkFee = await this.networkFeeWei(chainReference).catch(() => 0n);
-    const version = this.policyVersion();
-    const chainId = this.chainIdFor(chain);
-    const protocolFee = this.protocolFeeFor(networkFee, version, chainId);
+    const version = await this.activeVersion();
+    const {
+      serviceFee: protocolFee,
+      chainMin,
+      bps,
+    } = await this.serviceFeeFor(networkFee, version, chainReference);
     const totalFee = networkFee + protocolFee;
     const status = deployed && (await this.deploymentMatches(rpc, row.address, user.pid, chainReference).catch(() => false))
       ? "active"
@@ -294,10 +347,17 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       balanceWei: balance.toString(),
       requiredWei: totalFee.toString(),
       networkFeeWei: networkFee.toString(),
-      protocolFeeBps: 5000,
+      protocolFeeBps: bps,
       feePolicyVersion: version,
       totalFeeWei: totalFee.toString(),
       maxTotalFeeWei: totalFee.toString(),
+      serviceFeeWei: protocolFee.toString(),
+      chainMinBaseUnits: chainMin.toString(),
+      // Canonical aliases (same values, wallet-friendly names shared with SVM quotes).
+      networkFee: networkFee.toString(),
+      platformFee: protocolFee.toString(),
+      totalFee: totalFee.toString(),
+      maxTotalFee: totalFee.toString(),
     };
   }
 
@@ -346,13 +406,29 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    // Accept policy 1 (sunset, frozen) and 2 (V4 canonical). Quote offers 2;
-    // submit must match what the client signed — mismatch means re-quote.
+    // Submit-time version gate (ANT-730, spec §4.3/NFR-6): the active version
+    // and one version back are accepted (the older with a warning — v1 sunset
+    // keeps frozen 50%-no-floor math); anything older is StaleQuote (410),
+    // anything unknown is UnknownFeePolicy (400). Without the fee service the
+    // frozen {1,2} set applies (previous behavior).
     const version = dto.feePolicyVersion;
-    if (version !== 1 && version !== 2) {
+    let feePolicyWarning: string | undefined;
+    if (this.fees) {
+      const gate = await this.fees.checkSubmitVersion(version);
+      if (!gate.ok) {
+        return this.reject(
+          user.pid,
+          feeChain,
+          "policy-unknown",
+          gate.status === 410
+            ? new GoneException({ code: gate.code, message: gate.message })
+            : new BadRequestException({ code: gate.code, message: gate.message }),
+        );
+      }
+      feePolicyWarning = gate.warning;
+    } else if (version !== 1 && version !== 2) {
       return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("Unsupported fee policy — re-quote and try again"));
     }
-    const chainId = this.chainIdFor(chain);
     const rpc = await this.rpcFor(chainReference);
     const now = await rpc.blockTimestamp().catch(() => Math.floor(Date.now() / 1000));
     if (dto.deadline <= now) {
@@ -374,7 +450,11 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       });
       return this.reject(user.pid, feeChain, "drift", new ConflictException("Network fee moved — re-quote and try again"));
     }
-    const protocolFee = this.protocolFeeFor(networkFee, version, chainId);
+    const {
+      serviceFee: protocolFee,
+      chainMin,
+      bps,
+    } = await this.serviceFeeFor(networkFee, version, chainReference);
     const totalFee = networkFee + protocolFee;
     // V4 B6: VERIFY the user-approved bound. total > max reverts on-chain
     // (FeeExceedsMax) — fail closed here before broadcast.
@@ -446,7 +526,8 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
           entryPoint: "activate",
           unattributed: true,
         });
-        return this.viewOf(user, chainReference);
+        const resolved = await this.viewOf(user, chainReference);
+        return feePolicyWarning ? { ...resolved, feePolicyWarning } : resolved;
       }
       const receipt = deploy.receipt;
       // Verify the relayer deployed OUR authority (fail closed on mismatch).
@@ -490,14 +571,31 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         entryPoint: "activate",
         signature: receipt.hash,
       });
-      await this.reconcileActivation(user.pid, chainReference, receipt, networkFee, protocolFee, version).catch(
-        (err) => this.logger.warn(`evm activation reconcile failed for ${receipt.hash}: ${(err as Error).message}`),
-      );
+      await this.reconcileActivation(user.pid, chainReference, receipt, networkFee, protocolFee, {
+        version,
+        bps,
+        chainMin,
+      }).catch((err) => this.logger.warn(`evm activation reconcile failed for ${receipt.hash}: ${(err as Error).message}`));
+      // NFR-4/AC-13: every activation lands a quote–actual pair in the subsidy
+      // ledger (quoted submit attestation vs execution gas + L1 data fee).
+      // Best-effort — a ledger write failure never fails the user flow.
+      await this.fees
+        ?.recordSubsidy({
+          pid: user.pid,
+          namespace: EIP155_NAMESPACE,
+          reference: chainReference,
+          kind: "activation",
+          quotedFee: networkFee + protocolFee,
+          actualCost: BigInt(receipt.costWei) + (receipt.l1FeeWei != null ? BigInt(receipt.l1FeeWei) : 0n),
+          txHash: receipt.hash,
+        })
+        .catch((err) => this.logger.warn(`evm subsidy ledger failed for ${receipt.hash}: ${(err as Error).message}`));
     } catch (err) {
       await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "ready" } }).catch(() => undefined);
       throw err;
     }
-    return this.viewOf(user, chainReference);
+    const view = await this.viewOf(user, chainReference);
+    return feePolicyWarning ? { ...view, feePolicyWarning } : view;
   }
 
   /**
@@ -583,14 +681,10 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     receipt: { hash: string; costWei: string; l1FeeWei?: string },
     networkFee: bigint,
     protocolFee: bigint,
-    version: number,
+    leg: { version: number; bps: number; chainMin: bigint },
   ): Promise<void> {
     const chain = evmReferenceToFeeChain(chainReference);
-    const chainId = Number(chainReference);
-    const expectedProtocol =
-      version === 2 && Number.isInteger(chainId)
-        ? splitEvmFeeV2(networkFee, chainId).protocolFee
-        : protocolFeeOf(networkFee, protocolFeeBps(version));
+    const expectedProtocol = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
     const l1Fee = receipt.l1FeeWei != null ? BigInt(receipt.l1FeeWei) : 0n;
     const actual = BigInt(receipt.costWei) + l1Fee;
     const absorbed = absorbedLoss(networkFee, actual);

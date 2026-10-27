@@ -95,9 +95,18 @@ export function protocolFeeOf(networkFee: bigint, bps: number): bigint {
  */
 export function platformFeeOf(networkFee: bigint, chain: FeeChain, version: number): bigint {
   const row = feePolicyRow(version);
-  const pct = (networkFee * BigInt(row.bps)) / 10_000n;
-  const min = row.chainMin[chain];
-  return pct > min ? pct : min;
+  return platformFeeWithMin(networkFee, row.bps, row.chainMin[chain]);
+}
+
+/**
+ * `MAX(floor(networkFee × bps / 10_000), minFee)` with an explicit minimum.
+ * DB-backed quotes (ANT-730) use this with the dashboard-managed minimum so
+ * the formula stays identical to the frozen table path above (one formula,
+ * two minimum sources — no drift between DB and code paths).
+ */
+export function platformFeeWithMin(networkFee: bigint, bps: number, minFee: bigint): bigint {
+  const pct = (networkFee * BigInt(bps)) / 10_000n;
+  return pct > minFee ? pct : minFee;
 }
 
 /** `totalFee = networkFee + platformFee` under a policy version. */

@@ -58,7 +58,7 @@ jest.mock("@peridotvault/pid-solana", () => ({
   b64urlToBytes: jest.fn((s: string) => Uint8Array.from(Buffer.from(s, "base64url"))),
 }));
 
-function setup() {
+function setup(fees?: unknown) {
   const config = solanaRelayerConfig();
   const security = mockSecurity();
   const prisma = {
@@ -78,7 +78,7 @@ function setup() {
   chains.solanaProgramId.mockResolvedValue("PidProgram1111111111111111111111111111111");
   const idempotency = mockIdempotency();
   const breaker = mockBreaker();
-  const service = new SponsoredWithdrawService(prisma as never, config as never, security as never, chains as never, idempotency as never, breaker as never);
+  const service = new SponsoredWithdrawService(prisma as never, config as never, security as never, chains as never, idempotency as never, breaker as never, fees as never);
   return { service, security, idempotency };
 }
 
@@ -603,5 +603,59 @@ describe("SponsoredWithdrawService", () => {
     const fresh = await service.withdraw(IDENTITY_ID, base);
     expect(fresh.signature).toBe("sig-sponsor-sol");
     expect(adapterMock.sponsoredWithdrawSolV3).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SponsoredWithdrawService — DB fee legs (ANT-730)", () => {
+  const dbFees = {
+    minFeeFor: jest.fn<Promise<{ minFee: bigint; version: number; bps: number }>, []>(),
+    minFeeForVersion: jest.fn<Promise<{ minFee: bigint; bps: number }>, []>(),
+    checkSubmitVersion: jest.fn<Promise<unknown>, []>(),
+  };
+
+  beforeEach(() => {
+    dbFees.minFeeFor.mockResolvedValue({ minFee: 50_000n, version: 2, bps: 5000 });
+    dbFees.minFeeForVersion.mockResolvedValue({ minFee: 50_000n, bps: 5000 });
+    dbFees.checkSubmitVersion.mockResolvedValue({ ok: true as const });
+  });
+
+  it("quote uses the DB MIN_FEE leg (network 5000 → platform 50000, not the frozen 17000)", async () => {
+    const { service } = setup(dbFees);
+    const q = await service.quote(IDENTITY_ID);
+    expect(q.feePolicyVersion).toBe(2);
+    expect(q.chainMinBaseUnits).toBe("50000");
+    expect(q.platformFee).toBe("50000");
+    expect(q.totalFee).toBe("55000");
+    expect(q.maxTotalFee).toBe("55000");
+  });
+
+  it("withdraw rejects a superseded version as StaleQuote (410) with the typed cause", async () => {
+    dbFees.checkSubmitVersion.mockResolvedValue({
+      ok: false as const,
+      code: "StaleQuote",
+      status: 410 as const,
+      message: "Fee policy superseded — re-quote and try again",
+    });
+    const { service, security } = setup(dbFees);
+    const err = await service.withdraw(IDENTITY_ID, { ...base, feePolicyVersion: 1 }).catch((e) => e);
+    expect(err.getStatus()).toBe(410);
+    expect(err.getResponse()).toMatchObject({ code: "StaleQuote" });
+    expect(security.log).toHaveBeenCalledWith(
+      IDENTITY_ID,
+      expect.anything(),
+      expect.objectContaining({ entryPoint: "withdraw", cause: "policy-unknown" }),
+    );
+    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+  });
+
+  it("withdraw accepts one version back with a warning and settles under the signed version", async () => {
+    dbFees.checkSubmitVersion.mockResolvedValue({ ok: true as const, warning: "Quote uses fee-policy v1; current is v2" });
+    dbFees.minFeeForVersion.mockResolvedValue({ minFee: 0n, bps: 5000 });
+    const { service } = setup(dbFees);
+    // v1 math: network 5000 → platform 2500 → total 7500 ≤ maxTotalFee 22000.
+    const out = await service.withdraw(IDENTITY_ID, { ...base, feePolicyVersion: 1 });
+    expect(out.signature).toBe("sig-sponsor-sol");
+    expect(out.protocolFeeLamports).toBe("2500");
+    expect(out.feePolicyWarning).toMatch(/v1.*v2/);
   });
 });
