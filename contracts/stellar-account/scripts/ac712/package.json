@@ -1,0 +1,15 @@
+{
+  "name": "ac712-operator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ANT-712 testnet operator: passkey EXECUTE (AC2.8) + token-deny (AC3.4). Testnet-only, never mainnet. Not part of the published SDK.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@noble/curves": "^1.8.2",
+    "@stellar/stellar-sdk": "^17.4.0"
+  }
+}

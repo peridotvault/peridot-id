@@ -127,3 +127,35 @@ stellar contract invoke \
 - No mainnet vectors anywhere in these crates (no mainnet passphrase, no
   mainnet RPC); factory has no upgrade path by design — rotate by deploying
   a new factory.
+
+## ANT-712 residual close-out (Troy, 2026-10-27 — AC2.8 + AC3.4 on-chain)
+
+Operator: `contracts/stellar-account/scripts/ac712/` (README there has the
+full command log + 8 host/SDK findings). New crate `contracts/stellar-policy`
+(OZ `Policy`, deny-first FINANCIAL_FNS mirror of `rules.rs`): **10/10 cargo
+tests**; in-tree wasm is v2 with the execute-dispatch layer
+(`2fd03ff3…71d63b568f`; v1 `4fadfcca…3013a0bc3e35` superseded on-chain). Reference actors
+(all testnet): passkey-only pilot `CA2XGFLW…LAB36` (rule 0 = External only),
+verifier `CD7HL6U…LQLL7QXSDB` (Phase-0, confirmed live, reused), policy v1
+`CDCPKVIJ…7QZYVP`, policy v2 `CBMNKK7T…DZAMPAD5`, native SAC `CDLZFC3S…YGCYSC`.
+
+| Item | Evidence |
+|---|---|
+| (a) Verifier | Phase-0 contract fetchable + spec-checked live; no redeploy |
+| External signer on pilot | Constructor-bound at deploy (tx `e3653886…` pilot #4, `4a99e039…` pilot #5, predict == deploy both) |
+| (c) Passkey EXECUTE | `execute(verifier, canonicalize_key, …)` via External signer, tx **`f7ac3032…`** SUCCESS, on-chain `verify=true` |
+| G1 byte-equality | On-chain `auth_digest(preimage)` = `8bf61223…2824b9` == SDK sha256(XDR) over the submitted envelope's `(nonce, expiration, invocation)` == the signed challenge D |
+| (d) Replay-reject | Same assertion, fresh envelope → enforce-sim `#3114 ChallengeInvalid`; submitted tx **`5defe5cb…`** FAILED with on-chain `#3114` |
+| AC3.4 token-deny | Rule 2 (`nonfinancial-only-v2` + policy v2, tx `425259c6…`); decimals probe tx `34887291…` SUCCESS (rule authorizes, policy passes); `execute(SAC, transfer, …)` → enforce-sim contract `#1`, submitted tx **`cdfc24ad…`** FAILED with on-chain `UnauthorizedFinancialOp` (`enforce` → `fail_with_error #1` on the transfer dispatch) |
+
+Local suites at close-out: stellar 38/38, stellar-account 9/9,
+stellar-factory 6/6, stellar-policy 10/10, `@peridotvault/pid-stellar` 13/13,
+ac712 operator 10/10.
+
+Known residual: Delegated (G-key) nested self-auth (`AuthPayload{Delegated}`
++ nested `__check_auth(preimage)` entry, OZ-documented) fails on testnet with
+`Auth/InvalidAction` despite a byte-matching outer payload — undiagnosed
+invocation-match issue (host 28.0.2 reviewed; OZ tests only cover nested auth
+with contract delegates). Nothing in AC2.8/AC3.4 depends on it (all flows are
+passkey-only, single-entry). Flagged as follow-up for Tobias (auth-path
+semantics, audit-adjacent).
