@@ -46,6 +46,17 @@ const adapterMock = {
   estimateExecuteFee: jest.fn(async () => 10000n) as jest.Mock,
   sponsoredExecuteV3: jest.fn(async () => "sig-execute") as jest.Mock,
   waitForConfirmation: jest.fn(async () => "confirmed" as const),
+  // ANT-729 (WS3) lazy-activation doubles.
+  estimateCompositeWithdrawFee: jest.fn(async () => 8000n) as jest.Mock,
+  estimateCompositeExecuteFee: jest.fn(async () => 12000n) as jest.Mock,
+  rentExemption: jest.fn(async () => 900000n) as jest.Mock,
+  sponsoredActivatePlusWithdrawSolV4: jest.fn(async () => "sig-first-action") as jest.Mock,
+  sponsoredActivatePlusWithdrawTokenV4: jest.fn(async () => "sig-first-action-token") as jest.Mock,
+  sponsoredActivatePlusExecuteV4: jest.fn(async () => "sig-first-action-exec") as jest.Mock,
+  activateV4: jest.fn(async () => "sig-activate") as jest.Mock,
+  sponsoredWithdrawSolV4: jest.fn(async () => "sig-spend-sol") as jest.Mock,
+  sponsoredWithdrawTokenV4: jest.fn(async () => "sig-spend-token") as jest.Mock,
+  sponsoredExecuteV4: jest.fn(async () => "sig-spend-exec") as jest.Mock,
 };
 
 jest.mock("@peridotvault/pid-solana", () => ({
@@ -127,10 +138,98 @@ describe("SponsoredWithdrawService", () => {
     expect(q.treasury).toBe(TREASURY_PDA);
   });
 
-  it("quote rejects a not-activated wallet", async () => {
+  it("quote on an ACTIVE account carries activation mode none (AC-15)", async () => {
+    const { service } = setup();
+    const q = await service.quote(IDENTITY_ID);
+    expect(q.activation).toEqual({
+      required: false,
+      includedInTotal: false,
+      estimate: "0",
+      estimateBasis: "account-active",
+      mode: "none",
+    });
+  });
+
+  it("quote on an inactive wallet returns a lazy first-action quote (no gate)", async () => {
     const { service } = setup();
     adapterMock.isActivated.mockResolvedValue(false);
-    await expect(service.quote(IDENTITY_ID)).rejects.toThrow(ConflictException);
+    adapterMock.getNonce.mockResolvedValue(0n);
+    const q = await service.quote(IDENTITY_ID);
+    // networkFee = rent(80B) + composite message fee; ANT-743 pure percentage.
+    expect(BigInt(q.networkFeeLamports)).toBe(900000n + 8000n);
+    expect(q.activation.required).toBe(true);
+    expect(q.activation.includedInTotal).toBe(true);
+    expect(q.activation.estimate).toBe((900000n + 8000n).toString());
+    expect(q.activation.mode).toBe("svm-composite");
+    // platformFee = pure 50% of 908000 = 454000 (minima removed, ANT-743).
+    expect(q.platformFee).toBe("454000");
+    expect(q.chainMinBaseUnits).toBe("0");
+  });
+
+  describe("ANT-729 lazy first-action submit", () => {
+    const firstActionBase = {
+      ...base,
+      nonce: "0",
+      quotedNetworkFeeLamports: "908000", // rent 900000 + composite 8000
+      maxTotalFeeLamports: "1362000", // 908000 + pure-50% 454000 (ANT-743)
+      activation: {
+        expiry: 1_000_300,
+        feePolicyVersion: 2,
+        quotedActivationLamports: "908000",
+        maxTotalFeeLamports: "1362000",
+        assertion: assertion as never,
+      },
+    };
+
+    beforeEach(() => {
+      adapterMock.isActivated.mockResolvedValue(false);
+      adapterMock.getNonce.mockResolvedValue(0n);
+    });
+
+    it("routes an inactive first action to the atomic composite (no gate)", async () => {
+      const { service } = setup();
+      const res = await service.withdraw(IDENTITY_ID, firstActionBase);
+      expect(res.signature).toBe("sig-first-action");
+      expect(res.status).toBe("confirmed");
+      expect(res.activation).toEqual({ mode: "svm-composite" });
+      expect(adapterMock.sponsoredActivatePlusWithdrawSolV4).toHaveBeenCalledTimes(1);
+      expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    });
+
+    it("fail-closed re-quote when the activation leg is missing (never the legacy gate)", async () => {
+      const { service } = setup();
+      const { activation: _dropped, ...noLeg } = firstActionBase;
+      await expect(service.withdraw(IDENTITY_ID, noLeg)).rejects.toThrow(ConflictException);
+      await expect(service.withdraw(IDENTITY_ID, noLeg)).rejects.toThrow(/re-quote for first action/);
+      expect(adapterMock.sponsoredActivatePlusWithdrawSolV4).not.toHaveBeenCalled();
+      expect(adapterMock.activateV4).not.toHaveBeenCalled();
+    });
+
+    it("falls back to 2-step on TxTooLarge with identical UX + mode report", async () => {
+      const { service } = setup();
+      adapterMock.sponsoredActivatePlusWithdrawSolV4.mockRejectedValueOnce(new Error("TxTooLarge: composite exceeds packet ceiling"));
+      const res = await service.withdraw(IDENTITY_ID, firstActionBase);
+      expect(res.signature).toBe("sig-spend-sol");
+      expect(res.activation).toEqual({ mode: "svm-fallback-2step" });
+      expect(adapterMock.activateV4).toHaveBeenCalledTimes(1);
+      expect(adapterMock.sponsoredWithdrawSolV4).toHaveBeenCalledTimes(1);
+    });
+
+    it("enforces FeeExceedsMax pre-claim (no half-activated state)", async () => {
+      const { service } = setup();
+      await expect(
+        service.withdraw(IDENTITY_ID, { ...firstActionBase, maxTotalFeeLamports: "1000" }),
+      ).rejects.toThrow(ConflictException);
+      expect(adapterMock.sponsoredActivatePlusWithdrawSolV4).not.toHaveBeenCalled();
+      expect(adapterMock.activateV4).not.toHaveBeenCalled();
+    });
+
+    it("requires the same passkey on both legs", async () => {
+      const { service } = setup();
+      const other = { ...firstActionBase, activation: { ...firstActionBase.activation, assertion: { ...assertion, id: "cred-2" } as never } };
+      await expect(service.withdraw(IDENTITY_ID, other)).rejects.toThrow(BadRequestException);
+      expect(adapterMock.sponsoredActivatePlusWithdrawSolV4).not.toHaveBeenCalled();
+    });
   });
 
   it("withdraw broadcasts with the relayer and returns the confirmed signature", async () => {

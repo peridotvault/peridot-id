@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsInt,
   IsObject,
+  IsOptional,
   IsString,
   Matches,
   Max,
@@ -41,6 +42,37 @@ class ExecuteMetaDto {
 
   @IsBoolean()
   signer!: boolean;
+}
+
+/**
+ * ANT-729 (WS3): first-action authorization for lazy activation (mirrors the
+ * withdraw DTO — carries the passkey-signed activation leg, spec WS1 §7.2).
+ */
+export class FirstActionDto {
+  /** Chain-time expiry (unix seconds) the activation passkey signed against. */
+  @IsInt()
+  @Min(0)
+  @Max(4102444800)
+  expiry!: number;
+
+  /** Signed fee-policy version for the activation leg. */
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  feePolicyVersion!: number;
+
+  /** The quoted activation estimate the client signed against (drift reference). */
+  @Matches(/^\d+$/, { message: "Quoted activation fee must be an integer" })
+  quotedActivationLamports!: string;
+
+  /** User-approved upper bound on the activation leg's `networkFee + platformFee`. */
+  @Matches(/^\d+$/, { message: "Activation max total fee must be an integer" })
+  maxTotalFeeLamports!: string;
+
+  @IsObject()
+  @ValidateNested()
+  @Type(() => AssertionDto)
+  assertion!: AssertionDto;
 }
 
 export class SponsoredExecuteDto {
@@ -94,6 +126,13 @@ export class SponsoredExecuteDto {
   @ValidateNested()
   @Type(() => AssertionDto)
   assertion!: AssertionDto;
+
+  /** First-action authorization (required when the account is not yet ACTIVE). */
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => FirstActionDto)
+  activation?: FirstActionDto;
 }
 
 export class ExecuteQuoteDto {

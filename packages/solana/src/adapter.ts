@@ -18,10 +18,12 @@ import {
   buildActivateInstruction,
   buildActivateInstructionV2,
   buildActivateInstructionV3,
+  buildActivateInstructionV4,
   buildCloseInstruction,
   buildDepositSolInstruction,
   buildDepositTokenInstruction,
   buildExecuteInstructionV3,
+  buildExecuteInstructionV4,
   buildInitializeInstruction,
   buildInitializeInstructionV2,
   buildSecp256r1Instruction,
@@ -32,6 +34,8 @@ import {
   buildWithdrawTokenInstructionV2,
   buildWithdrawSolInstructionV3,
   buildWithdrawTokenInstructionV3,
+  buildWithdrawSolInstructionV4,
+  buildWithdrawTokenInstructionV4,
   deriveTreasuryPda,
 } from "./instructions.js";
 import type { NftItem, ParsedTx, SolanaRpc, TokenBalance } from "./rpc.js";
@@ -46,6 +50,15 @@ export interface TransactionStatus {
 }
 
 const DEFAULT_EXPIRY_TTL_SECONDS = 300;
+
+/**
+ * ANT-729 (WS3): on-chain smart-account state length used as the rent basis
+ * (80-byte v2 layout, `state.rs:15-19`). The old 112-byte basis over-reserved
+ * rent and inflated activation quotes; priority fees are out of scope.
+ */
+export const SMART_ACCOUNT_STATE_LEN = 80;
+/** Solana legacy packet ceiling: composite txs above this fall back to 2 steps. */
+export const TX_SIZE_LIMIT_BYTES = 1232;
 
 /**
  * Smart-account operations. The fee payer is a client-held Ed25519 keypair (fee-payer model);
@@ -216,6 +229,385 @@ export class SolanaAdapter {
     return this.submitRelayedPasskeyTx(programIx, authorityCompressed, assertion, relayer);
   }
 
+  /**
+   * ANT-729 (WS3): activate via the relayer, V4 (disc 14). Passkey-signed claim
+   * binding op-tag, account, authority, policy, `max_total_fee`, expiry; the
+   * program enforces `network_fee + protocol_fee ≤ max_total_fee`
+   * (`FeeExceedsMax`) BEFORE the claim CPI, so an over-cap activation never
+   * touches chain state. `initialize` (deprecated) is never used — this and
+   * `activate`/`activateV3` are the only creation paths.
+   */
+  async activateV4(
+    pid: string,
+    authorityCompressed: Uint8Array<ArrayBufferLike>,
+    feePolicyVersion: number,
+    networkFeeLamports: bigint,
+    maxTotalFeeLamports: bigint,
+    expiry: number,
+    relayer: Keypair,
+    treasury: PublicKey | undefined,
+    assertion: PasskeyAssertion,
+  ): Promise<string> {
+    const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
+    const programIx = buildActivateInstructionV4(
+      pidToSeed32(pid),
+      authorityCompressed,
+      feePolicyVersion,
+      expiry,
+      networkFeeLamports,
+      maxTotalFeeLamports,
+      relayer.publicKey,
+      smartAccount,
+      vault,
+      assertion.clientDataJSON,
+      this.programId,
+    );
+    return this.submitRelayedPasskeyTx(programIx, authorityCompressed, assertion, relayer);
+  }
+
+  /**
+   * ANT-729 (WS3): sponsored SOL withdrawal, V4. As V3 plus the user-approved
+   * `maxTotalFeeLamports` bound carried in the passkey-signed authorization
+   * (spec B5). Layout MUST match `withdraw_sol_v4.rs` byte-for-byte.
+   */
+  async sponsoredWithdrawSolV4(
+    pid: string,
+    authorityCompressed: Uint8Array,
+    destination: PublicKey,
+    amount: bigint,
+    feePolicyVersion: number,
+    networkFeeLamports: bigint,
+    maxTotalFeeLamports: bigint,
+    nonce: bigint,
+    expiry: number,
+    assertion: PasskeyAssertion,
+    relayer: Keypair,
+    treasury: PublicKey | undefined,
+  ): Promise<string> {
+    const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
+    const programIx = buildWithdrawSolInstructionV4(
+      smartAccount,
+      destination,
+      vault,
+      relayer.publicKey,
+      nonce,
+      amount,
+      feePolicyVersion,
+      networkFeeLamports,
+      maxTotalFeeLamports,
+      expiry,
+      assertion.clientDataJSON,
+      this.programId,
+    );
+    return this.submitRelayedPasskeyTx(programIx, authorityCompressed, assertion, relayer);
+  }
+
+  /**
+   * ANT-729 (WS3): sponsored SPL token withdrawal, V4 (as V3 plus
+   * `max_total_fee`; layout MUST match `withdraw_token_v4.rs`).
+   */
+  async sponsoredWithdrawTokenV4(
+    pid: string,
+    authorityCompressed: Uint8Array,
+    mint: PublicKey,
+    destinationAta: PublicKey,
+    amount: bigint,
+    feePolicyVersion: number,
+    networkFeeLamports: bigint,
+    maxTotalFeeLamports: bigint,
+    nonce: bigint,
+    expiry: number,
+    assertion: PasskeyAssertion,
+    relayer: Keypair,
+    treasury: PublicKey | undefined,
+  ): Promise<string> {
+    const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
+    const sourceAta = await getAssociatedTokenAddress(mint, smartAccount, true);
+    const programIx = buildWithdrawTokenInstructionV4(
+      smartAccount,
+      sourceAta,
+      destinationAta,
+      mint,
+      vault,
+      relayer.publicKey,
+      nonce,
+      amount,
+      feePolicyVersion,
+      networkFeeLamports,
+      maxTotalFeeLamports,
+      expiry,
+      assertion.clientDataJSON,
+      this.programId,
+    );
+    return this.submitRelayedPasskeyTx(programIx, authorityCompressed, assertion, relayer);
+  }
+
+  /**
+   * ANT-729 (WS3): sponsored generic execute, V4 (as V3 plus `max_total_fee`;
+   * layout MUST match `execute_v4.rs`). Same call-confinement checks as V3.
+   */
+  async sponsoredExecuteV4(
+    pid: string,
+    authorityCompressed: Uint8Array,
+    target: PublicKey,
+    metas: { address: PublicKey; writable: boolean; signer: boolean }[],
+    data: Uint8Array,
+    feePolicyVersion: number,
+    networkFeeLamports: bigint,
+    maxTotalFeeLamports: bigint,
+    nonce: bigint,
+    expiry: number,
+    assertion: PasskeyAssertion,
+    relayer: Keypair,
+    treasury: PublicKey | undefined,
+  ): Promise<string> {
+    const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
+    const programIx = buildExecuteInstructionV4(
+      smartAccount,
+      vault,
+      relayer.publicKey,
+      nonce,
+      target,
+      metas,
+      data,
+      feePolicyVersion,
+      networkFeeLamports,
+      maxTotalFeeLamports,
+      expiry,
+      assertion.clientDataJSON,
+      this.programId,
+    );
+    return this.submitRelayedPasskeyTx(programIx, authorityCompressed, assertion, relayer);
+  }
+
+  /**
+   * ANT-729 (WS3): assemble a lazy-activation composite
+   * `[activateV4_ix, secp_activate, spendV4_ix, secp_spend]` with the relayer
+   * as fee payer. Each program ix is immediately followed by its secp256r1
+   * precompile (the program's introspection order); the whole tx is atomic —
+   * a failing spend reverts the activation, so there is no half-activated
+   * state that burns fee (spec WS1 §3.2, AC-3).
+   */
+  private async buildCompositeTx(
+    activateIx: TransactionInstruction,
+    activateAuthority: Uint8Array,
+    activateAssertion: PasskeyAssertion,
+    spendIx: TransactionInstruction,
+    spendAuthority: Uint8Array,
+    spendAssertion: PasskeyAssertion,
+    feePayer: PublicKey,
+  ): Promise<Transaction> {
+    const secpActivate = buildSecp256r1Instruction(
+      activateAuthority,
+      normalizeLowS(activateAssertion.signature),
+      await buildWebAuthnMessage(activateAssertion.authenticatorData, activateAssertion.clientDataJSON),
+    );
+    const secpSpend = buildSecp256r1Instruction(
+      spendAuthority,
+      normalizeLowS(spendAssertion.signature),
+      await buildWebAuthnMessage(spendAssertion.authenticatorData, spendAssertion.clientDataJSON),
+    );
+    return this.buildTx([activateIx, secpActivate, spendIx, secpSpend], feePayer);
+  }
+
+  /**
+   * ANT-729 (WS3): true when a composite tx fits the legacy packet ceiling.
+   * Oversize composites MUST use the automatic 2-step fallback (relayer-float
+   * + claim) with identical 1-click UX — never a new user-facing step
+   * (spec WS1 §3.2, AC-4).
+   */
+  compositeFitsLimit(tx: Transaction): boolean {
+    return tx.serializeMessage().length <= TX_SIZE_LIMIT_BYTES;
+  }
+
+  /**
+   * ANT-729 (WS3): realtime network fee for a composite
+   * `[activate_v4 + spend]` message (`getFeeForMessage` on the exact 4-ix
+   * layout). Quote estimate = rent(80B) + this fee (spec WS1 §7.1).
+   */
+  private async estimateCompositeMessageFee(
+    activateIx: TransactionInstruction,
+    spendIx: TransactionInstruction,
+  ): Promise<bigint> {
+    const conn = this.rpc.connection;
+    const dummy = Keypair.generate().publicKey;
+    const secp = buildSecp256r1Instruction(
+      new Uint8Array(33).fill(2),
+      new Uint8Array(64),
+      new Uint8Array([0x7b, 0x7d]),
+    );
+    const rawTx = new Transaction();
+    rawTx.add(activateIx, secp, spendIx, secp);
+    rawTx.feePayer = dummy;
+    rawTx.recentBlockhash = await this.rpc.getLatestBlockhash();
+    const fee = await conn.getFeeForMessage(rawTx.compileMessage(), "confirmed");
+    return BigInt(fee.value ?? 0);
+  }
+
+  /** Dummy-data composite fee for a SOL-spend first action (quote path). */
+  async estimateCompositeWithdrawFee(): Promise<bigint> {
+    const pid = "dummy";
+    const dummyAuthority = new Uint8Array(33);
+    const smartAccount = this.getAddress(pid);
+    const dummyRelayer = Keypair.generate().publicKey;
+    const vault = this.treasuryAddress();
+    const clientJson = new Uint8Array([0x7b, 0x7d]);
+    const activateIx = buildActivateInstructionV4(
+      pidToSeed32(pid), dummyAuthority, 1, 0, 0n, 0n,
+      dummyRelayer, smartAccount, vault, clientJson, this.programId,
+    );
+    const spendIx = buildWithdrawSolInstructionV4(
+      smartAccount, dummyRelayer, vault, dummyRelayer,
+      0n, 0n, 1, 0n, 0n, 0, clientJson, this.programId,
+    );
+    return this.estimateCompositeMessageFee(activateIx, spendIx);
+  }
+
+  /** Dummy-data composite fee for a generic-execute first action (quote path). */
+  async estimateCompositeExecuteFee(
+    target: PublicKey,
+    metas: { address: PublicKey; writable: boolean; signer: boolean }[],
+    dataLength: number,
+  ): Promise<bigint> {
+    const pid = "dummy";
+    const dummyAuthority = new Uint8Array(33);
+    const smartAccount = this.getAddress(pid);
+    const dummyRelayer = Keypair.generate().publicKey;
+    const vault = this.treasuryAddress();
+    const clientJson = new Uint8Array([0x7b, 0x7d]);
+    const activateIx = buildActivateInstructionV4(
+      pidToSeed32(pid), dummyAuthority, 1, 0, 0n, 0n,
+      dummyRelayer, smartAccount, vault, clientJson, this.programId,
+    );
+    const spendIx = buildExecuteInstructionV4(
+      smartAccount, vault, dummyRelayer, 0n, target, metas,
+      new Uint8Array(dataLength), 1, 0n, 0n, 0, clientJson, this.programId,
+    );
+    return this.estimateCompositeMessageFee(activateIx, spendIx);
+  }
+
+  /**
+   * ANT-729 (WS3): atomically activate + SOL-spend in one tx. Throws
+   * `TxTooLarge` when the composite exceeds the packet ceiling so the caller
+   * falls back to the automatic 2-step path (same UX, `svm-fallback-2step`).
+   */
+  async sponsoredActivatePlusWithdrawSolV4(
+    pid: string,
+    authorityCompressed: Uint8Array,
+    activate: { feePolicyVersion: number; networkFeeLamports: bigint; maxTotalFeeLamports: bigint; expiry: number; assertion: PasskeyAssertion },
+    spend: { destination: PublicKey; amount: bigint; feePolicyVersion: number; networkFeeLamports: bigint; maxTotalFeeLamports: bigint; nonce: bigint; expiry: number; assertion: PasskeyAssertion },
+    relayer: Keypair,
+    treasury: PublicKey | undefined,
+  ): Promise<string> {
+    const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
+    const activateIx = buildActivateInstructionV4(
+      pidToSeed32(pid), authorityCompressed,
+      activate.feePolicyVersion, activate.expiry,
+      activate.networkFeeLamports, activate.maxTotalFeeLamports,
+      relayer.publicKey, smartAccount, vault,
+      activate.assertion.clientDataJSON, this.programId,
+    );
+    const spendIx = buildWithdrawSolInstructionV4(
+      smartAccount, spend.destination, vault, relayer.publicKey,
+      spend.nonce, spend.amount,
+      spend.feePolicyVersion, spend.networkFeeLamports, spend.maxTotalFeeLamports,
+      spend.expiry, spend.assertion.clientDataJSON, this.programId,
+    );
+    const tx = await this.buildCompositeTx(
+      activateIx, authorityCompressed, activate.assertion,
+      spendIx, authorityCompressed, spend.assertion,
+      relayer.publicKey,
+    );
+    if (!this.compositeFitsLimit(tx)) throw new Error("TxTooLarge: composite exceeds packet ceiling, use 2-step fallback");
+    return this.send(tx, [relayer]);
+  }
+
+  /**
+   * ANT-729 (WS3): atomically activate + generic-execute in one tx.
+   * Same atomicity and `TxTooLarge` fallback contract as the SOL-spend twin.
+   */
+  async sponsoredActivatePlusExecuteV4(
+    pid: string,
+    authorityCompressed: Uint8Array,
+    activate: { feePolicyVersion: number; networkFeeLamports: bigint; maxTotalFeeLamports: bigint; expiry: number; assertion: PasskeyAssertion },
+    spend: { target: PublicKey; metas: { address: PublicKey; writable: boolean; signer: boolean }[]; data: Uint8Array; feePolicyVersion: number; networkFeeLamports: bigint; maxTotalFeeLamports: bigint; nonce: bigint; expiry: number; assertion: PasskeyAssertion },
+    relayer: Keypair,
+    treasury: PublicKey | undefined,
+  ): Promise<string> {
+    const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
+    const activateIx = buildActivateInstructionV4(
+      pidToSeed32(pid), authorityCompressed,
+      activate.feePolicyVersion, activate.expiry,
+      activate.networkFeeLamports, activate.maxTotalFeeLamports,
+      relayer.publicKey, smartAccount, vault,
+      activate.assertion.clientDataJSON, this.programId,
+    );
+    const spendIx = buildExecuteInstructionV4(
+      smartAccount, vault, relayer.publicKey,
+      spend.nonce, spend.target, spend.metas, spend.data,
+      spend.feePolicyVersion, spend.networkFeeLamports, spend.maxTotalFeeLamports,
+      spend.expiry, spend.assertion.clientDataJSON, this.programId,
+    );
+    const tx = await this.buildCompositeTx(
+      activateIx, authorityCompressed, activate.assertion,
+      spendIx, authorityCompressed, spend.assertion,
+      relayer.publicKey,
+    );
+    if (!this.compositeFitsLimit(tx)) throw new Error("TxTooLarge: composite exceeds packet ceiling, use 2-step fallback");
+    return this.send(tx, [relayer]);
+  }
+
+  /**
+   * ANT-729 (WS3): atomically activate + SPL-token-spend in one tx.
+   * Same atomicity and `TxTooLarge` fallback contract as the SOL twin.
+   */
+  async sponsoredActivatePlusWithdrawTokenV4(
+    pid: string,
+    authorityCompressed: Uint8Array,
+    activate: { feePolicyVersion: number; networkFeeLamports: bigint; maxTotalFeeLamports: bigint; expiry: number; assertion: PasskeyAssertion },
+    spend: { mint: PublicKey; destinationAta: PublicKey; amount: bigint; feePolicyVersion: number; networkFeeLamports: bigint; maxTotalFeeLamports: bigint; nonce: bigint; expiry: number; assertion: PasskeyAssertion },
+    relayer: Keypair,
+    treasury: PublicKey | undefined,
+  ): Promise<string> {
+    const smartAccount = this.getAddress(pid);
+    const vault = this.resolveTreasury(treasury);
+    const activateIx = buildActivateInstructionV4(
+      pidToSeed32(pid), authorityCompressed,
+      activate.feePolicyVersion, activate.expiry,
+      activate.networkFeeLamports, activate.maxTotalFeeLamports,
+      relayer.publicKey, smartAccount, vault,
+      activate.assertion.clientDataJSON, this.programId,
+    );
+    const sourceAta = await getAssociatedTokenAddress(spend.mint, smartAccount, true);
+    const spendIx = buildWithdrawTokenInstructionV4(
+      smartAccount, sourceAta, spend.destinationAta, spend.mint, vault, relayer.publicKey,
+      spend.nonce, spend.amount,
+      spend.feePolicyVersion, spend.networkFeeLamports, spend.maxTotalFeeLamports,
+      spend.expiry, spend.assertion.clientDataJSON, this.programId,
+    );
+    const tx = await this.buildCompositeTx(
+      activateIx, authorityCompressed, activate.assertion,
+      spendIx, authorityCompressed, spend.assertion,
+      relayer.publicKey,
+    );
+    if (!this.compositeFitsLimit(tx)) throw new Error("TxTooLarge: composite exceeds packet ceiling, use 2-step fallback");
+    return this.send(tx, [relayer]);
+  }
+
+  /**
+   * ANT-729 (WS3): rent-exempt minimum for the 80-byte v2 state — the rent
+   * leg of the lazy-activation quote (`rent(80B) + getFeeForMessage`).
+   */
+  async rentExemption(): Promise<bigint> {
+    return BigInt(await this.rpc.connection.getMinimumBalanceForRentExemption(SMART_ACCOUNT_STATE_LEN, "confirmed"));
+  }
+
   /** Balance of the smart account address (lamports). */
   async getBalanceOf(address: string | PublicKey): Promise<number> {
     const pub = typeof address === "string" ? new PublicKey(address) : address;
@@ -255,7 +647,7 @@ export class SolanaAdapter {
     const msg = rawTx.compileMessage();
     const [fee, rent] = await Promise.all([
       conn.getFeeForMessage(msg, "confirmed"),
-      conn.getMinimumBalanceForRentExemption(112, "confirmed"),
+      conn.getMinimumBalanceForRentExemption(SMART_ACCOUNT_STATE_LEN, "confirmed"),
     ]);
     const feeLamports = BigInt(fee.value ?? 0);
     const rentLamports = BigInt(rent);

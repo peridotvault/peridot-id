@@ -85,6 +85,7 @@ export class WalletController {
         quotedNetworkFeeLamports: dto.quotedNetworkFeeLamports,
         maxTotalFeeLamports: dto.maxTotalFeeLamports,
         assertion: dto.assertion as never,
+        activation: dto.activation as never,
       },
       await this.selection(chainRefHeader, chainRefQuery),
     );
@@ -113,6 +114,7 @@ export class WalletController {
         quotedNetworkFeeLamports: dto.quotedNetworkFeeLamports,
         maxTotalFeeLamports: dto.maxTotalFeeLamports,
         assertion: dto.assertion as never,
+        activation: dto.activation as never,
       },
       await this.selection(chainRefHeader, chainRefQuery),
     );
