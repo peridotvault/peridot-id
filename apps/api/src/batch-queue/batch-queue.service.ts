@@ -19,9 +19,11 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -121,7 +123,11 @@ export interface BatchPorts {
   sessions: SessionValidator;
 }
 
-const failClosedPorts = (): BatchPorts => {
+/** Injection token for the flush-transport ports (interface types can't be DI tokens). */
+export const BATCH_PORTS = "BATCH_PORTS";
+
+/** Fail-closed default ports: every transport call 503s until explicitly bound. */
+export function failClosedPorts(): BatchPorts {
   const fail = async (): Promise<never> => {
     throw new ServiceUnavailableException("Batch flush transport is not configured");
   };
@@ -135,7 +141,7 @@ const failClosedPorts = (): BatchPorts => {
       },
     },
   };
-};
+}
 
 export interface BatchQuoteView {
   quoteId: string;
@@ -289,7 +295,7 @@ export class BatchQueueService {
     private readonly fees: FeePolicyService,
     private readonly security: SecurityEventService,
     private readonly config: ConfigService,
-    ports?: BatchPorts,
+    @Optional() @Inject(BATCH_PORTS) ports?: BatchPorts,
   ) {
     this.ports = ports ?? failClosedPorts();
   }
