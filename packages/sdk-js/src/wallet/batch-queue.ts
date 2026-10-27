@@ -7,8 +7,10 @@
 // Shapes are ERC-5792-adapted (`to`/`value`/`data` call objects, status handle
 // shaped like `wallet_getCallsStatus`) but the transport is RELAYER-executed
 // sequential single-calls, NOT EIP-4337-bundled: there is no bundler,
-// no EntryPoint, no paymaster. `capabilities` is accepted as passthrough and
-// echoed; capability discovery (`wallet_getCapabilities`) is unsupported.
+// no EntryPoint, no paymaster. `capabilities` is accepted client-side for
+// forward-compatibility but IGNORED by the phase-1a backend (it is neither
+// passed through nor echoed); capability discovery
+// (`wallet_getCapabilities`) is unsupported.
 
 export interface BatchCall {
   /** Target contract (checksummed 0x address; EOAs and zero address rejected). */

@@ -253,6 +253,36 @@ describe("quote → submit → settle (pass-through pricing)", () => {
     );
     expect(view.lifecycle).toBe("failed");
     expect(view.failure?.code).toBe("EXECUTION_REVERTED");
+    // Halt-not-rollback (ANT-765 F3): the message must not promise a revert.
+    expect(view.failure?.message).toMatch(/halted, prior submitted ops stand/);
+  });
+
+  it("reaps stale submitted rows fail-closed without resubmission (ANT-765 F1)", async () => {
+    const ports = testPorts();
+    const submitSpy = jest.spyOn(ports.submitter, "submit");
+    const { svc, fees } = harness(ports);
+    const t0 = new Date("2026-10-27T00:00:00Z");
+    const quote = await svc.estimateBatch(PID, { from: FROM, ops: [op()], atomic: true }, t0);
+    // Crash settle between the `submitted` write and the terminal update.
+    // Note: submitBatch consumes one activePolicy call for its version check
+    // first, so the rejection lands on settleBatch's call.
+    (fees.activePolicy as jest.Mock)
+      .mockResolvedValueOnce({ version: 2, bps: 5000 })
+      .mockRejectedValueOnce(new Error("db down"));
+    await expect(
+      svc.submitBatch(
+        PID, { from: FROM, ops: [op()], atomic: true, quoteId: quote.quoteId, idempotencyKey: "idem-stuck", bypassQueue: true }, t0,
+      ),
+    ).rejects.toThrow("db down");
+    expect(submitSpy).not.toHaveBeenCalled();
+    // Past the 2x-window reaper horizon (wall-clock: the harness stamps
+    // updatedAt with real time): failed closed, still no submission.
+    const reaped = await svc.flushDueBatches(new Date(Date.now() + 2 * 900_000 + 1000));
+    expect(reaped).toHaveLength(1);
+    expect(reaped[0].lifecycle).toBe("failed");
+    expect(reaped[0].failure?.code).toBe("RELAYER_ERROR");
+    expect(reaped[0].failure?.message).toMatch(/no resubmission attempted/);
+    expect(submitSpy).not.toHaveBeenCalled();
   });
 });
 

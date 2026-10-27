@@ -527,7 +527,9 @@ export class BatchQueueService {
         if (row.atomic) {
           batchFailed = true;
           failureCode = "SIMULATION_FAILED";
-          failureMessage = `Op ${index} failed simulation — atomic batch reverted`;
+          // Halt-not-rollback (ANT-765 F3): sequential single-calls already
+          // submitted stay on-chain; nothing already landed is reverted.
+          failureMessage = `Op ${index} failed simulation — atomic batch halted, prior submitted ops stand`;
           break;
         }
         continue;
@@ -546,7 +548,8 @@ export class BatchQueueService {
         if (row.atomic) {
           batchFailed = true;
           failureCode = "EXECUTION_REVERTED";
-          failureMessage = `Op ${index} reverted — atomic batch reverted`;
+          // Halt-not-rollback (ANT-765 F3): see simulation-halt note above.
+          failureMessage = `Op ${index} reverted — atomic batch halted, prior submitted ops stand`;
           break;
         }
         continue;
@@ -606,21 +609,24 @@ export class BatchQueueService {
     return this.toView(updated);
   }
 
-  /** Reap a stale `submitted` row: finalize from stored receipts or fail closed. */
+  /**
+   * Reap a stale `submitted` row: ALWAYS fail closed. A crash between the
+   * `submitted` write and the terminal update leaves `receipts = null`, and
+   * the terminal update writes receipts + status atomically — so any stored
+   * receipts on a stale row are preserved verbatim for operator
+   * reconciliation and NEVER resubmitted (resubmission would risk duplicate
+   * on-chain effects + double ledger rows; see ANT-765 F1).
+   */
   private async reapStaleSubmitted(batchId: string): Promise<BatchStatusView> {
     const row = await this.prisma.queuedBatch.findUnique({ where: { id: batchId } });
     if (!row || row.status !== "submitted") return this.toView(row!);
-    const receipts = row.receipts as unknown as { ops?: Array<{ status: string }> } | null;
-    if (receipts?.ops && receipts.ops.length > 0) {
-      // Settle deterministically from stored receipts (no resubmission).
-      return this.settleBatch(batchId, new Date());
-    }
     const failed = await this.prisma.queuedBatch.update({
       where: { id: batchId },
       data: {
         status: "failed",
         failureCode: "RELAYER_ERROR",
-        failureMessage: "Flush crashed before any receipt was recorded — no fee charged",
+        failureMessage:
+          "Flush did not complete before the reaper horizon — no fee charged, no resubmission attempted; stored receipts (if any) preserved for reconciliation",
         settledAt: new Date(),
       },
     });
