@@ -192,17 +192,20 @@ export interface EvmActivationView {
 }
 
 /**
- * Active chain fee policy (ANT-730, spec ANT-727 §4.3/7.2, AC-18) —
+ * Active chain fee policy (ANT-730, spec ANT-727 §4.3/7.2, AC-18; ANT-743 pure 50%) —
  * GET /v1/fee-policy (public, no auth). The single display source of truth
  * wallets/SDKs must use instead of hardcoded numbers: version, percentage
- * leg, per-chain MIN_FEE legs in native base units keyed by CAIP-2 pair
- * (`eip155:84532`, `solana:<reference>`), and the FX display source/date.
- * Settlement is always base units on-chain; rupiah figures are informational.
+ * leg, and the FX display source/date. Settlement is always base units
+ * on-chain; rupiah figures are informational.
+ *
+ * `minFee` is the legacy per-chain floor map (base units keyed by CAIP-2 pair)
+ * and is ABSENT on pure-percentage policies — always read it as optional
+ * (`policy.minFee ?? {}`) and never present a floor as current pricing.
  */
 export interface ChainFeePolicy {
   version: number;
   bps: number;
-  minFee: Record<string, string>;
+  minFee?: Record<string, string>;
   fxSource: string;
   fxAsOf: string | null;
   updatedAt: string;
@@ -247,7 +250,11 @@ export interface FeeQuoteView {
    */
   /** Canonical alias of networkFeeLamports. */
   networkFee?: string;
-  /** v2 platform fee: MAX(floor(networkFee×bps/10_000), chainMin). */
+  /**
+   * v2 platform fee: the pure percentage leg — floor(networkFee×bps/10_000)
+   * (ANT-743: no minima/floor; any chainMinBaseUnits the backend still echoes
+   * is informational only and never raises the quoted service fee).
+   */
   platformFee?: string;
   /** Legacy alias of platformFee. */
   protocolFeeLamports?: string;

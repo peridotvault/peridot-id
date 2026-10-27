@@ -15,6 +15,7 @@ import {
 } from "@peridotvault/pid-sdk-js";
 import { FeePanel } from "../../feat/chain/components/FeePanel";
 import { gateFeeApproval } from "../../feat/chain/utils/feeReview";
+import { formatSendReceipt } from "../../feat/chain/utils/sendReceipt";
 import {
   FIRST_ACTION_APPROVE_TITLE,
   FIRST_ACTION_REVIEW_NOTICE,
@@ -196,21 +197,28 @@ export function Send({ onDone }: { onDone: () => void }) {
         },
       );
       decisionRef.current = null;
-      const feeSol = Number(BigInt(res.networkFeeLamports) + BigInt(res.protocolFeeLamports)) / LAMPORTS_PER_SOL;
+      // ANT-748: the receipt names the SETTLED network + PeridotID service legs
+      // separately plus the total (pure 50% policy — no minima/floor math here,
+      // just the attested legs). Integer formatting keeps dust-scale fees exact.
+      const receipt = formatSendReceipt({
+        networkBaseUnits: res.networkFeeLamports,
+        serviceBaseUnits: res.protocolFeeLamports,
+        decimals: 9,
+        symbol: "SOL",
+      });
+      const receiptCopy =
+        `Sent and confirmed on-chain. Network fee ${receipt.networkFee} + ` +
+        `service fee ${receipt.serviceFee} = total ${receipt.totalFee}, reimbursed from your balance.\nSignature: ${res.signature}`;
       // NFR-6: signed version one back — the send settled, the next quote
       // just uses a newer policy. Non-blocking notice, never an error.
       if (res.feePolicyWarning) setPolicyNotice(res.feePolicyWarning);
       if (res.status === "confirmed") {
-        setResult(
-          `Sent and confirmed on-chain. Network fee ${feeSol.toFixed(6)} SOL was reimbursed from your balance.\nSignature: ${res.signature}`,
-        );
+        setResult(receiptCopy);
       } else {
         // Server already waited ~8s; give it a few more before reporting pending.
         const outcome = await peridot.wallet.waitForConfirmation(res.signature, 6, 1200).catch(() => "pending");
         if (outcome === "confirmed") {
-          setResult(
-            `Sent and confirmed on-chain. Network fee ${feeSol.toFixed(6)} SOL was reimbursed from your balance.\nSignature: ${res.signature}`,
-          );
+          setResult(receiptCopy);
         } else if (outcome === "failed") {
           setError("The transaction failed on-chain — the Solana network rejected it. No funds were moved.");
         } else {

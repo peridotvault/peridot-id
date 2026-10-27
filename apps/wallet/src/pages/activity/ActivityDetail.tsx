@@ -1,6 +1,7 @@
 import { ScrollArea } from "../../shared/components/ui/ScrollArea";
 import { openExternalUrl } from "../../shared/app/openExternal";
 import type { WalletTransaction } from "@peridotvault/pid-types";
+import { formatFeeAmount } from "@peridotvault/pid-sdk-js";
 import { styles as s } from "../../shared/styles/theme";
 import { solanaExplorerTxUrl } from "../../shared/data/networkMode";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
@@ -18,6 +19,16 @@ function fmtAmount(t: WalletTransaction): string {
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "medium" });
+}
+
+// Receipt fee leg: integer-math formatting (dust-safe); a malformed recorded
+// leg falls back to the raw base-unit string rather than crashing the receipt.
+function fmtFee(baseUnits: string, fees: NonNullable<WalletTransaction["fees"]>): string {
+  try {
+    return formatFeeAmount(baseUnits, fees.decimals, fees.symbol);
+  } catch {
+    return `${baseUnits} base units`;
+  }
 }
 
 export function ActivityDetail({ tx, onDone }: { tx: WalletTransaction; onDone: () => void }) {
@@ -45,6 +56,16 @@ export function ActivityDetail({ tx, onDone }: { tx: WalletTransaction; onDone: 
       <Field label="Amount" value={fmtAmount(tx)} />
       <Field label="Asset" value={tx.asset ?? "—"} />
       <Field label="Counterparty" value={shorten(tx.counterparty)} mono />
+      <div className="flex flex-col gap-1">
+        <span style={s.label}>Fees</span>
+        {tx.fees != null ? (
+          <span className="select-text font-mono text-sm text-foreground">
+            Network {fmtFee(tx.fees.networkFee, tx.fees)} · Service {fmtFee(tx.fees.platformFee, tx.fees)} · Total {fmtFee(tx.fees.totalFee, tx.fees)}
+          </span>
+        ) : (
+          <span className="font-sans text-sm text-muted-foreground">Fee breakdown not recorded for this transaction.</span>
+        )}
+      </div>
       <Field label="Network" value={`${tx.chain} · ${tx.network}`} />
       <Field label="Created" value={fmtDate(tx.createdAt)} />
       <Field label="Confirmed" value={fmtDate(tx.confirmedAt)} />

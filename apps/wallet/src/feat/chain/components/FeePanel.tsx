@@ -56,12 +56,18 @@ export function FeePanel({
 
   const quotedAt = new Date(quote.quotedAtMs).toLocaleTimeString();
 
+  // ANT-748: name the policy rate on the service line when the quote carries
+  // it (pure 50% policy → "Service fee (50%)"). No hardcoded numbers — the
+  // label falls back to the bare name when the backend omits the leg.
+  const serviceLabel =
+    quote.protocolFeeBps != null ? `Service fee (${quote.protocolFeeBps / 100}%)` : "Service fee";
+
   return (
     <div style={s.card} className="flex flex-col">
       <span style={s.label}>Fee quote</span>
       <div className="flex flex-col gap-1">
         <Row label="Network fee" value={fmt(quote.networkFee)} />
-        <Row label="Service fee" value={fmt(quote.platformFee)} />
+        <Row label={serviceLabel} value={fmt(quote.platformFee)} />
         <Row label="Total fee" value={fmt(quote.totalFee)} strong />
         <Row label="Max total you authorize" value={fmt(quote.maxTotalFee)} strong />
       </div>
