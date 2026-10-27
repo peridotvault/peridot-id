@@ -8,7 +8,7 @@ import { PageHeader } from "./page-header";
 import { useWorkspace } from "./workspace-provider";
 import { CutButton } from "./cut-button";
 
-const CONTRACT_TYPES = ["factory", "account_implementation", "verifier", "paymaster"] as const;
+const CONTRACT_TYPES = ["factory", "account_implementation"] as const;
 
 /** Admin smart-contract registry: typed contracts per chain (factory, implementation, …). */
 export function ContractsManager({ client }: { client: PeridotClient }) {
@@ -56,7 +56,7 @@ export function ContractsManager({ client }: { client: PeridotClient }) {
       <PageHeader
         eyebrow="Smart contracts"
         title="Contracts"
-        description="Set factory, implementation, verifier, and paymaster addresses per chain."
+        description="Set factory and implementation addresses per chain."
       />
       {error && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
