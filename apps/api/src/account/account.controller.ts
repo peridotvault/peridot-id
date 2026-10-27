@@ -7,9 +7,10 @@ import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { UserTokenGuard } from "../common/user-token.guard";
 import { ActivationService, ActivationView } from "./activation.service";
 import { AccountService, ChainAccountView } from "./account.service";
-import { EvmActivationService, EvmActivationView } from "./evm-activation.service";
+import { EvmActivationService, EvmActivationView, EvmFirstActionResult } from "./evm-activation.service";
 import { ActivateDto } from "./dto/activate.dto";
 import { EvmActivateDto } from "./dto/evm-activate.dto";
+import { EvmFirstActionDto } from "./dto/evm-first-action.dto";
 
 // 1 identity = 1 personal wallet. No account ids anywhere — the owner
 // always comes from the JWT, the wallet is resolved from it.
@@ -99,5 +100,23 @@ export class AccountController {
     @Body() dto: EvmActivateDto,
   ): Promise<EvmActivationView> {
     return this.evmActivationService.activate(user, chainRef, dto);
+  }
+
+  /**
+   * WS1 §3.1 lazy first-action (EVM): one approval runs `deployAndInit` →
+   * `execute` back-to-back through the relayer. Idempotent on `firstActionId`
+   * (in-flight → `ActivationInProgress` 409; completed → same hashes, no
+   * second deploy or execute). Returns the activation view + execute hash.
+   */
+  @Post("evm/:chainRef/first-action")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
+  evmFirstAction(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("chainRef") chainRef: string,
+    @Body() dto: EvmFirstActionDto,
+  ): Promise<EvmFirstActionResult> {
+    return this.evmActivationService.activateAndExecute(user, chainRef, dto);
   }
 }

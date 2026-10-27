@@ -24,9 +24,13 @@ export const PROTOCOL_FEE_BPS_V2 = 5000;
 export const MAX_PROTOCOL_FEE_BPS = 5000;
 
 /** Chains with a (now zero) fee-policy minimum slot (spec B2, native base units).
+ *  WS1 §4.4: Monad + Arbitrum rows exist and are ZERO on policy v2 (backend
+ *  no longer falls back to the Ethereum floor for 10143/421614 — that was
+ *  the pre-WS2 divergence; settlement (on-chain `_chainMinV2` + SDK
+ *  `evmChainMinV2`) is 0 there too).
  *  @deprecated ANT-743: minima removed — every leg is 0, quotes are pure
  *  percentage. Kept so existing imports keep compiling. */
-export type FeeChain = "stellar" | "solana" | "ethereum" | "base" | "bsc";
+export type FeeChain = "stellar" | "solana" | "ethereum" | "base" | "bsc" | "monad" | "arbitrum";
 
 /** Per-chain `chainMin` (always 0 since ANT-743 — pure percentage).
  *  @deprecated Minima removed; kept for shape compatibility. */
@@ -36,6 +40,11 @@ export const CHAIN_MIN_FEE_V2: Readonly<Record<FeeChain, bigint>> = Object.freez
   ethereum: 0n,
   base: 0n,
   bsc: 0n,
+  // WS1 §4.2/§4.4: Monad + Arbitrum settle with NO minimum — DB/backend must
+  // quote 0 here (quoting the Ethereum floor would strand user funds as
+  // unclaimable surplus, since settlement takes only the percentage leg).
+  monad: 0n,
+  arbitrum: 0n,
 });
 
 /** One immutable fee-policy row: percentage leg + per-chain minima. */
@@ -50,6 +59,8 @@ const ZERO_MINIMA: Readonly<Record<FeeChain, bigint>> = Object.freeze({
   ethereum: 0n,
   base: 0n,
   bsc: 0n,
+  monad: 0n,
+  arbitrum: 0n,
 });
 
 /**
@@ -147,7 +158,10 @@ export function exceedsDriftBound(attested: bigint, quoted: bigint): boolean {
 export const MAX_TTL_SECS = 600;
 
 /**
- * Fee-policy chain for an EVM CAIP-2 reference.
+ * Fee-policy chain for an EVM CAIP-2 reference. WS1 §4.4: Monad (143
+ * mainnet / 10143 testnet) and Arbitrum (42161 / 421614) map to their own
+ * ZERO-minimum rows — never to the Ethereum floor. Unknown EVM references
+ * fall back to the Ethereum row.
  * @deprecated ANT-743: fee floors removed — the mapping is no longer applied
  * to quotes. Kept for chain-label compatibility only.
  */
@@ -159,6 +173,12 @@ export function feeChainForEvmReference(reference: string): FeeChain {
     case "8453":
     case "84532":
       return "base";
+    case "143":
+    case "10143":
+      return "monad";
+    case "42161":
+    case "421614":
+      return "arbitrum";
     case "1":
     case "11155111":
     default:
