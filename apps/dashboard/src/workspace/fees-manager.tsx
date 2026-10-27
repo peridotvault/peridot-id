@@ -42,7 +42,7 @@ type Tab = "peridot" | "doku" | "chain";
  *  - PeridotID: platform fee (append-only versioned) + its PPN.
  *  - DOKU: which payment methods are offered, each method's gateway fee, and the
  *    DOKU-wide PPN.
- *  - Chain: chain fee-policy versions (MIN_FEE legs) + subsidy ledger summary.
+ *  - Chain: chain fee-policy versions (pure percentage + subsidy ledger summary).
  * Admin-only; the API enforces the same on every write.
  */
 export function FeesManager({ client }: { client: PeridotClient }) {
@@ -200,7 +200,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
       <PageHeader
         eyebrow="Treasury"
         title="Fees"
-        description="The PeridotID platform fee, the DOKU payment-gateway fees and PPN charged on top-ups, and the chain fee-policy (MIN_FEE) console."
+        description="The PeridotID platform fee, the DOKU payment-gateway fees and PPN charged on top-ups, and the pure-percentage chain fee-policy console."
       />
       {error && (
         <div className="mt-3 flex flex-wrap items-center gap-2">

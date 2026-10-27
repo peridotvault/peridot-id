@@ -34,15 +34,17 @@ function fmtDateTime(iso: string): string {
 }
 
 /**
- * Chain fee-policy console (ANT-736, backend ANT-730): the MIN_FEE admin
- * surface over GET/POST /v1/admin/fee-policies,
+ * Chain fee-policy console (ANT-736, backend ANT-730; ANT-748 pure 50%):
+ * the fee-policy admin surface over GET/POST /v1/admin/fee-policies,
  * POST /v1/admin/fee-policies/:version/activate, and
  * GET /v1/admin/subsidy-ledger/summary.
  *
- * New versions only — published rows are never mutated. Every minimum must
- * sit at or above the chain's on-chain settlement floor (ChainMinBelowFloor
- * otherwise); fresh quotes pick up the active version within the 30s policy
- * cache TTL. Admin-only; the API enforces the same on every write.
+ * Pure-percentage by default (ANT-743): publishing with no chain rows yields
+ * a pure bps policy (no minima map). Per-chain floor rows are legacy-only —
+ * any row provided must still sit at or above the chain's on-chain settlement
+ * floor (ChainMinBelowFloor otherwise); fresh quotes pick up the active
+ * version within the 30s policy cache TTL. Admin-only; the API enforces the
+ * same on every write.
  */
 export function ChainFeesManager({ client }: { client: PeridotClient }) {
   const [versions, setVersions] = useState<ChainFeePolicy[] | null>(null);
@@ -51,7 +53,7 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
   const [bps, setBps] = useState("");
   const [fxSource, setFxSource] = useState("");
   const [fxAsOf, setFxAsOf] = useState("");
-  const [minima, setMinima] = useState<MinimaDraft[]>([{ namespace: "solana", reference: "", minFee: "" }]);
+  const [minima, setMinima] = useState<MinimaDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -160,7 +162,7 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
           )}
         </div>
         <p className={`mt-1 text-xs ${MUTED}`}>
-          Percentage leg + per-chain MIN_FEE legs (base units, keyed by CAIP-2 pair). Publishing creates an
+          Pure percentage leg (no chain rows = pure 50%-style policy) + optional legacy per-chain floor rows (base units, keyed by CAIP-2 pair). Publishing creates an
           inactive version — activate it before wallets quote from it.
         </p>
         {versions == null || versions.length === 0 ? (
@@ -183,11 +185,11 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
                     </MiniButton>
                   )}
                   <span className={`text-xs ${MUTED}`}>
-                    {fmtBps(v.bps)} · {Object.keys(v.minFee).length} chain{Object.keys(v.minFee).length === 1 ? "" : "s"} · updated {fmtDateTime(v.updatedAt)}
+                    {fmtBps(v.bps)} · {Object.keys(v.minFee ?? {}).length} chain{Object.keys(v.minFee ?? {}).length === 1 ? "" : "s"} · updated {fmtDateTime(v.updatedAt)}
                   </span>
                 </div>
                 <p className={`mt-1 font-mono text-xs ${MUTED}`}>
-                  {Object.entries(v.minFee).map(([chain, floor]) => `${chain}=${floor}`).join(" · ") || "no minima"}
+                  {Object.entries(v.minFee ?? {}).map(([chain, floor]) => `${chain}=${floor}`).join(" · ") || "pure percentage — no chain minima"}
                 </p>
                 <p className={`mt-0.5 text-xs ${MUTED}`}>
                   FX: {v.fxSource}{v.fxAsOf ? ` · as of ${fmtDateTime(v.fxAsOf)}` : ""}
@@ -201,7 +203,8 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
       <Card>
         <p className={SECTION_LABEL}>Publish new version</p>
         <p className={`mt-1 text-xs ${MUTED}`}>
-          Starts inactive. Every minimum must sit at or above the chain&apos;s on-chain settlement floor
+          Starts inactive. Pure percentage is the default — add a legacy floor row only when a chain needs one.
+          Any floor row must sit at or above the chain&apos;s on-chain settlement floor
           (rejected with ChainMinBelowFloor otherwise).
         </p>
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -235,6 +238,11 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
           </label>
         </div>
         <div className="mt-3 flex flex-col gap-2">
+          {minima.length === 0 && (
+            <p className={`text-xs ${MUTED}`}>
+              No floor rows — this publishes a pure percentage policy. Add a chain row only for a legacy floor.
+            </p>
+          )}
           {minima.map((m, i) => (
             <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-4">
               <label className="text-xs">
@@ -262,7 +270,7 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
                 />
               </label>
               <label className="text-xs">
-                MIN_FEE (base units)
+                Legacy floor (base units)
                 <input
                   value={m.minFee}
                   onChange={(e) =>
@@ -274,11 +282,9 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
                 />
               </label>
               <div className="flex items-end gap-2">
-                {minima.length > 1 && (
-                  <MiniButton size="sm" onClick={() => setMinima((prev) => prev.filter((_, j) => j !== i))}>
-                    Remove
-                  </MiniButton>
-                )}
+                <MiniButton size="sm" onClick={() => setMinima((prev) => prev.filter((_, j) => j !== i))}>
+                  Remove
+                </MiniButton>
               </div>
             </div>
           ))}
