@@ -212,6 +212,44 @@ paging underneath — the USD lens never gates the breaker.
   Until failover exists, any single-vendor outage pages — that is the intended
   fail-closed behavior, not noise to tune away.
 
+## 8. Chain fee-policy admin ops (ANT-730/741)
+
+Dashboard: workspace chain-fees console → `POST /v1/admin/fee-policies`,
+`POST /v1/admin/fee-policies/:version/activate`. Every publish writes an
+`admin.fee_policy.created` / `admin.fee_policy.activated` security event
+(who/when/old-new) — quote those rows in the incident thread, not screenshots.
+
+- **Two-step control (revenue guard):** publish creates an INACTIVE version;
+  quotes only move on a separate activate call. Never activate a version you
+  did not diff against the current active row (`GET /v1/admin/fee-policies`).
+  `bps` floor is 1 (API rejects 0 — no zero-fee policy without a reviewed
+  contract exception); the DB CHECK enforces the protocol bound 0..5000 for
+  any writer. There is deliberately NO upper cap on per-chain MIN_FEE legs:
+  the backstop is the signed `maxTotalFee` fail-closed bound on every submit
+  (over-quoted submits re-quote instead of settling) — see accepted risk
+  below. If quotes look wrong after activation, the rollback is forward-only:
+  publish a corrected version and activate it (rows are never mutated).
+- **Propagation delay:** the policy cache is per API instance, 30s TTL — a
+  multi-replica deploy can serve mixed versions for ≤ ~60s after activation.
+  Do not page on mixed-version quotes inside that window. In-flight quotes
+  keep working: submits settle under the SIGNED version and the gate tolerates
+  one version back (`feePolicyWarning`, NFR-6) — anything older is `StaleQuote`
+  (410, re-quote), unknown/future is `UnknownFeePolicy` (400).
+- **Downgrade window (explicit accept):** activating an older version is
+  allowed (compat mechanism, not a bypass) — but while a newer version with a
+  HIGHER floor is active, the older (lower-floor) version still settles its
+  signed submits until it ages out. Floor LOWERINGS therefore ship as a new
+  version + contract upgrade + Tobias review, never as a dashboard-only
+  downgrade; treat any unexpected activate-to-older as an incident (check the
+  security log for who/when first).
+- **Accepted risks (Tobias LOWs, ANT-741):** (a) single-admin activation —
+  no dual-control; mitigated by the two-step publish→activate split + audit
+  events, reversible forward-only; (b) no MAX cap on MIN_FEE legs (overcharge
+  knob) — bounded at submit time by signed `maxTotalFee` fail-closed, not at
+  the dashboard; (c) one-back submit window keeps a lowered floor quotable
+  until the older version ages out — floor lowerings are never urgent (see
+  above). Revisit if admin roles change or the fail-closed bound is relaxed.
+
 ### Appendix: incident log
 
 | Date | Signal | Chain | Cause | Action | Threshold change |

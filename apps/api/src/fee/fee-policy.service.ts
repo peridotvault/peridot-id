@@ -260,7 +260,16 @@ export class FeePolicyService {
     return { version, bps, active: false };
   }
 
-  /** Admin: activate one version (deactivates the rest). Changes apply to fresh quotes within the 30s cache TTL (AC-9). */
+  /**
+   * Admin: activate one version (deactivates the rest). Changes apply to
+   * fresh quotes within the 30s cache TTL (AC-9).
+   *
+   * Accepted risk (ANT-732 LOW, runbook §8): single-admin activation, no
+   * dual-control and no MAX cap on MIN_FEE legs. Mitigations: the publish→
+   * activate split (quotes never move on publish alone), per-call audit
+   * events, forward-only rollback, and the signed `maxTotalFee` fail-closed
+   * bound at submit time — not a dashboard cap.
+   */
   async activatePolicy(pid: string, version: number): Promise<{ version: number; previousVersion: number }> {
     const row = await this.prisma.chainFeePolicy.findUnique({ where: { version } });
     if (!row) throw new BadRequestException({ code: "UnknownFeePolicy", message: `Fee policy v${version} does not exist` });
