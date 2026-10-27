@@ -40,7 +40,6 @@ import { FiatTransfer } from "./src/pages/fiat/FiatTransfer";
 import { FiatLedgerDetail } from "./src/pages/fiat/FiatLedgerDetail";
 import { TabBar, type TabKey } from "./src/shared/components/shell/TabBar";
 import { TopBar } from "./src/shared/components/shell/TopBar";
-import { Activation } from "./src/pages/chain/Activation";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import type { FiatItem, FiatLedgerItem } from "./src/shared/data/fiat";
 
@@ -168,15 +167,13 @@ export default function App() {
       case "fiat-transfer":
         return <FiatTransfer onDone={pop} />;
       case "receive":
-        return <Receive onDone={pop} goPasskey={openPasskey} />;
+        return <Receive onDone={pop} />;
       case "swap":
         return <Swap onDone={pop} />;
       case "topup":
         return <Topup onDone={pop} />;
       case "passkey":
         return <Passkey onDone={pop} />;
-      case "activation":
-        return <Activation onDone={pop} goPasskey={openPasskey} />;
       case "profile":
         return (
           <Profile

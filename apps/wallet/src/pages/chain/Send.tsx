@@ -15,6 +15,15 @@ import {
 } from "@peridotvault/pid-sdk-js";
 import { FeePanel } from "../../feat/chain/components/FeePanel";
 import { gateFeeApproval } from "../../feat/chain/utils/feeReview";
+import {
+  FIRST_ACTION_APPROVE_TITLE,
+  FIRST_ACTION_REVIEW_NOTICE,
+  FIRST_ACTION_SENDING_COPY,
+  SETUP_PROGRESS_COPY,
+  ensureAccountAndActivate,
+  isFirstActionQuote,
+  isNotActivatedError,
+} from "../../feat/chain/utils/firstAction";
 import { useQuoteCountdown } from "../../feat/chain/hooks/useQuoteCountdown";
 
 const LAMPORTS_PER_SOL = 1e9;
@@ -54,7 +63,7 @@ function failureCopy(
   return friendly(e);
 }
 
-type Phase = "form" | "quoting" | "review" | "sending";
+type Phase = "form" | "quoting" | "review" | "sending" | "activating";
 
 export function Send({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -72,6 +81,13 @@ export function Send({ onDone }: { onDone: () => void }) {
   const [reviewQuote, setReviewQuote] = useState<NormalizedFeeQuote | null>(null);
   const [reviewValue, setReviewValue] = useState<string | null>(null);
   const [reviewBalance, setReviewBalance] = useState<string | null>(null);
+  // First-action (ANT-731 WS4): the first send also sets up the on-chain
+  // account — no separate user step. Detected best-effort before quoting
+  // (local activation view) and confirmed by the quote envelope (WS1 §7.1).
+  const [firstAction, setFirstAction] = useState(false);
+  // Pre-lazy backends refuse the submit ("must be activated"); the flow then
+  // runs the passkey-signed setup inline and retries exactly once.
+  const setupRetriedRef = useRef(false);
   const decisionRef = useRef<((ok: boolean) => void) | null>(null);
   // The catch path runs in the closure of the render that started the send —
   // render state is stale by then, so the error context lives in a ref.
@@ -143,6 +159,14 @@ export function Send({ onDone }: { onDone: () => void }) {
         return;
       }
       setPhase("quoting");
+      // Best-effort first-action detection (fail-open: unreadable status
+      // takes the normal path; the quote envelope + the setup-and-retry
+      // below still cover a first send).
+      const first = await peridot.wallet
+        .activation()
+        .then((act) => !(typeof act === "object" && act !== null && "statusCode" in act) && act.status !== "active")
+        .catch(() => false);
+      setFirstAction(first);
       // Balance is display-only here (shortfall line + Approve gating); the
       // chain still enforces funds fail-closed at submit time. Unreadable
       // balance hides the line instead of blocking.
@@ -189,14 +213,35 @@ export function Send({ onDone }: { onDone: () => void }) {
       }
       setPhase("form");
       setReviewQuote(null);
+      setFirstAction(false);
+      setupRetriedRef.current = false;
       reviewRef.current = { quote: null, value: null, balance: null };
     } catch (e) {
       // ANT-333: friendly server-error mapping instead of a raw dump,
       // taxonomy-first (ANT-557 E3) so each failure class reads correctly.
       decisionRef.current = null;
+      // Pre-lazy backend refusing a first send: run the passkey-signed setup
+      // inline and retry once — still one flow, no separate user step.
+      // (Lazy backends never hit this: the first submit already includes it.)
+      if (isNotActivatedError(e) && !setupRetriedRef.current) {
+        setupRetriedRef.current = true;
+        setPhase("activating");
+        setReviewQuote(null);
+        reviewRef.current = { quote: null, value: null, balance: null };
+        try {
+          await ensureAccountAndActivate(peridot);
+        } catch (setupError) {
+          setPhase("form");
+          setError(setupError instanceof Error ? setupError.message : String(setupError));
+          return;
+        }
+        return send();
+      }
       const copy = failureCopy(e, ctxForError());
       setPhase("form");
       setReviewQuote(null);
+      setFirstAction(false);
+      setupRetriedRef.current = false;
       reviewRef.current = { quote: null, value: null, balance: null };
       setError(copy);
     }
@@ -217,7 +262,7 @@ export function Send({ onDone }: { onDone: () => void }) {
   };
 
   // ANT-333: confirm before abandoning an in-flight send.
-  const busy = phase === "quoting" || phase === "sending";
+  const busy = phase === "quoting" || phase === "sending" || phase === "activating";
   const goBack = () => {
     if (phase === "review") {
       cancelReview();
@@ -238,6 +283,10 @@ export function Send({ onDone }: { onDone: () => void }) {
         })
       : null;
   const approveBlocked = countdown.expired || gate == null || gate.ok === false;
+  // First-action comes from the local pre-flight OR the quote envelope (WS1
+  // §7.1) — either source shows the inclusion notice, never an extra step.
+  const showFirstAction = firstAction || isFirstActionQuote(reviewQuote);
+  const approveTitle = countdown.expired ? "Quote expired" : showFirstAction ? FIRST_ACTION_APPROVE_TITLE : "Approve & sign";
 
   return (
     <div style={s.container} className="flex flex-col">
@@ -308,9 +357,10 @@ export function Send({ onDone }: { onDone: () => void }) {
             valueBaseUnits={asset === "SOL" ? reviewValue : null}
             balanceBaseUnits={asset === "SOL" ? reviewBalance : null}
           />
+          {showFirstAction && <p style={s.hint}>{FIRST_ACTION_REVIEW_NOTICE}</p>}
           {error && <p role="alert" tabIndex={-1} id="send-error" style={s.error}>{error}</p>}
           <UIButton
-            title={countdown.expired ? "Quote expired" : "Approve & sign"}
+            title={approveTitle}
             onPress={approve}
             disabled={approveBlocked}
             variant="primary"
@@ -318,7 +368,12 @@ export function Send({ onDone }: { onDone: () => void }) {
           <UIButton title="Cancel" onPress={cancelReview} />
         </>
       )}
-      {phase === "sending" && <p role="status" style={s.hint}>Waiting for passkey… approve in your authenticator to sign the quoted send.</p>}
+      {phase === "sending" && (
+        <p role="status" style={s.hint}>
+          {firstAction ? FIRST_ACTION_SENDING_COPY : "Waiting for passkey… approve in your authenticator to sign the quoted send."}
+        </p>
+      )}
+      {phase === "activating" && <p role="status" style={s.hint}>{SETUP_PROGRESS_COPY}</p>}
     </div>
   );
 }

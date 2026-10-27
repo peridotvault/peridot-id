@@ -4,10 +4,13 @@ import type { ActivationView, PeridotClient } from "@peridotvault/pid-sdk-js";
 
 const LAMPORTS_PER_SOL = 1e9;
 
-// Single copy of the activation gate shared by ReceiveScreen (SOL modal)
-// and ActivationScreen (explainer flow): activation + passkey fetch,
-// fund-and-activate (with me/createAccount ensure), and SOL-denominated
-// derived values.
+// Status-only activation gate for the Receive funding view: activation +
+// passkey fetch and SOL-denominated derived values.
+//
+// ANT-731 WS4: there is no separate user-facing setup step — the first send
+// sets the account up automatically inside the send flow (see
+// feat/chain/utils/firstAction.ts). This hook never triggers setup; it only
+// reports funding status so the Receive modal can show the right hint.
 export function useActivationGate(peridot: PeridotClient) {
   const [activation, setActivation] = useState<ActivationView | null>(null);
   const [passkeys, setPasskeys] = useState<Authority[]>([]);
@@ -15,6 +18,7 @@ export function useActivationGate(peridot: PeridotClient) {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    setBusy(true);
     try {
       const act = await peridot.wallet.activation();
       if (!("statusCode" in act)) setActivation(act as ActivationView);
@@ -26,6 +30,8 @@ export function useActivationGate(peridot: PeridotClient) {
       setPasskeys(Array.isArray(creds) ? (creds as Authority[]) : []);
     } catch {
       setPasskeys([]);
+    } finally {
+      setBusy(false);
     }
   }, [peridot]);
 
@@ -34,26 +40,6 @@ export function useActivationGate(peridot: PeridotClient) {
   }, [refresh]);
 
   const clearError = useCallback(() => setError(null), []);
-
-  const activate = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      let acc = await peridot.wallet.me();
-      if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
-      if ("statusCode" in acc) throw new Error("Failed to create account");
-      const res = await peridot.wallet.activate();
-      if ("statusCode" in res) {
-        const msg = Array.isArray(res.message) ? res.message.join(" ") : (res.message as string);
-        throw new Error(msg);
-      }
-      await refresh();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [peridot, refresh]);
 
   const st = activation?.status;
   return {
@@ -69,6 +55,5 @@ export function useActivationGate(peridot: PeridotClient) {
     error,
     clearError,
     refresh,
-    activate,
   };
 }

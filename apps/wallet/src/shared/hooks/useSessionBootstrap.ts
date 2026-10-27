@@ -25,8 +25,7 @@ export type Screen =
   | "fiat-detail"
   | "fiat-account"
   | "fiat-transfer"
-  | "fiat-ledger-detail"
-  | "activation";
+  | "fiat-ledger-detail";
 
 // Session lifecycle: bootstrap, post-auth routing, account-switch reload.
 // Shell-wide (not feature-scoped), so it lives in shared/hooks.
