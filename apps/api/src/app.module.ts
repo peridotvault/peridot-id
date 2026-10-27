@@ -6,6 +6,7 @@ import { skipIfAnon, skipIfAuthed, USER_THROTTLER, userThrottleTracker } from ".
 import { AccountModule } from "./account/account.module";
 import { AdminModule } from "./admin/admin.module";
 import { AuthModule } from "./auth/auth.module";
+import { BatchQueueModule } from "./batch-queue/batch-queue.module";
 import { CredentialModule } from "./credentials/credential.module";
 import { EnvModule } from "./env/env.module";
 import { ExperienceModule } from "./experience/experience.module";
@@ -48,6 +49,7 @@ import { HealthModule } from "./health/health.module";
     WalletModule,
     AccountModule,
     AdminModule,
+    BatchQueueModule,
     CredentialModule,
     EnvModule,
     ExperienceModule,
