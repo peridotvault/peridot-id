@@ -151,6 +151,76 @@ export interface ActivationView {
   quotedAt?: string;
   /** Quote expiry (ISO-8601; expiresAt − quotedAt ≤ 300s). Past it → re-quote, never submit. */
   expiresAt?: string;
+  /**
+   * Present on submit results when the signed version trails the active
+   * policy by one (ANT-730 NFR-6/AC-11). Non-blocking — render as a notice.
+   */
+  feePolicyWarning?: string;
+}
+
+/**
+ * EVM activation view for one chain (ANT-730, spec ANT-727 §4/7).
+ * The service leg is exposed twice — `serviceFeeWei` and the canonical
+ * `platformFee` name the SAME value (with `serviceFee`/`protocolFee`
+ * accepted as aliases) — so EVM quotes render through the same FeePanel
+ * path as SVM quotes (AC-8). All amounts: base-unit decimal strings.
+ */
+export interface EvmActivationView {
+  pid: string;
+  chainReference: string;
+  status: string;
+  smartAccountAddress: string;
+  deployed: boolean;
+  balanceWei: string;
+  requiredWei: string;
+  networkFeeWei: string;
+  protocolFeeBps: number;
+  totalFeeWei: string;
+  maxTotalFeeWei: string;
+  serviceFeeWei: string;
+  networkFee: string;
+  platformFee: string;
+  totalFee: string;
+  maxTotalFee: string;
+  feePolicyVersion: number;
+  chainMinBaseUnits: string;
+  /**
+   * Present on submit results when the signed version trails the active
+   * policy by one (NFR-6). Non-blocking — render as a notice.
+   */
+  feePolicyWarning?: string;
+}
+
+/**
+ * Active chain fee policy (ANT-730, spec ANT-727 §4.3/7.2, AC-18) —
+ * GET /v1/fee-policy (public, no auth). The single display source of truth
+ * wallets/SDKs must use instead of hardcoded numbers: version, percentage
+ * leg, per-chain MIN_FEE legs in native base units keyed by CAIP-2 pair
+ * (`eip155:84532`, `solana:<reference>`), and the FX display source/date.
+ * Settlement is always base units on-chain; rupiah figures are informational.
+ */
+export interface ChainFeePolicy {
+  version: number;
+  bps: number;
+  minFee: Record<string, string>;
+  fxSource: string;
+  fxAsOf: string | null;
+  updatedAt: string;
+  /** Admin list view only — exactly one version is active. */
+  active?: boolean;
+}
+
+/** Sponsored-submit result: signature plus settled fees and an optional policy notice. */
+export interface SponsoredSubmitResult {
+  signature: string;
+  networkFeeLamports: string;
+  protocolFeeLamports: string;
+  status: "confirmed" | "pending";
+  /**
+   * Present when the signed version trails the active policy by one
+   * (ANT-730 NFR-6/AC-11). Non-blocking — render as a notice.
+   */
+  feePolicyWarning?: string;
 }
 
 export interface RotateInput {
@@ -386,7 +456,7 @@ export class PeridotWallet {
    * totalFee — the client MAY raise it for drift headroom). Missing → 400;
    * `totalFee ≤ maxTotalFee` is enforced pre-broadcast (409 → re-quote).
    */
-  async withdraw(input: WithdrawInput, opts?: { expectedPid?: string; onQuote?: FeeApprovalHandler }): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
+  async withdraw(input: WithdrawInput, opts?: { expectedPid?: string; onQuote?: FeeApprovalHandler }): Promise<SponsoredSubmitResult> {
     if (!this.passkeySigner) return this.viaPopup("withdraw", input, opts);
     const pid = await this.pid();
     const amount = BigInt(input.amount);
@@ -399,7 +469,7 @@ export class PeridotWallet {
     const attempt = async (
       n: bigint,
       quote: NormalizedFeeQuote,
-    ): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> => {
+    ): Promise<SponsoredSubmitResult> => {
       const expiry = Math.floor(quote.chainTime) + 300;
       const p =
         input.asset === "SOL"
@@ -414,7 +484,7 @@ export class PeridotWallet {
               await adapter.tokenAta(pid, new PublicKey(input.asset)),
             );
       const a = await this.signer().sign(p, {});
-      const res = await this.api.post<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }>("/v1/wallet/withdraw", {
+      const res = await this.api.post<SponsoredSubmitResult>("/v1/wallet/withdraw", {
         asset: input.asset,
         to: input.to,
         amount: input.amount,
@@ -437,7 +507,7 @@ export class PeridotWallet {
         const msg = (res.data as { message?: string | string[] }).message ?? "Withdrawal failed";
         throw new Error(Array.isArray(msg) ? msg.join(" ") : msg);
       }
-      return res.data as { signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" };
+      return res.data as SponsoredSubmitResult;
     };
 
     const nonce = await adapter.getNonce(pid);
@@ -493,7 +563,7 @@ export class PeridotWallet {
    * the PDA as signer. The client signs `call_hash` (target ‖ metas ‖ data) plus
    * the fee policy; the server re-quotes once if fees moved beyond the drift bound.
    */
-  async execute(input: ExecuteInput, opts?: { expectedPid?: string; onQuote?: FeeApprovalHandler }): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> {
+  async execute(input: ExecuteInput, opts?: { expectedPid?: string; onQuote?: FeeApprovalHandler }): Promise<SponsoredSubmitResult> {
     if (!this.passkeySigner) return this.viaPopup("execute", input, opts);
     const pid = await this.pid();
     const accountId = pidToSeed32(pid);
@@ -507,12 +577,12 @@ export class PeridotWallet {
     const attempt = async (
       n: bigint,
       quote: NormalizedFeeQuote,
-    ): Promise<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }> => {
+    ): Promise<SponsoredSubmitResult> => {
       const expiry = Math.floor(quote.chainTime) + 300;
       const callHash = await executeCallHash(target, metas, data);
       const p = await buildExecutePayloadV3(accountId, n, expiry, quote.feePolicyVersion, callHash);
       const a = await this.signer().sign(p, {});
-      const res = await this.api.post<{ signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" }>("/v1/wallet/execute", {
+      const res = await this.api.post<SponsoredSubmitResult>("/v1/wallet/execute", {
         target: input.target,
         metas: input.metas,
         data: input.data,
@@ -533,7 +603,7 @@ export class PeridotWallet {
         const msg = (res.data as { message?: string | string[] }).message ?? "Execute failed";
         throw new Error(Array.isArray(msg) ? msg.join(" ") : msg);
       }
-      return res.data as { signature: string; networkFeeLamports: string; protocolFeeLamports: string; status: "confirmed" | "pending" };
+      return res.data as SponsoredSubmitResult;
     };
 
     const nonce = await adapter.getNonce(pid);
@@ -748,6 +818,23 @@ export class PeridotWallet {
   /** Current activation status of the smart account. */
   async activation(): Promise<ActivationView | ApiError> {
     const res = await this.api.get<ActivationView>(`/v1/account/activation`);
+    return res.data;
+  }
+
+  /**
+   * Active chain fee policy (ANT-730, public, no auth) — the single display
+   * source of truth (AC-18). Wallets must render from this instead of
+   * hardcoded numbers; settlement stays base units, FX figures informational.
+   */
+  async feePolicy(): Promise<ChainFeePolicy> {
+    const res = await this.api.get<ChainFeePolicy>(`/v1/fee-policy`);
+    if (!res.ok || isApiError(res.data)) throw new Error("Failed to load fee policy");
+    return res.data;
+  }
+
+  /** Live EVM activation view for one chain (ANT-730) — same FeePanel path as SVM. */
+  async evmActivation(chainReference: string): Promise<EvmActivationView | ApiError> {
+    const res = await this.api.get<EvmActivationView>(`/v1/account/evm/${encodeURIComponent(chainReference)}/activation`);
     return res.data;
   }
 

@@ -1,6 +1,6 @@
 export { PeridotWallet, ClusterMismatchError, assertChainEcho, buildChainEcho } from "./wallet/wallet-client.js";
 export type { PeridotWalletOptions } from "./wallet/wallet-client.js";
-export type { ExecuteInput, ExecuteMetaInput, RotateInput, TopupInput, WithdrawInput, ChainEcho, FeeQuoteView, SubmitTransactionInput } from "./wallet/wallet-client.js";
+export type { ExecuteInput, ExecuteMetaInput, RotateInput, TopupInput, WithdrawInput, ChainEcho, ChainFeePolicy, EvmActivationView, FeeQuoteView, SponsoredSubmitResult, SubmitTransactionInput } from "./wallet/wallet-client.js";
 export {
   AUTHORIZATION_TTL_SECS,
   FeeApprovalDeniedError,

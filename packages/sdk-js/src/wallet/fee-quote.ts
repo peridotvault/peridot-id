@@ -8,6 +8,13 @@
 // the normalizer so this UI works against pre-v2 backends too — the split is
 // then derived as total − network and flagged, never silently blended.
 //
+// EVM alias rule (ANT-730, spec ANT-727 §4/7): `serviceFee`, `platformFee`
+// and `protocolFee` name the SAME value. EVM views expose the service leg as
+// `serviceFeeWei` alongside the canonical `platformFee`, and the totals as
+// `networkFeeWei` / `totalFeeWei` / `maxTotalFeeWei` alongside the canonical
+// `networkFee` / `totalFee` / `maxTotalFee`. The normalizer accepts every
+// alias so SVM and EVM quotes render through the same path (AC-8).
+//
 // Amounts are base-unit integers encoded as decimal strings. No floats anywhere
 // in fee paths (spec NFR-5).
 //
@@ -36,6 +43,19 @@ export interface FeeQuoteV2 {
   protocolFeeBps?: number;
   treasury?: string;
   chain?: ChainEcho;
+  // --- EVM aliases (ANT-730): same legs, Wei-suffixed names ---
+  /** EVM canonical alias of the platform leg (== platformFee). */
+  serviceFee?: string;
+  /** EVM service leg in wei (== platformFee). */
+  serviceFeeWei?: string;
+  /** Bare alias of the platform leg (== platformFee). */
+  protocolFee?: string;
+  /** EVM canonical alias of networkFee (base units, decimal string). */
+  networkFeeWei?: string;
+  /** EVM canonical alias of totalFee (base units, decimal string). */
+  totalFeeWei?: string;
+  /** EVM canonical alias of maxTotalFee (base units, decimal string). */
+  maxTotalFeeWei?: string;
   // --- legacy v1 aliases (pre-v2 backend) ---
   networkFeeLamports?: string;
   /** Legacy alias of the platform fee amount. */
@@ -104,10 +124,13 @@ function parseMs(iso: string | undefined): number | null {
  * inconsistent amounts (fail closed — never render a blended or guessed total).
  */
 export function normalizeFeeQuote(raw: FeeQuoteV2): NormalizedFeeQuote {
-  const network = parseBaseUnits(firstPresent(raw.networkFee, raw.networkFeeLamports));
-  const platform = parseBaseUnits(firstPresent(raw.platformFee, raw.protocolFeeLamports, raw.platformFeeLamports));
-  const total = parseBaseUnits(firstPresent(raw.totalFee, raw.totalFeeLamports));
-  const maxTotal = parseBaseUnits(firstPresent(raw.maxTotalFee, raw.maxTotalFeeLamports, raw.suggestedMaxTotalFee));
+  const network = parseBaseUnits(firstPresent(raw.networkFee, raw.networkFeeWei, raw.networkFeeLamports));
+  // serviceFee, platformFee and protocolFee name the SAME value (ANT-730).
+  const platform = parseBaseUnits(
+    firstPresent(raw.platformFee, raw.serviceFee, raw.serviceFeeWei, raw.protocolFee, raw.protocolFeeLamports, raw.platformFeeLamports),
+  );
+  const total = parseBaseUnits(firstPresent(raw.totalFee, raw.totalFeeWei, raw.totalFeeLamports));
+  const maxTotal = parseBaseUnits(firstPresent(raw.maxTotalFee, raw.maxTotalFeeWei, raw.maxTotalFeeLamports, raw.suggestedMaxTotalFee));
   const feePolicyVersion = raw.feePolicyVersion;
   const chainTime = raw.chainTime;
 
@@ -207,6 +230,7 @@ export type FeeFailureAction =
   | "top-up"
   | "fail-closed"
   | "cancelled"
+  | "poll"
   | "unknown";
 
 export interface FeeFailure {
@@ -214,9 +238,12 @@ export interface FeeFailure {
     | "STALE_NONCE"
     | "AUTHORIZATION_EXPIRED"
     | "FEE_DRIFT"
+    | "STALE_QUOTE"
     | "MAX_TOTAL_EXCEEDED"
     | "INSUFFICIENT_FUNDS"
     | "POLICY_VIOLATION"
+    | "CHAIN_MIN_BELOW_FLOOR"
+    | "ACTIVATION_IN_PROGRESS"
     | "APPROVAL_DENIED"
     | "UNKNOWN";
   /** One-line title for alerts/headings. */
@@ -241,7 +268,18 @@ export function classifyFeeFailure(err: unknown): FeeFailure {
       action: "cancelled",
     };
   }
-  if (/stale|newer nonce/i.test(msg)) {
+  // ANT-730: signed fee-policy version superseded (HTTP 410 StaleQuote).
+  // Re-quote on the active policy and approve fresh — nothing was charged.
+  // Checked before STALE_NONCE: the code name itself contains "stale".
+  if (/stalequote|stale quote|superseded/i.test(msg)) {
+    return {
+      code: "STALE_QUOTE",
+      title: "Quote expired",
+      body: "The fee policy changed while you were reviewing. Get a fresh quote — your new total will never exceed the maximum you approve.",
+      action: "re-quote",
+    };
+  }
+  if (/stale nonce|newer nonce/i.test(msg)) {
     return {
       code: "STALE_NONCE",
       title: "Approval is stale",
@@ -273,6 +311,27 @@ export function classifyFeeFailure(err: unknown): FeeFailure {
       action: "fail-closed",
     };
   }
+  // ANT-730: chain minimum below the on-chain settlement floor (admin
+  // misconfiguration, HTTP 400 code ChainMinBelowFloor). Nothing the user
+  // can fix — fail closed and say so.
+  if (/chainminbelowfloor|chain min.*floor|minimum.*below.*floor/i.test(msg)) {
+    return {
+      code: "CHAIN_MIN_BELOW_FLOOR",
+      title: "Fee setup unavailable",
+      body: "The fee setup for this chain is temporarily unavailable. Try again later — nothing was charged.",
+      action: "fail-closed",
+    };
+  }
+  // ANT-730: activation already running for this account (HTTP 409 code
+  // ActivationInProgress). Same firstActionId — poll, don't resubmit.
+  if (/activationinprogress|activation.*(already|in progress)|same firstAction/i.test(msg)) {
+    return {
+      code: "ACTIVATION_IN_PROGRESS",
+      title: "Activation in progress",
+      body: "Your activation is already being processed. Check back in a moment — don't submit again.",
+      action: "poll",
+    };
+  }
   if (/authorization lifetime|ttl|fee pol/i.test(msg)) {
     return {
       code: "POLICY_VIOLATION",
@@ -281,11 +340,11 @@ export function classifyFeeFailure(err: unknown): FeeFailure {
       action: "fail-closed",
     };
   }
-  if (/exceeds your authorized maximum|feeexceedsmax/i.test(msg)) {
+  if (/exceeds your authorized maximum|feeexceedsmax|fee.*exceeds.*max|totalFee.*maxTotalFee/i.test(msg)) {
     return {
       code: "MAX_TOTAL_EXCEEDED",
       title: "Fee exceeded your max",
-      body: "The fee rose above the maximum you authorized, so this transaction was stopped before anything was charged. Get a fresh quote to continue.",
+      body: "The fee rose above the maximum you authorized, so this transaction was stopped before anything was charged. Raise the authorized max and approve again, or get a fresh quote to continue.",
       action: "re-quote",
     };
   }
