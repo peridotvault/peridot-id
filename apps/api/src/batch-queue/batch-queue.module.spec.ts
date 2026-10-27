@@ -40,7 +40,8 @@ describe("BatchQueueModule wiring (ANT-766 blocker)", () => {
     await app.init();
     expect(moduleRef.get(BatchQueueService)).toBeDefined();
     expect(moduleRef.get(BatchQueueController)).toBeDefined();
-    // The default ports binding is the fail-closed factory.
+    // The ports binding is the production factory (provisioned per call —
+    // unset relayer/registry rows fail closed); it must resolve under DI.
     expect(moduleRef.get(BATCH_PORTS)).toBeDefined();
     await app.close();
   });
