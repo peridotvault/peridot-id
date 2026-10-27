@@ -12,9 +12,9 @@ registry re-seed, rent sims, and cron ops.
 | Artifact | Path | sha256 |
 |---|---|---|
 | Account wasm | `contracts/stellar-account/wasm/peridot_stellar_account.wasm` | `0be4974994827c7b653e6d1cb1221f21068ba0f75414302af768828fc59b5bdf` |
-| Factory wasm | `contracts/stellar-factory/wasm/peridot_stellar_factory.wasm` | `6f07e249006ac1a7e89d8f6bfab0a0b0072a8134bf4cdb25a06fcbafeaaefcc1` |
+| Factory wasm | `contracts/stellar-factory/wasm/peridot_stellar_factory.wasm` | `c33c6424ac69793bd63c1120b791325e3d33b82246b3fbf5177b41c5a936b3bf` |
 
-Sizes: account 72649 B, factory 13178 B. Built with `stellar contract build`
+Sizes: account 72649 B, factory 13199 B. Built with `stellar contract build`
 (stellar 28.1.0), `overflow-checks = true` release profile.
 Rebuild: `cd contracts/stellar-account && stellar contract build`,
 `cd contracts/stellar-factory && stellar contract build`, then re-sha256.
@@ -45,10 +45,12 @@ salt_hex = 98bc15cccd4fd3a85b71e5b29b430d0cc461e7b5ebb7ac1b13428299ce52cfe7
 
 ## Deployer identity (counterfactual namespace owner)
 
-Trevor's funded testnet identity: `GCILFP75RYHAJA5IFGFO2TFDVFTWJDKFIP5EBYKS2OZRRSB6JMJBADRU`
-(source alias `trevor-p1-testnet`). If a different deployer is required, ALL
-three addresses below (CLI `id`, on-chain `predict_for_pid`, actual deploy)
-change together — that is the expected counterfactual binding, not a bug.
+Trevor's funded testnet identity: `GA4WH3ZIX73RRMLVG4KAP5V5OKDZ4OFXLK6RUOPNWZOXKN2ZSN2RYRHR`
+(source alias `trevor-p1-testnet`). Supersedes the `GCILFP75…BADRU` identity
+from the first handoff — that key file died with a run-scoped config dir
+(Trevor, ANT-710 wake 2026-10-27). If the deployer changes again, ALL three
+addresses below (CLI `id`, on-chain `predict_for_pid`, actual deploy) change
+together — that is the expected counterfactual binding, not a bug.
 
 ## Exact commands (run from the repo root on this branch)
 
@@ -73,14 +75,14 @@ stellar contract deploy \
 stellar contract invoke \
   --id <FACTORY_ID> --network testnet --source-account trevor-p1-testnet \
   --send no -- predict-for-pid \
-  --deployer GCILFP75RYHAJA5IFGFO2TFDVFTWJDKFIP5EBYKS2OZRRSB6JMJBADRU \
+  --deployer GA4WH3ZIX73RRMLVG4KAP5V5OKDZ4OFXLK6RUOPNWZOXKN2ZSN2RYRHR \
   --pid 'ifal@pid'
 
 # 4. Off-chain counterfactual (no RPC write; must equal step 3 output) —
 #    AC1.4 predict→deploy parity gate
 stellar contract id wasm \
   --salt 98bc15cccd4fd3a85b71e5b29b430d0cc461e7b5ebb7ac1b13428299ce52cfe7 \
-  --source-account GCILFP75RYHAJA5IFGFO2TFDVFTWJDKFIP5EBYKS2OZRRSB6JMJBADRU \
+  --source-account GA4WH3ZIX73RRMLVG4KAP5V5OKDZ4OFXLK6RUOPNWZOXKN2ZSN2RYRHR \
   --network testnet
 
 # 5. Deploy the pilot account through the factory (returns the predicted
@@ -90,13 +92,13 @@ stellar contract id wasm \
 stellar contract invoke \
   --id <FACTORY_ID> --network testnet --source-account trevor-p1-testnet \
   -- deploy \
-  --deployer GCILFP75RYHAJA5IFGFO2TFDVFTWJDKFIP5EBYKS2OZRRSB6JMJBADRU \
+  --deployer GA4WH3ZIX73RRMLVG4KAP5V5OKDZ4OFXLK6RUOPNWZOXKN2ZSN2RYRHR \
   --pid 'ifal@pid' \
-  --signers '[{"Delegated":"GCILFP75RYHAJA5IFGFO2TFDVFTWJDKFIP5EBYKS2OZRRSB6JMJBADRU}]' \
+  --signers '[{"Delegated":"GA4WH3ZIX73RRMLVG4KAP5V5OKDZ4OFXLK6RUOPNWZOXKN2ZSN2RYRHR}]' \
   --policies '{}'
 ```
 
-## Test evidence (this branch, 2026-10-26)
+## Test evidence (this branch, 2026-10-27 — require_auth fix)
 
 - `contracts/stellar`: **38 passed, 0 failed** (S1 local AC green, unchanged)
 - `contracts/stellar-account`: **9 passed, 0 failed** — includes T3 golden
@@ -108,7 +110,10 @@ stellar contract invoke \
   AC1.6 distinctness, AC1.7 fail-closed (4/8/0/31/33-byte salts), and
   **predict→deploy parity against the real account wasm**
   (`predict_for_pid == deploy`, distinct pid ⇒ distinct address,
-  distinct deployer ⇒ distinct address)
+  distinct deployer ⇒ distinct address). Deploy tests run under a
+  **root-only** auth mock — reverting the `deployer.require_auth()` line
+  makes them fail with the same host `Auth.InvalidAction` seen on testnet
+  (verified by toggle), so the on-chain defect class is pinned.
 
 ## Residual risk / follow-ups (for Trevor, ANT-710)
 

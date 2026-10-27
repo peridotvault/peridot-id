@@ -210,6 +210,14 @@ impl PeridotFactoryContract {
         signers: Vec<Signer>,
         policies: Map<Address, Val>,
     ) -> Address {
+        // Checks-first (finding: on-chain Auth.InvalidAction, ANT-710):
+        // `with_address(deployer, salt)` deploys INTO the deployer's
+        // counterfactual namespace, so the host requires the deployer's
+        // authorization tied to this (root) invocation. Without this node
+        // the simulator records no auth for the deployer and the VM traps
+        // at `create_contract_with_constructor`. Predict paths are
+        // unaffected (no host deploy).
+        deployer.require_auth();
         let wasm_hash = Self::pinned_account_wasm_hash(e);
         // Reject duplicates FIRST on the caller-supplied order (OZ/
         // verifier-canonical), then sort — so the constructor args, and
@@ -364,7 +372,12 @@ mod test {
     #[test]
     fn predict_deploy_parity_for_pid() {
         let e = Env::default();
-        e.mock_all_auths_allowing_non_root_auth();
+        // Root-only mock (regression pin for the on-chain
+        // Auth.InvalidAction): `deploy_inner` records the deployer auth via
+        // `require_auth()` on THIS root invocation, so no non-root mock is
+        // needed. Reverting the `require_auth` line makes this test fail
+        // exactly like the testnet deploy did.
+        e.mock_all_auths();
         let factory = setup(&e);
         let c = PeridotFactoryContractClient::new(&e, &factory);
         let deployer = Address::generate(&e);
@@ -387,7 +400,8 @@ mod test {
     #[test]
     fn deploy_with_explicit_salt_parity() {
         let e = Env::default();
-        e.mock_all_auths_allowing_non_root_auth();
+        // Root-only mock here too — same regression pin as above.
+        e.mock_all_auths();
         let factory = setup(&e);
         let c = PeridotFactoryContractClient::new(&e, &factory);
         let deployer = Address::generate(&e);

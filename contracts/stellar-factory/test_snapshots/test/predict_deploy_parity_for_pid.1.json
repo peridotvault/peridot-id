@@ -12,17 +12,16 @@
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
         {
           "function": {
-            "create_contract_v2_host_fn": {
-              "contract_id_preimage": {
-                "address": {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-                  "salt": "98bc15cccd4fd3a85b71e5b29b430d0cc461e7b5ebb7ac1b13428299ce52cfe7"
-                }
-              },
-              "executable": {
-                "wasm": "0be4974994827c7b653e6d1cb1221f21068ba0f75414302af768828fc59b5bdf"
-              },
-              "constructor_args": [
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "deploy",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "string": "ifal@pid"
+                },
                 {
                   "vec": [
                     {
@@ -43,7 +42,43 @@
               ]
             }
           },
-          "sub_invocations": []
+          "sub_invocations": [
+            {
+              "function": {
+                "create_contract_v2_host_fn": {
+                  "contract_id_preimage": {
+                    "address": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                      "salt": "98bc15cccd4fd3a85b71e5b29b430d0cc461e7b5ebb7ac1b13428299ce52cfe7"
+                    }
+                  },
+                  "executable": {
+                    "wasm": "0be4974994827c7b653e6d1cb1221f21068ba0f75414302af768828fc59b5bdf"
+                  },
+                  "constructor_args": [
+                    {
+                      "vec": [
+                        {
+                          "vec": [
+                            {
+                              "symbol": "Delegated"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "map": []
+                    }
+                  ]
+                }
+              },
+              "sub_invocations": []
+            }
+          ]
         }
       ]
     ],
