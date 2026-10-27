@@ -64,6 +64,21 @@ export interface WalletTransaction {
   status: "prepared" | "submitted" | "confirmed" | "failed";
   createdAt: string;
   confirmedAt: string | null;
+  /**
+   * Settled fee split for this transaction (ANT-748, parent ANT-743 pure 50%).
+   * Present when the recorder knew the legs (this-device sends, or a backend
+   * history enrichment); absent on RPC-parsed rows, which cannot split the
+   * fee from balance deltas. The receipt renders Network / Service / Total
+   * lines only when present — never a blended or invented split.
+   * All amounts: base-unit decimal strings.
+   */
+  fees?: {
+    networkFee: string;
+    platformFee: string;
+    totalFee: string;
+    decimals: number;
+    symbol: string;
+  };
 }
 
 export interface ActivityRecord {
