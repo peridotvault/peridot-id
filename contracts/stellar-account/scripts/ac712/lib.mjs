@@ -110,6 +110,60 @@ export function delegatedSignerScVal({ addressStr }) {
 }
 
 /**
+ * Nested G-delegate credential signature: Vec<AccountEd25519Signature>.
+ * ANT-716 diagnosis: the host's `check_account_authentication`
+ * (soroban-env-host 28.0.2, builtin_contracts/account_contract.rs) parses an
+ * Account (G-address) credential signature as a Vec of {public_key,
+ * signature} contracttype structs — NOT raw Bytes, NOT Void. Raw Bytes dies
+ * with `Value/UnexpectedType` → `Auth/InvalidAction` (reproduced live on
+ * testnet); Void (the OZ-test contract-delegate pattern, where the host
+ * routes ScAddress::Contract to `__check_auth` without parsing the signature)
+ * fails the same way for real G addresses. Proven live: correct shape reaches
+ * ed25519 verification ("failed ED25519 verification" instead of
+ * UnexpectedType), and the same construction passes in try-runtime (host
+ * 28.0.2) with a valid signature.
+ *
+ * Sign the 32-byte NESTED signature_payload hash (sha256 of the
+ * HashIdPreimageSorobanAuthorization XDR over the nested invocation — i.e.
+ * the output of `signaturePayloadHex` for the nested nonce/expiration/
+ * invocation), never the preimage XDR itself and never the outer payload.
+ * Nested nonce/expiration are independent of the outer entry (fresh nonce
+ * per entry); entry order is [outer, nested] per the OZ auth_entries tests.
+ */
+export function delegatedAccountSigVecScVal({ publicKey32, signature64 }) {
+  const pubBytes = Buffer.from(publicKey32);
+  const sigBytes = Buffer.from(signature64);
+  if (pubBytes.length !== 32) throw new Error('publicKey32 must be 32 bytes');
+  if (sigBytes.length !== 64) throw new Error('signature64 must be 64 bytes');
+  return xdr.ScVal.scvVec([
+    sortedMap([
+      [symKey('public_key'), xdr.ScVal.scvBytes(pubBytes)],
+      [symKey('signature'), xdr.ScVal.scvBytes(sigBytes)],
+    ]),
+  ]);
+}
+
+/**
+ * Nested `account.__check_auth(preimage)` invocation for a Delegated(G)
+ * self-auth — exactly what OZ 0.8.0 `authenticate()` demands via
+ * `addr.require_auth_for_args((preimage,))`. `preimageScVal` is the same
+ * `authDigestPreimageScVal` value passed in the outer AuthPayload path
+ * (account/signature_payload/context_rule_ids).
+ */
+export function delegatedNestedInvocation({ accountStr, preimageScVal }) {
+  return new xdr.SorobanAuthorizedInvocation({
+    function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
+      new xdr.InvokeContractArgs({
+        contractAddress: new Address(accountStr).toScAddress(),
+        functionName: '__check_auth',
+        args: [preimageScVal],
+      }),
+    ),
+    subInvocations: [],
+  });
+}
+
+/**
  * AuthPayload ScVal: {signers: Map<Signer,Bytes>, context_rule_ids}.
  * signerEntries: [[signerScVal, sigBytesBuffer], ...].
  */

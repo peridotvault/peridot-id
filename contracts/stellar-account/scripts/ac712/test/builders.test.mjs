@@ -14,6 +14,8 @@ import {
   b64url,
   clientDataJson,
   craftAssertion,
+  delegatedAccountSigVecScVal,
+  delegatedNestedInvocation,
   delegatedSignerScVal,
   executeInvocation,
   externalSignerScVal,
@@ -127,6 +129,37 @@ describe('xdr builders', () => {
     assert.match(p1, /^[0-9a-f]{64}$/);
     assert.notEqual(p1, signaturePayloadHex({ ...base, nonce: '8', invocation: inv('execute') }));
     assert.notEqual(p1, signaturePayloadHex({ ...base, nonce: '7', invocation: inv('ping') }));
+  });
+
+  it('delegated G nested sig is Vec<AccountEd25519Signature> (ANT-716)', () => {
+    // Host check_account_authentication parses Account-credential signatures
+    // as Vec of {public_key, signature} contracttype structs (sorted map
+    // keys). Raw Bytes / Void die with Value/UnexpectedType → InvalidAction.
+    const scv = delegatedAccountSigVecScVal({
+      publicKey32: Buffer.alloc(32, 7),
+      signature64: Buffer.alloc(64, 9),
+    });
+    assert.equal(scv.vec.length, 1);
+    const keys = scv.vec[0].map.map((e) => e.key.sym.toString());
+    assert.deepEqual(keys, ['public_key', 'signature']);
+    assert.equal(Buffer.from(scv.vec[0].map[0].val.bytes.value).length, 32);
+    assert.equal(Buffer.from(scv.vec[0].map[1].val.bytes.value).length, 64);
+    assert.throws(() => delegatedAccountSigVecScVal({ publicKey32: Buffer.alloc(31), signature64: Buffer.alloc(64) }), /32 bytes/);
+    assert.throws(() => delegatedAccountSigVecScVal({ publicKey32: Buffer.alloc(32), signature64: Buffer.alloc(63) }), /64 bytes/);
+  });
+
+  it('delegated nested invocation targets __check_auth(preimage) (ANT-716)', () => {
+    const preimage = authDigestPreimageScVal({
+      accountStr: PILOT,
+      signaturePayloadHex: 'ab'.repeat(32),
+      ruleIds: [0],
+    });
+    const inv = delegatedNestedInvocation({ accountStr: PILOT, preimageScVal: preimage });
+    const fn_ = inv.function.contractFn;
+    assert.equal(fn_.functionName.toString(), '__check_auth');
+    assert.equal(fn_.args.length, 1);
+    assert.deepEqual(fn_.args[0].toXDR(), preimage.toXDR());
+    assert.deepEqual(inv.subInvocations, []);
   });
 
   it('auth entry carries pilot address + payload (V1 credentials)', () => {
