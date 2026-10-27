@@ -218,6 +218,46 @@ async function main(): Promise<void> {
     }
   }
   console.log("token registry seeded");
+
+  // Chain fee-policy v2 bootstrap (ANT-730, spec ANT-727 §4.2). v1 (pure 50%,
+  // zero minima, inactive — v1 traffic keeps v1 math) + v2 (spec minima,
+  // active). Re-runnable: policies upsert by version with `update: {}` and
+  // minima use `skipDuplicates` — the dashboard owns values after bootstrap
+  // and a re-seed never clobbers admin edits. OQ-1: FX display source is
+  // CoinGecko USD/IDR as of 2026-10-27 (reference that day ≈ Rp18.110/USD
+  // mid-market; BI sell 18.137 / buy 17.957), replacing the static Rp16.000
+  // assumption — the rupiah figure stays informational, settlement is base
+  // units on-chain. Stellar keeps its frozen-table minimum (100_000 stroops)
+  // for behavior parity; Stellar stays out of the business docs (spec §8).
+  await prisma.chainFeePolicy.upsert({
+    where: { version: 1 },
+    update: {},
+    create: { version: 1, bps: 5000, active: false, fxSource: "FALLBACK_STATIC" },
+  });
+  await prisma.chainFeePolicy.upsert({
+    where: { version: 2 },
+    update: {},
+    create: {
+      version: 2,
+      bps: 5000,
+      active: true,
+      fxSource: "CoinGecko USD/IDR",
+      fxAsOf: new Date("2026-10-27T00:00:00Z"),
+    },
+  });
+  await prisma.chainMinFee.createMany({
+    data: [
+      { policyVersion: 2, namespace: "eip155", reference: "84532", minFee: 750_000_000_000n },
+      { policyVersion: 2, namespace: "eip155", reference: "97", minFee: 2_300_000_000_000n },
+      { policyVersion: 2, namespace: "eip155", reference: "10143", minFee: 0n },
+      { policyVersion: 2, namespace: "eip155", reference: "421614", minFee: 0n },
+      { namespace: "solana", reference: SOLANA_DEVNET_REFERENCE, policyVersion: 2, minFee: 17_000n },
+      { namespace: "solana", reference: SOLANA_TESTNET_REFERENCE, policyVersion: 2, minFee: 17_000n },
+      { namespace: STELLAR_NAMESPACE, reference: STELLAR_TESTNET_REFERENCE, policyVersion: 2, minFee: 100_000n },
+    ],
+    skipDuplicates: true,
+  });
+  console.log("chain fee policy v2 seeded");
 }
 
 main()

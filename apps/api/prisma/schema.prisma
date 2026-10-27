@@ -514,6 +514,76 @@ model EvmRelayerKey {
   @@map("evm_relayer_keys")
 }
 
+// Chain fee policy v2 (ANT-730, spec ANT-727 §4). Quote-time source of truth
+// for `serviceFee = max(networkFee × bps / 10_000, MIN_FEE[chain])`.
+// Versioned rows: exactly one row is active; a new policy ships as a NEW
+// version row — never mutate a published row (same rule as FiatFeePolicy and
+// the frozen in-code FEE_POLICY_TABLE in common/solana-relay.ts, which stays
+// as the DB-unavailable fallback). On-chain immutable values are the
+// settlement guard: DB minima must be >= the per-chain settlement floors
+// (common/chain-fee-floors.ts, spec §4.3) or admin writes are rejected.
+// Dashboard-managed via the admin fee-policy endpoints; every write emits a
+// security event (who/when/old-new) and invalidates the 30s policy cache.
+model ChainFeePolicy {
+  version   Int       @id
+  bps       Int       @default(5000)
+  active    Boolean   @default(false)
+  // FX display source for wallet rendering (spec §4.5, OQ-1): e.g.
+  // "CoinGecko USD/IDR". Settlement is always base units on-chain; the
+  // rupiah figure is informational. Code fallback rows use "FALLBACK_STATIC".
+  fxSource  String    @default("FALLBACK_STATIC")
+  fxAsOf    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @db.Timestamptz(3) @default(now())
+  updatedAt DateTime  @db.Timestamptz(3) @updatedAt
+
+  minima ChainMinFee[]
+
+  @@map("chain_fee_policies")
+}
+
+// Per-chain MIN_FEE leg of one ChainFeePolicy version, in native base units
+// (wei for eip155, lamports for solana). Keyed by the chain registry natural
+// key (namespace + reference) — not by chain id — so rows survive registry
+// re-seeds. Spec §4.2 seeds: eip155:84532/97 + solana rows; Monad (10143) and
+// Arbitrum Sepolia (421614) are 0 (spec §4.4, AC-14).
+model ChainMinFee {
+  id            String         @id @default(uuid())
+  policyVersion Int
+  policy        ChainFeePolicy @relation(fields: [policyVersion], references: [version], onDelete: Cascade)
+  namespace     String
+  reference     String
+  minFee        BigInt
+  createdAt     DateTime @db.Timestamptz(3) @default(now())
+
+  @@unique([policyVersion, namespace, reference])
+  @@index([namespace, reference])
+  @@map("chain_min_fees")
+}
+
+// Relayer subsidy ledger (ANT-730, spec §5.4/NFR-4, OQ-3). One row per
+// activation capturing quotedFee vs actualCost (execution gas + L1 data fee
+// where the oracle exists). subsidy = actual − quoted (negative = surplus).
+// Zero activations without a quote–actual pair is a violation (AC-13); the
+// daily aggregate feeds the internal dashboard (admin subsidy summary).
+model RelayerSubsidyLedger {
+  id         String   @id @default(uuid())
+  pid        String
+  namespace  String
+  reference  String
+  // activation | withdraw | execute
+  kind       String
+  quotedFee  BigInt
+  actualCost BigInt
+  subsidy    BigInt
+  txHash     String?
+  createdAt  DateTime @db.Timestamptz(3) @default(now())
+
+  @@index([pid])
+  @@index([namespace, reference])
+  @@index([createdAt])
+  @@map("relayer_subsidy_ledger")
+}
+
 // DOKU Sub-Account V2 mapping (1 PID → 1 Sub-Account). DOKU is the
 // authoritative ledger — these rows store identity mapping, provider status,
 // cached reads, transaction references and fee snapshots only.

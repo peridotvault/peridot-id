@@ -12,7 +12,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
 import { normalizeFeeChain } from "../relayer/relayer-events";
-import { CreateChainDto, CreateTokenDto, PreviewTokenDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto } from "./admin.dto";
+import { CreateChainDto, CreateFeePolicyDto, CreateTokenDto, PreviewTokenDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto } from "./admin.dto";
+import { FeePolicyService } from "../fee/fee-policy.service";
 
 @Injectable()
 export class AdminService {
@@ -24,6 +25,7 @@ export class AdminService {
     private readonly security: SecurityEventService,
     @Optional() private readonly config?: ConfigService,
     @Optional() private readonly breaker?: CircuitBreakerService,
+    @Optional() private readonly fees?: FeePolicyService,
   ) {}
 
   listChains() {
@@ -351,5 +353,37 @@ export class AdminService {
     } finally {
       clearTimeout(t);
     }
+  }
+
+  // --- Chain fee-policy v2 (ANT-730, dashboard-managed MIN_FEE) ---
+
+  private feeStore(): FeePolicyService {
+    if (!this.fees) throw new ServiceUnavailableException("Chain fee policy store is not configured");
+    return this.fees;
+  }
+
+  /** Every fee-policy version, newest first (minima as decimal strings). */
+  listFeePolicies() {
+    return this.feeStore().listPolicies();
+  }
+
+  /** Publish a new (inactive) policy version. Published rows are never mutated. */
+  createFeePolicy(pid: string, dto: CreateFeePolicyDto) {
+    return this.feeStore().createPolicy(pid, {
+      bps: dto.bps,
+      minima: dto.minima,
+      fxSource: dto.fxSource,
+      fxAsOf: dto.fxAsOf,
+    });
+  }
+
+  /** Activate one version (fresh quotes pick it up within the 30s cache TTL). */
+  activateFeePolicy(pid: string, version: number) {
+    return this.feeStore().activatePolicy(pid, version);
+  }
+
+  /** Daily quote-vs-actual aggregates for the internal subsidy dashboard (NFR-4). */
+  subsidyDailySummary(days?: number) {
+    return this.feeStore().subsidyDailySummary(days ?? 30);
   }
 }

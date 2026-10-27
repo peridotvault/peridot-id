@@ -2,8 +2,9 @@
 // relayer key (EvmRelayerKey, dashboard-managed since ANT-193) is write-only
 // via the admin API and read server-side only. Other relayer keys and RPC API
 // keys stay in env by design.
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
+import { MAX_PROTOCOL_FEE_BPS } from "../common/solana-relay";
 
 export class CreateChainDto {
   @IsIn(["solana", "eip155"])
@@ -261,4 +262,46 @@ export class CloseRelayerBreakerDto {
   @IsString()
   @MaxLength(2000)
   evidence!: string;
+}
+
+/** One per-chain MIN_FEE leg of a new fee-policy version (base units, decimal string). */
+export class FeePolicyMinDto {
+  @IsIn(["solana", "eip155"])
+  namespace!: string;
+
+  @IsString()
+  @MaxLength(128)
+  reference!: string;
+
+  @Matches(/^\d+$/, { message: "minFee must be a non-negative integer (base units)" })
+  minFee!: string;
+}
+
+/**
+ * Publish a new chain fee-policy version (ANT-730, spec §4.3). New versions
+ * only — published rows are never mutated. Every minimum must sit at or
+ * above the chain's on-chain settlement floor (`ChainMinBelowFloor`
+ * otherwise, AC-10). The row starts inactive; activate it via
+ * `POST /v1/admin/fee-policies/:version/activate`.
+ */
+export class CreateFeePolicyDto {
+  @IsInt()
+  @Min(0)
+  @Max(MAX_PROTOCOL_FEE_BPS)
+  bps!: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FeePolicyMinDto)
+  minima!: FeePolicyMinDto[];
+
+  @IsString()
+  @MaxLength(64)
+  @IsOptional()
+  fxSource?: string;
+
+  @IsString()
+  @MaxLength(32)
+  @IsOptional()
+  fxAsOf?: string;
 }
