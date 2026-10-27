@@ -114,8 +114,18 @@ export interface SessionState {
 }
 
 /** Session validity check (revocation + expiry), re-run at settlement. */
+export interface SessionCheckArgs {
+  keyAddress: string;
+  sequence: number;
+  nowSec: number;
+  /** Smart-account contract the grant was issued for (envelope `account`). */
+  account?: string;
+  /** On-chain grant id (envelope `auth.permissionId`) for session kinds. */
+  permissionId?: string;
+}
+
 export interface SessionValidator {
-  check(keyAddress: string, sequence: number, nowSec: number): Promise<SessionState>;
+  check(args: SessionCheckArgs): Promise<SessionState>;
 }
 
 export interface BatchPorts {
@@ -217,6 +227,123 @@ export function hashOps(ops: Array<Pick<StoredOp, "to" | "value" | "data">>): st
 }
 
 /**
+ * Production intent envelope, v1 (ANT-770, phase-1b owner Troy's spec).
+ * The queue stores each op's `intent` opaque; the production submitter
+ * forwards it verbatim through the EXISTING single-call EVM entrypoint
+ * (sequential, one tx per op — no multicall, never re-signed). The envelope
+ * carries the fields to build one `execute(...)` / `executeWithPermission(...)`
+ * call plus its auth proof. Serialization: compact JSON, `0x`-prefixed
+ * lowercase hex, uints as decimal strings.
+ */
+export const INTENT_ENVELOPE_VERSION = 1;
+
+/** Envelope kinds: 1a accepts the v1/kind-1 pair; 1b adds v4/v2 kinds. */
+export const INTENT_KIND_OWNER_V3 = "owner-execute-v3";
+export const INTENT_KIND_OWNER_V4 = "owner-execute-v4";
+export const INTENT_KIND_SESSION_V1 = "session-permission-v1";
+export const INTENT_KIND_SESSION_V2 = "session-permission-v2";
+
+/** Phase-1a envelope kinds (non-financial only — frozen row semantics). */
+export const PHASE_1A_INTENT_KINDS = [INTENT_KIND_OWNER_V3, INTENT_KIND_SESSION_V1] as const;
+
+const KNOWN_INTENT_KINDS = new Set<string>([
+  INTENT_KIND_OWNER_V3,
+  INTENT_KIND_OWNER_V4,
+  INTENT_KIND_SESSION_V1,
+  INTENT_KIND_SESSION_V2,
+]);
+
+const SESSION_INTENT_KINDS = new Set<string>([INTENT_KIND_SESSION_V1, INTENT_KIND_SESSION_V2]);
+
+export interface ValidatedIntentEnvelope {
+  kind: string;
+  account: string;
+  chainId: string;
+  permissionId?: string;
+  seq?: number;
+  /** True when `kind` was absent and defaulted (legacy rows — log + deprecate). */
+  legacyDefaulted: boolean;
+}
+
+function isIntentKind(k: unknown): k is string {
+  return typeof k === "string" && KNOWN_INTENT_KINDS.has(k);
+}
+
+/**
+ * Kind-aware envelope validation (pure — unit-tested directly).
+ * Enforces the 1a/1b non-collision rule: unknown `kind` fails closed;
+ * only the v1/kind-1 pair is phase-1a; `intent.call.*` MUST mirror the op.
+ * Legacy intents without `kind` default to `owner-execute-v3`.
+ */
+export function validateIntentEnvelope(intent: Record<string, unknown>, op: Pick<StoredOp, "to" | "value" | "data">): ValidatedIntentEnvelope {
+  const raw = intent as Record<string, unknown>;
+  const kindRaw = raw["kind"];
+  let kind: string;
+  let legacyDefaulted = false;
+  if (kindRaw === undefined) {
+    kind = INTENT_KIND_OWNER_V3;
+    legacyDefaulted = true;
+  } else if (isIntentKind(kindRaw)) {
+    kind = kindRaw;
+  } else {
+    throw batchError("INVALID_CALLDATA", `Unknown intent kind: ${String(kindRaw)}`);
+  }
+  if (typeof raw["version"] !== "number" || raw["version"] !== INTENT_ENVELOPE_VERSION) {
+    throw batchError("INVALID_CALLDATA", "Intent envelope version must be 1");
+  }
+  const account = raw["account"];
+  if (typeof account !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(account)) {
+    throw batchError("INVALID_CALLDATA", "Intent envelope account must be a 0x address");
+  }
+  const chainId = raw["chainId"];
+  if (typeof chainId !== "string" || !/^\d+$/.test(chainId)) {
+    throw batchError("INVALID_CALLDATA", "Intent envelope chainId must be a decimal string");
+  }
+  const call = raw["call"];
+  if (!call || typeof call !== "object") {
+    throw batchError("INVALID_CALLDATA", "Intent envelope must carry call {to,value,data}");
+  }
+  const c = call as Record<string, unknown>;
+  if (
+    typeof c["to"] !== "string" || (c["to"] as string).toLowerCase() !== op.to.toLowerCase() ||
+    typeof c["value"] !== "string" || (c["value"] as string) !== op.value ||
+    typeof c["data"] !== "string" || (c["data"] as string).toLowerCase() !== op.data.toLowerCase()
+  ) {
+    throw batchError("INVALID_CALLDATA", "Intent call must mirror the op (to/value/data)");
+  }
+  const auth = raw["auth"];
+  if (!auth || typeof auth !== "object") {
+    throw batchError("INVALID_CALLDATA", "Intent envelope must carry auth proof");
+  }
+  const a = auth as Record<string, unknown>;
+  let permissionId: string | undefined;
+  let seq: number | undefined;
+  if (SESSION_INTENT_KINDS.has(kind)) {
+    if (typeof a["permissionId"] !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(a["permissionId"] as string)) {
+      throw batchError("INVALID_CALLDATA", "Session intent must carry auth.permissionId (bytes32)");
+    }
+    permissionId = (a["permissionId"] as string).toLowerCase();
+    if (typeof a["seq"] !== "number" || !Number.isSafeInteger(a["seq"]) || (a["seq"] as number) < 0) {
+      throw batchError("INVALID_CALLDATA", "Session intent must carry auth.seq (u64)");
+    }
+    seq = a["seq"] as number;
+  }
+  return { kind, account: (account as string).toLowerCase(), chainId: chainId as string, permissionId, seq, legacyDefaulted };
+}
+
+/** Cross-check (Troy's rule): session intents must bind the batch's session key sequence. */
+export function assertIntentSessionMatch(
+  intent: Record<string, unknown>,
+  op: Pick<StoredOp, "to" | "value" | "data">,
+  sessionKey: { sequence: number },
+): void {
+  const env = validateIntentEnvelope(intent, op);
+  if (SESSION_INTENT_KINDS.has(env.kind) && env.seq !== sessionKey.sequence) {
+    throw batchError("INVALID_CALLDATA", "Intent session seq does not match the batch session key");
+  }
+}
+
+/**
  * Boundary validation for a batch op list (pure — unit-tested directly).
  * Session-key batches pass their session context; owner batches pass none.
  * Phase-1a rejects value-bearing ops unconditionally (non-financial only).
@@ -263,6 +390,12 @@ export function validateBatchOps(
     }
     if (intentBytes > MAX_INTENT_BYTES) {
       throw batchError("INTENT_TOO_LARGE", `Op intent exceeds ${MAX_INTENT_BYTES} bytes`);
+    }
+    // ANT-770 envelope: kind-aware validation + call-mirrors-op cross-check.
+    // Phase-1a accepts only the v1/kind-1 pair (row semantics frozen).
+    const env = validateIntentEnvelope(op.intent, op);
+    if (!(PHASE_1A_INTENT_KINDS as readonly string[]).includes(env.kind)) {
+      throw batchError("INVALID_CALLDATA", `Intent kind ${env.kind} is not permitted in phase-1a`);
     }
     void opts;
   }
@@ -416,11 +549,18 @@ export class BatchQueueService {
     const windowSecs = this.windowSecs();
     const settleDueAt = new Date((nowSec + windowSecs) * 1000);
     if (dto.sessionKey) {
-      const state = await this.ports.sessions.check(
-        dto.sessionKey.keyAddress,
-        dto.sessionKey.sequence,
+      // Troy's cross-check: every session intent must bind this batch's key sequence.
+      for (const op of ops) {
+        assertIntentSessionMatch(op.intent, op, dto.sessionKey);
+      }
+      const firstEnv = validateIntentEnvelope(ops[0].intent, ops[0]);
+      const state = await this.ports.sessions.check({
+        keyAddress: dto.sessionKey.keyAddress,
+        sequence: dto.sessionKey.sequence,
         nowSec,
-      );
+        account: firstEnv.account,
+        permissionId: firstEnv.permissionId,
+      });
       if (state.revoked) throw batchError("SESSION_REVOKED", "Session was revoked — quote voided");
       if (!state.valid || state.expiresAt <= nowSec) {
         throw batchError("SESSION_EXPIRED", "Session is expired — quote voided");
@@ -529,11 +669,25 @@ export class BatchQueueService {
 
     // Session must STILL be valid at settlement (validUntil <= expiresAt).
     if (stored.sessionKey) {
-      const state = await this.ports.sessions.check(
-        stored.sessionKey.keyAddress,
-        stored.sessionKey.sequence,
+      // Envelope of the first op carries the grant to pre-flight on-chain;
+      // every op's seq binding was already enforced at submit time.
+      let account: string | undefined;
+      let permissionId: string | undefined;
+      try {
+        const firstEnv = validateIntentEnvelope(ops[0].intent, ops[0]);
+        account = firstEnv.account;
+        permissionId = firstEnv.permissionId;
+      } catch {
+        account = undefined;
+        permissionId = undefined;
+      }
+      const state = await this.ports.sessions.check({
+        keyAddress: stored.sessionKey.keyAddress,
+        sequence: stored.sessionKey.sequence,
         nowSec,
-      ).catch(() => ({ valid: false, revoked: true, expiresAt: 0 }));
+        account,
+        permissionId,
+      }).catch(() => ({ valid: false, revoked: true, expiresAt: 0 }));
       const validUntilSec = row.validUntil ? Math.floor(row.validUntil.getTime() / 1000) : nowSec;
       if (state.revoked || !state.valid || state.expiresAt <= nowSec || state.expiresAt < validUntilSec) {
         const failed = await this.prisma.queuedBatch.update({

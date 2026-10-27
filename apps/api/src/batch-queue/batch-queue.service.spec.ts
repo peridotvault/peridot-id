@@ -1,7 +1,7 @@
 // Phase-1a intent queue specs (ANT-762): validation, quote/settle math,
 // idempotency, session-at-settlement, failure paths, flush, metrics.
 // Follows the apps/api focused-spec pattern (mocked Prisma/fees, fake ports).
-import { BatchQueueService, StoredOp, decodeQuoteId, encodeQuoteId, hashOps, testPorts, validateBatchOps } from "./batch-queue.service";
+import { BatchQueueService, StoredOp, assertIntentSessionMatch, decodeQuoteId, encodeQuoteId, hashOps, testPorts, validateBatchOps, validateIntentEnvelope } from "./batch-queue.service";
 
 const PID = "test-user@pid";
 const FROM = "0x1111111111111111111111111111111111111111";
@@ -11,13 +11,46 @@ const TARGET_B = "0x3333333333333333333333333333333333333333";
 const TRANSFER_DATA = "0xa9059cbb00000000000000000000000044444444444444444444444444444444444444440000000000000000000000000000000000000000000000000000000000000001";
 const GAME_DATA = "0x123456780000000000000000000000000000000000000000000000000000000000000001";
 
-const op = (over: Partial<StoredOp> = {}): StoredOp => ({
-  to: TARGET_A,
-  value: "0",
-  data: GAME_DATA,
-  intent: { sig: "owner-or-session-sig" },
+const ACCOUNT = "0x15b4f164718fac7cfda7b60687aca4173c99aafc";
+
+// Production envelope v1 (ANT-770): kind/version/account/chainId/call/auth,
+// with call.* mirroring the op. Overrides win; pass `intent` explicitly to
+// test malformed envelopes.
+const envelopeFor = (
+  to: string,
+  value: string,
+  data: string,
+  over: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  version: 1,
+  kind: "owner-execute-v3",
+  account: ACCOUNT,
+  chainId: "10143",
+  call: { to, value, data },
+  auth: {
+    deadline: 2000000000,
+    feePolicyVersion: 2,
+    authenticatorData: "0x0404",
+    clientDataJSON: "0x7b2274797065223a22776562617574686e2e676574227d",
+    r: "0x0606060606060606060606060606060606060606060606060606060606060606",
+    s: "0x0707070707070707070707070707070707070707070707070707070707070707",
+  },
   ...over,
 });
+
+const op = (over: Partial<StoredOp> = {}): StoredOp => {
+  const base: StoredOp = {
+    to: TARGET_A,
+    value: "0",
+    data: GAME_DATA,
+    intent: {},
+    ...over,
+  };
+  if (!over.intent) {
+    base.intent = envelopeFor(base.to, base.value, base.data);
+  }
+  return base;
+};
 
 interface Row {
   id: string;
@@ -407,8 +440,10 @@ describe("ANT-767 F2 pid-scoped flush + F4 hardening", () => {
     const quote = await svc.estimateBatch(PID, { from: FROM, ops: opsList, atomic: true }, t0);
     const decoded = decodeQuoteId(quote.quoteId);
     expect(decoded.opsHashFull).toBe(hashOps(opsList).slice(2));
-    // A tampered op that collides on 8 hex chars is still rejected by the full binding.
-    const tampered = { ...opsList[1], data: `${GAME_DATA}00` };
+    // A tampered op (with its envelope rebuilt to mirror it, so it passes
+    // the boundary) is still rejected by the full quote binding.
+    const tamperedData = `${GAME_DATA}00`;
+    const tampered = { ...opsList[1], data: tamperedData, intent: envelopeFor(TARGET_B, "0", tamperedData) };
     await expect(
       svc.submitBatch(PID, { from: FROM, ops: [opsList[0], tampered], atomic: true, quoteId: quote.quoteId, idempotencyKey: "idem-tamper" }, t0),
     ).rejects.toThrow(expect.objectContaining({ message: expect.stringContaining("QUOTE_MISMATCH") }));
@@ -423,5 +458,85 @@ describe("ANT-767 F2 pid-scoped flush + F4 hardening", () => {
     const bigIntent = { sig: "x".repeat(9 * 1024) };
     expect(() => validateBatchOps([op({ intent: bigIntent })], { atomic: true }))
       .toThrow(expect.objectContaining({ message: expect.stringContaining("INTENT_TOO_LARGE") }));
+  });
+});
+
+describe("ANT-770 intent envelope validation (phase-1b owner spec)", () => {
+  const sessionEnvelope = (seq: number, to = TARGET_A, data = GAME_DATA): Record<string, unknown> => ({
+    version: 1,
+    kind: "session-permission-v1",
+    account: ACCOUNT,
+    chainId: "10143",
+    call: { to, value: "0", data },
+    auth: {
+      permissionId: "0x0707070707070707070707070707070707070707070707070707070707070707",
+      deadline: 2000000000,
+      seq,
+      feePolicyVersion: 2,
+      authenticatorData: "0x0404",
+      clientDataJSON: "0x7b7d",
+      r: "0x0606060606060606060606060606060606060606060606060606060606060606",
+      s: "0x0707070707070707070707070707070707070707070707070707070707070707",
+    },
+  });
+
+  it("accepts a valid v1 owner envelope mirroring the op", () => {
+    const o = op();
+    expect(() => validateIntentEnvelope(o.intent, o)).not.toThrow();
+    expect(validateIntentEnvelope(o.intent, o)).toMatchObject({ kind: "owner-execute-v3", account: ACCOUNT.toLowerCase() });
+  });
+
+  it("defaults legacy kind-less intents to owner-execute-v3", () => {
+    const o = op();
+    const legacy = { ...(o.intent as Record<string, unknown>) };
+    delete legacy["kind"];
+    expect(validateIntentEnvelope(legacy, o).legacyDefaulted).toBe(true);
+  });
+
+  it("rejects unknown kinds fail-closed", () => {
+    const o = op();
+    const bad = { ...(o.intent as Record<string, unknown>), kind: "owner-execute-v99" };
+    expect(() => validateIntentEnvelope(bad, o))
+      .toThrow(expect.objectContaining({ message: expect.stringContaining("Unknown intent kind") }));
+  });
+
+  it("rejects call/op mirror mismatches", () => {
+    const o = op();
+    const drifted = envelopeFor(TARGET_B, "0", o.data);
+    expect(() => validateIntentEnvelope(drifted, o))
+      .toThrow(expect.objectContaining({ message: expect.stringContaining("must mirror the op") }));
+  });
+
+  it("rejects phase-1b kinds in phase-1a validation", () => {
+    const v4 = envelopeFor(TARGET_A, "0", GAME_DATA, { kind: "owner-execute-v4" });
+    expect(() => validateBatchOps([op({ intent: v4 })], { atomic: true }))
+      .toThrow(expect.objectContaining({ message: expect.stringContaining("not permitted in phase-1a") }));
+  });
+
+  it("requires auth.seq binding on session intents", () => {
+    const good = op({ intent: sessionEnvelope(7) });
+    expect(() => assertIntentSessionMatch(good.intent, good, { sequence: 7 })).not.toThrow();
+    const bad = op({ intent: sessionEnvelope(8) });
+    expect(() => assertIntentSessionMatch(bad.intent, bad, { sequence: 7 }))
+      .toThrow(expect.objectContaining({ message: expect.stringContaining("seq does not match") }));
+  });
+
+  it("rejects session intents without permissionId", () => {
+    const o = op();
+    const noGrant = sessionEnvelope(7);
+    delete (noGrant["auth"] as Record<string, unknown>)["permissionId"];
+    expect(() => validateIntentEnvelope(noGrant, o))
+      .toThrow(expect.objectContaining({ message: expect.stringContaining("permissionId") }));
+  });
+
+  it("submitBatch enforces the session seq cross-check", async () => {
+    const { svc } = harness();
+    const t0 = new Date("2026-10-27T00:00:00Z");
+    const sessionKey = { keyAddress: "0x5555555555555555555555555555555555555555", sequence: 7, expiresAt: Math.floor(t0.getTime() / 1000) + 3600 };
+    const mismatched = op({ intent: sessionEnvelope(9) });
+    const quote = await svc.estimateBatch(PID, { from: FROM, ops: [op()], atomic: true, sessionKey }, t0);
+    await expect(
+      svc.submitBatch(PID, { from: FROM, ops: [mismatched], atomic: true, quoteId: quote.quoteId, idempotencyKey: "idem-seq", sessionKey }, t0),
+    ).rejects.toThrow(expect.objectContaining({ message: expect.stringContaining("seq does not match") }));
   });
 });
