@@ -32,6 +32,8 @@ export {
   type TestCreditView,
 } from "./fiat/fiat-client.js";
 export type { ActivationView, ActivationStatus } from "./wallet/wallet-client.js";
+export { cancelQueuedBatch, estimateBatch, getBatchStatus, pollBatchStatus, submitBatch } from "./wallet/batch-queue.js";
+export type { BatchCall, BatchLifecycle, BatchQuote, BatchSessionKey, BatchStatus, SubmitBatchInput } from "./wallet/batch-queue.js";
 export { PeridotLevel } from "./level.js";
 export { authenticatePasskey, BrowserPasskeySigner, PasskeyHostedRequiredError, registerPasskey } from "@peridotvault/pid-core";
 export type { PasskeySigner } from "@peridotvault/pid-core";

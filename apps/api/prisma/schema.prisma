@@ -565,6 +565,9 @@ model ChainMinFee {
 // where the oracle exists). subsidy = actual − quoted (negative = surplus).
 // Zero activations without a quote–actual pair is a violation (AC-13); the
 // daily aggregate feeds the internal dashboard (admin subsidy summary).
+// Phase-1a batching (ANT-762) writes one row per SETTLED op with
+// kind = "batch_execute" (no schema change: the kind column already carries
+// activation | withdraw | execute; batch rows reuse it).
 model RelayerSubsidyLedger {
   id         String   @id @default(uuid())
   pid        String
@@ -582,6 +585,48 @@ model RelayerSubsidyLedger {
   @@index([namespace, reference])
   @@index([createdAt])
   @@map("relayer_subsidy_ledger")
+}
+
+// Phase-1a intent queue (ANT-762, CTO pass-through pricing, no contract
+// change). Expand-only: brand-new table, no changes to existing tables.
+// One row per submitBatch call. Ops are stored as JSON: each entry carries
+// the opaque signed single-call authorization (owner/session signature over
+// the existing entrypoint — zero auth changes) plus denormalized routing
+// metadata (to/value/data selector) used for non-financial validation,
+// quoting, and settlement. The queue never holds value-bearing ops.
+model QueuedBatch {
+  id             String   @id @default(uuid())
+  pid            String
+  // queued | submitted | settled | partial | failed | expired | bypassed
+  status         String   @default("queued")
+  atomic         Boolean  @default(true)
+  // { ops: [{ to, value, data, gasLimit?, intent, sessionKey? }], from }
+  ops            Json
+  quoteId        String
+  // Idempotency: duplicate idempotencyKey returns the original row
+  // (no double-execution). Globally unique like Transaction.txHash.
+  idempotencyKey String   @unique
+  quotedBaseline BigInt
+  quotedMaxTotal BigInt
+  feePolicyVersion Int
+  sessionExpiresAt DateTime? @db.Timestamptz(3)
+  // Quote lock for the deferred window: validUntil <= sessionExpiresAt
+  // is enforced at submit AND at settlement (spec §5).
+  validUntil     DateTime? @db.Timestamptz(3)
+  bypassQueue    Boolean  @default(false)
+  // Per-op settlement outcomes (txHash / gasUsed / actualCost / status).
+  receipts       Json?
+  failureCode    String?
+  failureMessage String?
+  settleDueAt    DateTime @db.Timestamptz(3)
+  settledAt      DateTime? @db.Timestamptz(3)
+  createdAt      DateTime @db.Timestamptz(3) @default(now())
+  updatedAt      DateTime @db.Timestamptz(3) @updatedAt
+
+  @@index([pid])
+  @@index([status])
+  @@index([settleDueAt])
+  @@map("queued_batches")
 }
 
 // DOKU Sub-Account V2 mapping (1 PID → 1 Sub-Account). DOKU is the
