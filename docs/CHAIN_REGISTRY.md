@@ -9,10 +9,22 @@ Clients discover everything via `GET /v1/chains` — no chain/RPC/program env.
 |---|---|---|---|
 | `solana-devnet` | `("solana", SOLANA_DEVNET_REFERENCE)` — legacy truncated-hash key, kept byte-stable | `https://api.devnet.solana.com` | `SOLANA_PROGRAM_ID` = `9oMG7e…ECce` default (fresh devnet program, ANT-68 Option B; re-seed heals stale rows via `update: { address }`; old program `CiwLJ1h…Xf6NT` left untouched on-chain as the rollback path) |
 | `solana-testnet` | `("solana", SOLANA_TESTNET_REFERENCE)` — live testnet genesis hash (verified 2026-10-18) | `https://api.testnet.solana.com` (or `SOLANA_TESTNET_RPC` env at seed time) | `SOLANA_TESTNET_PROGRAM_ID` = `D6TpM7…ALVsg3` default (or `SOLANA_TESTNET_PROGRAM_ID` env at seed time; verified live on testnet 2026-10-18, slot 453908238 — unchanged by ANT-70) |
+| `stellar-testnet` | `("stellar", STELLAR_TESTNET_REFERENCE)` — F1 `network_id` hex `cee0302d…ecd472` = `sha256("Test SDF Network ; September 2015")` (S1 §5.2, OQ-S1 proposed; if CTO picks the raw passphrase, re-key mechanically) | `https://horizon-testnet.stellar.org` (or `STELLAR_TESTNET_RPC` env at seed time) | `factory` contract = `STELLAR_FACTORY_ADDRESS` env at seed time (the §1 deployed factory, `versionLabel: "v1"`; row seeds without a contract until the deploy lands, re-seed heals rotations — no `program`-type row required for stellar) |
 
 `chain_accounts` FKs by chain **id**, so adding/renaming rows never orphans
 wallets. No schema migration is needed for a new chain — adding a chain is a
 data row (expand), and deactivation (not delete) is the contraction path.
+
+## Valid contract types per namespace
+
+| namespace | valid `chainContract.type` values |
+|---|---|
+| `solana` | `program` (one per row) |
+| `eip155` | `factory` + `account_implementation` (deployable pair) |
+| `stellar` | `factory` (one per row; the §1 deployed factory, `versionLabel: "v1"`) |
+
+Unknown/over-long/inactive reference selection fails closed `400 UNKNOWN_CHAIN`
+(existing behavior, regression-pinned — AC5.6).
 
 ## Selection scoping (ANT-15 req 1)
 

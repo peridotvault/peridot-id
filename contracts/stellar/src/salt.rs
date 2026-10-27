@@ -25,6 +25,21 @@ pub fn pid_to_salt32(pid: &str) -> [u8; 32] {
     salt
 }
 
+/// Fail-closed salt-length gate (S1 AC1.7): the factory accepts exactly 32
+/// bytes. Truncated (u32/u64-shaped), padded, or empty salts from old
+/// fixtures are rejected before deploy — no silent truncation.
+///
+/// Gas: zero (pure length check, no hashing).
+/// Reentrancy: N/A (no external calls).
+/// Access: deployer-side check, least privilege preserved.
+pub fn check_salt_len(salt: &[u8]) -> Result<(), &'static str> {
+    if salt.len() == 32 {
+        Ok(())
+    } else {
+        Err("invalid salt: factory accepts exactly 32 bytes")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +81,27 @@ mod tests {
     #[should_panic(expected = "invalid pid")]
     fn empty_pid_rejected() {
         let _ = pid_to_salt32("   ");
+    }
+
+    /// S1 AC1.6: distinct pids yield distinct contract IDs (collision sanity).
+    #[test]
+    fn distinct_pids_yield_distinct_salts() {
+        let a = pid_to_salt32("alice@pid");
+        let b = pid_to_salt32("bob@pid");
+        assert_ne!(a, b);
+        // Phase-0 fixture pair is distinct as well (Exp-2 CCGI… vs CDD37… analogue).
+        assert_ne!(pid_to_salt32("ifal@pid"), pid_to_salt32("TEST@PID"));
+    }
+
+    /// S1 AC1.7: non-32B salts (truncated u32/u64 fixtures, padded, empty)
+    /// fail closed before deploy — the factory accepts exactly 32 bytes.
+    #[test]
+    fn non_32b_salt_rejected_fail_closed() {
+        assert!(check_salt_len(&pid_to_salt32("ifal@pid")).is_ok());
+        assert!(check_salt_len(&[0u8; 4]).is_err()); // truncated u32 fixture shape
+        assert!(check_salt_len(&[0u8; 8]).is_err()); // u64 shape
+        assert!(check_salt_len(&[]).is_err()); // empty
+        assert!(check_salt_len(&[0u8; 31]).is_err());
+        assert!(check_salt_len(&[0u8; 33]).is_err()); // padded
     }
 }
