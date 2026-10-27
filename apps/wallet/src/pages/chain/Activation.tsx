@@ -73,6 +73,8 @@ export function Activation({ onDone, goPasskey }: { onDone: () => void; goPasske
 
       {gate.error && <p role="alert" style={s.error}>{gate.error}</p>}
 
+      {gate.notice && <p role="status" style={s.hint}>Note: {gate.notice}</p>}
+
       {gate.activation && !gate.isActive && (
         <ActivationStatusCard status={gate.st} requiredSol={gate.requiredSol} balanceSol={gate.balanceSol} />
       )}

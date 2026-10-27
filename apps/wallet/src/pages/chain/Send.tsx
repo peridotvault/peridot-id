@@ -67,6 +67,10 @@ export function Send({ onDone }: { onDone: () => void }) {
   const [phase, setPhase] = useState<Phase>("form");
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Non-blocking policy notice (ANT-736 NFR-6): present when the signed
+  // fee-policy version trails the active policy by one. The send settled
+  // fine — this only says the next quote will use a newer policy.
+  const [policyNotice, setPolicyNotice] = useState<string | null>(null);
   // Review-step state: the exact quote the SDK will sign (single-quote
   // continuity — the panel and the ceremony share one quote object).
   const [reviewQuote, setReviewQuote] = useState<NormalizedFeeQuote | null>(null);
@@ -127,6 +131,7 @@ export function Send({ onDone }: { onDone: () => void }) {
   const send = async () => {
     setError(null);
     setResult(null);
+    setPolicyNotice(null);
     try {
       if (isNetworkSwitching()) {
         setError("Network is switching — wait a moment, then try again.");
@@ -168,6 +173,9 @@ export function Send({ onDone }: { onDone: () => void }) {
       );
       decisionRef.current = null;
       const feeSol = Number(BigInt(res.networkFeeLamports) + BigInt(res.protocolFeeLamports)) / LAMPORTS_PER_SOL;
+      // NFR-6: signed version one back — the send settled, the next quote
+      // just uses a newer policy. Non-blocking notice, never an error.
+      if (res.feePolicyWarning) setPolicyNotice(res.feePolicyWarning);
       if (res.status === "confirmed") {
         setResult(
           `Sent and confirmed on-chain. Network fee ${feeSol.toFixed(6)} SOL was reimbursed from your balance.\nSignature: ${res.signature}`,
@@ -286,6 +294,7 @@ export function Send({ onDone }: { onDone: () => void }) {
           <p style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</p>
           {error && <p role="alert" tabIndex={-1} id="send-error" style={s.error}>{error}</p>}
           {result && <span role="status" style={s.mono} className="select-text">{result}</span>}
+          {policyNotice && <p role="status" style={s.hint}>Note: {policyNotice}</p>}
           {net.switching && <p style={s.hint}>Network is switching — sending is paused until balances reload.</p>}
           <UIButton title="Review fees" onPress={send} disabled={!to || !amount || net.switching} variant="primary" />
         </>

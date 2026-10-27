@@ -59,3 +59,53 @@ describe("activationFeeQuote", () => {
     assert.equal(activationFeeQuote({ ...V2_VIEW, networkFee: "lots" }), null);
   });
 });
+
+const EVM_VIEW = {
+  pid: "alice@pid",
+  chainReference: "84532",
+  status: "ready",
+  smartAccountAddress: "0x1234567890123456789012345678901234567890",
+  deployed: false,
+  balanceWei: "10000000000000000",
+  requiredWei: "3000000000000000",
+  networkFeeWei: "1000000000000000",
+  protocolFeeBps: 50,
+  totalFeeWei: "3000000000000000",
+  maxTotalFeeWei: "3000000000000000",
+  serviceFeeWei: "2000000000000000",
+  networkFee: "1000000000000000",
+  platformFee: "2000000000000000",
+  totalFee: "3000000000000000",
+  maxTotalFee: "3000000000000000",
+  feePolicyVersion: 2,
+  chainMinBaseUnits: "1000000000000000",
+};
+
+describe("activationFeeQuote (EVM, ANT-736)", () => {
+  it("normalizes an EVM view through the same FeePanel path", async () => {
+    const q = activationFeeQuote(EVM_VIEW);
+    assert.ok(q);
+    assert.equal(q.networkFee, "1000000000000000");
+    assert.equal(q.platformFee, "2000000000000000");
+    assert.equal(q.totalFee, "3000000000000000");
+    assert.equal(q.maxTotalFee, "3000000000000000");
+    assert.equal(q.feePolicyVersion, 2);
+    assert.equal(q.platformFeeDerived, false);
+    assert.ok(q.expiresAtMs > q.quotedAtMs);
+  });
+
+  it("prefers serviceFeeWei when the canonical platformFee alias is absent", async () => {
+    const { platformFee, ...rest } = EVM_VIEW;
+    void platformFee;
+    const q = activationFeeQuote(rest);
+    assert.ok(q);
+    assert.equal(q.platformFee, "2000000000000000");
+  });
+
+  it("returns null for EVM views without totals (never a blended total)", async () => {
+    const { networkFee, platformFee, totalFee, maxTotalFee, networkFeeWei, serviceFeeWei, totalFeeWei, maxTotalFeeWei, ...rest } = EVM_VIEW;
+    void networkFee; void platformFee; void totalFee; void maxTotalFee;
+    void networkFeeWei; void serviceFeeWei; void totalFeeWei; void maxTotalFeeWei;
+    assert.equal(activationFeeQuote(rest), null);
+  });
+});

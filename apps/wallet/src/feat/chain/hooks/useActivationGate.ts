@@ -13,6 +13,9 @@ export function useActivationGate(peridot: PeridotClient) {
   const [passkeys, setPasskeys] = useState<Authority[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Non-blocking policy notice (ANT-736 NFR-6): the activation settled but
+  // the signed fee-policy version trails the active one by one.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -38,6 +41,7 @@ export function useActivationGate(peridot: PeridotClient) {
   const activate = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       let acc = await peridot.wallet.me();
       if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
@@ -47,6 +51,7 @@ export function useActivationGate(peridot: PeridotClient) {
         const msg = Array.isArray(res.message) ? res.message.join(" ") : (res.message as string);
         throw new Error(msg);
       }
+      if (res.feePolicyWarning) setNotice(res.feePolicyWarning);
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -67,6 +72,7 @@ export function useActivationGate(peridot: PeridotClient) {
     hasPasskey: passkeys.length > 0,
     busy,
     error,
+    notice,
     clearError,
     refresh,
     activate,

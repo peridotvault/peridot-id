@@ -63,6 +63,7 @@ export function SolActivationModal({
             </p>
           )}
           {gate.error && <p role="alert" style={s.error}>{gate.error}</p>}
+          {gate.notice && <p role="status" style={s.hint}>Note: {gate.notice}</p>}
           {!gate.isActive && gate.activation && <ActivationFee view={gate.activation} />}
           {!gate.isActive && (
             <UIButton
