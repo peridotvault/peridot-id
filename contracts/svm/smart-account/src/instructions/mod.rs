@@ -100,7 +100,7 @@ impl TryFrom<u8> for Instruction {
 /// - Execute:         nonce u64 | target [u8; 32] | meta_count u8 | metas meta_count×(addr[32] ‖ flags u8) | data_len u16 | data | expiry i64 | policy u16 | network_fee u64 | len u16 | clientDataJSON
 /// V4 fee-capped layouts (ANT-544 B5, ANT-556 — discriminators 11-14, verified
 /// under `DOMAIN_V4` with `total ≤ max_total_fee` else `FeeExceedsMax`; the fee
-/// formula follows the signed policy version via `fee::policy_v2_row`):
+/// formula follows the signed policy version via `fee::policy_protocol_bps_v4`)
 /// - WithdrawSolV4:   V3 WithdrawSol | max_total_fee u64 (after network_fee)
 /// - WithdrawTokenV4: V3 WithdrawToken | max_total_fee u64 (after network_fee)
 /// - ExecuteV4:       V3 Execute | max_total_fee u64 (after network_fee)

@@ -210,7 +210,7 @@ distinction, enforced on-chain and proven by the adversarial suite.
 - `verify_pda(account, program, account_id)` — real `find_program_address` on-chain; host stub returns 255 (covered by integration suite, not units).
 - `verify_nonce` — `state.nonce == ix.nonce` else `InvalidNonce`.
 - `errors.rs::PeridotError`: `…/Forbidden` (retained discriminant 11, no longer emitted — creation is permissionless since ANT-612), `FeeExceedsMax = 12` (reintroduced for the V4 fee-cap family — discriminant preserved from the retired slot; V3 verifiers never emit it), `UnknownFeePolicy = 13`, `MissingRpIdHash = 14`, `ExceedsMaxBps = 15`, `InvalidTarget = 16` (execute self-call), session errors 17–22 (`SessionNotFound/Revoked/Expired`, `BadSessionSeq`, `SessionScopeViolation`, `SessionTtlExceeded`), `SessionSpendExceeded = 24` (C3 per-execution session-PDA spend pin).
-- `fee.rs`: `FEE_POLICY_V1 = 1` (frozen), `FEE_POLICY_V2 = 2` (`PROTOCOL_FEE_BPS_V2 = 5000`, `CHAIN_MIN_LAMPORTS_V2 = 17_000`); `policy_protocol_bps()` (frozen v1); `policy_v2_row()` (v1 → `(5000, 0)`, v2 → `(5000, 17_000)`, unknown → `UnknownFeePolicy`); `split_attested_fee()` (frozen v1 formula); `split_attested_fee_v2()` (`MAX(floor(n×bps/10000), chain_min)`); `total_fee()` (saturating add).
+- `fee.rs`: `FEE_POLICY_V1 = 1` (frozen), `FEE_POLICY_V2 = 2` (accepted for pre-ANT-747 signed intents; ANT-747 removed the floor leg); `policy_protocol_bps()` (frozen v1-only gate); `policy_protocol_bps_v4()` (v1/v2 gate, both 5000 bps); `split_attested_fee()` (single money path: `floor(n×bps/10000)`, no floors); `total_fee()` (saturating add).
 
 ## 6. SVM — instructions
 
