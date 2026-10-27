@@ -159,3 +159,21 @@ invocation-match issue (host 28.0.2 reviewed; OZ tests only cover nested auth
 with contract delegates). Nothing in AC2.8/AC3.4 depends on it (all flows are
 passkey-only, single-entry). Flagged as follow-up for Tobias (auth-path
 semantics, audit-adjacent).
+
+## ANT-715 fail-closed layer-2 (Troy, 2026-10-27 — follow-up to ANT-713 review)
+
+`contracts/stellar-policy/src/lib.rs`: layer 2 is now scoped to
+account-originated `execute` (`call.contract == smart_account`) and
+fail-closed within that scope — args that do not decode as
+`(Address, Symbol, Vec<Val>)` (wrong arity, non-symbol target fn) DENY with
+`UnauthorizedFinancialOp`. `execute`-named entrypoints on any OTHER contract
+pass (rule scoping decides) so unrelated contracts are never DoS'd. OZ
+`stellar-accounts =0.8.0` `ExecutionEntryPoint` always builds the fixed
+3-shape, so fail-closed costs nothing legitimate. Testnet-only; no new audit
+surface beyond the reviewed deny path (same error code, no external calls).
+
+| Item | Evidence |
+|---|---|
+| `cargo test -p peridot-stellar-policy` | **13 passed, 0 failed** — 10 existing (2 re-scoped to account-originated contexts, incl. 8-fn deny-list + byte-parity with `contracts/stellar/src/rules.rs` `FINANCIAL_FNS` exact case-sensitive per R4) + 3 new fail-closed pins: `malformed_account_execute_wrong_arity_denied`, `malformed_account_execute_non_symbol_target_fn_denied` (`String` "transfer"), `non_account_execute_shaped_call_passes` |
+| In-tree wasm (rebuilt `stellar contract build`, stellar 28.1.0) | `contracts/stellar-policy/wasm/peridot_stellar_policy.wasm`, sha256 `67893d0b…bae62e6e` (v3; supersedes v2 `2fd03ff3…71d63b568f`) — needs testnet upload before it enforces anything on-chain |
+| Security-surface review | Same `UnauthorizedFinancialOp` code path, still zero external calls in `enforce` (reentrancy-safe by construction); no new privileged fns — Tobias review optional, no secrets/keys involved |
