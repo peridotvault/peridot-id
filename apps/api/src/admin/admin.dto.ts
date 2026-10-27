@@ -2,7 +2,7 @@
 // relayer key (EvmRelayerKey, dashboard-managed since ANT-193) is write-only
 // via the admin API and read server-side only. Other relayer keys and RPC API
 // keys stay in env by design.
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 import { MAX_PROTOCOL_FEE_BPS } from "../common/solana-relay";
 
@@ -266,7 +266,7 @@ export class CloseRelayerBreakerDto {
 
 /** One per-chain MIN_FEE leg of a new fee-policy version (base units, decimal string). */
 export class FeePolicyMinDto {
-  @IsIn(["solana", "eip155"])
+  @IsIn(["solana", "eip155", "stellar"])
   namespace!: string;
 
   @IsString()
@@ -285,12 +285,20 @@ export class FeePolicyMinDto {
  * `POST /v1/admin/fee-policies/:version/activate`.
  */
 export class CreateFeePolicyDto {
+  // ANT-732 LOW: bps=0 + empty minima would quote zero fees (revenue kill),
+  // and no spec calls for a fee holiday — floor at 1 (explicit accept: a
+  // deliberate 0-bps policy needs a contract-review exception, not a form).
   @IsInt()
-  @Min(0)
+  @Min(1)
   @Max(MAX_PROTOCOL_FEE_BPS)
   bps!: number;
 
+  // ANT-732 LOW: bound the batch (each entry becomes a row; unbounded arrays
+  // are a cheap write-amplification vector). 64 chains is far above the
+  // registry size; dup legs are rejected 400 in the service (no P2002 500).
   @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(64)
   @ValidateNested({ each: true })
   @Type(() => FeePolicyMinDto)
   minima!: FeePolicyMinDto[];

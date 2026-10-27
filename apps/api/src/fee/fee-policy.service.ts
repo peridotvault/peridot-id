@@ -12,7 +12,13 @@
 // (421614) map to 0 here even though the frozen table's EVM fallback would
 // give them the Ethereum floor (spec §4.4, AC-14 — the override lives in this
 // service so the frozen table + its pins stay untouched).
-import { BadRequestException, Injectable } from "@nestjs/common";
+//
+// Runbook (ANT-732 LOW explicit-accept): the 30s cache is per API instance —
+// a multi-replica deploy can serve mixed versions for ≤30s after an
+// activation. That window is accepted (submits settle under the SIGNED
+// version and the gate tolerates one version back, so in-flight quotes keep
+// working); do not shorten the TTL without re-checking DB load.
+import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { EVM_CHAINS } from "@peridotvault/pid-core/dist/evm";
 import { Prisma } from "@prisma/client";
 import { settlementFloorFor } from "../common/chain-fee-floors";
@@ -24,6 +30,7 @@ import {
   feeChainForEvmReference,
   feePolicyVersion as configuredPolicyVersion,
 } from "../common/solana-relay";
+import { isP2002 } from "../prisma/prisma-error";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -133,6 +140,12 @@ export class FeePolicyService {
    * one version back are accepted (the older with a warning — v1 traffic keeps
    * v1 math); anything older is `StaleQuote` (410), anything unknown (or from
    * the future) is `UnknownFeePolicy` (400).
+   *
+   * Explicit-accept (ANT-732 LOW): the one-back window means a floor LOWERING
+   * stays quotable until the older version ages out. Floor lowerings ship as a
+   * new version + contract upgrade + Tobias review (spec §4.3) and are never
+   * urgent — the overlap window is the NFR-6 compatibility mechanism working
+   * as specified, not a bypass.
    */
   async checkSubmitVersion(submitted: number): Promise<SubmitVersionCheck> {
     const { policies, activeVersion } = await this.policies();
@@ -194,27 +207,54 @@ export class FeePolicyService {
     input: { bps: number; minima: Array<{ namespace: string; reference: string; minFee: string }>; fxSource?: string; fxAsOf?: string },
   ): Promise<{ version: number; bps: number; active: boolean }> {
     const { bps, minima } = input;
-    if (!Number.isInteger(bps) || bps < 0 || bps > MAX_PROTOCOL_FEE_BPS) {
-      throw new BadRequestException({ code: "FeeBpsOutOfRange", message: `bps must be an integer 0..${MAX_PROTOCOL_FEE_BPS}` });
+    // ANT-732 LOW: bps=0 + empty minima quotes zero fees (revenue kill) and no
+    // spec calls for a fee holiday — floor at 1. The DB CHECK guards 0..5000
+    // (protocol bound); the API floor is the stricter revenue guard.
+    if (!Number.isInteger(bps) || bps < 1 || bps > MAX_PROTOCOL_FEE_BPS) {
+      throw new BadRequestException({ code: "FeeBpsOutOfRange", message: `bps must be an integer 1..${MAX_PROTOCOL_FEE_BPS}` });
     }
     const parsed = minima.map((m) => this.validateMinimum(m.namespace, m.reference, m.minFee));
+    // ANT-732 LOW: dup legs must fail 400 here, never P2002 500 from the insert.
+    const seen = new Set<string>();
+    for (const m of parsed) {
+      const key = chainKey(m.namespace, m.reference);
+      if (seen.has(key)) {
+        throw new BadRequestException({ code: "DuplicateChainMin", message: `Duplicate minima for chain "${key}"` });
+      }
+      seen.add(key);
+    }
     let fxAsOf: Date | null = null;
     if (input.fxAsOf !== undefined) {
       fxAsOf = new Date(input.fxAsOf);
       if (Number.isNaN(fxAsOf.getTime())) throw new BadRequestException("fxAsOf must be an ISO-8601 date");
     }
-    const existing = await this.prisma.chainFeePolicy.findMany({ select: { version: true } }).catch(() => []);
-    const version = existing.reduce((max, r) => Math.max(max, r.version), 0) + 1;
-    await this.prisma.chainFeePolicy.create({
-      data: {
-        version,
-        bps,
-        active: false,
-        fxSource: input.fxSource?.trim() || "FALLBACK_STATIC",
-        fxAsOf,
-        minima: { create: parsed.map((m) => ({ namespace: m.namespace, reference: m.reference, minFee: m.minFee })) },
-      },
-    });
+    // ANT-732 LOW: version=max+1 races between concurrent admins. Retry with a
+    // fresh max instead of surfacing P2002; residual collision → 409.
+    let version = 0;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const existing = await this.prisma.chainFeePolicy.findMany({ select: { version: true } }).catch(() => []);
+      version = existing.reduce((max, r) => Math.max(max, r.version), 0) + 1;
+      try {
+        await this.prisma.chainFeePolicy.create({
+          data: {
+            version,
+            bps,
+            active: false,
+            fxSource: input.fxSource?.trim() || "FALLBACK_STATIC",
+            fxAsOf,
+            minima: { create: parsed.map((m) => ({ namespace: m.namespace, reference: m.reference, minFee: m.minFee })) },
+          },
+        });
+        break;
+      } catch (err) {
+        if (!isP2002(err) || attempt === 2) {
+          if (isP2002(err)) {
+            throw new ConflictException({ code: "FeePolicyVersionConflict", message: "Fee-policy version collided — retry the publish" });
+          }
+          throw err;
+        }
+      }
+    }
     this.invalidate();
     await this.security.log(pid, "admin.fee_policy.created", { version, bps, chainCount: parsed.length });
     return { version, bps, active: false };
@@ -286,7 +326,7 @@ export class FeePolicyService {
     reference: string,
     minFee: string,
   ): { namespace: string; reference: string; minFee: bigint } {
-    if (namespace !== "solana" && namespace !== "eip155") {
+    if (namespace !== "solana" && namespace !== "eip155" && namespace !== "stellar") {
       throw new BadRequestException({ code: "UnknownChain", message: `Unknown chain namespace "${namespace}"` });
     }
     const ref = reference?.trim() ?? "";

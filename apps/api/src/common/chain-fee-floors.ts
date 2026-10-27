@@ -12,7 +12,7 @@
 // Monad testnet (10143) and Arbitrum Sepolia (421614) are 0 on-chain and in
 // the backend (spec §4.4, AC-14): the pre-v2 backend wrongly applied the
 // Ethereum fallback floor to them via `feeChainForEvmReference`.
-import { SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE } from "./chains";
+import { SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE, STELLAR_NAMESPACE, STELLAR_TESTNET_REFERENCE } from "./chains";
 
 /** Settlement floor in native base units, keyed by registry natural key. */
 export interface ChainFeeFloor {
@@ -31,6 +31,9 @@ export const CHAIN_FEE_FLOORS: ReadonlyArray<ChainFeeFloor> = Object.freeze([
   { namespace: "eip155", reference: "421614", floor: 0n, source: "PeridotAccount.sol _chainMinV2 = 0 (arbitrum-sepolia, spec §4.4)" },
   { namespace: "solana", reference: SOLANA_DEVNET_REFERENCE, floor: 17_000n, source: "fee.rs CHAIN_MIN_LAMPORTS_V2" },
   { namespace: "solana", reference: SOLANA_TESTNET_REFERENCE, floor: 17_000n, source: "fee.rs CHAIN_MIN_LAMPORTS_V2" },
+  // ANT-732 LOW: the seed carries a stellar minima row (frozen-table parity),
+  // so the validator allowlist and the floor map must agree — no dangling row.
+  { namespace: STELLAR_NAMESPACE, reference: STELLAR_TESTNET_REFERENCE, floor: 100_000n, source: "frozen FEE_POLICY_TABLE parity (spec B2)" },
 ]);
 
 /** Settlement floor for a chain (0 for unlisted chains — permissive, admin-set minima rule there). */

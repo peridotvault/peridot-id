@@ -4134,16 +4134,18 @@ components:
       properties:
         bps:
           type: integer
-          description: "Percentage leg in basis points (0..5000)"
+          description: "Percentage leg in basis points (1..5000; 0 rejected — no zero-fee policy without review, ANT-732)"
         minima:
           type: array
+          minItems: 1
+          maxItems: 64
           items:
             type: object
             required: [namespace, reference, minFee]
             properties:
               namespace:
                 type: string
-                enum: [solana, eip155]
+                enum: [solana, eip155, stellar]
               reference:
                 type: string
                 description: "Registry reference (decimal chain id for eip155)"

@@ -2,8 +2,9 @@
 // DB-first MIN_FEE per chain with frozen-table fallback; versioned rows that
 // are never mutated; submit-time version gate (NFR-6/AC-11); floor validation
 // on admin writes (AC-10); public read view (AC-18).
+import { Prisma } from "@prisma/client";
 import { FeePolicyService } from "./fee-policy.service";
-import { SOLANA_DEVNET_REFERENCE, SOLANA_NAMESPACE, SOLANA_TESTNET_REFERENCE } from "../common/chains";
+import { SOLANA_DEVNET_REFERENCE, SOLANA_NAMESPACE, SOLANA_TESTNET_REFERENCE, STELLAR_NAMESPACE, STELLAR_TESTNET_REFERENCE } from "../common/chains";
 import { platformFeeWithMin } from "../common/solana-relay";
 
 function policyRow(overrides: Record<string, unknown> = {}) {
@@ -188,6 +189,61 @@ describe("FeePolicyService — admin writes", () => {
     await expect(
       service.createPolicy("admin@pid", { bps: 5001, minima: [] }),
     ).rejects.toMatchObject({ response: expect.objectContaining({ code: "FeeBpsOutOfRange" }) });
+  });
+
+  it("rejects bps=0 — no zero-fee policy without a reviewed exception (ANT-732 LOW)", async () => {
+    const { service } = setup([v1Row(), policyRow()]);
+    await expect(
+      service.createPolicy("admin@pid", { bps: 0, minima: [] }),
+    ).rejects.toMatchObject({ response: expect.objectContaining({ code: "FeeBpsOutOfRange" }) });
+  });
+
+  it("rejects duplicate minima legs with 400, never P2002 (ANT-732 LOW)", async () => {
+    const { service, prisma } = setup([v1Row(), policyRow()]);
+    await expect(
+      service.createPolicy("admin@pid", {
+        bps: 5000,
+        minima: [
+          { namespace: "eip155", reference: "10143", minFee: "5" },
+          { namespace: "eip155", reference: "10143", minFee: "6" },
+        ],
+      }),
+    ).rejects.toMatchObject({ response: expect.objectContaining({ code: "DuplicateChainMin" }) });
+    expect(prisma.chainFeePolicy.create).not.toHaveBeenCalled();
+  });
+
+  it("retries version=max+1 races instead of surfacing P2002 (ANT-732 LOW)", async () => {
+    const { service, prisma } = setup([v1Row(), policyRow()]);
+    const p2002 = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "test",
+    });
+    prisma.chainFeePolicy.create.mockRejectedValueOnce(p2002);
+    prisma.chainFeePolicy.create.mockResolvedValueOnce({ version: 3, bps: 5000 });
+    const created = await service.createPolicy("admin@pid", {
+      bps: 5000,
+      minima: [{ namespace: "eip155", reference: "84532", minFee: "750000000000" }],
+    });
+    expect(created.version).toBe(3);
+    expect(prisma.chainFeePolicy.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("accepts the stellar namespace (seed parity) with its floor enforced (ANT-732 LOW)", async () => {
+    const { service, prisma } = setup([v1Row(), policyRow()]);
+    // Below the 100_000-stroop floor → rejected.
+    await expect(
+      service.createPolicy("admin@pid", {
+        bps: 5000,
+        minima: [{ namespace: STELLAR_NAMESPACE, reference: STELLAR_TESTNET_REFERENCE, minFee: "1" }],
+      }),
+    ).rejects.toMatchObject({ response: expect.objectContaining({ code: "ChainMinBelowFloor" }) });
+    // At the floor → accepted and stored.
+    const created = await service.createPolicy("admin@pid", {
+      bps: 5000,
+      minima: [{ namespace: STELLAR_NAMESPACE, reference: STELLAR_TESTNET_REFERENCE, minFee: "100000" }],
+    });
+    expect(created.version).toBe(3);
+    expect(prisma.chainFeePolicy.create).toHaveBeenCalled();
   });
 
   it("publishes new versions inactive with an audit event", async () => {
