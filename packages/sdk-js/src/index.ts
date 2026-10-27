@@ -14,7 +14,7 @@ export {
   shortfallMessage,
   ttlRemainingMs,
 } from "./wallet/fee-quote.js";
-export type { FeeApprovalHandler, FeeFailure, FeeFailureAction, FeeQuoteV2, NormalizedFeeQuote } from "./wallet/fee-quote.js";
+export type { FeeApprovalHandler, FeeFailure, FeeFailureAction, FeeQuoteV2, NormalizedFeeQuote, QuoteActivation } from "./wallet/fee-quote.js";
 export {
   PeridotFiat,
   sumTransferFee,

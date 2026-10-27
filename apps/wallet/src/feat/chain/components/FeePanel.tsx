@@ -1,12 +1,15 @@
-// Pre-approval fee panel (ANT-557, spec ANT-544 FR-B B4 + FR-E E2).
+// Pre-approval fee panel (ANT-557, spec ANT-544 FR-B B4 + FR-E E2;
+// ANT-731 WS4: WS1 spec §4.1 names the second line "service fee").
 //
 // Spec rules enforced here:
-// - networkFee and platformFee are ALWAYS separate line items (never a
+// - networkFee and serviceFee are ALWAYS separate line items (never a
 //   blended total only), then totalFee, then the authorized maxTotalFee bound.
 // - maxTotalFee is displayed verbatim: the transaction cannot charge above it.
 // - feePolicyVersion + quoted-at/TTL with a live expiry countdown.
 // - Quote is unsigned intent data: this panel renders BEFORE any passkey
 //   ceremony; nothing here signs or submits.
+// - First-action quotes (WS1 §7.1 `activation.required`) add one inclusion
+//   line: setup is inside the total, never a separate step.
 //
 // States: the parent renders loading/error; this panel covers ready + expired.
 // Accessibility: expiry and shortfall are role="alert" with focus handoff
@@ -58,12 +61,15 @@ export function FeePanel({
       <span style={s.label}>Fee quote</span>
       <div className="flex flex-col gap-1">
         <Row label="Network fee" value={fmt(quote.networkFee)} />
-        <Row label="Platform fee (Peridot)" value={fmt(quote.platformFee)} />
+        <Row label="Service fee" value={fmt(quote.platformFee)} />
         <Row label="Total fee" value={fmt(quote.totalFee)} strong />
         <Row label="Max total you authorize" value={fmt(quote.maxTotalFee)} strong />
       </div>
       {quote.platformFeeDerived && (
-        <p style={s.hint}>Platform fee is split from the quoted total (pre-v2 quote).</p>
+        <p style={s.hint}>Service fee is split from the quoted total (pre-v2 quote).</p>
+      )}
+      {quote.activation?.required === true && (
+        <p style={s.hint}>Includes first-time account setup — no extra step.</p>
       )}
       <p style={s.hint}>
         The transaction cannot charge more than the authorized max. Any spike above it stops the send — nothing is charged.

@@ -19,14 +19,14 @@ export function ActivationStatusCard({
         <Info size={16} className="text-muted-foreground" />
         <span className="font-sans text-sm leading-[19px] text-muted-foreground">
           {status === "ready"
-            ? `Ready to activate.`
+            ? `Ready — your first send sets up the account.`
             : status === "inactivated"
               ? "Deposit SOL to your address above first."
               : status === "insufficient"
-                ? `Need at least ${requiredSol.toFixed(4)} SOL to cover activation (you have ${balanceSol.toFixed(4)}).`
+                ? `Need at least ${requiredSol.toFixed(4)} SOL to cover the first-send setup (you have ${balanceSol.toFixed(4)}).`
                 : status === "activating"
-                  ? "Activating on-chain…"
-                  : "Funds received — activation is checked shortly."}
+                  ? "Setting up on-chain…"
+                  : "Funds received — setup runs with your first send."}
         </span>
       </div>
     </div>

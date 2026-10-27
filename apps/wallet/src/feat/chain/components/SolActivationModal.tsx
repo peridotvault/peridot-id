@@ -16,14 +16,12 @@ export function SolActivationModal({
   copiedKey,
   onClose,
   onCopy,
-  onGoPasskey,
 }: {
   target: DepositTarget | null;
   gate: Gate;
   copiedKey: string | null;
   onClose: () => void;
   onCopy: (key: string, address: string) => void;
-  onGoPasskey: () => void;
 }) {
   // ANT-74 + ANT-78: never render the Solana activate entry unless the
   // data-driven gate passes (testnet always; mainnet only when the registry
@@ -56,27 +54,21 @@ export function SolActivationModal({
           {!gate.isActive && !gate.ready && (
             <p style={s.hint}>
               {gate.st === "insufficient"
-                ? `Need at least ${gate.requiredSol.toFixed(4)} SOL to cover activation (you have ${gate.balanceSol.toFixed(4)}).`
+                ? `Need at least ${gate.requiredSol.toFixed(4)} SOL to cover the first-send setup (you have ${gate.balanceSol.toFixed(4)}).`
                 : gate.st === "activating"
-                  ? "Activating on-chain…"
+                  ? "Setting up on-chain…"
                   : "Send SOL to this address first."}
             </p>
           )}
           {gate.error && <p role="alert" style={s.error}>{gate.error}</p>}
-          {gate.notice && <p role="status" style={s.hint}>Note: {gate.notice}</p>}
           {!gate.isActive && gate.activation && <ActivationFee view={gate.activation} />}
+          {/* ANT-731 WS4: no separate setup step — the first send sets the
+              account up automatically inside the send flow. This modal stays
+              a funding view (address + QR + balance), never a CTA. */}
           {!gate.isActive && (
-            <UIButton
-              title={gate.busy ? "Activating…" : "Activate Account"}
-              variant="primary"
-              // ponytail: passkey is a hard backend requirement (the claim
-              // must be passkey-signed), so one button routes both cases:
-              // no passkey → create one first, else activate inline.
-              // Disabled (not hidden) when under-funded — the hint above
-              // explains why.
-              onPress={() => (gate.hasPasskey ? gate.activate() : onGoPasskey())}
-              disabled={gate.busy || !gate.ready}
-            />
+            <p style={s.hint}>
+              No setup step needed — your first send sets up this account automatically.
+            </p>
           )}
           <UIButton
             title={target && copiedKey === target.key ? "Copied" : "Copy address"}

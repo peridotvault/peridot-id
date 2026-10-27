@@ -12,7 +12,7 @@ import { DepositCardList } from "../../feat/chain/components/DepositCardList";
 import { SolActivationModal } from "../../feat/chain/components/SolActivationModal";
 import type { DepositTarget } from "../../feat/chain/utils/depositTargets";
 
-export function Receive({ onDone, goPasskey }: { onDone: () => void; goPasskey: () => void }) {
+export function Receive({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
   const { targets } = useDepositTargets(peridot);
   const { solanaAvailable } = useNetworkMode();
@@ -57,7 +57,6 @@ export function Receive({ onDone, goPasskey }: { onDone: () => void; goPasskey: 
           copiedKey={copiedKey}
           onClose={() => setSelectedSol(null)}
           onCopy={copy}
-          onGoPasskey={goPasskey}
         />
       )}
     </div>

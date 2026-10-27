@@ -20,7 +20,7 @@ export function DepositAddressCard({
     <div style={s.card} className="flex flex-col">
       <span style={flatten([s.label, { marginBottom: 6 }])}>Your deposit address</span>
       <span className="font-sans text-sm leading-[19px] text-muted-foreground">
-        Send SOL to this address to fund your wallet and cover activation. The cost
+        Send SOL to this address to fund your wallet and cover the first-send setup. The cost
         currently requires about {requiredSol.toFixed(4)} SOL.
       </span>
       <Pressable onPress={onCopy} accessibilityLabel="Copy deposit address">

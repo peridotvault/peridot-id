@@ -28,7 +28,7 @@ export function DepositCardList({
               <span className="font-sans text-base font-semibold">{t.label}</span>
               <p style={s.hint}>{t.sublabel}</p>
             </div>
-            {alert && <span className="mb-2 font-sans text-xs font-medium text-danger">Top up here to activate</span>}
+            {alert && <span className="mb-2 font-sans text-xs font-medium text-danger">Top up here for your first send</span>}
             <Pressable
               onPress={() => (isSol ? onOpen(t) : onCopy(t.key, t.address))}
             >
