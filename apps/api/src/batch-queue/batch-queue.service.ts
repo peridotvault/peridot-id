@@ -316,6 +316,9 @@ export function validateIntentEnvelope(intent: Record<string, unknown>, op: Pick
     throw batchError("INVALID_CALLDATA", "Intent envelope must carry auth proof");
   }
   const a = auth as Record<string, unknown>;
+  if (typeof a["deadline"] !== "number" || !Number.isSafeInteger(a["deadline"]) || (a["deadline"] as number) < 0) {
+    throw batchError("INVALID_CALLDATA", "Intent envelope auth.deadline must be a u64 unix time");
+  }
   let permissionId: string | undefined;
   let seq: number | undefined;
   if (SESSION_INTENT_KINDS.has(kind)) {
@@ -340,6 +343,23 @@ export function assertIntentSessionMatch(
   const env = validateIntentEnvelope(intent, op);
   if (SESSION_INTENT_KINDS.has(env.kind) && env.seq !== sessionKey.sequence) {
     throw batchError("INVALID_CALLDATA", "Intent session seq does not match the batch session key");
+  }
+}
+
+/**
+ * Fail-fast freshness (Tobias ANT-774 (b)): reject intents whose signed
+ * auth deadline already passed — otherwise they queue and revert on-chain
+ * at failed-op cost.
+ */
+export function assertIntentFreshness(
+  intent: Record<string, unknown>,
+  op: Pick<StoredOp, "to" | "value" | "data">,
+  nowSec: number,
+): void {
+  validateIntentEnvelope(intent, op);
+  const deadline = (intent["auth"] as Record<string, unknown>)["deadline"] as number;
+  if (deadline <= nowSec) {
+    throw batchError("SESSION_EXPIRED", "Intent auth deadline has passed — re-sign and try again");
   }
 }
 
@@ -468,6 +488,20 @@ export class BatchQueueService {
     return this.config.get<string>("BATCH_CHAIN_REFERENCE") ?? DEFAULT_BATCH_REFERENCE;
   }
 
+  /** Tobias ANT-774 (d): deprecation log for kind-less legacy intents. */
+  private warnLegacyIntents(ops: StoredOp[]): void {
+    for (const op of ops) {
+      try {
+        if (validateIntentEnvelope(op.intent, op).legacyDefaulted) {
+          this.logger.warn("batch op intent missing kind — defaulted to owner-execute-v3 (deprecated)");
+          return;
+        }
+      } catch {
+        // Malformed intents are rejected by validateBatchOps — never log here.
+      }
+    }
+  }
+
   private toStored(dto: EstimateBatchDto): StoredOp[] {
     return dto.ops.map((o) => ({ to: o.to, value: o.value, data: o.data, gasLimit: o.gasLimit, intent: o.intent }));
   }
@@ -476,6 +510,7 @@ export class BatchQueueService {
   async estimateBatch(pid: string, dto: EstimateBatchDto, now = new Date()): Promise<BatchQuoteView> {
     const ops = this.toStored(dto);
     validateBatchOps(ops, { atomic: dto.atomic ?? true, sessionKey: dto.sessionKey });
+    this.warnLegacyIntents(ops);
     const windowSecs = this.windowSecs();
     const estimates: bigint[] = [];
     for (const op of ops) {
@@ -514,6 +549,7 @@ export class BatchQueueService {
     const ops = this.toStored(dto);
     const atomic = dto.atomic ?? true;
     validateBatchOps(ops, { atomic, sessionKey: dto.sessionKey });
+    this.warnLegacyIntents(ops);
 
     const existing = await this.prisma.queuedBatch.findUnique({ where: { idempotencyKey: dto.idempotencyKey } });
     if (existing) {
@@ -524,6 +560,11 @@ export class BatchQueueService {
     const quote = decodeQuoteId(dto.quoteId);
     const nowSec = Math.floor(now.getTime() / 1000);
     if (quote.expiresSec <= nowSec) throw batchError("QUOTE_EXPIRED", "Quote expired — re-estimate and try again");
+    // Tobias ANT-774 (b): fail fast on intents whose signed auth deadline
+    // already passed — never queue a batch that can only revert on-chain.
+    for (const op of ops) {
+      assertIntentFreshness(op.intent, op, nowSec);
+    }
     const opsHash = hashOps(ops);
     if (quote.opsHashFull) {
       if (opsHash.slice(2).toLowerCase() !== quote.opsHashFull) {

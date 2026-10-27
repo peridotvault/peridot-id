@@ -197,7 +197,7 @@ export function productionBatchPorts(chains: ChainRegistryService, config: Confi
     },
 
     sessions: {
-      check: async ({ nowSec, account, permissionId }) => {
+      check: async ({ sequence, nowSec, account, permissionId }) => {
         // No grant reference on a session batch: fail closed (never valid).
         if (!account || !permissionId) {
           return { valid: false, revoked: true, expiresAt: 0 };
@@ -213,14 +213,21 @@ export function productionBatchPorts(chains: ChainRegistryService, config: Confi
           throw new ServiceUnavailableException("Batch session validation is not reachable");
         }
         const words = (raw.startsWith("0x") ? raw.slice(2) : raw).toLowerCase();
-        // Permission struct: 17 words; all-zero / short = no grant on-chain.
+        // Permission struct: 19 words (w2=validAfter, w3=validUntil,
+        // w4=seq, w6=revoked); short / all-zero = no grant on-chain.
         if (words.length < 17 * 64 || /^0+$/.test(words)) {
           return { valid: false, revoked: true, expiresAt: 0 };
         }
         const w = (i: number): bigint => BigInt(`0x${words.slice(i * 64, (i + 1) * 64)}`);
         const validAfter = w(2);
         const validUntil = w(3);
-        const revoked = w(6) !== 0n;
+        // On-chain seq is the replay guard: a grant whose seq advanced past
+        // the envelope seq is already spent — fail closed as unusable.
+        // (keyAddress-vs-sessionX/Y comparison is intentionally skipped: the
+        // grant stores P-256 coordinates, not the address, and on-chain
+        // executeWithPermission remains the authoritative verifier.)
+        const seqSpent = w(4) !== BigInt(sequence);
+        const revoked = w(6) !== 0n || seqSpent;
         const valid = !revoked && validAfter <= BigInt(nowSec) && BigInt(nowSec) <= validUntil;
         const expiresAt = validUntil <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(validUntil) : Number.MAX_SAFE_INTEGER;
         return { valid, revoked, expiresAt };

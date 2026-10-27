@@ -76,6 +76,54 @@ describe("productionBatchPorts fail-closed (unprovisioned operator inputs)", () 
     ).resolves.toEqual({ valid: false, revoked: true, expiresAt: 0 });
   });
 
+  describe("sessions.check on-chain grant pre-flight (mocked eth_call)", () => {
+    const PERMISSION_ID = "0x0707070707070707070707070707070707070707070707070707070707070707";
+    const word = (n: bigint): string => n.toString(16).padStart(64, "0");
+    const grantHex = (seq: number, validAfter = 1, validUntil = 9999999999, revoked = 0): string => {
+      const words = [
+        word(0n), word(0n), // sessionX, sessionY
+        word(BigInt(validAfter)), word(BigInt(validUntil)), word(BigInt(seq)),
+        word(1n), // kind
+        word(BigInt(revoked)),
+        ...Array.from({ length: 12 }, () => word(0n)), // target..feeSpent
+      ];
+      return `0x${words.join("")}`;
+    };
+
+    let realFetch: typeof fetch;
+    beforeEach(() => { realFetch = global.fetch; });
+    afterEach(() => { global.fetch = realFetch; });
+    const mockGrant = (hex: string) => {
+      global.fetch = jest.fn(async () =>
+        ({ ok: true, json: async () => ({ result: hex }) }) as never,
+      ) as never;
+    };
+
+    it("returns valid for a live grant with matching seq", async () => {
+      const { ports } = harness({ relayer: "0x0000000000000000000000000000000000000000000000000000000000000001" });
+      mockGrant(grantHex(7));
+      await expect(
+        ports.sessions.check({ keyAddress: "0x5555555555555555555555555555555555555555", sequence: 7, nowSec: 1000, account: ACCOUNT, permissionId: PERMISSION_ID }),
+      ).resolves.toEqual({ valid: true, revoked: false, expiresAt: 9999999999 });
+    });
+
+    it("fails closed to revoked when the on-chain seq advanced past the envelope seq", async () => {
+      const { ports } = harness({ relayer: "0x0000000000000000000000000000000000000000000000000000000000000001" });
+      mockGrant(grantHex(8)); // grant already spent once more than this intent
+      await expect(
+        ports.sessions.check({ keyAddress: "0x5555555555555555555555555555555555555555", sequence: 7, nowSec: 1000, account: ACCOUNT, permissionId: PERMISSION_ID }),
+      ).resolves.toMatchObject({ valid: false, revoked: true });
+    });
+
+    it("fails closed to revoked for an all-zero (nonexistent) grant", async () => {
+      const { ports } = harness({ relayer: "0x0000000000000000000000000000000000000000000000000000000000000001" });
+      mockGrant(`0x${"00".repeat(19 * 32)}`);
+      await expect(
+        ports.sessions.check({ keyAddress: "0x5555555555555555555555555555555555555555", sequence: 7, nowSec: 1000, account: ACCOUNT, permissionId: PERMISSION_ID }),
+      ).resolves.toEqual({ valid: false, revoked: true, expiresAt: 0 });
+    });
+  });
+
   it("sessions.check throws (never settles blind) when the chain is unreachable", async () => {
     const { ports } = harness({
       relayer: "0x0000000000000000000000000000000000000000000000000000000000000001",

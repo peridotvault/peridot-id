@@ -539,4 +539,16 @@ describe("ANT-770 intent envelope validation (phase-1b owner spec)", () => {
       svc.submitBatch(PID, { from: FROM, ops: [mismatched], atomic: true, quoteId: quote.quoteId, idempotencyKey: "idem-seq", sessionKey }, t0),
     ).rejects.toThrow(expect.objectContaining({ message: expect.stringContaining("seq does not match") }));
   });
+
+  it("submitBatch fails fast on intents whose auth deadline passed", async () => {
+    const { svc } = harness();
+    const t0 = new Date("2026-10-27T00:00:00Z");
+    const staleIntent = { ...(op().intent as Record<string, unknown>) };
+    staleIntent["auth"] = { ...(staleIntent["auth"] as Record<string, unknown>), deadline: Math.floor(t0.getTime() / 1000) - 1 };
+    const stale = op({ intent: staleIntent });
+    const quote = await svc.estimateBatch(PID, { from: FROM, ops: [op()], atomic: true }, t0);
+    await expect(
+      svc.submitBatch(PID, { from: FROM, ops: [stale], atomic: true, quoteId: quote.quoteId, idempotencyKey: "idem-stale", bypassQueue: true }, t0),
+    ).rejects.toThrow(expect.objectContaining({ message: expect.stringContaining("deadline has passed") }));
+  });
 });
