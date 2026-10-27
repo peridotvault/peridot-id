@@ -1,10 +1,11 @@
-// Chain fee-policy service tests (ANT-730, spec ANT-727 §4).
-// DB-first MIN_FEE per chain with frozen-table fallback; versioned rows that
-// are never mutated; submit-time version gate (NFR-6/AC-11); floor validation
-// on admin writes (AC-10); public read view (AC-18).
+// Chain fee-policy service tests (ANT-730, ANT-743 pure percentage).
+// DB-first percentage leg with frozen-table fallback; versioned rows that
+// are never mutated; submit-time version gate (NFR-6/AC-11); public read
+// view (AC-18). Minima removed: legacy `chain_min_fees` rows are inert,
+// admin `minima` legs are accepted but ignored, quotes are pure percentage.
 import { FeePolicyService } from "./fee-policy.service";
 import { SOLANA_DEVNET_REFERENCE, SOLANA_NAMESPACE, SOLANA_TESTNET_REFERENCE } from "../common/chains";
-import { platformFeeWithMin } from "../common/solana-relay";
+import { protocolFeeOf } from "../common/solana-relay";
 
 function policyRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -15,6 +16,7 @@ function policyRow(overrides: Record<string, unknown> = {}) {
     fxAsOf: new Date("2026-10-27T00:00:00Z"),
     createdAt: new Date("2026-10-27T00:00:00Z"),
     updatedAt: new Date("2026-10-27T00:00:00Z"),
+    // Legacy pre-ANT-743 rows — the service must ignore these.
     minima: [
       { namespace: "eip155", reference: "84532", minFee: 750_000_000_000n },
       { namespace: "eip155", reference: "97", minFee: 2_300_000_000_000n },
@@ -70,28 +72,28 @@ function setup(rows: unknown[] | Error) {
   return { service, prisma, security };
 }
 
-describe("FeePolicyService — DB-first reads", () => {
-  it("serves MIN_FEE from DB rows (AC-7 vectors)", async () => {
+describe("FeePolicyService — DB-first reads (pure percentage)", () => {
+  it("serves a zero minima leg even when legacy DB rows exist (ANT-743)", async () => {
     const { service } = setup([v1Row(), policyRow()]);
-    // Solana: network 5_000 lamports → floor 17_000 wins.
+    // Solana: network 5_000 lamports → pure 50% = 2_500 (legacy 17_000 floor ignored).
     const sol = await service.minFeeFor(SOLANA_NAMESPACE, SOLANA_DEVNET_REFERENCE);
-    expect(sol).toEqual({ minFee: 17_000n, version: 2, bps: 5000 });
-    expect(platformFeeWithMin(5_000n, sol.bps, sol.minFee)).toBe(17_000n);
-    // Base Sepolia: network 200 gwei → floor 750 gwei wins.
+    expect(sol).toEqual({ minFee: 0n, version: 2, bps: 5000 });
+    expect(protocolFeeOf(5_000n, sol.bps)).toBe(2_500n);
+    // Base Sepolia: network 200 gwei → pure 50% = 100 gwei (legacy floor ignored).
     const base = await service.minFeeFor("eip155", "84532");
-    expect(base.minFee).toBe(750_000_000_000n);
-    expect(platformFeeWithMin(200_000_000_000n, base.bps, base.minFee)).toBe(750_000_000_000n);
-    // BSC: network 2.1M gwei-wei → floor 2.3T wins.
+    expect(base.minFee).toBe(0n);
+    expect(protocolFeeOf(200_000_000_000n, base.bps)).toBe(100_000_000_000n);
+    // BSC: network 2.1M gwei-wei → pure 50% (legacy 2.3T floor ignored).
     const bsc = await service.minFeeFor("eip155", "97");
-    expect(platformFeeWithMin(2_100_000_000_000n, bsc.bps, bsc.minFee)).toBe(2_300_000_000_000n);
+    expect(protocolFeeOf(2_100_000_000_000n, bsc.bps)).toBe(1_050_000_000_000n);
   });
 
-  it("reads 0 for Monad/Arbitrum Sepolia (spec §4.4, AC-14)", async () => {
+  it("reads 0 for Monad/Arbitrum Sepolia (no floors anywhere)", async () => {
     const { service } = setup([v1Row(), policyRow()]);
     for (const ref of ["10143", "421614"]) {
       const m = await service.minFeeFor("eip155", ref);
       expect(m.minFee).toBe(0n);
-      expect(platformFeeWithMin(1_000_000_000n, m.bps, m.minFee)).toBe(500_000_000n);
+      expect(protocolFeeOf(1_000_000_000n, m.bps)).toBe(500_000_000n);
     }
   });
 
@@ -104,9 +106,7 @@ describe("FeePolicyService — DB-first reads", () => {
   it("falls back to the frozen table when the DB is unavailable", async () => {
     const { service } = setup(new Error("relation does not exist"));
     const sol = await service.minFeeFor(SOLANA_NAMESPACE, SOLANA_DEVNET_REFERENCE);
-    expect(sol).toEqual({ minFee: 17_000n, version: 2, bps: 5000 });
-    // Spec §4.4 override lives in the service: Monad/Arb read 0 even though
-    // the frozen EVM fallback would hand them the Ethereum floor.
+    expect(sol).toEqual({ minFee: 0n, version: 2, bps: 5000 });
     expect((await service.minFeeFor("eip155", "10143")).minFee).toBe(0n);
     expect((await service.minFeeFor("eip155", "421614")).minFee).toBe(0n);
   });
@@ -121,14 +121,12 @@ describe("FeePolicyService — DB-first reads", () => {
     expect(prisma.chainFeePolicy.findMany).toHaveBeenCalledTimes(2);
   });
 
-  it("exposes the public read view (AC-18)", async () => {
+  it("exposes the public read view with empty minima (AC-18)", async () => {
     const { service } = setup([v1Row(), policyRow()]);
     const view = await service.publicView();
     expect(view.version).toBe(2);
     expect(view.bps).toBe(5000);
-    expect(view.minFee["eip155:84532"]).toBe("750000000000");
-    expect(view.minFee["eip155:10143"]).toBe("0");
-    expect(view.minFee[`solana:${SOLANA_DEVNET_REFERENCE}`]).toBe("17000");
+    expect(view.minFee).toEqual({});
     expect(view.fxSource).toBe("CoinGecko USD/IDR");
     expect(view.fxAsOf).toBe("2026-10-27T00:00:00.000Z");
   });
@@ -173,14 +171,28 @@ describe("FeePolicyService — submit version gate (NFR-6/AC-11)", () => {
 });
 
 describe("FeePolicyService — admin writes", () => {
-  it("rejects minima below the settlement floor (AC-10)", async () => {
-    const { service } = setup([v1Row(), policyRow()]);
-    await expect(
-      service.createPolicy("admin@pid", {
-        bps: 5000,
-        minima: [{ namespace: "eip155", reference: "97", minFee: "1" }],
-      }),
-    ).rejects.toMatchObject({ response: expect.objectContaining({ code: "ChainMinBelowFloor" }) });
+  it("accepts low legs with no floor gate (ANT-743: minima ignored, never persisted)", async () => {
+    const { service, prisma, security } = setup([v1Row(), policyRow()]);
+    const created = await service.createPolicy("admin@pid", {
+      bps: 5000,
+      minima: [{ namespace: "eip155", reference: "97", minFee: "1" }],
+    });
+    expect(created).toEqual({ version: 3, bps: 5000, active: false });
+    const data = prisma.chainFeePolicy.create.mock.calls[0][0].data as Record<string, unknown>;
+    expect(data).not.toHaveProperty("minima");
+    expect(security.log).toHaveBeenCalledWith("admin@pid", "admin.fee_policy.created", {
+      version: 3,
+      bps: 5000,
+      chainCount: 0,
+      ignoredMinima: 1,
+    });
+  });
+
+  it("accepts a missing minima array (ANT-743)", async () => {
+    const { service, prisma } = setup([v1Row(), policyRow()]);
+    const created = await service.createPolicy("admin@pid", { bps: 5000 });
+    expect(created).toEqual({ version: 3, bps: 5000, active: false });
+    expect(prisma.chainFeePolicy.create).toHaveBeenCalled();
   });
 
   it("rejects bps above the protocol maximum", async () => {
@@ -202,7 +214,8 @@ describe("FeePolicyService — admin writes", () => {
     expect(security.log).toHaveBeenCalledWith("admin@pid", "admin.fee_policy.created", {
       version: 3,
       bps: 5000,
-      chainCount: 1,
+      chainCount: 0,
+      ignoredMinima: 1,
     });
   });
 

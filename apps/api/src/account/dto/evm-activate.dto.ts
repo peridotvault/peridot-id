@@ -27,7 +27,7 @@ export class EvmActivateDto {
   @Matches(/^\d+$/, { message: "Quoted network fee must be wei (positive integer)" })
   quotedNetworkFeeWei!: string;
 
-  /** Signed fee-policy version (1 = legacy 50% no-floor sunset; 2 = V4 MAX(50%, chainMin)). */
+  /** Signed fee-policy version (1 = legacy 50% sunset; 2 = V4 pure 50%). */
   @IsInt()
   @Min(1)
   @Max(2)

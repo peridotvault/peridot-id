@@ -213,9 +213,9 @@ export class AdminController {
     return this.adminService.setTokenLogo(user.pid, id, file);
   }
 
-  // --- Chain fee-policy v2 (ANT-730, dashboard-managed MIN_FEE) ---
+  // --- Chain fee-policy (ANT-730, ANT-743 pure percentage, minima ignored) ---
 
-  /** Every fee-policy version, newest first (admin view with all minima). */
+  /** Every fee-policy version, newest first (minima always empty). */
   @Get("fee-policies")
   @UseGuards(JwtAuthGuard, AdminGuard)
   feePolicies() {

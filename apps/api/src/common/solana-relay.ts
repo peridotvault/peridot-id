@@ -14,28 +14,28 @@ export function feePolicyVersion(): number {
 }
 
 /** Canonical protocol-fee table (mirrors the on-chain policy; V3 spec §1).
- *  Fee policy v2 (ANT-544 FR-B): per-chain minima in native base units.
- *  New minima or percentages ship as a NEW version row — never mutate a
- *  published row (spec B7; ANT-543 business model). */
+ *  Fee policy (ANT-743: pure percentage, no per-chain minima). Both rows are
+ *  pure `networkFee × bps / 10_000` — v2 keeps its row number so in-flight
+ *  signed quotes keep settling; only the floor leg is gone. New percentages
+ *  ship as a NEW version row — never mutate a published row (spec B7). */
 export const PROTOCOL_FEE_BPS_V1 = 5000;
-/** Active fee-policy v2 percentage leg (bps; ≤ MAX_PROTOCOL_FEE_BPS enforced). */
+/** Active fee-policy percentage leg (bps; ≤ MAX_PROTOCOL_FEE_BPS enforced). */
 export const PROTOCOL_FEE_BPS_V2 = 5000;
 export const MAX_PROTOCOL_FEE_BPS = 5000;
 
-/** Chains with a fee-policy minimum (spec B2, native base units). */
+/** Chains with a (now zero) fee-policy minimum slot (spec B2, native base units).
+ *  @deprecated ANT-743: minima removed — every leg is 0, quotes are pure
+ *  percentage. Kept so existing imports keep compiling. */
 export type FeeChain = "stellar" | "solana" | "ethereum" | "base" | "bsc";
 
-/** Per-chain `chainMin` for fee-policy v2 (spec B2 — immutable, versioned). */
+/** Per-chain `chainMin` (always 0 since ANT-743 — pure percentage).
+ *  @deprecated Minima removed; kept for shape compatibility. */
 export const CHAIN_MIN_FEE_V2: Readonly<Record<FeeChain, bigint>> = Object.freeze({
-  // 0.01 XLM (100_000 stroops).
-  stellar: 100_000n,
-  // 0.000017 SOL (17_000 lamports).
-  solana: 17_000n,
-  // 0.00000075 ETH (750_000_000_000 wei = 750 gwei). Base shares Ethereum's minimum.
-  ethereum: 750_000_000_000n,
-  base: 750_000_000_000n,
-  // 0.0000023 BNB (2_300_000_000_000 wei, 18 decimals).
-  bsc: 2_300_000_000_000n,
+  stellar: 0n,
+  solana: 0n,
+  ethereum: 0n,
+  base: 0n,
+  bsc: 0n,
 });
 
 /** One immutable fee-policy row: percentage leg + per-chain minima. */
@@ -53,14 +53,14 @@ const ZERO_MINIMA: Readonly<Record<FeeChain, bigint>> = Object.freeze({
 });
 
 /**
- * Versioned fee-policy table. V1 is frozen at pure-percentage semantics
- * (minima 0 — v1 traffic keeps v1 math, spec B-AC9). V2 adds the B2 minima.
+ * Versioned fee-policy table. Both rows are pure-percentage (minima 0):
+ * v1 keeps its frozen semantics and v2 is the floor-less row (ANT-743).
  * Add new versions as new rows only; editing a published row breaks the
  * on-chain mirror and the B3 vectors — `fee-policy.spec.ts` pins both rows.
  */
 export const FEE_POLICY_TABLE: Readonly<Record<number, FeePolicyRow>> = Object.freeze({
   1: Object.freeze({ bps: PROTOCOL_FEE_BPS_V1, chainMin: ZERO_MINIMA }),
-  2: Object.freeze({ bps: PROTOCOL_FEE_BPS_V2, chainMin: CHAIN_MIN_FEE_V2 }),
+  2: Object.freeze({ bps: PROTOCOL_FEE_BPS_V2, chainMin: ZERO_MINIMA }),
 });
 
 /** Fee-policy row for a version (throws on unknown versions — `UnknownFeePolicy`). */
@@ -76,9 +76,15 @@ export function protocolFeeBps(version: number): number {
   return feePolicyRow(version).bps;
 }
 
-/** `chainMin` (base units) for a chain under a policy version. */
+/**
+ * `chainMin` (base units) for a chain under a policy version.
+ * @deprecated ANT-743: minima removed — always returns 0n. Kept for
+ * shape compatibility; quotes use `protocolFeeOf` (pure percentage).
+ */
 export function chainMinBaseUnits(chain: FeeChain, version: number): bigint {
-  return feePolicyRow(version).chainMin[chain];
+  feePolicyRow(version);
+  void chain;
+  return 0n;
 }
 
 /** protocolFee = floor(networkFee × bps / 10_000). Floor favors the user. */
@@ -87,26 +93,26 @@ export function protocolFeeOf(networkFee: bigint, bps: number): bigint {
 }
 
 /**
- * Fee policy v2 platform fee (spec B1):
- * `platformFee = MAX(floor(networkFee × bps / 10_000), chainMin)`,
+ * Fee policy platform fee (ANT-743: pure percentage, no minima):
+ * `platformFee = floor(networkFee × bps / 10_000)`,
  * `totalFee = networkFee + platformFee` (additive). Integer floor at every
  * step (NFR-5 — no floats anywhere in fee paths); dust below 1 base unit of
- * the percentage leg falls to the `chainMin` leg automatically.
+ * the percentage leg quotes a zero fee (user-favorable).
  */
 export function platformFeeOf(networkFee: bigint, chain: FeeChain, version: number): bigint {
   const row = feePolicyRow(version);
-  return platformFeeWithMin(networkFee, row.bps, row.chainMin[chain]);
+  void chain;
+  return protocolFeeOf(networkFee, row.bps);
 }
 
 /**
- * `MAX(floor(networkFee × bps / 10_000), minFee)` with an explicit minimum.
- * DB-backed quotes (ANT-730) use this with the dashboard-managed minimum so
- * the formula stays identical to the frozen table path above (one formula,
- * two minimum sources — no drift between DB and code paths).
+ * Pure-percentage platform fee (ANT-743).
+ * @deprecated The `minFee` argument is ignored (minima removed). Kept so
+ * DB-backed call sites keep compiling; new code should call `protocolFeeOf`.
  */
 export function platformFeeWithMin(networkFee: bigint, bps: number, minFee: bigint): bigint {
-  const pct = (networkFee * BigInt(bps)) / 10_000n;
-  return pct > minFee ? pct : minFee;
+  void minFee;
+  return protocolFeeOf(networkFee, bps);
 }
 
 /** `totalFee = networkFee + platformFee` under a policy version. */
@@ -141,10 +147,9 @@ export function exceedsDriftBound(attested: bigint, quoted: bigint): boolean {
 export const MAX_TTL_SECS = 600;
 
 /**
- * Fee-policy chain for an EVM CAIP-2 reference (fee minima only — the chain
- * row itself is still resolved via the registry). Unknown EVM references fall
- * back to the Ethereum row (the smallest EVM minimum; fail-open only on the
- * floor leg — submit paths additionally re-attest and enforce the user bound).
+ * Fee-policy chain for an EVM CAIP-2 reference.
+ * @deprecated ANT-743: fee floors removed — the mapping is no longer applied
+ * to quotes. Kept for chain-label compatibility only.
  */
 export function feeChainForEvmReference(reference: string): FeeChain {
   switch (reference) {

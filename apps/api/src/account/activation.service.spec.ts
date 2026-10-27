@@ -388,7 +388,7 @@ describe("ActivationService", () => {
     expect(view.platformFee).toBe(String(PROTOCOL));
     expect(view.totalFee).toBe(String(NETWORK + PROTOCOL));
     expect(view.maxTotalFee).toBe(String(NETWORK + PROTOCOL));
-    expect(view.chainMinBaseUnits).toBe("17000");
+    expect(view.chainMinBaseUnits).toBe("0");
     expect(new Date(view.expiresAt).getTime() - new Date(view.quotedAt).getTime()).toBe(300_000);
   });
 

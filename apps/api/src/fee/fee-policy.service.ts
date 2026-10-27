@@ -1,27 +1,27 @@
-// Chain fee-policy v2 — DB-managed MIN_FEE per chain (ANT-730, spec ANT-727 §4).
+// Chain fee-policy (ANT-730 DB layer, ANT-743 pure percentage).
 //
-// Quote-time source of truth for `serviceFee = max(networkFee × bps / 10_000,
-// MIN_FEE[chain])`. Reads are DB-first with a 30s TTL cache (same pattern as
-// ChainRegistryService); every admin write invalidates the cache (AC-9: new
-// values apply to fresh quotes within 60s, no deploy) and emits a security
-// event (who/when/old-new, spec §4.3).
+// Quote-time source of truth for `serviceFee = networkFee × bps / 10_000`
+// (bps=5000 for 50% — no per-chain minima, no floor leg). Reads are DB-first
+// with a 30s TTL cache (same pattern as ChainRegistryService); every admin
+// write invalidates the cache (AC-9: new values apply to fresh quotes within
+// 60s, no deploy) and emits a security event (who/when/old-new, spec §4.3).
+//
+// Legacy `chain_min_fees` rows are INERT: `readPolicies` and the code
+// fallback both serve empty minima maps, so quotes stay pure-percentage even
+// on databases that still carry pre-ANT-743 rows. No migration deletes data
+// (expand-then-contract); a later cleanup migration may drop the table once
+// every environment runs this backend. Admin `createPolicy` still accepts a
+// `minima` array for contract compatibility but ignores its contents (never
+// persisted, never read).
 //
 // Unavailable DB / unmigrated table / zero rows → the frozen in-code
 // FEE_POLICY_TABLE (common/solana-relay.ts) so fresh local dev and old
-// unit-test doubles keep working. Monad (10143) and Arbitrum Sepolia
-// (421614) map to 0 here even though the frozen table's EVM fallback would
-// give them the Ethereum floor (spec §4.4, AC-14 — the override lives in this
-// service so the frozen table + its pins stay untouched).
+// unit-test doubles keep working.
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { EVM_CHAINS } from "@peridotvault/pid-core/dist/evm";
 import { Prisma } from "@prisma/client";
-import { settlementFloorFor } from "../common/chain-fee-floors";
-import { SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE } from "../common/chains";
 import {
   FEE_POLICY_TABLE,
   MAX_PROTOCOL_FEE_BPS,
-  chainMinBaseUnits,
-  feeChainForEvmReference,
   feePolicyVersion as configuredPolicyVersion,
 } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
@@ -41,6 +41,10 @@ export interface FeePolicySnapshot {
   fxSource: string;
   fxAsOf: Date | null;
   updatedAt: Date;
+  /**
+   * Per-chain minima — ALWAYS empty since ANT-743 (pure percentage).
+   * Kept so quote/settle call sites keep compiling; always read 0.
+   */
   minima: Map<string, bigint>;
 }
 
@@ -104,11 +108,10 @@ export class FeePolicyService {
   }
 
   /**
-   * MIN_FEE + percentage leg for one chain under an exact version. Submit
-   * paths settle under the SIGNED version (v1 traffic keeps v1 math); a
-   * chain with no row reads 0 (DB is authoritative — add the row via the
-   * admin API when onboarding a chain). Throws `UnknownFeePolicy` for
-   * versions the backend does not know.
+   * Percentage leg for one chain under an exact version (ANT-743: pure
+   * percentage, no minima). Submit paths settle under the SIGNED version.
+   * The returned `minFee` is always 0n (kept for call-site compatibility).
+   * Throws `UnknownFeePolicy` for versions the backend does not know.
    */
   async minFeeForVersion(
     namespace: string,
@@ -119,13 +122,21 @@ export class FeePolicyService {
     if (!row) {
       throw new BadRequestException({ code: "UnknownFeePolicy", message: "Unsupported fee policy — re-quote and try again" });
     }
-    return { minFee: row.minima.get(chainKey(namespace, reference)) ?? 0n, bps: row.bps };
+    void namespace;
+    void reference;
+    return { minFee: 0n, bps: row.bps };
   }
 
-  /** MIN_FEE for one chain under the active policy (0 when the chain has no row). */
+  /**
+   * Percentage leg for one chain under the active policy (ANT-743: pure
+   * percentage). The returned `minFee` is always 0n (kept for call-site
+   * compatibility).
+   */
   async minFeeFor(namespace: string, reference: string): Promise<{ minFee: bigint; version: number; bps: number }> {
     const policy = await this.activePolicy();
-    return { minFee: policy.minima.get(chainKey(namespace, reference)) ?? 0n, version: policy.version, bps: policy.bps };
+    void namespace;
+    void reference;
+    return { minFee: 0n, version: policy.version, bps: policy.bps };
   }
 
   /**
@@ -152,22 +163,22 @@ export class FeePolicyService {
     return { ok: false, code: "StaleQuote", status: 410, message: "Fee policy superseded — re-quote and try again" };
   }
 
-  /** Public read-only view for `GET /v1/fee-policy` (AC-18). */
+  /** Public read-only view for `GET /v1/fee-policy` (AC-18). `minFee` is
+   *  always empty since ANT-743 (pure percentage) — the key stays so existing
+   *  clients keep parsing. */
   async publicView(): Promise<FeePolicyPublicView> {
     const policy = await this.activePolicy();
-    const minFee: Record<string, string> = {};
-    for (const [key, value] of [...policy.minima.entries()].sort()) minFee[key] = value.toString();
     return {
       version: policy.version,
       bps: policy.bps,
-      minFee,
+      minFee: {},
       fxSource: policy.fxSource,
       fxAsOf: policy.fxAsOf ? policy.fxAsOf.toISOString() : null,
       updatedAt: policy.updatedAt.toISOString(),
     };
   }
 
-  /** Admin list (newest first) with minima as decimal strings. */
+  /** Admin list (newest first). `minima` is always empty since ANT-743. */
   async listPolicies() {
     const { policies, activeVersion } = await this.policies();
     return [...policies.values()]
@@ -179,25 +190,27 @@ export class FeePolicyService {
         fxSource: p.fxSource,
         fxAsOf: p.fxAsOf ? p.fxAsOf.toISOString() : null,
         updatedAt: p.updatedAt.toISOString(),
-        minima: Object.fromEntries([...p.minima.entries()].map(([k, v]): [string, string] => [k, v.toString()])),
+        minima: {} as Record<string, string>,
       }));
   }
 
   /**
    * Admin: publish a new policy version (inactive by default). New versions
-   * only — published rows are never mutated (spec §4.3). Every minimum must
-   * sit at or above the chain's settlement floor or the write is rejected
-   * with `ChainMinBelowFloor` (AC-10).
+   * only — published rows are never mutated (spec §4.3).
+   *
+   * ANT-743: the `minima` array is accepted for contract compatibility but
+   * IGNORED (never persisted, never read). There is no floor to enforce, so
+   * no `ChainMinBelowFloor` gate exists — any non-negative leg is accepted.
    */
   async createPolicy(
     pid: string,
-    input: { bps: number; minima: Array<{ namespace: string; reference: string; minFee: string }>; fxSource?: string; fxAsOf?: string },
+    input: { bps: number; minima?: Array<{ namespace: string; reference: string; minFee: string }>; fxSource?: string; fxAsOf?: string },
   ): Promise<{ version: number; bps: number; active: boolean }> {
-    const { bps, minima } = input;
+    const { bps } = input;
     if (!Number.isInteger(bps) || bps < 0 || bps > MAX_PROTOCOL_FEE_BPS) {
       throw new BadRequestException({ code: "FeeBpsOutOfRange", message: `bps must be an integer 0..${MAX_PROTOCOL_FEE_BPS}` });
     }
-    const parsed = minima.map((m) => this.validateMinimum(m.namespace, m.reference, m.minFee));
+    const ignoredMinima = input.minima ?? [];
     let fxAsOf: Date | null = null;
     if (input.fxAsOf !== undefined) {
       fxAsOf = new Date(input.fxAsOf);
@@ -212,11 +225,10 @@ export class FeePolicyService {
         active: false,
         fxSource: input.fxSource?.trim() || "FALLBACK_STATIC",
         fxAsOf,
-        minima: { create: parsed.map((m) => ({ namespace: m.namespace, reference: m.reference, minFee: m.minFee })) },
       },
     });
     this.invalidate();
-    await this.security.log(pid, "admin.fee_policy.created", { version, bps, chainCount: parsed.length });
+    await this.security.log(pid, "admin.fee_policy.created", { version, bps, chainCount: 0, ignoredMinima: ignoredMinima.length });
     return { version, bps, active: false };
   }
 
@@ -281,42 +293,14 @@ export class FeePolicyService {
     }));
   }
 
-  private validateMinimum(
-    namespace: string,
-    reference: string,
-    minFee: string,
-  ): { namespace: string; reference: string; minFee: bigint } {
-    if (namespace !== "solana" && namespace !== "eip155") {
-      throw new BadRequestException({ code: "UnknownChain", message: `Unknown chain namespace "${namespace}"` });
-    }
-    const ref = reference?.trim() ?? "";
-    if (!ref || ref.length > 128) {
-      throw new BadRequestException({ code: "UnknownChain", message: "Chain reference must be 1..128 chars" });
-    }
-    if (!/^\d+$/.test(minFee)) {
-      throw new BadRequestException({ code: "InvalidMinFee", message: "minFee must be a non-negative integer (base units)" });
-    }
-    const value = BigInt(minFee);
-    const floor = settlementFloorFor(namespace, ref);
-    if (value < floor) {
-      throw new BadRequestException({
-        code: "ChainMinBelowFloor",
-        message: `minFee ${value} is below the on-chain settlement floor ${floor} for ${namespace}:${ref} — lowering the floor needs a contract upgrade, not a dashboard edit`,
-      });
-    }
-    return { namespace, reference: ref, minFee: value };
-  }
-
   private async readPolicies(): Promise<{ policies: Map<number, FeePolicySnapshot>; activeVersion: number }> {
     const rows = await this.prisma.chainFeePolicy.findMany({
-      include: { minima: true },
       orderBy: { version: "asc" },
     });
     if (rows.length === 0) return this.codeFallback();
     const policies = new Map<number, FeePolicySnapshot>();
     for (const r of rows) {
-      const minima = new Map<string, bigint>();
-      for (const m of r.minima) minima.set(chainKey(m.namespace, m.reference), m.minFee);
+      // ANT-743: legacy `chain_min_fees` rows are inert — minima always empty.
       policies.set(r.version, {
         version: r.version,
         bps: r.bps,
@@ -324,7 +308,7 @@ export class FeePolicyService {
         fxSource: r.fxSource,
         fxAsOf: r.fxAsOf,
         updatedAt: r.updatedAt,
-        minima,
+        minima: new Map(),
       });
     }
     const active = rows.find((r) => r.active) ?? rows[rows.length - 1];
@@ -332,25 +316,11 @@ export class FeePolicyService {
   }
 
   /**
-   * Frozen-table fallback (no DB rows yet): the active in-code row mapped onto
-   * registry natural keys. Monad/Arb are pinned to 0 here (spec §4.4) even
-   * though `feeChainForEvmReference` would hand them the Ethereum floor.
+   * Frozen-table fallback (no DB rows yet): the active in-code row's
+   * percentage leg. Minima are always empty (ANT-743 pure percentage).
    */
   private codeFallback(): { policies: Map<number, FeePolicySnapshot>; activeVersion: number } {
-    const table = FEE_POLICY_TABLE[configuredPolicyVersion()] ? configuredPolicyVersion() : 1;
-    const version = table;
-    const row = FEE_POLICY_TABLE[version];
-    const minima = new Map<string, bigint>();
-    for (const c of EVM_CHAINS) {
-      const min =
-        c.chainReference === "10143" || c.chainReference === "421614"
-          ? 0n
-          : chainMinBaseUnits(feeChainForEvmReference(c.chainReference), version);
-      minima.set(chainKey("eip155", c.chainReference), min);
-    }
-    for (const ref of [SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE]) {
-      minima.set(chainKey("solana", ref), chainMinBaseUnits("solana", version));
-    }
+    const version = FEE_POLICY_TABLE[configuredPolicyVersion()] ? configuredPolicyVersion() : 1;
     const now = new Date();
     const policies = new Map<number, FeePolicySnapshot>();
     for (const [v, r] of Object.entries(FEE_POLICY_TABLE)) {
@@ -361,7 +331,7 @@ export class FeePolicyService {
         fxSource: "FALLBACK_STATIC",
         fxAsOf: null,
         updatedAt: now,
-        minima: Number(v) === version ? minima : new Map(),
+        minima: new Map(),
       });
     }
     return { policies, activeVersion: version };
