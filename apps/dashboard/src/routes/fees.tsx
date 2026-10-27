@@ -6,7 +6,7 @@ import { Card, ERROR, MUTED } from "../workspace/ui";
 import { PageHeader } from "../workspace/page-header";
 import { CutButton } from "../workspace/cut-button";
 
-/** Admin fees console: global PeridotID fee + DOKU gateway fee rates. */
+/** Admin fees console: global PeridotID fee + DOKU gateway fee rates + chain MIN_FEE policy. */
 export default function WorkspaceFeesPage() {
   const { client, status, isAdmin, busy, error, signIn } = useWorkspace();
 

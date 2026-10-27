@@ -6,6 +6,7 @@ import type { FeePolicyView, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
 import type { PaymentFeeRate } from "./app-types";
 import { Card, DIVIDER, ERROR, FIELD, MUTED, SECTION_LABEL, MiniButton } from "./ui";
+import { ChainFeesManager } from "./chain-fees-manager";
 import { PageHeader } from "./page-header";
 
 function fmtIdr(units: string): string {
@@ -34,13 +35,14 @@ const pctOnly = (v: string) => v.replace(/[^\d.]/g, "");
 const digitsOnly = (v: string) => v.replace(/\D/g, "");
 const toBps = (percent: string) => Math.round((Number(percent) || 0) * 100);
 
-type Tab = "peridot" | "doku";
+type Tab = "peridot" | "doku" | "chain";
 
 /**
- * Admin fees console. Two tabs:
+ * Admin fees console. Three tabs:
  *  - PeridotID: platform fee (append-only versioned) + its PPN.
  *  - DOKU: which payment methods are offered, each method's gateway fee, and the
  *    DOKU-wide PPN.
+ *  - Chain: chain fee-policy versions (MIN_FEE legs) + subsidy ledger summary.
  * Admin-only; the API enforces the same on every write.
  */
 export function FeesManager({ client }: { client: PeridotClient }) {
@@ -71,8 +73,8 @@ export function FeesManager({ client }: { client: PeridotClient }) {
   };
 
   // ANT-341 FR6: roving-tabindex tab refs for arrow-key nav.
-  const tabOrder: Tab[] = ["peridot", "doku"];
-  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ peridot: null, doku: null });
+  const tabOrder: Tab[] = ["peridot", "doku", "chain"];
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ peridot: null, doku: null, chain: null });
   const onTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, current: Tab) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     e.preventDefault();
@@ -198,7 +200,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
       <PageHeader
         eyebrow="Treasury"
         title="Fees"
-        description="The PeridotID platform fee and the DOKU payment-gateway fees and PPN charged on top-ups."
+        description="The PeridotID platform fee, the DOKU payment-gateway fees and PPN charged on top-ups, and the chain fee-policy (MIN_FEE) console."
       />
       {error && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -233,13 +235,15 @@ export function FeesManager({ client }: { client: PeridotClient }) {
               tab === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {k === "peridot" ? "PeridotID" : "DOKU"}
+            {k === "peridot" ? "PeridotID" : k === "doku" ? "DOKU" : "Chain"}
           </button>
         ))}
       </div>
 
       <div role="tabpanel" id={`fees-panel-${tab}`} aria-labelledby={`fees-tab-${tab}`} className="mt-4 grid gap-4">
-        {tab === "peridot" ? (
+        {tab === "chain" ? (
+          <ChainFeesManager client={client} />
+        ) : tab === "peridot" ? (
           <Card>
             <div className="flex items-center justify-between gap-3">
               <p className={SECTION_LABEL}>PeridotID platform fee</p>
