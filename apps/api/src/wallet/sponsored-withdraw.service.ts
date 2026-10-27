@@ -9,9 +9,11 @@
 import {
   BadRequestException,
   ConflictException,
+  GoneException,
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -19,19 +21,20 @@ import { ChainAccount } from "@prisma/client";
 import { createHash } from "node:crypto";
 import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
-import { ACCOUNT_TYPE_SMART, SolanaSelection } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
   chainMinBaseUnits,
   exceedsDriftBound,
   exceedsMaxTotalFee,
   feePolicyVersion as configuredPolicyVersion,
-  platformFeeOf,
+  platformFeeWithMin,
   protocolFeeBps,
   QUOTE_TTL_SECS,
   relayerKeypair,
   solanaAdapter,
 } from "../common/solana-relay";
+import { FeePolicyService } from "../fee/fee-policy.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
@@ -98,6 +101,8 @@ export interface SponsoredWithdrawResult {
   networkFeeLamports: string;
   protocolFeeLamports: string;
   status: "confirmed" | "pending";
+  /** Present when the signed version trails the active policy by one (NFR-6/AC-11). */
+  feePolicyWarning?: string;
 }
 
 /** Maximum authorization lifetime (seconds) — bounds cross-cluster replay. */
@@ -114,6 +119,7 @@ export class SponsoredWithdrawService {
     private readonly chains: ChainRegistryService,
     private readonly idempotency: RelayerIdempotencyService,
     private readonly breaker: CircuitBreakerService,
+    @Optional() private readonly fees?: FeePolicyService,
   ) {}
 
   private policyVersion(): number {
@@ -213,20 +219,84 @@ export class SponsoredWithdrawService {
   }
 
   /**
+   * Quoting leg for one Solana cluster (ANT-730): DB-managed MIN_FEE via the
+   * fee-policy service, frozen in-code table when the service/row is absent.
+   */
+  private async solanaFeeLeg(
+    selection?: SolanaSelection,
+    version?: number,
+  ): Promise<{ version: number; bps: number; chainMin: bigint }> {
+    const reference = solanaReferenceFor(selection ?? "devnet");
+    if (this.fees) {
+      if (version === undefined) {
+        const m = await this.fees.minFeeFor("solana", reference);
+        return { version: m.version, bps: m.bps, chainMin: m.minFee };
+      }
+      const leg = await this.fees.minFeeForVersion("solana", reference, version).catch(() => undefined);
+      if (leg) return { version, bps: leg.bps, chainMin: leg.minFee };
+    }
+    const v = version ?? this.policyVersion();
+    return { version: v, bps: protocolFeeBps(v), chainMin: chainMinBaseUnits("solana", v) };
+  }
+
+  /**
+   * Submit-time version gate (spec §4.3, NFR-6/AC-11): the active version and
+   * one version back are accepted (older with a warning); anything older is
+   * StaleQuote (410), anything unknown is UnknownFeePolicy (400). Without
+   * the fee service the frozen exact-match rule applies (previous behavior).
+   */
+  private async gateSubmitVersion(
+    pid: string,
+    entryPoint: SponsoredEntryPoint,
+    nonce: string,
+    submitted: number,
+  ): Promise<string | undefined> {
+    if (!this.fees) {
+      if (submitted !== this.policyVersion()) {
+        return this.reject(
+          pid,
+          entryPoint,
+          nonce,
+          "policy-unknown",
+          new BadRequestException({ code: "UnknownFeePolicy", message: "Unsupported fee policy — re-quote and try again" }),
+        );
+      }
+      return undefined;
+    }
+    const gate = await this.fees.checkSubmitVersion(submitted);
+    if (!gate.ok) {
+      return this.reject(
+        pid,
+        entryPoint,
+        nonce,
+        "policy-unknown",
+        gate.status === 410
+          ? new GoneException({ code: gate.code, message: gate.message })
+          : new BadRequestException({ code: gate.code, message: gate.message }),
+      );
+    }
+    return gate.warning;
+  }
+
+  /**
    * Fee-policy v2 quote envelope shared by withdraw + execute quotes.
    * `maxTotalFee` offered defaults to `totalFee`; the client MAY raise it
    * before passkey-signing (drift headroom) — submit enforces the signed bound.
    */
-  private quoteEnvelope(networkFee: bigint, version: number, chainTime: number, treasury: string) {
-    const bps = protocolFeeBps(version);
-    const platformFee = platformFeeOf(networkFee, "solana", version);
+  private quoteEnvelope(
+    networkFee: bigint,
+    leg: { version: number; bps: number; chainMin: bigint },
+    chainTime: number,
+    treasury: string,
+  ) {
+    const platformFee = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
     const totalFee = networkFee + platformFee;
     const quotedAt = new Date(chainTime * 1000);
     const expiresAt = new Date(quotedAt.getTime() + QUOTE_TTL_SECS * 1000);
     return {
       networkFeeLamports: networkFee.toString(),
-      protocolFeeBps: bps,
-      feePolicyVersion: version,
+      protocolFeeBps: leg.bps,
+      feePolicyVersion: leg.version,
       totalFeeLamports: totalFee.toString(),
       chainTime,
       treasury,
@@ -236,7 +306,7 @@ export class SponsoredWithdrawService {
       totalFee: totalFee.toString(),
       maxTotalFee: totalFee.toString(),
       suggestedMaxTotalFee: totalFee.toString(),
-      chainMinBaseUnits: chainMinBaseUnits("solana", version).toString(),
+      chainMinBaseUnits: leg.chainMin.toString(),
       quoteId: `q_sol_${chainTime}_${networkFee.toString(36)}`,
       quotedAt: quotedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
@@ -318,11 +388,11 @@ export class SponsoredWithdrawService {
     const { chain } = await this.resolveSmart(pid);
     await this.assertActivated(adapter, chain.address);
     const networkFee = await this.networkFeeLamports(adapter);
-    const version = this.policyVersion();
+    const leg = await this.solanaFeeLeg(selection);
     const chainTime = await adapter.chainTime();
     const solChain = await this.chains.solanaChain(selection).catch(() => undefined);
     return {
-      ...this.quoteEnvelope(networkFee, version, chainTime, adapter.treasuryAddress().toBase58()),
+      ...this.quoteEnvelope(networkFee, leg, chainTime, adapter.treasuryAddress().toBase58()),
       ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
@@ -365,16 +435,10 @@ export class SponsoredWithdrawService {
 
     const amount = BigInt(dto.amount);
     if (amount <= 0n) throw new BadRequestException("Amount must be greater than 0");
-    const version = this.policyVersion();
-    if (dto.feePolicyVersion !== version) {
-      return this.reject(
-        pid,
-        "withdraw",
-        dto.nonce,
-        "policy-unknown",
-        new BadRequestException("Unsupported fee policy — re-quote and try again"),
-      );
-    }
+    // Submit settles under the SIGNED version (v1 traffic keeps v1 math).
+    const feePolicyWarning = await this.gateSubmitVersion(pid, "withdraw", dto.nonce, dto.feePolicyVersion);
+    const version = dto.feePolicyVersion;
+    const leg = await this.solanaFeeLeg(selection, version);
 
     // Stale-nonce / expired / over-TTL rejections happen before broadcast.
     const chainNonce = BigInt(await adapter.getNonce(pid));
@@ -415,7 +479,7 @@ export class SponsoredWithdrawService {
         new ConflictException("Network fee moved — re-quote and try again"),
       );
     }
-    const protocolFee = platformFeeOf(networkFee, "solana", version);
+    const protocolFee = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
     const totalFee = networkFee + protocolFee;
 
     // V4 user bound (spec B5/B-AC5): the passkey-signed authorization carries
@@ -641,6 +705,7 @@ export class SponsoredWithdrawService {
       networkFee: networkFee.toString(),
       protocolFee: protocolFee.toString(),
       feePolicyVersion: version,
+      ...(feePolicyWarning ? { feePolicyWarning } : {}),
     });
     if (status === "confirmed") {
       await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "withdraw", "confirmed", signature);
@@ -651,7 +716,7 @@ export class SponsoredWithdrawService {
         signature,
       });
     }
-    await this.reconcile(pid, adapter, signature, networkFee, protocolFee, version).catch((err) =>
+    await this.reconcile(pid, adapter, signature, networkFee, protocolFee, leg).catch((err) =>
       this.logger.warn(`withdraw reconcile failed for ${signature}: ${(err as Error).message}`),
     );
     return {
@@ -659,6 +724,7 @@ export class SponsoredWithdrawService {
       networkFeeLamports: networkFee.toString(),
       protocolFeeLamports: protocolFee.toString(),
       status,
+      ...(feePolicyWarning ? { feePolicyWarning } : {}),
     };
   }
 
@@ -675,10 +741,10 @@ export class SponsoredWithdrawService {
     signature: string,
     networkFee: bigint,
     protocolFee: bigint,
-    version: number,
+    leg: { version: number; bps: number; chainMin: bigint },
     kind: SponsoredEntryPoint = "withdraw",
   ): Promise<void> {
-    const expectedProtocol = platformFeeOf(networkFee, "solana", version);
+    const expectedProtocol = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
     const parsed = await adapter.parseTransaction(signature).catch(() => null);
     const actual = parsed?.fee != null ? BigInt(parsed.fee) : null;
     const absorbed = absorbedLoss(networkFee, actual);
@@ -725,7 +791,7 @@ export class SponsoredWithdrawService {
         protocolFee: protocolFee.toString(),
         protocolFeeExpected: expectedProtocol.toString(),
         networkFee: networkFee.toString(),
-        feePolicyVersion: version,
+        feePolicyVersion: leg.version,
       });
     }
     if (overAttested) {
@@ -744,7 +810,7 @@ export class SponsoredWithdrawService {
         signature,
         attestedNetworkFee: networkFee.toString(),
         actualNetworkFee: actual?.toString() ?? "unknown",
-        feePolicyVersion: version,
+        feePolicyVersion: leg.version,
       });
     }
   }
@@ -795,11 +861,11 @@ export class SponsoredWithdrawService {
     await this.assertActivated(adapter, chain.address);
     const decoded = await this.decodeExecuteCall(chain.address, call, selection);
     const networkFee = await adapter.estimateExecuteFee(decoded.target, decoded.metas, decoded.data.length);
-    const version = this.policyVersion();
+    const leg = await this.solanaFeeLeg(selection);
     const chainTime = await adapter.chainTime();
     const solChain = await this.chains.solanaChain(selection).catch(() => undefined);
     return {
-      ...this.quoteEnvelope(networkFee, version, chainTime, adapter.treasuryAddress().toBase58()),
+      ...this.quoteEnvelope(networkFee, leg, chainTime, adapter.treasuryAddress().toBase58()),
       ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
     };
   }
@@ -841,16 +907,10 @@ export class SponsoredWithdrawService {
       return this.reject(pid, "execute", dto.nonce, "unauthorized", new BadRequestException("Unknown or inactive passkey"));
     }
 
-    const version = this.policyVersion();
-    if (dto.feePolicyVersion !== version) {
-      return this.reject(
-        pid,
-        "execute",
-        dto.nonce,
-        "policy-unknown",
-        new BadRequestException("Unsupported fee policy — re-quote and try again"),
-      );
-    }
+    // Submit settles under the SIGNED version (v1 traffic keeps v1 math).
+    const feePolicyWarning = await this.gateSubmitVersion(pid, "execute", dto.nonce, dto.feePolicyVersion);
+    const version = dto.feePolicyVersion;
+    const leg = await this.solanaFeeLeg(selection, version);
 
     // Stale-nonce / expired / over-TTL rejections happen before broadcast.
     const chainNonce = BigInt(await adapter.getNonce(pid));
@@ -891,7 +951,7 @@ export class SponsoredWithdrawService {
         new ConflictException("Network fee moved — re-quote and try again"),
       );
     }
-    const protocolFee = platformFeeOf(networkFee, "solana", version);
+    const protocolFee = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
     const totalFee = networkFee + protocolFee;
 
     // V4 user bound (spec B5/B-AC5): fail-closed pre-broadcast, like withdraw.
@@ -1037,6 +1097,7 @@ export class SponsoredWithdrawService {
       feePolicyVersion: version,
       dataLen: decoded.data.length,
       metaCount: decoded.metas.length,
+      ...(feePolicyWarning ? { feePolicyWarning } : {}),
     });
     if (status === "confirmed") {
       await this.security.log(pid, RelayerH1Events.resolveLanded, {
@@ -1046,7 +1107,7 @@ export class SponsoredWithdrawService {
         signature,
       });
     }
-    await this.reconcile(pid, adapter, signature, networkFee, protocolFee, version, "execute").catch((err) =>
+    await this.reconcile(pid, adapter, signature, networkFee, protocolFee, leg, "execute").catch((err) =>
       this.logger.warn(`execute reconcile failed for ${signature}: ${(err as Error).message}`),
     );
     if (status === "confirmed") {
@@ -1057,6 +1118,7 @@ export class SponsoredWithdrawService {
       networkFeeLamports: networkFee.toString(),
       protocolFeeLamports: protocolFee.toString(),
       status,
+      ...(feePolicyWarning ? { feePolicyWarning } : {}),
     };
   }
 }

@@ -7,11 +7,13 @@
 import {
   BadRequestException,
   ConflictException,
+  GoneException,
   Injectable,
   Logger,
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -26,13 +28,14 @@ import {
   chainMinBaseUnits,
   exceedsMaxTotalFee,
   feePolicyVersion as configuredPolicyVersion,
-  platformFeeOf,
+  platformFeeWithMin,
   protocolFeeBps,
   exceedsDriftBound,
   QUOTE_TTL_SECS,
   relayerKeypair,
   solanaAdapter,
 } from "../common/solana-relay";
+import { FeePolicyService } from "../fee/fee-policy.service";
 import { PID_ACTIVATION_CONFIRM_INTERVAL_MS, PID_ACTIVATION_CONFIRM_ATTEMPTS, PID_ACTIVATION_POLL_MS } from "../common/app-config";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -82,6 +85,8 @@ export interface ActivationView {
   /** Quote timestamps (ISO-8601; `expiresAt − quotedAt` ≤ 300s, NFR-3). */
   quotedAt: string;
   expiresAt: string;
+  /** Present on submit results when the signed version trails the active policy by one (NFR-6). */
+  feePolicyWarning?: string;
 }
 
 const POLL_ACCOUNT_TYPE = ACCOUNT_TYPE_SMART;
@@ -101,6 +106,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     private readonly chains: ChainRegistryService,
     private readonly idempotency: RelayerIdempotencyService,
     private readonly breaker: CircuitBreakerService,
+    @Optional() private readonly fees?: FeePolicyService,
   ) {}
 
   onModuleInit(): void {
@@ -148,22 +154,44 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return undefined;
   }
 
+  /** Quoting leg for one Solana cluster (ANT-730): DB-managed MIN_FEE via the
+   *  fee-policy service, frozen in-code table when the service/row is absent. */
+  private async solanaFeeLeg(
+    selection?: SolanaSelection,
+    version?: number,
+  ): Promise<{ version: number; bps: number; chainMin: bigint }> {
+    const reference = solanaReferenceFor(selection ?? "devnet");
+    if (this.fees) {
+      if (version === undefined) {
+        const m = await this.fees.minFeeFor(SOLANA_NAMESPACE, reference);
+        return { version: m.version, bps: m.bps, chainMin: m.minFee };
+      }
+      const leg = await this.fees.minFeeForVersion(SOLANA_NAMESPACE, reference, version).catch(() => undefined);
+      if (leg) return { version, bps: leg.bps, chainMin: leg.minFee };
+    }
+    const v = version ?? this.policyVersion();
+    return { version: v, bps: protocolFeeBps(v), chainMin: chainMinBaseUnits("solana", v) };
+  }
+
   /** Realtime activation network-cost estimate (rent + message fee, no margin)
    *  plus the v2 platform fee for the active policy. The platform fee is
    *  MAX(50%, chainMin) — never a margin on a total. */
-  private async quotedFees(adapter: SolanaAdapter): Promise<{
+  private async quotedFees(
+    adapter: SolanaAdapter,
+    selection?: SolanaSelection,
+  ): Promise<{
     networkEst: bigint;
     protocolFee: bigint;
     total: bigint;
     version: number;
     bps: number;
+    chainMin: bigint;
   }> {
     const cost = await adapter.estimateActivationCost(0);
     const networkEst = cost.rentLamports + cost.feeLamports;
-    const version = this.policyVersion();
-    const bps = protocolFeeBps(version);
-    const protocolFee = platformFeeOf(networkEst, "solana", version);
-    return { networkEst, protocolFee, total: networkEst + protocolFee, version, bps };
+    const leg = await this.solanaFeeLeg(selection);
+    const protocolFee = platformFeeWithMin(networkEst, leg.bps, leg.chainMin);
+    return { networkEst, protocolFee, total: networkEst + protocolFee, version: leg.version, bps: leg.bps, chainMin: leg.chainMin };
   }
 
   /** Active lamports held by the Peridot relayer (the float that funds fee + rent). */
@@ -254,7 +282,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
       const adapter = await this.adapter(selection);
-      const quoted = await this.quotedFees(adapter);
+      const quoted = await this.quotedFees(adapter, selection);
 
       for (const ca of group.rows) {
         try {
@@ -342,7 +370,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(`activation check failed for ${chain.address}: ${(err as Error).message}`);
     }
-    const quoted = await this.quotedFees(adapter);
+    const quoted = await this.quotedFees(adapter, selection);
     const required = Number(quoted.total);
     const live = activated ? "active" : this.classify(balance, required, chain.status);
 
@@ -395,9 +423,27 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       if (dto.expiry - chainTime > MAX_TTL_SECS) {
         return this.reject(user.pid, "expired", new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again"));
       }
-      if (dto.feePolicyVersion !== quoted.version) {
+      // Submit settles under the SIGNED version (spec §4.3/NFR-6): the active
+      // version and one version back are accepted (older with a warning); older
+      // is StaleQuote (410), unknown is UnknownFeePolicy (400).
+      const version = dto.feePolicyVersion;
+      let feePolicyWarning: string | undefined;
+      if (this.fees) {
+        const gate = await this.fees.checkSubmitVersion(version);
+        if (!gate.ok) {
+          return this.reject(
+            user.pid,
+            "policy-unknown",
+            gate.status === 410
+              ? new GoneException({ code: gate.code, message: gate.message })
+              : new BadRequestException({ code: gate.code, message: gate.message }),
+          );
+        }
+        feePolicyWarning = gate.warning;
+      } else if (version !== quoted.version) {
         return this.reject(user.pid, "policy-unknown", new BadRequestException("Unsupported fee policy — re-quote and try again"));
       }
+      const submitLeg = await this.solanaFeeLeg(selection, version);
       // Attest the realtime network fee at submit time; fail closed when it drifted
       // beyond 120% of what the client quoted against.
       const quotedNetwork = BigInt(dto.quotedNetworkFeeLamports);
@@ -412,7 +458,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         });
         return this.reject(user.pid, "drift", new ConflictException("Network fee moved — re-quote and try again"));
       }
-      const protocolFee = platformFeeOf(networkFee, "solana", quoted.version);
+      const protocolFee = platformFeeWithMin(networkFee, submitLeg.bps, submitLeg.chainMin);
       const totalFee = networkFee + protocolFee;
 
       // V4 user bound (spec B5/B-AC5): `totalFee ≤ maxTotalFee` pre-broadcast.
@@ -425,7 +471,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
           maxTotalFee: dto.maxTotalFeeLamports,
           networkFee: networkFee.toString(),
           protocolFee: protocolFee.toString(),
-          feePolicyVersion: quoted.version,
+          feePolicyVersion: version,
         });
         throw new ConflictException("Total fee exceeds your authorized maximum — re-quote and try again");
       }
@@ -434,7 +480,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       // replay-protection scalar for activation. Identical retries reuse the
       // slot; different bytes under the same expiry are forbidden.
       const slotHash = createHash("sha256")
-        .update(JSON.stringify(["activate", dto.expiry, quoted.version, networkFee.toString()]))
+        .update(JSON.stringify(["activate", dto.expiry, version, networkFee.toString()]))
         .update(dto.assertion.signature)
         .digest("hex");
       const claim = await this.idempotency.claimSlot(
@@ -445,7 +491,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         "activate",
       );
       if (claim.decision === "duplicate" && claim.signature) {
-        return this.viewOf(user, selection);
+        const dup = await this.viewOf(user, selection);
+        return feePolicyWarning ? { ...dup, feePolicyWarning } : dup;
       }
 
       const out = await this.idempotency.broadcastWithResolveThenAct({
@@ -458,7 +505,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
             .activateV3(
               user.pid,
               coseToCompressedSecp256r1(Buffer.from(asserting.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
-              quoted.version,
+              version,
               networkFee,
               dto.expiry,
               this.relayer(),
@@ -548,7 +595,8 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         signature,
         networkFee: networkFee.toString(),
         protocolFee: protocolFee.toString(),
-        feePolicyVersion: quoted.version,
+        feePolicyVersion: version,
+        ...(feePolicyWarning ? { feePolicyWarning } : {}),
       });
       // H2: resolve-then-act outcome for the sponsored activation.
       await this.security.log(user.pid, RelayerH1Events.resolveLanded, {
@@ -556,15 +604,37 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         entryPoint: "activate",
         signature,
       });
-      await this.reconcileActivation(user.pid, adapter, signature, networkFee, protocolFee, quoted.version).catch(
+      await this.reconcileActivation(user.pid, adapter, signature, networkFee, protocolFee, submitLeg).catch(
         (err) => this.logger.warn(`activation reconcile failed for ${signature}: ${(err as Error).message}`),
       );
+      // NFR-4/AC-13: every activation lands a quote–actual pair in the subsidy
+      // ledger. actualCost is the parsed tx fee (rent locks in the PDA and the
+      // service leg is revenue, so subsidy reads negative by those legs —
+      // the pair's job is drift visibility, not P&L exactness). Best-effort:
+      // a ledger write failure never fails the user flow.
+      await adapter
+        .parseTransaction(signature)
+        .then((parsed) => (parsed?.fee != null ? BigInt(parsed.fee) : null))
+        .catch(() => null)
+        .then((actual) => {
+          if (actual === null) return undefined;
+          return this.fees?.recordSubsidy({
+            pid: user.pid,
+            namespace: SOLANA_NAMESPACE,
+            reference: solanaReferenceFor(selection ?? "devnet"),
+            kind: "activation",
+            quotedFee: networkFee + protocolFee,
+            actualCost: actual,
+            txHash: signature,
+          });
+        })
+        .catch((err) => this.logger.warn(`activation subsidy ledger failed for ${signature}: ${(err as Error).message}`));
+      const view = await this.viewOf(user, selection);
+      return feePolicyWarning ? { ...view, feePolicyWarning } : view;
     } catch (err) {
       await this.prisma.chainAccount.update({ where: { id: chain.id }, data: { status: "ready" } }).catch(() => undefined);
       throw err;
     }
-
-    return this.viewOf(user, selection);
   }
 
   /** H1.ii: semantic intent rejections emit intent.rejected (activation has no nonce — key omitted). */
@@ -604,7 +674,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       this.logger.warn(`activation view failed for ${chain.address}: ${(err as Error).message}`);
     }
-    const quoted = await this.quotedFees(adapter);
+    const quoted = await this.quotedFees(adapter, selection);
     const required = Number(quoted.total);
 
     // Authoritative: a program-owned PDA is ACTIVE regardless of stored status.
@@ -635,7 +705,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       platformFee: quoted.protocolFee.toString(),
       totalFee: quoted.total.toString(),
       maxTotalFee: quoted.total.toString(),
-      chainMinBaseUnits: chainMinBaseUnits("solana", quoted.version).toString(),
+      chainMinBaseUnits: quoted.chainMin.toString(),
       quotedAt: quotedAt.toISOString(),
       expiresAt: expiresAt.toISOString(),
     };
@@ -652,9 +722,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     signature: string,
     networkFee: bigint,
     protocolFee: bigint,
-    version: number,
+    leg: { version: number; bps: number; chainMin: bigint },
   ): Promise<void> {
-    const expectedProtocol = platformFeeOf(networkFee, "solana", version);
+    const expectedProtocol = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
     const formulaDiverged = protocolFee !== expectedProtocol;
     const parsed = await adapter.parseTransaction(signature).catch(() => null);
     const actual = parsed?.fee != null ? BigInt(parsed.fee) : null;
@@ -697,7 +767,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         protocolFee: protocolFee.toString(),
         protocolFeeExpected: expectedProtocol.toString(),
         networkFee: networkFee.toString(),
-        feePolicyVersion: version,
+        feePolicyVersion: leg.version,
       });
     }
   }
