@@ -24,12 +24,11 @@ import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { ACCOUNT_TYPE_SMART, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
-  chainMinBaseUnits,
   exceedsDriftBound,
   exceedsMaxTotalFee,
   feePolicyVersion as configuredPolicyVersion,
-  platformFeeWithMin,
   protocolFeeBps,
+  protocolFeeOf,
   QUOTE_TTL_SECS,
   relayerKeypair,
   solanaAdapter,
@@ -73,7 +72,7 @@ export interface WithdrawQuote {
   // --- Fee-policy v2 canonical quote shape (ANT-544 §4.1; contract-first field names) ---
   /** Canonical alias of networkFeeLamports (base units, decimal string). */
   networkFee: string;
-  /** v2 platform fee: MAX(floor(networkFee×bps/10_000), chainMin) (base units). */
+  /** platform fee: floor(networkFee×bps/10_000), pure percentage (base units). */
   platformFee: string;
   /** Solana-legacy alias of platformFee (lamports). */
   protocolFeeLamports: string;
@@ -87,7 +86,7 @@ export interface WithdrawQuote {
   maxTotalFee: string;
   /** Legacy alias of maxTotalFee (lamports). */
   suggestedMaxTotalFee: string;
-  /** chainMin applied for this chain under the quoted policy version (base units). */
+  /** minima leg — always "0" since ANT-743 (kept for shape compatibility). */
   chainMinBaseUnits: string;
   /** Informational quote id (submit re-attests — the id is not replay-checked). */
   quoteId: string;
@@ -219,8 +218,9 @@ export class SponsoredWithdrawService {
   }
 
   /**
-   * Quoting leg for one Solana cluster (ANT-730): DB-managed MIN_FEE via the
-   * fee-policy service, frozen in-code table when the service/row is absent.
+   * Quoting leg for one Solana cluster (ANT-743: pure percentage — the
+   * fee-policy service supplies version + bps; the minima leg is always 0).
+   * Frozen in-code bps apply when the service/row is absent.
    */
   private async solanaFeeLeg(
     selection?: SolanaSelection,
@@ -230,13 +230,13 @@ export class SponsoredWithdrawService {
     if (this.fees) {
       if (version === undefined) {
         const m = await this.fees.minFeeFor("solana", reference);
-        return { version: m.version, bps: m.bps, chainMin: m.minFee };
+        return { version: m.version, bps: m.bps, chainMin: 0n };
       }
       const leg = await this.fees.minFeeForVersion("solana", reference, version).catch(() => undefined);
-      if (leg) return { version, bps: leg.bps, chainMin: leg.minFee };
+      if (leg) return { version, bps: leg.bps, chainMin: 0n };
     }
     const v = version ?? this.policyVersion();
-    return { version: v, bps: protocolFeeBps(v), chainMin: chainMinBaseUnits("solana", v) };
+    return { version: v, bps: protocolFeeBps(v), chainMin: 0n };
   }
 
   /**
@@ -289,7 +289,7 @@ export class SponsoredWithdrawService {
     chainTime: number,
     treasury: string,
   ) {
-    const platformFee = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
+    const platformFee = protocolFeeOf(networkFee, leg.bps);
     const totalFee = networkFee + platformFee;
     const quotedAt = new Date(chainTime * 1000);
     const expiresAt = new Date(quotedAt.getTime() + QUOTE_TTL_SECS * 1000);
@@ -479,7 +479,7 @@ export class SponsoredWithdrawService {
         new ConflictException("Network fee moved — re-quote and try again"),
       );
     }
-    const protocolFee = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
+    const protocolFee = protocolFeeOf(networkFee, leg.bps);
     const totalFee = networkFee + protocolFee;
 
     // V4 user bound (spec B5/B-AC5): the passkey-signed authorization carries
@@ -744,7 +744,7 @@ export class SponsoredWithdrawService {
     leg: { version: number; bps: number; chainMin: bigint },
     kind: SponsoredEntryPoint = "withdraw",
   ): Promise<void> {
-    const expectedProtocol = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
+    const expectedProtocol = protocolFeeOf(networkFee, leg.bps);
     const parsed = await adapter.parseTransaction(signature).catch(() => null);
     const actual = parsed?.fee != null ? BigInt(parsed.fee) : null;
     const absorbed = absorbedLoss(networkFee, actual);
@@ -951,7 +951,7 @@ export class SponsoredWithdrawService {
         new ConflictException("Network fee moved — re-quote and try again"),
       );
     }
-    const protocolFee = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
+    const protocolFee = protocolFeeOf(networkFee, leg.bps);
     const totalFee = networkFee + protocolFee;
 
     // V4 user bound (spec B5/B-AC5): fail-closed pre-broadcast, like withdraw.

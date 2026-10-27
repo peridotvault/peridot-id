@@ -355,14 +355,14 @@ export class AdminService {
     }
   }
 
-  // --- Chain fee-policy v2 (ANT-730, dashboard-managed MIN_FEE) ---
+  // --- Chain fee-policy (ANT-730, ANT-743 pure percentage, minima ignored) ---
 
   private feeStore(): FeePolicyService {
     if (!this.fees) throw new ServiceUnavailableException("Chain fee policy store is not configured");
     return this.fees;
   }
 
-  /** Every fee-policy version, newest first (minima as decimal strings). */
+  /** Every fee-policy version, newest first (pure-percentage legs; `minima` always empty). */
   listFeePolicies() {
     return this.feeStore().listPolicies();
   }

@@ -20,12 +20,11 @@ import {
 import { ConfigService } from "@nestjs/config";
 import type { ChainAccountStatus } from "@prisma/client";
 import { createHash } from "node:crypto";
-import { EvmAdapter, EvmRpc, buildViewCalldata, evmChainMinV2, splitEvmFeeV2, toHex } from "@peridotvault/pid-evm";
+import { EvmAdapter, EvmRpc, buildViewCalldata, toHex } from "@peridotvault/pid-evm";
 import { ChainRegistryService, type RegistryChain } from "../chain/chain-registry.service";
 import { classifyActivation, requireActiveAuthority } from "../common/activation";
 import { ACCOUNT_TYPE_SMART, EIP155_NAMESPACE } from "../common/chains";
 import {
-  platformFeeWithMin,
   protocolFeeBps,
   protocolFeeOf,
   exceedsDriftBound,
@@ -66,13 +65,13 @@ export interface EvmActivationView {
   /** Suggested user-approved bound for submit (`maxTotalFeeWei >= totalFeeWei`, V4 B5). */
   maxTotalFeeWei: string;
   /**
-   * v2 service fee, separated from the network fee for wallet rendering
-   * (ANT-730): `serviceFee = max(networkFee × bps / 10_000, MIN_FEE[chain])`
-   * in wei. Canonical alias of the protocol-fee leg — `serviceFee`,
-   * `platformFee` (SVM quotes), and `protocolFee` name the same value.
+   * service fee, separated from the network fee for wallet rendering
+   * (ANT-743: pure `networkFee × bps / 10_000`, no minima) in wei. Canonical
+   * alias of the protocol-fee leg — `serviceFee`, `platformFee` (SVM quotes),
+   * and `protocolFee` name the same value.
    */
   serviceFeeWei: string;
-  /** MIN_FEE leg applied for this chain under the quoted version (wei, "0" when none). */
+  /** minima leg — always "0" since ANT-743 (kept for shape compatibility). */
   chainMinBaseUnits: string;
   /** Canonical alias of networkFeeWei (base units, decimal string). */
   networkFee: string;
@@ -138,7 +137,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private policyVersion(): number {
-    // EVM canonical is V4 policy 2 (MAX 50%, chainMin floor). Policy 1 stays
+    // EVM canonical is policy 2 (pure 50%, no floor). Policy 1 stays
     // accepted on submit for sunset (frozen semantics: 50% no floor).
     return 2;
   }
@@ -159,19 +158,12 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     throw err;
   }
 
-  /** Chain id numeric for the V2 floor table (reference IS the decimal chain id). */
-  private chainIdFor(chain: { reference: string }): number {
-    const cid = Number(chain.reference);
-    if (!Number.isInteger(cid) || cid <= 0) throw new NotFoundException("Unsupported EVM chain");
-    return cid;
-  }
-
   /**
-   * Service (protocol) fee for a policy version with the applied minimum.
-   * DB-first (ANT-730): the dashboard-managed MIN_FEE row for
-   * `(eip155, reference)` under the signed version; absent service/row falls
-   * back to the frozen legs (v1 = 50% no-floor, v2 = `splitEvmFeeV2`). Submit
-   * paths settle under the SIGNED version, so v1 traffic keeps v1 math.
+   * Service (protocol) fee for a policy version (ANT-743: pure percentage —
+   * `networkFee × bps / 10_000`, no minima on any path). DB-first for the
+   * version's bps; the fee-service minima leg is always 0 and ignored. Absent
+   * service/row falls back to the frozen bps legs. Submit paths settle under
+   * the SIGNED version, so v1 traffic keeps v1 math.
    */
   private async serviceFeeFor(
     networkFee: bigint,
@@ -179,14 +171,11 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     chainReference: string,
   ): Promise<{ serviceFee: bigint; chainMin: bigint; bps: number }> {
     const leg = await this.fees?.minFeeForVersion(EIP155_NAMESPACE, chainReference, version).catch(() => undefined);
-    if (leg) return { serviceFee: platformFeeWithMin(networkFee, leg.bps, leg.minFee), chainMin: leg.minFee, bps: leg.bps };
-    if (version === 1) {
+    void chainReference;
+    if (leg) return { serviceFee: protocolFeeOf(networkFee, leg.bps), chainMin: 0n, bps: leg.bps };
+    if (version === 1 || version === 2) {
       const bps = protocolFeeBps(version);
       return { serviceFee: protocolFeeOf(networkFee, bps), chainMin: 0n, bps };
-    }
-    if (version === 2) {
-      const chainId = this.chainIdFor({ reference: chainReference });
-      return { serviceFee: splitEvmFeeV2(networkFee, chainId).protocolFee, chainMin: evmChainMinV2(chainId), bps: protocolFeeBps(version) };
     }
     throw new BadRequestException("Unsupported fee policy — re-quote and try again");
   }
@@ -684,7 +673,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     leg: { version: number; bps: number; chainMin: bigint },
   ): Promise<void> {
     const chain = evmReferenceToFeeChain(chainReference);
-    const expectedProtocol = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
+    const expectedProtocol = protocolFeeOf(networkFee, leg.bps);
     const l1Fee = receipt.l1FeeWei != null ? BigInt(receipt.l1FeeWei) : 0n;
     const actual = BigInt(receipt.costWei) + l1Fee;
     const absorbed = absorbedLoss(networkFee, actual);

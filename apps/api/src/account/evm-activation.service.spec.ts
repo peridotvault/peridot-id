@@ -461,11 +461,11 @@ describe("EvmActivationService", () => {
     })).rejects.toThrow(BadRequestException);
   });
 
-  it("viewOf quotes V4 policy 2 with fee floor and suggested maxTotalFee (B5)", async () => {
+  it("viewOf quotes V4 policy 2 pure percentage with suggested maxTotalFee (B5)", async () => {
     const { service } = setup();
     const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
     expect(view.feePolicyVersion).toBe(2);
-    // 350k gas × 1 gwei = 350_000_000_000_000 network; 50% = 175e12 wins over 2.3e12 floor.
+    // 350k gas × 1 gwei = 350_000_000_000_000 network; pure 50% = 175e12.
     expect(view.networkFeeWei).toBe("350000000000000");
     expect(view.totalFeeWei).toBe("525000000000000");
     expect(view.maxTotalFeeWei).toBe(view.totalFeeWei);
@@ -556,8 +556,8 @@ describe("EvmActivationService", () => {
   });
 });
 
-describe("EvmActivationService — DB fee legs (ANT-730)", () => {
-  const DB_MIN = 10n ** 18n; // above any percentage leg at 1 gwei — proves the DB leg wins
+describe("EvmActivationService — DB fee legs ignored (ANT-743 pure percentage)", () => {
+  const DB_MIN = 10n ** 18n; // above any percentage leg at 1 gwei — proves the DB leg is ignored
   const dbFees = {
     activePolicy: jest.fn<Promise<{ version: number; bps: number }>, []>(),
     minFeeForVersion: jest.fn<Promise<{ minFee: bigint; bps: number }>, []>(),
@@ -572,24 +572,24 @@ describe("EvmActivationService — DB fee legs (ANT-730)", () => {
     dbFees.recordSubsidy.mockResolvedValue(undefined);
   });
 
-  it("viewOf separates network vs DB service fee (AC-7/AC-8)", async () => {
+  it("viewOf separates network vs service fee (pure 50%, DB leg ignored)", async () => {
     const { service } = setup(undefined, dbFees);
     const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
-    // network = 350000 × 1 gwei = 3.5e14; pct = 1.75e14 < DB min 1e18.
+    // network = 350000 × 1 gwei = 3.5e14; service = pure 50% = 1.75e14 (DB 1e18 leg ignored).
     expect(view.feePolicyVersion).toBe(2);
     expect(view.networkFeeWei).toBe("350000000000000");
-    expect(view.serviceFeeWei).toBe("1000000000000000000");
-    expect(view.chainMinBaseUnits).toBe("1000000000000000000");
-    expect(view.platformFee).toBe("1000000000000000000");
+    expect(view.serviceFeeWei).toBe("175000000000000");
+    expect(view.chainMinBaseUnits).toBe("0");
+    expect(view.platformFee).toBe("175000000000000");
     expect(view.networkFee).toBe("350000000000000");
-    expect(view.totalFee).toBe("1000350000000000000");
-    expect(view.totalFeeWei).toBe("1000350000000000000");
-    expect(view.requiredWei).toBe("1000350000000000000");
+    expect(view.totalFee).toBe("525000000000000");
+    expect(view.totalFeeWei).toBe("525000000000000");
+    expect(view.requiredWei).toBe("525000000000000");
     expect(view.protocolFeeBps).toBe(5000);
   });
 
   it("activate rejects a superseded version as StaleQuote (410)", async () => {
-    // Frozen-equivalent leg so the account classifies READY and reaches the gate.
+    // Pure-percentage leg so the account classifies READY and reaches the gate.
     dbFees.minFeeForVersion.mockResolvedValue({ minFee: 2_300_000_000_000n, bps: 5000 });
     dbFees.checkSubmitVersion.mockResolvedValue({
       ok: false as const,

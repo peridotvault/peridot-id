@@ -1,17 +1,14 @@
-// Settlement-guard floors for chain fee minima (ANT-730, spec ANT-727 §4.3).
+// Former settlement-guard floors for chain fee minima (ANT-730, spec ANT-727 §4.3).
 //
-// The on-chain immutable values are the settlement guard: a DB MIN_FEE below
-// the chain's on-chain floor would quote fine but revert at settlement, so
-// admin writes below the floor are rejected (`ChainMinBelowFloor`, AC-10).
-// DB values may sit AT or ABOVE the floor (surplus = revenue, safe direction).
+// ANT-743: minima removed — quotes and settlement are pure
+// `networkFee × bps / 10_000` with no floor. This module is kept for shape
+// compatibility only: `settlementFloorFor` always returns 0n and no admin
+// write is gated. The `CHAIN_FEE_FLOORS` rows below are the historical
+// (pre-ANT-743) schedule, retained as documentation — they are NOT enforced.
 //
-// Floor schedule = spec §4.2 "Sumber on-chain (backstop)" (fee-policy v2
-// design values: `PeridotAccount.sol _chainMinV2` / `fee.rs
-// CHAIN_MIN_LAMPORTS_V2`). Lowering a floor below these values needs a policy
-// version + contract/program upgrade + Tobias review — never a dashboard edit.
-// Monad testnet (10143) and Arbitrum Sepolia (421614) are 0 on-chain and in
-// the backend (spec §4.4, AC-14): the pre-v2 backend wrongly applied the
-// Ethereum fallback floor to them via `feeChainForEvmReference`.
+// No migration deletes the `chain_min_fees` rows: legacy rows stay in the DB
+// but the fee service never reads them (inert). A cleanup migration may drop
+// the table once every environment has deployed the ANT-743 backend.
 import { SOLANA_DEVNET_REFERENCE, SOLANA_TESTNET_REFERENCE } from "./chains";
 
 /** Settlement floor in native base units, keyed by registry natural key. */
@@ -24,6 +21,10 @@ export interface ChainFeeFloor {
   source: string;
 }
 
+/**
+ * Historical floor schedule (pre-ANT-743, NOT enforced).
+ * @deprecated ANT-743: fee floors removed.
+ */
 export const CHAIN_FEE_FLOORS: ReadonlyArray<ChainFeeFloor> = Object.freeze([
   { namespace: "eip155", reference: "84532", floor: 750_000_000_000n, source: "PeridotAccount.sol _chainMinV2 (base)" },
   { namespace: "eip155", reference: "97", floor: 2_300_000_000_000n, source: "PeridotAccount.sol _chainMinV2 (bsc)" },
@@ -33,7 +34,12 @@ export const CHAIN_FEE_FLOORS: ReadonlyArray<ChainFeeFloor> = Object.freeze([
   { namespace: "solana", reference: SOLANA_TESTNET_REFERENCE, floor: 17_000n, source: "fee.rs CHAIN_MIN_LAMPORTS_V2" },
 ]);
 
-/** Settlement floor for a chain (0 for unlisted chains — permissive, admin-set minima rule there). */
+/**
+ * Settlement floor for a chain.
+ * @deprecated ANT-743: fee floors removed — always returns 0n.
+ */
 export function settlementFloorFor(namespace: string, reference: string): bigint {
-  return CHAIN_FEE_FLOORS.find((f) => f.namespace === namespace && f.reference === reference)?.floor ?? 0n;
+  void namespace;
+  void reference;
+  return 0n;
 }

@@ -25,11 +25,10 @@ import { classifyActivation, requireActiveAuthority } from "../common/activation
 import { ACCOUNT_TYPE_SMART, SOLANA_DEVNET_REFERENCE, SOLANA_NAMESPACE, SOLANA_TESTNET_REFERENCE, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
-  chainMinBaseUnits,
   exceedsMaxTotalFee,
   feePolicyVersion as configuredPolicyVersion,
-  platformFeeWithMin,
   protocolFeeBps,
+  protocolFeeOf,
   exceedsDriftBound,
   QUOTE_TTL_SECS,
   relayerKeypair,
@@ -74,13 +73,13 @@ export interface ActivationView {
   // --- Fee-policy v2 canonical quote fields (ANT-544 §4.1) ---
   /** Canonical alias of networkFeeLamports (base units, decimal string). */
   networkFee: string;
-  /** v2 platform fee: MAX(floor(networkFee×bps/10_000), chainMin) (base units). */
+  /** platform fee: floor(networkFee×bps/10_000), pure percentage (base units). */
   platformFee: string;
   /** networkFee + platformFee at quote time (canonical). */
   totalFee: string;
   /** Offered user-approved upper bound for the V4 authorization (defaults to totalFee). */
   maxTotalFee: string;
-  /** chainMin applied for this chain under the quoted policy version (base units). */
+  /** minima leg — always "0" since ANT-743 (kept for shape compatibility). */
   chainMinBaseUnits: string;
   /** Quote timestamps (ISO-8601; `expiresAt − quotedAt` ≤ 300s, NFR-3). */
   quotedAt: string;
@@ -154,8 +153,9 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     return undefined;
   }
 
-  /** Quoting leg for one Solana cluster (ANT-730): DB-managed MIN_FEE via the
-   *  fee-policy service, frozen in-code table when the service/row is absent. */
+  /** Quoting leg for one Solana cluster (ANT-743: pure percentage — the
+   *  fee-policy service supplies version + bps; the minima leg is always 0).
+   *  Frozen in-code bps apply when the service/row is absent. */
   private async solanaFeeLeg(
     selection?: SolanaSelection,
     version?: number,
@@ -164,18 +164,18 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     if (this.fees) {
       if (version === undefined) {
         const m = await this.fees.minFeeFor(SOLANA_NAMESPACE, reference);
-        return { version: m.version, bps: m.bps, chainMin: m.minFee };
+        return { version: m.version, bps: m.bps, chainMin: 0n };
       }
       const leg = await this.fees.minFeeForVersion(SOLANA_NAMESPACE, reference, version).catch(() => undefined);
-      if (leg) return { version, bps: leg.bps, chainMin: leg.minFee };
+      if (leg) return { version, bps: leg.bps, chainMin: 0n };
     }
     const v = version ?? this.policyVersion();
-    return { version: v, bps: protocolFeeBps(v), chainMin: chainMinBaseUnits("solana", v) };
+    return { version: v, bps: protocolFeeBps(v), chainMin: 0n };
   }
 
   /** Realtime activation network-cost estimate (rent + message fee, no margin)
-   *  plus the v2 platform fee for the active policy. The platform fee is
-   *  MAX(50%, chainMin) — never a margin on a total. */
+   *  plus the platform fee for the active policy (pure 50% — never a margin
+   *  on a total). */
   private async quotedFees(
     adapter: SolanaAdapter,
     selection?: SolanaSelection,
@@ -190,7 +190,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     const cost = await adapter.estimateActivationCost(0);
     const networkEst = cost.rentLamports + cost.feeLamports;
     const leg = await this.solanaFeeLeg(selection);
-    const protocolFee = platformFeeWithMin(networkEst, leg.bps, leg.chainMin);
+    const protocolFee = protocolFeeOf(networkEst, leg.bps);
     return { networkEst, protocolFee, total: networkEst + protocolFee, version: leg.version, bps: leg.bps, chainMin: leg.chainMin };
   }
 
@@ -458,7 +458,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         });
         return this.reject(user.pid, "drift", new ConflictException("Network fee moved — re-quote and try again"));
       }
-      const protocolFee = platformFeeWithMin(networkFee, submitLeg.bps, submitLeg.chainMin);
+      const protocolFee = protocolFeeOf(networkFee, submitLeg.bps);
       const totalFee = networkFee + protocolFee;
 
       // V4 user bound (spec B5/B-AC5): `totalFee ≤ maxTotalFee` pre-broadcast.
@@ -724,7 +724,7 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
     protocolFee: bigint,
     leg: { version: number; bps: number; chainMin: bigint },
   ): Promise<void> {
-    const expectedProtocol = platformFeeWithMin(networkFee, leg.bps, leg.chainMin);
+    const expectedProtocol = protocolFeeOf(networkFee, leg.bps);
     const formulaDiverged = protocolFee !== expectedProtocol;
     const parsed = await adapter.parseTransaction(signature).catch(() => null);
     const actual = parsed?.fee != null ? BigInt(parsed.fee) : null;

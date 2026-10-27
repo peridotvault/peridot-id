@@ -120,7 +120,7 @@ describe("SponsoredWithdrawService", () => {
     const q = await service.quote(IDENTITY_ID);
     expect(BigInt(q.networkFeeLamports)).toBe(5000n);
     expect(q.protocolFeeBps).toBe(5000);
-    expect(BigInt(q.totalFeeLamports)).toBe(22000n);
+    expect(BigInt(q.totalFeeLamports)).toBe(7500n);
     expect(q.feePolicyVersion).toBe(2);
     expect(q.chainTime).toBe(1_000_000);
     // ANT-635: the quote names the ["treasury"] PDA, never an env const.
@@ -139,7 +139,7 @@ describe("SponsoredWithdrawService", () => {
     expect(res.signature).toBe("sig-sponsor-sol");
     expect(res.status).toBe("confirmed");
     expect(res.networkFeeLamports).toBe("5000");
-    expect(res.protocolFeeLamports).toBe("17000");
+    expect(res.protocolFeeLamports).toBe("2500");
     expect(adapterMock.sponsoredWithdrawSolV3).toHaveBeenCalledTimes(1);
     expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][0]).toBe("pid_01HASH");
     expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][4]).toBe(2); // policy version
@@ -261,8 +261,8 @@ describe("SponsoredWithdrawService", () => {
       "withdraw.reconciled",
       expect.objectContaining({
         networkFee: "5000",
-        protocolFee: "17000",
-        protocolFeeExpected: "17000",
+        protocolFee: "2500",
+        protocolFeeExpected: "2500",
         actualNetworkFee: "5000",
         overAttested: false,
       }),
@@ -350,7 +350,7 @@ describe("SponsoredWithdrawService", () => {
     expect(res.signature).toBe("sig-execute");
     expect(res.status).toBe("confirmed");
     expect(res.networkFeeLamports).toBe("10000");
-    expect(res.protocolFeeLamports).toBe("17000");
+    expect(res.protocolFeeLamports).toBe("5000");
     expect(adapterMock.sponsoredExecuteV3).toHaveBeenCalledTimes(1);
     const call = adapterMock.sponsoredExecuteV3.mock.calls[0];
     expect(call[0]).toBe("pid_01HASH");
@@ -360,7 +360,7 @@ describe("SponsoredWithdrawService", () => {
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
       "execute.submitted",
-      expect.objectContaining({ networkFee: "10000", protocolFee: "17000", dataLen: 9, metaCount: 2 }),
+      expect.objectContaining({ networkFee: "10000", protocolFee: "5000", dataLen: 9, metaCount: 2 }),
     );
   });
 
@@ -374,7 +374,7 @@ describe("SponsoredWithdrawService", () => {
     });
     expect(BigInt(q.networkFeeLamports)).toBe(10000n);
     expect(q.protocolFeeBps).toBe(5000);
-    expect(BigInt(q.totalFeeLamports)).toBe(27000n);
+    expect(BigInt(q.totalFeeLamports)).toBe(15000n);
     // The estimate saw the real call shape (target + metas + data length).
     const shapeCall = adapterMock.estimateExecuteFee.mock.calls[0];
     expect(shapeCall[0]).toEqual(new MockPublicKey(executeBase.target));
@@ -412,13 +412,13 @@ describe("SponsoredWithdrawService", () => {
     const { service, security } = setup();
     adapterMock.estimateExecuteFee.mockResolvedValue(10000n);
     await expect(
-      service.execute(IDENTITY_ID, { ...executeBase, maxTotalFeeLamports: "26999" }),
+      service.execute(IDENTITY_ID, { ...executeBase, maxTotalFeeLamports: "14999" }),
     ).rejects.toThrow(ConflictException);
     expect(adapterMock.sponsoredExecuteV3).not.toHaveBeenCalled();
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
       "execute.max_total_exceeded",
-      expect.objectContaining({ totalFee: "27000", maxTotalFee: "26999" }),
+      expect.objectContaining({ totalFee: "15000", maxTotalFee: "14999" }),
     );
   });
 
@@ -432,8 +432,8 @@ describe("SponsoredWithdrawService", () => {
       "execute.reconciled",
       expect.objectContaining({
         networkFee: "10000",
-        protocolFee: "17000",
-        protocolFeeExpected: "17000",
+        protocolFee: "5000",
+        protocolFeeExpected: "5000",
         actualNetworkFee: "10000",
         overAttested: false,
       }),
@@ -445,29 +445,29 @@ describe("SponsoredWithdrawService", () => {
     const q = await service.quote(IDENTITY_ID);
     // Canonical six (ANT-544 §4.1 — Thomas integrates against these names).
     expect(q.networkFee).toBe("5000");
-    expect(q.platformFee).toBe("17000");
+    expect(q.platformFee).toBe("2500");
     expect(q.feePolicyVersion).toBe(2);
-    expect(q.totalFee).toBe("22000");
-    expect(q.maxTotalFee).toBe("22000");
+    expect(q.totalFee).toBe("7500");
+    expect(q.maxTotalFee).toBe("7500");
     expect(q.chainTime).toBe(1_000_000);
     // Compat aliases + policy introspection.
-    expect(q.totalFeeLamports).toBe("22000");
-    expect(q.protocolFeeLamports).toBe("17000");
-    expect(q.suggestedMaxTotalFee).toBe("22000");
-    expect(q.chainMinBaseUnits).toBe("17000");
+    expect(q.totalFeeLamports).toBe("7500");
+    expect(q.protocolFeeLamports).toBe("2500");
+    expect(q.suggestedMaxTotalFee).toBe("7500");
+    expect(q.chainMinBaseUnits).toBe("0");
     expect(new Date(q.expiresAt).getTime() - new Date(q.quotedAt).getTime()).toBe(300_000);
   });
 
   it("withdraw rejects a total above the user-authorized maxTotalFee without broadcasting", async () => {
     const { service, security } = setup();
     await expect(
-      service.withdraw(IDENTITY_ID, { ...base, maxTotalFeeLamports: "21999" }),
+      service.withdraw(IDENTITY_ID, { ...base, maxTotalFeeLamports: "7499" }),
     ).rejects.toThrow(ConflictException);
     expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
       "withdraw.max_total_exceeded",
-      expect.objectContaining({ totalFee: "22000", maxTotalFee: "21999" }),
+      expect.objectContaining({ totalFee: "7500", maxTotalFee: "7499" }),
     );
   });
 
@@ -606,7 +606,7 @@ describe("SponsoredWithdrawService", () => {
   });
 });
 
-describe("SponsoredWithdrawService — DB fee legs (ANT-730)", () => {
+describe("SponsoredWithdrawService — DB fee legs ignored (ANT-743 pure percentage)", () => {
   const dbFees = {
     minFeeFor: jest.fn<Promise<{ minFee: bigint; version: number; bps: number }>, []>(),
     minFeeForVersion: jest.fn<Promise<{ minFee: bigint; bps: number }>, []>(),
@@ -619,14 +619,14 @@ describe("SponsoredWithdrawService — DB fee legs (ANT-730)", () => {
     dbFees.checkSubmitVersion.mockResolvedValue({ ok: true as const });
   });
 
-  it("quote uses the DB MIN_FEE leg (network 5000 → platform 50000, not the frozen 17000)", async () => {
+  it("quote ignores the DB MIN_FEE leg (network 5000 → platform 2500 pure 50%)", async () => {
     const { service } = setup(dbFees);
     const q = await service.quote(IDENTITY_ID);
     expect(q.feePolicyVersion).toBe(2);
-    expect(q.chainMinBaseUnits).toBe("50000");
-    expect(q.platformFee).toBe("50000");
-    expect(q.totalFee).toBe("55000");
-    expect(q.maxTotalFee).toBe("55000");
+    expect(q.chainMinBaseUnits).toBe("0");
+    expect(q.platformFee).toBe("2500");
+    expect(q.totalFee).toBe("7500");
+    expect(q.maxTotalFee).toBe("7500");
   });
 
   it("withdraw rejects a superseded version as StaleQuote (410) with the typed cause", async () => {

@@ -514,16 +514,16 @@ model EvmRelayerKey {
   @@map("evm_relayer_keys")
 }
 
-// Chain fee policy v2 (ANT-730, spec ANT-727 §4). Quote-time source of truth
-// for `serviceFee = max(networkFee × bps / 10_000, MIN_FEE[chain])`.
-// Versioned rows: exactly one row is active; a new policy ships as a NEW
-// version row — never mutate a published row (same rule as FiatFeePolicy and
-// the frozen in-code FEE_POLICY_TABLE in common/solana-relay.ts, which stays
-// as the DB-unavailable fallback). On-chain immutable values are the
-// settlement guard: DB minima must be >= the per-chain settlement floors
-// (common/chain-fee-floors.ts, spec §4.3) or admin writes are rejected.
+// Chain fee policy (ANT-730, spec ANT-727 §4; ANT-743 pure percentage).
+// Quote-time source of truth for `serviceFee = networkFee × bps / 10_000`
+// (no per-chain minima, no floor). Versioned rows: exactly one row is active;
+// a new policy ships as a NEW version row — never mutate a published row
+// (same rule as FiatFeePolicy and the frozen in-code FEE_POLICY_TABLE in
+// common/solana-relay.ts, which stays as the DB-unavailable fallback).
 // Dashboard-managed via the admin fee-policy endpoints; every write emits a
 // security event (who/when/old-new) and invalidates the 30s policy cache.
+// ANT-743: legacy `chain_min_fees` rows are INERT (never read, never
+// written) — no migration deletes data; a later cleanup may drop the table.
 model ChainFeePolicy {
   version   Int       @id
   bps       Int       @default(5000)
@@ -542,10 +542,10 @@ model ChainFeePolicy {
 }
 
 // Per-chain MIN_FEE leg of one ChainFeePolicy version, in native base units
-// (wei for eip155, lamports for solana). Keyed by the chain registry natural
-// key (namespace + reference) — not by chain id — so rows survive registry
-// re-seeds. Spec §4.2 seeds: eip155:84532/97 + solana rows; Monad (10143) and
-// Arbitrum Sepolia (421614) are 0 (spec §4.4, AC-14).
+// (wei for eip155, lamports for solana). INERT since ANT-743: the backend
+// never reads or writes these rows (quotes are pure percentage). Kept so no
+// migration is needed; a later cleanup migration may drop the table once
+// every environment runs the ANT-743 backend.
 model ChainMinFee {
   id            String         @id @default(uuid())
   policyVersion Int

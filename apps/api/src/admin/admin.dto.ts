@@ -264,7 +264,11 @@ export class CloseRelayerBreakerDto {
   evidence!: string;
 }
 
-/** One per-chain MIN_FEE leg of a new fee-policy version (base units, decimal string). */
+/**
+ * One per-chain MIN_FEE leg of a fee-policy version (base units, decimal string).
+ * @deprecated ANT-743: minima removed — `CreateFeePolicyDto.minima` is accepted
+ * but ignored (never persisted, never read). Kept for contract compatibility.
+ */
 export class FeePolicyMinDto {
   @IsIn(["solana", "eip155"])
   namespace!: string;
@@ -279,10 +283,11 @@ export class FeePolicyMinDto {
 
 /**
  * Publish a new chain fee-policy version (ANT-730, spec §4.3). New versions
- * only — published rows are never mutated. Every minimum must sit at or
- * above the chain's on-chain settlement floor (`ChainMinBelowFloor`
- * otherwise, AC-10). The row starts inactive; activate it via
- * `POST /v1/admin/fee-policies/:version/activate`.
+ * only — published rows are never mutated. The row starts inactive; activate
+ * it via `POST /v1/admin/fee-policies/:version/activate`.
+ *
+ * ANT-743: `minima` is accepted for contract compatibility but IGNORED
+ * (never persisted, never read — quotes are pure percentage). No floor gate.
  */
 export class CreateFeePolicyDto {
   @IsInt()
@@ -290,10 +295,12 @@ export class CreateFeePolicyDto {
   @Max(MAX_PROTOCOL_FEE_BPS)
   bps!: number;
 
+  @IsOptional()
   @IsArray()
+  @ArrayMaxSize(64)
   @ValidateNested({ each: true })
   @Type(() => FeePolicyMinDto)
-  minima!: FeePolicyMinDto[];
+  minima?: FeePolicyMinDto[];
 
   @IsString()
   @MaxLength(64)

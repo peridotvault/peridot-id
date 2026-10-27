@@ -1656,7 +1656,7 @@ paths:
         - cookieAuth: []
       responses:
         "200":
-          description: Fee-policy versions with minima
+          description: Fee-policy versions (minima always empty since ANT-743)
           content:
             application/json:
               schema:
@@ -1671,11 +1671,10 @@ paths:
       tags: [admin]
       summary: Publish a new chain fee-policy version (admin, starts inactive)
       description: |
-        New versions only — published rows are never mutated. Every minimum
-        must sit at or above the chain's on-chain settlement floor
-        (`ChainMinBelowFloor` otherwise, AC-10). Activate via
-        POST /v1/admin/fee-policies/{version}/activate; fresh quotes pick it up
-        within the 30s policy cache TTL (AC-9).
+        New versions only — published rows are never mutated (ANT-743: the
+        `minima` array is accepted but ignored — quotes are pure percentage).
+        Activate via POST /v1/admin/fee-policies/{version}/activate; fresh
+        quotes pick it up within the 30s policy cache TTL (AC-9).
       security:
         - cookieAuth: []
       requestBody:
@@ -3284,13 +3283,13 @@ components:
           description: "Suggested user-approved bound for submit (maxTotalFeeWei >= totalFeeWei, V4 B5)"
         serviceFeeWei:
           type: string
-          description: "v2 service fee separated from the network fee for wallet rendering: MAX(floor(networkFee*bps/10000), MIN_FEE[chain]) in wei. Canonical alias of the platform leg (serviceFee, platformFee and protocolFee name the same value)"
+          description: "service fee separated from the network fee for wallet rendering: floor(networkFee*bps/10000) pure percentage in wei. Canonical alias of the platform leg (serviceFee, platformFee and protocolFee name the same value)"
         networkFee:
           type: string
           description: "Canonical alias of networkFeeWei (base units, decimal string)"
         platformFee:
           type: string
-          description: "v2 platform fee: MAX(floor(networkFee*bps/10000), chainMin) (base units)"
+          description: "platform fee: floor(networkFee*bps/10000), pure percentage (base units)"
         totalFee:
           type: string
           description: "networkFee + platformFee at quote time (canonical)"
@@ -3302,7 +3301,7 @@ components:
           description: "Fee-policy version the quote was computed under (must be signed)"
         chainMinBaseUnits:
           type: string
-          description: "MIN_FEE leg applied for this chain under the quoted policy version (base units, decimal string; 0 when none)"
+          description: "minima leg, always 0 since ANT-743 (kept for shape compatibility)"
         feePolicyWarning:
           type: string
           description: "Present on submit results when the signed version trails the active policy by one (NFR-6)"
@@ -3604,7 +3603,7 @@ components:
           description: "Canonical alias of networkFeeLamports (base units, decimal string)"
         platformFee:
           type: string
-          description: "v2 platform fee: MAX(floor(networkFee*bps/10000), chainMin) (base units)"
+          description: "platform fee: floor(networkFee*bps/10000), pure percentage (base units)"
         protocolFeeLamports:
           type: string
           description: "Legacy alias of platformFee (lamports)"
@@ -3619,7 +3618,7 @@ components:
           description: "Legacy alias of maxTotalFee (lamports)"
         chainMinBaseUnits:
           type: string
-          description: "chainMin applied for this chain under the quoted policy version (base units)"
+          description: "minima leg, always 0 since ANT-743 (kept for shape compatibility)"
         quoteId:
           type: string
           description: "Informational quote id (submit re-attests — not replay-checked)"
@@ -4112,7 +4111,7 @@ components:
           type: object
           additionalProperties:
             type: string
-          description: "MIN_FEE legs in native base units (decimal strings) keyed by CAIP-2 pair, e.g. eip155:84532"
+          description: "always empty since ANT-743 (pure percentage); key kept for compatibility"
         fxSource:
           type: string
           description: "FX display source, e.g. CoinGecko USD/IDR (FALLBACK_STATIC on code-fallback rows)"
@@ -4130,7 +4129,7 @@ components:
 
     ChainFeePolicyCreate:
       type: object
-      required: [bps, minima]
+      required: [bps]
       properties:
         bps:
           type: integer
@@ -4149,7 +4148,7 @@ components:
                 description: "Registry reference (decimal chain id for eip155)"
               minFee:
                 type: string
-                description: "MIN_FEE in native base units (non-negative integer, >= on-chain settlement floor)"
+                description: "accepted but ignored since ANT-743 (never persisted, never read)"
         fxSource:
           type: string
         fxAsOf:
