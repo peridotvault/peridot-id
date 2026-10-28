@@ -1,0 +1,21 @@
+// Candid HTTP request as sent by the HTTP gateway.
+type HttpRequest = record {
+  url : text;
+  method : text;
+  body : blob;
+  headers : vec record { text; text };
+  certificate_version : opt nat16;
+};
+// Candid HTTP response returned to the HTTP gateway.
+type HttpResponse = record {
+  body : blob;
+  headers : vec record { text; text };
+  upgrade : opt bool;
+  status_code : nat16;
+};
+service : () -> {
+  // HTTP gateway entry point (query). Never serves MCP content directly.
+  http_request : (HttpRequest) -> (HttpResponse) query;
+  // HTTP gateway entry point (update). Serves `POST /mcp`.
+  http_request_update : (HttpRequest) -> (HttpResponse);
+}
