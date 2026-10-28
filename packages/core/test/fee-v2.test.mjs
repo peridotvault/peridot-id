@@ -65,6 +65,8 @@ describe("evm fee v2 (ANT-544 B2/B3, ANT-747 pure 50%)", () => {
   it("chain rows are all zero (floors removed on-chain)", () => {
     assert.equal(EVM_PROTOCOL_FEE_BPS_V2, 5000);
     for (const cid of [1, 11155111, 8453, 84532, 31337, 56, 97, 10]) assert.equal(evmChainMinV2(cid), 0n);
+    // WS1 §4.2: Monad + Arbitrum (testnet AND mainnet ids) settle with NO minimum.
+    for (const cid of [143, 10143, 42161, 421614]) assert.equal(evmChainMinV2(cid), 0n);
   });
 
   it("B3: ethereum 0.000021 ETH → 50% → total 0.0000315 ETH", () => {

@@ -1,7 +1,7 @@
 import { Type } from "class-transformer";
-import { IsInt, IsObject, IsOptional, IsString, Matches, Max, Min, ValidateNested } from "class-validator";
+import { IsInt, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateNested } from "class-validator";
 
-class EvmActivateAssertionDto {
+export class EvmActivateAssertionDto {
   @IsString()
   id!: string;
 
@@ -44,6 +44,16 @@ export class EvmActivateDto {
   @IsInt()
   @Min(0)
   deadline!: number;
+
+  /**
+   * WS1 §7.2 idempotency key (client uuid; server generates one when absent).
+   * A retry with the same id never deploys twice (ACTIVE → no-op view,
+   * in-flight → `ActivationInProgress` 409). Echoed in errors and logs.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  firstActionId?: string;
 
   @IsObject()
   @ValidateNested()

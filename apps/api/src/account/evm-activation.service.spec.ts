@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
 import { keccak256, fromAscii, toHex } from "@peridotvault/pid-evm";
-import { EvmActivationService } from "./evm-activation.service";
+import { EvmActivationService, deployGasEstimateFor, DEPLOY_GAS_ESTIMATE_DEFAULT, ACTIVATION_IN_PROGRESS } from "./evm-activation.service";
 import { mockSecurity, mockIdempotency, mockBreaker, COSE_HEX } from "../../test/factories";
 import { coseToRawXy } from "../credentials/cose";
 
@@ -621,5 +621,203 @@ describe("EvmActivationService — DB fee legs ignored (ANT-743 pure percentage)
       expect.anything(),
       expect.objectContaining({ entryPoint: "activate", cause: "policy-unknown" }),
     );
+  });
+});
+
+describe("EVM lazy first-action (WS2 — WS1 §3.1/§5/§7)", () => {
+  const assertion = () => ({
+    id: "cred-1",
+    r: "0x" + "11".repeat(32),
+    s: "0x" + "22".repeat(32),
+    authenticatorData: "00".repeat(37),
+    clientDataJSON: Buffer.from("{}").toString("base64url"),
+  });
+
+  const firstActionDto = () => ({
+    firstActionId: "first-action-1",
+    activation: {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
+      deadline: 1000000300,
+      assertion: assertion(),
+    },
+    execute: {
+      to: "0x000000000000000000000000000000000000beef",
+      value: "0",
+      data: "0x",
+      deadline: 1000000300,
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "150000000000000",
+      quotedNetworkFeeWei: "150000000000000",
+      assertion: assertion(),
+    },
+  });
+
+  // 100k gas × 1 gwei attested execute fee (50% = 5e13 wins over the 2.3e12 floor).
+  function mockExecuteLeg(service: { estimateTxGas: unknown; sendExecuteTx: unknown }, hash = "0xexec") {
+    (service as unknown as { estimateTxGas: jest.Mock }).estimateTxGas = jest.fn(async () => 100_000n);
+    (service as unknown as { sendExecuteTx: jest.Mock }).sendExecuteTx = jest.fn(async () => ({
+      hash, from: "0xrelayer", costWei: "100000000000000", l1FeeWei: "0",
+    }));
+  }
+
+  function mockDeployedFetch(deployed: () => boolean) {
+    (global as unknown as { fetch: unknown }).fetch = jest.fn(async (_url: unknown, opts: unknown) => {
+      const { method, params } = JSON.parse((opts as { body: string }).body) as {
+        method: string;
+        params?: Array<{ data?: string }>;
+      };
+      const result =
+        method === "eth_getCode"
+          ? deployed() ? "0x6080604052" : "0x"
+          : method === "eth_getBalance"
+            ? balance
+            : method === "eth_getBlockByNumber"
+              ? { timestamp: "0x3b9aca00" }
+              : method === "eth_call"
+                ? defaultView(params?.[0]?.data ?? "")
+                : gasPrice;
+      return { ok: true, json: async () => ({ result }) };
+    });
+  }
+
+  it("per-chain deploy gas table is uniform 350k interim (WS1 §5)", () => {
+    for (const ref of ["97", "10143", "421614", "84532"]) {
+      expect(deployGasEstimateFor(ref)).toBe(350_000n);
+    }
+    expect(deployGasEstimateFor("999999")).toBe(DEPLOY_GAS_ESTIMATE_DEFAULT);
+  });
+
+  it("viewOf exposes the activation quote object for counterfactual accounts (WS1 §7.1)", async () => {
+    const { service } = setup();
+    const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
+    expect(view.activation.required).toBe(true);
+    expect(view.activation.mode).toBe("evm-sequenced");
+    expect(view.activation.includedInTotal).toBe(true);
+    expect(view.activation.estimateWei).toBe(view.networkFeeWei);
+    expect(view.activation.estimateBasis).toContain("DEPLOY_GAS_ESTIMATE[97]=350000");
+  });
+
+  it("viewOf reports no activation once ACTIVE (backward compat, WS1 §7.1)", async () => {
+    code = "0x6080604052";
+    const { service } = setup();
+    const view = await service.viewOf({ pid: IDENTITY_ID }, "97");
+    expect(view.status).toBe("active");
+    expect(view.activation).toEqual({
+      required: false, includedInTotal: false, estimateWei: "0", estimateBasis: "account-active", mode: "none",
+    });
+  });
+
+  it("activate is an idempotent no-op when already ACTIVE (no second deploy)", async () => {
+    code = "0x6080604052";
+    const { service } = setup("0x" + "11".repeat(32));
+    const sendDeploy = jest.fn();
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = sendDeploy;
+    const view = await service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
+      deadline: 1000000300,
+      firstActionId: "first-action-1",
+      assertion: assertion(),
+    });
+    expect(view.status).toBe("active");
+    expect(sendDeploy).not.toHaveBeenCalled();
+  });
+
+  it("activate on an in-flight account throws ActivationInProgress 409 (WS1 §7.3)", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service, prisma } = setup("0x" + "11".repeat(32));
+    (prisma.chainAccount.findFirst as jest.Mock).mockResolvedValue(chainRow({ status: "activating" }));
+    const err = await service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
+      deadline: 1000000300,
+      firstActionId: "first-123",
+      assertion: assertion(),
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as ConflictException).getResponse()).toMatchObject({
+      code: ACTIVATION_IN_PROGRESS, firstActionId: "first-123", retryable: true,
+    });
+  });
+
+  it("activateAndExecute sequences deploy then execute under one firstActionId", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service, prisma } = setup("0x" + "11".repeat(32));
+    let deployed = false;
+    const order: string[] = [];
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = jest.fn(async () => {
+      order.push("deploy");
+      deployed = true;
+      return { hash: "0xdeploy", from: "0xrelayer", costWei: "100000000000000", l1FeeWei: "0" };
+    });
+    mockExecuteLeg(service as never);
+    const sendExecute = (service as unknown as { sendExecuteTx: jest.Mock }).sendExecuteTx;
+    const wrappedSendExecute = jest.fn(async (...args: unknown[]) => {
+      order.push("execute");
+      return (sendExecute as jest.Mock)(...args);
+    });
+    (service as unknown as { sendExecuteTx: jest.Mock }).sendExecuteTx = wrappedSendExecute;
+    mockDeployedFetch(() => deployed);
+    const res = await service.activateAndExecute({ pid: IDENTITY_ID }, "97", firstActionDto());
+    expect(order).toEqual(["deploy", "execute"]);
+    expect(res.mode).toBe("evm-sequenced");
+    expect(res.firstActionId).toBe("first-action-1");
+    expect(res.executeTxHash).toBe("0xexec");
+    expect(res.activation.status).toBe("active");
+    const types = (prisma.transaction.create as jest.Mock).mock.calls.map(
+      (c: Array<{ data: { type: string } }>) => c[0].data.type,
+    );
+    expect(types).toEqual(expect.arrayContaining(["ACTIVATION", "EXECUTE"]));
+  });
+
+  it("activateAndExecute skips deploy when already ACTIVE (execute-only)", async () => {
+    code = "0x6080604052";
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    const sendDeploy = jest.fn();
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = sendDeploy;
+    mockExecuteLeg(service as never, "0xexec2");
+    const res = await service.activateAndExecute({ pid: IDENTITY_ID }, "97", firstActionDto());
+    expect(res.executeTxHash).toBe("0xexec2");
+    expect(sendDeploy).not.toHaveBeenCalled();
+    expect((service as unknown as { sendExecuteTx: jest.Mock }).sendExecuteTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("duplicate firstActionId returns the same execute hash without rebroadcast (AC-16)", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    let deployed = false;
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = jest.fn(async () => {
+      deployed = true;
+      return { hash: "0xdeploy", from: "0xrelayer", costWei: "100000000000000", l1FeeWei: "0" };
+    });
+    mockExecuteLeg(service as never);
+    mockDeployedFetch(() => deployed);
+    // Second execute-leg claim for the same slot resolves duplicate with the prior hash.
+    const idem = (service as unknown as { idempotency: { claimSlot: jest.Mock } }).idempotency;
+    let execClaims = 0;
+    idem.claimSlot.mockImplementation(async (_p: string, _n: string, _c: string, _h: string, entry: string) => {
+      if (entry === "execute") {
+        execClaims += 1;
+        if (execClaims > 1) return { decision: "duplicate", signature: "0xexec" };
+      }
+      return { decision: "proceed", signature: null };
+    });
+    const first = await service.activateAndExecute({ pid: IDENTITY_ID }, "97", firstActionDto());
+    expect(first.executeTxHash).toBe("0xexec");
+    const second = await service.activateAndExecute({ pid: IDENTITY_ID }, "97", firstActionDto());
+    expect(second.executeTxHash).toBe("0xexec");
+    expect((service as unknown as { sendExecuteTx: jest.Mock }).sendExecuteTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("L1 pre-flight quote is dormant on testnet (relayer absorbs, WS1 §5.3)", async () => {
+    const { service } = setup();
+    await expect(
+      (service as unknown as { l1DataFeeQuoteWei: (c: string, i: string) => Promise<bigint> }).l1DataFeeQuoteWei("84532", "0x1234"),
+    ).resolves.toBe(0n);
   });
 });

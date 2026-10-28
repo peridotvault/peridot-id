@@ -62,6 +62,9 @@ describe("fee policy — minima removed (ANT-743)", () => {
     expect(CHAIN_MIN_FEE_V2.ethereum).toBe(0n);
     expect(CHAIN_MIN_FEE_V2.base).toBe(0n);
     expect(CHAIN_MIN_FEE_V2.bsc).toBe(0n);
+    // WS1 §4.2/§4.4: Monad + Arbitrum settle with NO minimum.
+    expect(CHAIN_MIN_FEE_V2.monad).toBe(0n);
+    expect(CHAIN_MIN_FEE_V2.arbitrum).toBe(0n);
   });
 
   it("returns 0 from the versioned minima accessor (deprecated)", () => {
@@ -169,6 +172,16 @@ describe("EVM chain-reference → fee-chain mapping (deprecated, ANT-743)", () =
     expect(feeChainForEvmReference("84532")).toBe("base");
     expect(feeChainForEvmReference("56")).toBe("bsc");
     expect(feeChainForEvmReference("97")).toBe("bsc");
+    // WS1 §4.4: Monad + Arbitrum quote a ZERO floor (matches on-chain
+    // `_chainMinV2` + SDK `evmChainMinV2` — no silent Ethereum-floor markup).
+    expect(feeChainForEvmReference("143")).toBe("monad");
+    expect(feeChainForEvmReference("10143")).toBe("monad");
+    expect(feeChainForEvmReference("42161")).toBe("arbitrum");
+    expect(feeChainForEvmReference("421614")).toBe("arbitrum");
+    expect(chainMinBaseUnits("monad", 2)).toBe(0n);
+    expect(chainMinBaseUnits("arbitrum", 2)).toBe(0n);
+    expect(platformFeeOf(200_000_000_000n, "monad", 2)).toBe(100_000_000_000n);
+    expect(platformFeeOf(200_000_000_000n, "arbitrum", 2)).toBe(100_000_000_000n);
   });
 
   it("defaults unknown EVM references to the Ethereum row", () => {
