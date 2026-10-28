@@ -1,4 +1,4 @@
-// ANT-556: fee-policy v2 vectors (ANT-544 B3, byte/unit-exact) + V4 payload pins.
+// ANT-556: fee-policy v2 vectors (ANT-544 B3, byte/unit-exact, ANT-747 pure 50%) + V4 payload pins.
 // Runs against the BUILT package (pretest builds): the shipped artifact.
 // Run: `node --test test/` from packages/core.
 import { describe, it } from "node:test";
@@ -26,25 +26,29 @@ import {
   buildPermExecPayload,
 } from "../dist/evm.js";
 
-describe("solana fee v2 (ANT-544 B3)", () => {
-  it("B3 vector: network 5000 lamports → floor 17000 wins → total 22000", () => {
+describe("solana fee v2 (ANT-544 B3, ANT-747 pure 50%)", () => {
+  it("B3 vector: network 5000 lamports → pure 50% → protocol 2500, total 7500", () => {
     const { bps, chainMin } = solanaFeeV2Row();
     assert.equal(bps, 5000);
-    assert.equal(chainMin, 17_000n);
-    assert.equal(CHAIN_MIN_LAMPORTS_V2, 17_000n);
+    assert.equal(chainMin, 0n);
+    assert.equal(CHAIN_MIN_LAMPORTS_V2, 0n);
     const { relayerFee, protocolFee, totalFee } = splitAttestedFeeV2(5_000n, bps, chainMin);
     assert.equal(relayerFee, 5_000n);
-    assert.equal(protocolFee, 17_000n);
-    assert.equal(totalFee, 22_000n);
+    assert.equal(protocolFee, 2_500n);
+    assert.equal(totalFee, 7_500n);
   });
 
-  it("percentage leg wins above the floor; exact boundary passes", () => {
+  it("percentage leg settles everything; dust rounds down to zero", () => {
     const { bps, chainMin } = solanaFeeV2Row();
     assert.deepEqual(splitAttestedFeeV2(100_000n, bps, chainMin), {
       relayerFee: 100_000n, protocolFee: 50_000n, totalFee: 150_000n,
     });
-    // 34_000 → 17_000 == floor exactly.
+    // 34_000 → 17_000 (was the old floor boundary — now just the percentage).
     assert.equal(splitAttestedFeeV2(34_000n, bps, chainMin).protocolFee, 17_000n);
+    // Zero network fee settles zero protocol fee (no floor charge).
+    assert.equal(splitAttestedFeeV2(0n, bps, chainMin).protocolFee, 0n);
+    // chainMin arg is ignored (compat): passing the old floor changes nothing.
+    assert.equal(splitAttestedFeeV2(5_000n, bps, 17_000n).protocolFee, 2_500n);
   });
 
   it("V4 domain/op-tags are pinned and disjoint from V3", async () => {
@@ -57,33 +61,31 @@ describe("solana fee v2 (ANT-544 B3)", () => {
   });
 });
 
-describe("evm fee v2 (ANT-544 B2/B3)", () => {
-  it("chain rows are exact (750 gwei eth/base, 2.3e12 bsc, 0 unlisted)", () => {
+describe("evm fee v2 (ANT-544 B2/B3, ANT-747 pure 50%)", () => {
+  it("chain rows are all zero (floors removed on-chain)", () => {
     assert.equal(EVM_PROTOCOL_FEE_BPS_V2, 5000);
-    for (const cid of [1, 11155111, 8453, 84532, 31337]) assert.equal(evmChainMinV2(cid), 750_000_000_000n);
-    for (const cid of [56, 97]) assert.equal(evmChainMinV2(cid), 2_300_000_000_000n);
-    assert.equal(evmChainMinV2(10), 0n);
+    for (const cid of [1, 11155111, 8453, 84532, 31337, 56, 97, 10]) assert.equal(evmChainMinV2(cid), 0n);
   });
 
-  it("B3: ethereum 0.000021 ETH → 50% wins → total 0.0000315 ETH", () => {
+  it("B3: ethereum 0.000021 ETH → 50% → total 0.0000315 ETH", () => {
     const net = 21_000_000_000_000n;
     const { protocolFee, totalFee } = splitEvmFeeV2(net, 1);
     assert.equal(protocolFee, 10_500_000_000_000n);
     assert.equal(totalFee, 31_500_000_000_000n);
   });
 
-  it("B3: base 0.0000002 ETH → floor wins → total 0.00000095 ETH", () => {
+  it("B3: base 0.0000002 ETH → pure 50% → total 0.0000003 ETH (no floor)", () => {
     const net = 200_000_000_000n;
     const { protocolFee, totalFee } = splitEvmFeeV2(net, 8453);
-    assert.equal(protocolFee, 750_000_000_000n);
-    assert.equal(totalFee, 950_000_000_000n);
+    assert.equal(protocolFee, 100_000_000_000n);
+    assert.equal(totalFee, 300_000_000_000n);
   });
 
-  it("B3: bsc 0.0000021 BNB → floor wins → total 0.0000044 BNB", () => {
+  it("B3: bsc 0.0000021 BNB → pure 50% → total 0.00000315 BNB (no floor)", () => {
     const net = 2_100_000_000_000n;
     const { protocolFee, totalFee } = splitEvmFeeV2(net, 56);
-    assert.equal(protocolFee, 2_300_000_000_000n);
-    assert.equal(totalFee, 4_400_000_000_000n);
+    assert.equal(protocolFee, 1_050_000_000_000n);
+    assert.equal(totalFee, 3_150_000_000_000n);
   });
 
   it("PERM v2 domain differs from v1; kinds are non-financial-only", () => {

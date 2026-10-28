@@ -81,10 +81,17 @@ export const OP_V4 = {
   activate: 14,
 } as const;
 
-/** Fee-policy v2 (must match `fee.rs`): 5000 bps + 17_000-lamport floor. */
+/** Fee-policy v2 (ANT-747 pure 50%): accepted for pre-change signed intents;
+ * percentage leg 5000 bps, floor leg REMOVED — v2 settles the pure percentage
+ * leg, identically to v1, on every chain. */
 export const FEE_POLICY_V2 = 2;
 export const PROTOCOL_FEE_BPS_V2 = 5000;
-export const CHAIN_MIN_LAMPORTS_V2 = 17_000n;
+/**
+ * Historical v2 chain floor (ANT-544 B2: 0.000017 SOL = 17_000 lamports).
+ * ANT-747 removed the floor leg on-chain — pinned at 0. Kept exported so
+ * existing imports keep compiling; new code must treat v2 as pure percent.
+ */
+export const CHAIN_MIN_LAMPORTS_V2 = 0n;
 
 /** Execute meta flags (bit 0 = writable, bit 1 = signer) — match `execute.rs`. */
 export const EXECUTE_FLAG = { writable: 1, signer: 2 } as const;
@@ -417,22 +424,23 @@ export async function buildAuthorizationPayloadV4(opTag: number, parts: Uint8Arr
 }
 
 /**
- * Fee-policy v2 split (mirrors `fee::split_attested_fee_v2` exactly):
- * `protocolFee = MAX(floor(networkFee × bps / 10_000), chainMin)`,
- * all-bigint, floor division (user-favoring), no floats.
+ * Fee-policy v2 split (ANT-747 pure 50%; mirrors `fee::split_attested_fee`):
+ * `protocolFee = floor(networkFee × bps / 10_000)`, all-bigint, floor
+ * division (user-favoring), no floats. The `chainMin` parameter is retained
+ * for call-site compatibility but IGNORED — the floor leg was removed
+ * on-chain, so every caller settles the percentage leg only.
  */
 export function splitAttestedFeeV2(
   networkFee: bigint,
   bps: number,
-  chainMin: bigint,
+  _chainMin: bigint,
 ): { relayerFee: bigint; protocolFee: bigint; totalFee: bigint } {
-  if (networkFee < 0n || chainMin < 0n) throw new Error("fees must be non-negative");
-  const pct = (networkFee * BigInt(bps)) / 10_000n;
-  const protocolFee = pct > chainMin ? pct : chainMin;
+  if (networkFee < 0n) throw new Error("fees must be non-negative");
+  const protocolFee = (networkFee * BigInt(bps)) / 10_000n;
   return { relayerFee: networkFee, protocolFee, totalFee: networkFee + protocolFee };
 }
 
-/** Solana v2 row: `(5000 bps, 17_000 lamports)` — match `fee.rs`. */
+/** Solana v2 row: `(5000 bps, 0)` — pure-percent alias, match `fee.rs`. */
 export function solanaFeeV2Row(): { bps: number; chainMin: bigint } {
   return { bps: PROTOCOL_FEE_BPS_V2, chainMin: CHAIN_MIN_LAMPORTS_V2 };
 }

@@ -71,37 +71,34 @@ export function assertNonfinancialKind(kind: number): void {
   }
 }
 
-/** Fee-policy v2 (match the contract): 5000 bps + per-chain floor (ANT-544 B2). */
+/** Fee-policy v2 (ANT-747 pure 50%): accepted for pre-change signed intents;
+ * percentage leg 5000 bps, per-chain floor REMOVED — v2 settles the pure
+ * percentage leg, identically to v1, on every chain. */
 export const EVM_FEE_POLICY_V2 = 2;
 export const EVM_PROTOCOL_FEE_BPS_V2 = 5000;
 /**
- * v2 chain-minimum table (native wei, match `_chainMinV2` exactly).
- * NOTE: 0.00000075 ETH = 750_000_000_000 wei (the spec's base-units column
- * reads 750_000_000 — a 1000× typo against its own B3 totals; the ETH values
- * rule). Unlisted chains → 0n (percentage leg only).
+ * Historical v2 chain-minimum table (ANT-544 B2, native wei).
+ * ANT-747 removed the floor leg on-chain (`_chainMinV2` deleted) — every row
+ * is 0. Kept as a function so existing call sites keep compiling; new code
+ * must treat v2 as pure percent.
  */
-export function evmChainMinV2(chainId: bigint | number): bigint {
-  const cid = BigInt(chainId);
-  if (cid === 1n || cid === 11155111n || cid === 8453n || cid === 84532n || cid === 31337n) {
-    return 750_000_000_000n;
-  }
-  if (cid === 56n || cid === 97n) return 2_300_000_000_000n;
+export function evmChainMinV2(_chainId: bigint | number): bigint {
   return 0n;
 }
 
 /**
- * EVM fee-policy v2 split (mirrors `_protocolFeeV2` exactly):
- * `protocolFee = MAX(floor(networkFee × bps / 10_000), chainMin)`.
+ * EVM fee-policy v2 split (ANT-747 pure 50%; mirrors `_protocolFee`):
+ * `protocolFee = floor(networkFee × bps / 10_000)`. The `chainId` parameter
+ * is retained for call-site compatibility but IGNORED — no chain carries a
+ * floor leg anymore.
  */
 export function splitEvmFeeV2(
   networkFee: bigint,
-  chainId: bigint | number,
+  _chainId: bigint | number,
   bps: number = EVM_PROTOCOL_FEE_BPS_V2,
 ): { relayerFee: bigint; protocolFee: bigint; totalFee: bigint } {
   if (networkFee < 0n) throw new Error("networkFee must be non-negative");
-  const pct = (networkFee * BigInt(bps)) / 10_000n;
-  const chainMin = evmChainMinV2(chainId);
-  const protocolFee = pct > chainMin ? pct : chainMin;
+  const protocolFee = (networkFee * BigInt(bps)) / 10_000n;
   return { relayerFee: networkFee, protocolFee, totalFee: networkFee + protocolFee };
 }
 
