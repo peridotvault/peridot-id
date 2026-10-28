@@ -26,6 +26,11 @@ contract PeridotPermissionExecutor {
     /// @notice ERC-7579 single default mode (mirrors the account's MODE_SINGLE_DEFAULT).
     bytes32 public constant MODE_SINGLE_DEFAULT = bytes32(0);
 
+    /// @notice ERC-7579 batch mode (mirrors `PeridotAccountBatch.MODE_BATCH`).
+    /// Forwarded on the v2 path only; the frozen v1 account entrypoints (and
+    /// `executeViaPermission` below) stay single-only.
+    bytes32 public constant MODE_BATCH = bytes32(uint256(0x01) << 248);
+
     error UnsupportedExecutionMode();
 
     /// @notice ERC-7579 module type id: this contract is an executor (2) ONLY.
@@ -57,12 +62,15 @@ contract PeridotPermissionExecutor {
     /// `executionCalldata` = `abi.encode(permissionId, target, value, data,
     /// deadline, seq, feePolicyVersion, maxTotalFee, networkFee, feeRecipient,
     /// authenticatorData, clientDataJSON, r, s)`.
+    /// Batch form (ANT-763): `abi.encode(permissionId, targets, values, datas,
+    /// deadline, seq, feePolicyVersion, maxTotalFee, networkFee, feeRecipient,
+    /// authenticatorData, clientDataJSON, r, s)` with `mode == MODE_BATCH`.
     function executeViaPermissionV2(address payable account, bytes32 mode, bytes calldata executionCalldata)
         external
         payable
         returns (bytes[] memory)
     {
-        if (mode != MODE_SINGLE_DEFAULT) revert UnsupportedExecutionMode();
+        if (mode != MODE_SINGLE_DEFAULT && mode != MODE_BATCH) revert UnsupportedExecutionMode();
         return IPeridotExecutorAccount(account).executeFromExecutorV2{value: msg.value}(mode, executionCalldata);
     }
 }
