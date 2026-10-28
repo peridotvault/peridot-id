@@ -167,6 +167,27 @@ const one = await peridot.wallet.activity(txs[0]?.id); // cache read only — no
   `failed` / `pending` — treat `pending` as unconfirmed (reorg/finality:
   poll, never assume inclusion).
 
+### Passkey authorities
+
+`peridot.passkey` manages the secp256r1 signing authorities on the wallet —
+Google OAuth proves identity, a passkey authorizes it:
+
+```ts
+const authorities = await peridot.passkey.list();
+const created = await peridot.passkey.register(); // first credential registers freely
+await peridot.passkey.revoke(id);
+```
+
+### Batched execution (experimental)
+
+`POST /v1/wallet/execute/batch/*` (quote → submit → optional flush, cancel while
+queued) is **experimental** and has no `peridot.wallet` wrapper yet — call it
+through the raw client or the standalone `estimateBatch(api, …)` /
+`submitBatch(api, …)` / `getBatchStatus(api, …)` / `cancelQueuedBatch(api, …)`
+helpers. Quote IDs bind the exact op set; a changed op set
+rejects with `400 QUOTE_MISMATCH` (re-estimate). Single withdraw/execute quotes
+go stale instead: `410` (re-quote).
+
 ## Money (fiat)
 
 `peridot.fiat` covers top-up, balance, statement, and sends on the internal IDR

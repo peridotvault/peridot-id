@@ -1401,6 +1401,20 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/StaleQuote"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SponsoredWithdrawResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -1456,6 +1470,20 @@ paths:
       responses:
         "200":
           description: Execute result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SponsoredWithdrawResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/StaleQuote"
+        "429":
+          $ref: "#/components/responses/RateLimited"
           content:
             application/json:
               schema:
@@ -1579,6 +1607,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/StaleQuote"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -1639,8 +1669,139 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/StaleQuote"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /fee-policy:
+    get:
+      tags: [account]
+      summary: Active chain fee policy (public, read-only)
+      description: |
+        The quoting policy wallets/SDKs must use instead of hardcoding numbers
+        (spec ANT-727 section 4.3/7.2, AC-18): version, percentage leg, per-chain
+        MIN_FEE legs in native base units keyed by CAIP-2 pair
+        (`eip155:84532`, `solana:<reference>`), and the FX display source/date.
+        Settlement is always base units on-chain; rupiah figures are informational.
+      responses:
+        "200":
+          description: Active fee policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChainFeePolicy"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /admin/fee-policies:
+    get:
+      tags: [admin]
+      summary: Every chain fee-policy version, newest first (admin)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Fee-policy versions (minima always empty since ANT-743)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChainFeePolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [admin]
+      summary: Publish a new chain fee-policy version (admin, starts inactive)
+      description: |
+        New versions only — published rows are never mutated (ANT-743: the
+        `minima` array is accepted but ignored — quotes are pure percentage).
+        Activate via POST /v1/admin/fee-policies/{version}/activate; fresh
+        quotes pick it up within the 30s policy cache TTL (AC-9).
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChainFeePolicyCreate"
+      responses:
+        "200":
+          description: Created policy version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChainFeePolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/fee-policies/{version}/activate:
+    post:
+      tags: [admin]
+      summary: Activate one chain fee-policy version (admin)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Activation result with the previous version
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, previousVersion]
+                properties:
+                  version:
+                    type: integer
+                  previousVersion:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /admin/subsidy-ledger/summary:
+    get:
+      tags: [admin]
+      summary: Daily quote-vs-actual aggregates for the internal subsidy dashboard (admin, NFR-4)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 30
+          description: Window in days (1..90, default 30)
+      responses:
+        "200":
+          description: Daily aggregates, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SubsidyDailySummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /fiat/deposits:
     get:
@@ -2759,6 +2920,16 @@ components:
           example:
             statusCode: 403
             message: "Admin access required"
+    StaleQuote:
+      description: The signed fee-policy version was superseded (more than one version behind) — re-quote and try again
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+          example:
+            statusCode: 410
+            code: "StaleQuote"
+            message: "Fee policy superseded — re-quote and try again"
     NotFound:
       description: The identity or profile does not exist
       content:
@@ -3103,7 +3274,7 @@ components:
 
     ActivationView:
       type: object
-      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports, networkFeeLamports, protocolFeeBps, chainTime, treasury, feePolicyVersion, rpIdHash]
+      required: [pid, status, smartAccountAddress, balanceLamports, requiredLamports, networkFeeLamports, protocolFeeBps, chainTime, treasury, feePolicyVersion, rpIdHash, networkFee, platformFee, totalFee, maxTotalFee, chainMinBaseUnits, quotedAt, expiresAt]
       properties:
         pid:
           type: string
@@ -3135,10 +3306,13 @@ components:
         rpIdHash:
           type: string
           description: "base64url sha256 of the WebAuthn RP ID (bound into the V3 activation payload)"
+        feePolicyWarning:
+          type: string
+          description: "Present on submit results when the signed version trails the active policy by one (NFR-6/AC-11)"
 
     EvmActivationView:
       type: object
-      required: [pid, chainReference, status, smartAccountAddress, deployed, balanceWei, requiredWei, networkFeeWei, protocolFeeBps]
+      required: [pid, chainReference, status, smartAccountAddress, deployed, balanceWei, requiredWei, networkFeeWei, protocolFeeBps, totalFeeWei, maxTotalFeeWei, serviceFeeWei, networkFee, platformFee, totalFee, maxTotalFee, feePolicyVersion, chainMinBaseUnits]
       properties:
         pid:
           type: string
@@ -3155,13 +3329,43 @@ components:
           type: string
         requiredWei:
           type: string
-          description: "Total wei required (networkFee + protocolFee)"
+          description: "Total wei required (networkFee + serviceFee)"
         networkFeeWei:
           type: string
           description: "Realtime network-cost estimate the backend will attest near"
         protocolFeeBps:
           type: integer
           description: "Fixed protocol percentage in bps for the quoted policy version"
+        totalFeeWei:
+          type: string
+          description: "networkFee + serviceFee at quote time (informational — settles at submit-time values)"
+        maxTotalFeeWei:
+          type: string
+          description: "Suggested user-approved bound for submit (maxTotalFeeWei >= totalFeeWei, V4 B5)"
+        serviceFeeWei:
+          type: string
+          description: "service fee separated from the network fee for wallet rendering: floor(networkFee*bps/10000) pure percentage in wei. Canonical alias of the platform leg (serviceFee, platformFee and protocolFee name the same value)"
+        networkFee:
+          type: string
+          description: "Canonical alias of networkFeeWei (base units, decimal string)"
+        platformFee:
+          type: string
+          description: "platform fee: floor(networkFee*bps/10000), pure percentage (base units)"
+        totalFee:
+          type: string
+          description: "networkFee + platformFee at quote time (canonical)"
+        maxTotalFee:
+          type: string
+          description: "Offered user-approved upper bound for the V4 authorization (defaults to totalFee)"
+        feePolicyVersion:
+          type: integer
+          description: "Fee-policy version the quote was computed under (must be signed)"
+        chainMinBaseUnits:
+          type: string
+          description: "minima leg, always 0 since ANT-743 (kept for shape compatibility)"
+        feePolicyWarning:
+          type: string
+          description: "Present on submit results when the signed version trails the active policy by one (NFR-6)"
 
     Authority:
       type: object
@@ -3262,7 +3466,7 @@ components:
 
     Activate:
       type: object
-      required: [expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      required: [expiry, feePolicyVersion, quotedNetworkFeeLamports, maxTotalFeeLamports, assertion]
       properties:
         expiry:
           type: integer
@@ -3273,12 +3477,15 @@ components:
         quotedNetworkFeeLamports:
           type: string
           description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        maxTotalFeeLamports:
+          type: string
+          description: "User-approved upper bound on networkFee + platformFee (V4 authorization; totalFee <= maxTotalFee enforced pre-broadcast)"
         assertion:
           $ref: "#/components/schemas/PasskeyAssertion"
 
     EvmActivate:
       type: object
-      required: [quotedNetworkFeeWei, feePolicyVersion, deadline, assertion]
+      required: [quotedNetworkFeeWei, feePolicyVersion, deadline, maxTotalFeeWei, assertion]
       properties:
         quotedNetworkFeeWei:
           type: string
@@ -3289,6 +3496,9 @@ components:
         deadline:
           type: integer
           description: "Authorization deadline (unix seconds, TTL ≤ 600s)"
+        maxTotalFeeWei:
+          type: string
+          description: "User-approved upper bound on networkFee + platformFee in wei (V4 authorization; totalFee <= maxTotalFee enforced pre-broadcast)"
         assertion:
           type: object
           required: [id, r, s, authenticatorData, clientDataJSON]
@@ -3311,13 +3521,13 @@ components:
 
     GrantPermission:
       type: object
-      required: [kind, target, selector, token, to, perTxCap, totalLimit, nftId, sessionX, sessionY, validAfter, validUntil, salt, deadline, chainId, account, nonce, factory]
+      required: [kind, target, selector, token, to, perTxCap, totalLimit, feeLimit, nftId, sessionX, sessionY, validAfter, validUntil, salt, deadline, chainId, account, nonce, factory]
       properties:
         kind:
           type: integer
           minimum: 1
-          maximum: 5
-          description: "1 = nonfinancial, 2 = ETH, 3 = ERC-20, 4 = ERC-721, 5 = ERC-1155"
+          maximum: 1
+          description: "1 = nonfinancial (only; kinds 2-5 removed ANT-556 Option A)"
         target:
           type: string
           description: "Nonfinancial: exact allowed target (never the account/factory)"
@@ -3326,19 +3536,22 @@ components:
           description: "Nonfinancial: exact allowed selector (0x + 8 hex chars, never denylisted)"
         token:
           type: string
-          description: "Financial: token contract (zero address = native ETH)"
+          description: "Must be zero address (nonfinancial-only)"
         to:
           type: string
-          description: "Financial: explicit recipient"
+          description: "Must be zero address (nonfinancial-only)"
         perTxCap:
           type: string
-          description: "Financial: max per execution, raw units"
+          description: "Must be zero (nonfinancial-only; no value caps)"
         totalLimit:
           type: string
-          description: "Financial: lifetime cap in the same units"
+          description: "Must be zero (nonfinancial-only; no value caps)"
+        feeLimit:
+          type: string
+          description: "Owner-approved lifetime session-fee cap (wei, REQUIRED; 0 = only zero-fee execs pass)"
         nftId:
           type: string
-          description: "ERC-721/1155: token id"
+          description: "Must be zero (nonfinancial-only)"
         sessionX:
           type: string
           description: "Session P-256 key x (0x + 64 hex chars)"
@@ -3427,7 +3640,7 @@ components:
 
     WithdrawQuote:
       type: object
-      required: [networkFeeLamports, protocolFeeBps, feePolicyVersion, totalFeeLamports, chainTime, treasury]
+      required: [networkFeeLamports, protocolFeeBps, feePolicyVersion, totalFeeLamports, chainTime, treasury, networkFee, platformFee, totalFee, maxTotalFee, chainMinBaseUnits, quotedAt, expiresAt]
       properties:
         networkFeeLamports:
           type: string
@@ -3446,10 +3659,41 @@ components:
         treasury:
           type: string
           description: "Canonical revenue vault (informational — enforced on-chain)"
+        networkFee:
+          type: string
+          description: "Canonical alias of networkFeeLamports (base units, decimal string)"
+        platformFee:
+          type: string
+          description: "platform fee: floor(networkFee*bps/10000), pure percentage (base units)"
+        protocolFeeLamports:
+          type: string
+          description: "Legacy alias of platformFee (lamports)"
+        totalFee:
+          type: string
+          description: "networkFee + platformFee at quote time (canonical)"
+        maxTotalFee:
+          type: string
+          description: "Offered user-approved upper bound for the passkey-signed V4 authorization (defaults to totalFee)"
+        suggestedMaxTotalFee:
+          type: string
+          description: "Legacy alias of maxTotalFee (lamports)"
+        chainMinBaseUnits:
+          type: string
+          description: "minima leg, always 0 since ANT-743 (kept for shape compatibility)"
+        quoteId:
+          type: string
+          description: "Informational quote id (submit re-attests — not replay-checked)"
+        quotedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: "expiresAt - quotedAt <= 300s (NFR-3)"
 
     SponsoredWithdraw:
       type: object
-      required: [asset, to, amount, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      required: [asset, to, amount, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, maxTotalFeeLamports, assertion]
       properties:
         asset:
           type: string
@@ -3469,6 +3713,9 @@ components:
         quotedNetworkFeeLamports:
           type: string
           description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        maxTotalFeeLamports:
+          type: string
+          description: "User-approved upper bound on networkFee + platformFee (V4 authorization; totalFee <= maxTotalFee enforced pre-broadcast)"
         assertion:
           $ref: "#/components/schemas/PasskeyAssertion"
 
@@ -3911,6 +4158,83 @@ components:
           type: string
           format: date-time
 
+    ChainFeePolicy:
+      type: object
+      required: [version, bps, minFee, fxSource, fxAsOf, updatedAt]
+      properties:
+        version:
+          type: integer
+          description: "Policy version clients sign (active version and one back accepted on submit, NFR-6)"
+        bps:
+          type: integer
+          description: "Percentage leg in basis points (5000 = 50%)"
+        minFee:
+          type: object
+          additionalProperties:
+            type: string
+          description: "always empty since ANT-743 (pure percentage); key kept for compatibility"
+        fxSource:
+          type: string
+          description: "FX display source, e.g. CoinGecko USD/IDR (FALLBACK_STATIC on code-fallback rows)"
+        fxAsOf:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Date of the FX reference value (null on fallback rows)"
+        updatedAt:
+          type: string
+          format: date-time
+        active:
+          type: boolean
+          description: "Admin list view only — exactly one version is active"
+
+    ChainFeePolicyCreate:
+      type: object
+      required: [bps]
+      properties:
+        bps:
+          type: integer
+          description: "Percentage leg in basis points (0..5000)"
+        minima:
+          type: array
+          items:
+            type: object
+            required: [namespace, reference, minFee]
+            properties:
+              namespace:
+                type: string
+                enum: [solana, eip155]
+              reference:
+                type: string
+                description: "Registry reference (decimal chain id for eip155)"
+              minFee:
+                type: string
+                description: "accepted but ignored since ANT-743 (never persisted, never read)"
+        fxSource:
+          type: string
+        fxAsOf:
+          type: string
+          description: "ISO-8601 date of the FX reference value"
+
+    SubsidyDailySummary:
+      type: object
+      required: [day, count, quotedTotal, actualTotal, subsidyTotal]
+      properties:
+        day:
+          type: string
+          description: "UTC date (YYYY-MM-DD)"
+        count:
+          type: integer
+        quotedTotal:
+          type: string
+          description: "Sum of quoted fees (base units, decimal string)"
+        actualTotal:
+          type: string
+          description: "Sum of actual costs (base units, decimal string)"
+        subsidyTotal:
+          type: string
+          description: "Sum of actual − quoted (negative = surplus)"
+
     FeePolicy:
       type: object
       required: [version, percentBps, minIdr, maxIdr, taxBps, active]
@@ -3945,6 +4269,9 @@ components:
         status:
           type: string
           enum: [confirmed, pending]
+        feePolicyWarning:
+          type: string
+          description: "Present when the signed version trails the active policy by one (NFR-6/AC-11)"
 
     ExecuteMeta:
       type: object
@@ -3978,7 +4305,7 @@ components:
 
     SponsoredExecute:
       type: object
-      required: [target, metas, data, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, assertion]
+      required: [target, metas, data, nonce, expiry, feePolicyVersion, quotedNetworkFeeLamports, maxTotalFeeLamports, assertion]
       properties:
         target:
           type: string
@@ -4003,6 +4330,9 @@ components:
         quotedNetworkFeeLamports:
           type: string
           description: "Quoted network fee the client signed against (drift reference, not a cap)"
+        maxTotalFeeLamports:
+          type: string
+          description: "User-approved upper bound on networkFee + platformFee (V4 authorization; totalFee <= maxTotalFee enforced pre-broadcast)"
         assertion:
           $ref: "#/components/schemas/PasskeyAssertion"
 

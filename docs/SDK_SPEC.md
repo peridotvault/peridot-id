@@ -49,3 +49,8 @@ Notes:
   `transferFeeIdr` is the single combined fee (PeridotID fee + PPN, DOKU gateway
   fee + PPN). `sumTransferFee(parts)` recomputes it from the parts. See
   [Fiat & payments](/docs/fiat).
+- Passkeys: `peridot.passkey.{list,register,revoke}` manage the secp256r1
+  signing authorities on the wallet.
+- Batch execution helpers (`estimateBatch`, `submitBatch`, `getBatchStatus`,
+  `cancelQueuedBatch`, `pollBatchStatus` from `@peridotvault/pid-sdk-js`) are
+  **experimental**, matching the experimental batch API.
