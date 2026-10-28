@@ -13,6 +13,8 @@
 //!
 //! Pure logic: no `ic-*` dependencies, fully unit-testable on host.
 
+use std::sync::OnceLock;
+
 use serde::{Deserialize, Serialize};
 
 pub use crate::generated_docs::{
@@ -109,8 +111,55 @@ pub fn rank(query: &str, docs: &[DocEntry]) -> Vec<DocHit> {
 }
 
 /// Search the generated Mintlify corpus.
+///
+/// Fast path over the baked index: lowercase title/excerpt pairs are computed
+/// once (ANT-853) instead of re-lowercasing all 175 entries per call. Output
+/// is identical to `rank(query, &DOCS)` (see `cached_rank_matches_generic_rank`).
 pub fn search_docs(query: &str) -> Vec<DocHit> {
-    rank(query, &DOCS)
+    rank_generated(query)
+}
+
+/// Precomputed lowercase `(title, excerpt)` pairs for [`DOCS`], in order
+/// (ANT-853: amortizes the per-call `to_lowercase` over the 175-entry corpus).
+static LOWER_CORPUS: OnceLock<Vec<(String, String)>> = OnceLock::new();
+
+fn lower_corpus() -> &'static [(String, String)] {
+    LOWER_CORPUS.get_or_init(|| {
+        DOCS.iter()
+            .map(|d| (d.title.to_lowercase(), d.excerpt.to_lowercase()))
+            .collect()
+    })
+}
+
+fn hit_of(doc: &DocEntry) -> DocHit {
+    DocHit {
+        title: doc.title.to_string(),
+        url: doc.url.to_string(),
+        excerpt: doc.excerpt.to_string(),
+    }
+}
+
+/// Rank the generated corpus with the cached lowercase index. Identical
+/// output to [`rank`] called with `&DOCS`.
+fn rank_generated(query: &str) -> Vec<DocHit> {
+    let q = query.to_lowercase();
+    let corpus = lower_corpus();
+    let mut scored: Vec<(u8, usize, &DocEntry)> = Vec::new();
+    for (doc, (title_lc, excerpt_lc)) in DOCS.iter().zip(corpus.iter()) {
+        let title_pos = title_lc.find(q.as_str());
+        let excerpt_pos = excerpt_lc.find(q.as_str());
+        match (title_pos, excerpt_pos) {
+            (Some(tp), _) => scored.push((0, tp, doc)),
+            (None, Some(ep)) => scored.push((1, ep, doc)),
+            (None, None) => {}
+        }
+    }
+    scored.sort_by(|a, b| (a.0, a.1, a.2.title).cmp(&(b.0, b.1, b.2.title)));
+    scored
+        .into_iter()
+        .take(MAX_RESULTS)
+        .map(|(_, _, doc)| hit_of(doc))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +355,33 @@ mod tests {
         // Every URL contains "docs.peridot.id", but matching covers
         // title+excerpt only, so this must return zero hits.
         assert!(search_docs("docs.peridot.id").is_empty());
+    }
+
+    #[test]
+    fn cached_rank_matches_generic_rank() {
+        // ANT-853: the OnceLock fast path must return byte-identical hits to
+        // the generic ranker over the generated corpus.
+        for probe in [
+            "passkey",
+            "faucet",
+            "DOKU",
+            "webhook",
+            "sandbox",
+            "refresh token",
+            "PID handle",
+            "leveling",
+            "session cookies",
+            "openapi",
+            "WALLET",
+            "zzz-no-such-doc-zzz",
+            "e",
+        ] {
+            assert_eq!(
+                search_docs(probe),
+                rank(probe, &DOCS),
+                "cached rank diverged for probe: {probe}"
+            );
+        }
     }
 
     #[test]
