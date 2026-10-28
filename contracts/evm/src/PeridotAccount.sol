@@ -415,7 +415,9 @@ contract PeridotAccount {
     receive() external payable {}
 
     /// @notice Execute a call authorized by the passkey.
-    /// @dev The relayer submits the tx and floats gas, then attests `networkFee`;
+    /// @dev ANT-800: CLOSED for new intents (H2 — no `maxTotalFee` bound).
+    /// New code MUST use `executeV4`. Frozen here solely to settle in-flight
+    /// V3 signatures. The relayer submits the tx and floats gas, then attests `networkFee`;
     /// the contract sanity-checks it against measured gas, recomputes
     /// `protocolFee` from policy, and splits relayerFee → `msg.sender`,
     /// protocolFee → factory vault — atomically, in this same transaction.
