@@ -81,14 +81,14 @@ export class GoogleGuard extends AuthGuard("google") {
     // login with invalid_state.
     // Unwrap the login-step envelope (plain returnTo or app-bound encoding),
     // then re-wrap it signed + nonce-bound for the Google round-trip.
-    const { returnTo: target, clientId } = returnTo
+    const { returnTo: target, clientId, codeChallenge } = returnTo
       ? decodeState(returnTo)
       : { returnTo: resolveServiceUrls((key, def) => this.config.get(key, def)).walletUrl };
     const nonce = newOAuthNonce();
     const res = context.switchToHttp().getResponse<Response>();
     setOAuthStateCookie(res, this.config, nonce);
     const secret = oauthStateSecret((key, def) => this.config.get(key, def));
-    options.state = signOAuthState({ returnTo: target, clientId }, nonce, secret);
+    options.state = signOAuthState({ returnTo: target, clientId, codeChallenge }, nonce, secret);
     return options;
   }
 }

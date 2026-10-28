@@ -11,6 +11,16 @@ export class LoginDto {
   @IsOptional()
   @IsString()
   clientId?: string;
+
+  /**
+   * PKCE S256 challenge (M5, ANT-802): REQUIRED when `clientId` names a public
+   * client (no backend secret). Carried through the signed OAuth state and
+   * bound to the pid_code at issue time; the verifier is presented at
+   * exchange. 43-128 base64url chars; only S256 is accepted server-side.
+   */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_-]{43,128}$/, { message: "Invalid code_challenge" })
+  codeChallenge?: string;
 }
 
 export class ExchangeDto {
@@ -38,6 +48,8 @@ export class ExchangeDto {
   /**
    * PKCE verifier (ANT-284): required at exchange iff the code was issued
    * with an S256 challenge (public clients). RFC 7636 §4.1 charset.
+   * M5 (ANT-802): public-client codes ALWAYS carry a challenge now, so a
+   * public-client exchange without a verifier is rejected.
    */
   @IsOptional()
   @Matches(/^[A-Za-z0-9_~.-]{43,128}$/, { message: "Invalid code_verifier" })
@@ -53,6 +65,15 @@ export class ClaimDto {
   @Transform(({ value }) => (typeof value === "string" ? value.toLowerCase() : value))
   @Matches(PID_HANDLE_REGEX, { message: "handle must be 3-20 chars: lowercase letters, numbers, underscore" })
   handle!: string;
+
+  /**
+   * PKCE S256 challenge (M5, ANT-802): the wallet resends the challenge it
+   * generated at login start so the claimed pid_code is bound to it.
+   * Required when the ticket's `clientId` names a public client.
+   */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_-]{43,128}$/, { message: "Invalid code_challenge" })
+  codeChallenge?: string;
 }
 
 /**

@@ -98,9 +98,10 @@ export class AuthController {
       if (!resolved) {
         throw new BadRequestException("returnTo is not an allowed origin");
       }
-      // state round-trips through Google: carries returnTo (+ clientId when present).
+      // state round-trips through Google: carries returnTo (+ clientId when present,
+      // + PKCE challenge for public clients — bound to the pid_code at issue time).
       // Handles are never chosen here — new credentials land on the PID picker.
-      url += `?returnTo=${encodeURIComponent(encodeState(resolved.redirectTo, resolved.clientId))}`;
+      url += `?returnTo=${encodeURIComponent(encodeState(resolved.redirectTo, resolved.clientId, dto.codeChallenge))}`;
     }
     return { url };
   }
@@ -159,7 +160,10 @@ export class AuthController {
       if (!resolved) {
         throw new BadRequestException("returnTo is not an allowed origin");
       }
-      const pidCode = await this.ssoService.issue(pid, resolved.redirectTo, { clientId: resolved.clientId });
+      const pidCode = await this.ssoService.issue(pid, resolved.redirectTo, {
+        clientId: resolved.clientId,
+        ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+      });
       return { ok: true, pidCode };
     }
     return { ok: true };
@@ -195,7 +199,10 @@ export class AuthController {
     if (identity) {
       await this.authService.issueSession(res, identity.pid, req.headers["user-agent"], undefined, "email");
       if (resolved) {
-        const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, { clientId: resolved.clientId });
+        const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, {
+          clientId: resolved.clientId,
+          ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+        });
         return { ok: true, pidCode };
       }
       return { ok: true };
@@ -359,7 +366,7 @@ export class AuthController {
       res.redirect(withErrorFlag(successUrl, "invalid_state"));
       return;
     }
-    const { returnTo, clientId } = verified;
+    const { returnTo, clientId, codeChallenge } = verified;
     // First-party logins were bound to the wallet origin by the guard (no
     // cross-origin target): land on the wallet with the session, exactly like
     // pre-M3 — no pid_code minted, no allowlist lookup.
@@ -396,7 +403,10 @@ export class AuthController {
     await this.authService.issueSession(res, identity.pid, req.headers["user-agent"], undefined, "google");
 
     if (resolved) {
-      const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, { clientId: resolved.clientId });
+      const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, {
+        clientId: resolved.clientId,
+        ...(codeChallenge ? { codeChallenge } : {}),
+      });
       res.redirect(withPidCode(resolved.redirectTo, pidCode));
       return;
     }
@@ -428,7 +438,10 @@ export class AuthController {
     if (redirectTo) {
       const resolved = await this.ssoService.resolveReturnTo(redirectTo, clientId);
       if (resolved) {
-        const pidCode = await this.ssoService.issue(pid, resolved.redirectTo, { clientId: resolved.clientId });
+        const pidCode = await this.ssoService.issue(pid, resolved.redirectTo, {
+          clientId: resolved.clientId,
+          ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+        });
         return { ok: true, pid, pidCode, redirectTo: resolved.redirectTo };
       }
     }
@@ -492,6 +505,22 @@ export class AuthController {
     const token = (req as Request & { cookies?: Record<string, string> }).cookies?.[REFRESH_COOKIE];
     const currentJti = await this.authService.currentSessionJti(token);
     return this.authService.listSessions(user.pid, currentJti);
+  }
+
+  /**
+   * Global revoke (M6, ANT-802): log this identity out EVERYWHERE — every
+   * session on every device, including scoped app sessions. The current
+   * browser's cookies are NOT cleared here (the caller may be a different
+   * device); use POST /v1/auth/logout for the local-cookie path. Returns
+   * the number of sessions revoked.
+   */
+  @Delete("sessions")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async revokeAllSessions(@CurrentUser() user: AuthenticatedUser): Promise<{ ok: true; revoked: number }> {
+    const { revoked } = await this.authService.revokeAllSessions(user.pid);
+    return { ok: true, revoked };
   }
 
   @Delete("sessions/revoke-others")

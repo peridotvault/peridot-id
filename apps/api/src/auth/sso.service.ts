@@ -3,7 +3,7 @@
 // travels in the redirect URL, then is exchanged server-to-server — no cross-site cookie
 // sharing. Single-use, short TTL, bound to the issuing identity.
 
-import { Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -122,18 +122,33 @@ export interface SsoGrantView {
   firstSeenAt: Date;
   lastUsedAt: Date;
 }
-/** Opaque Google `state` carrying returnTo (+ optional clientId). Plain returnTo strings
- *  (pre-client_id clients like Live2Dev) decode via the fallback. */
-export function encodeState(returnTo: string, clientId?: string): string {
-  if (!clientId) return returnTo;
-  return Buffer.from(JSON.stringify({ r: returnTo, c: clientId }), "utf8").toString("base64url");
+/** Opaque Google `state` carrying returnTo (+ optional clientId + PKCE challenge).
+ * Plain returnTo strings (pre-client_id clients like Live2Dev) decode via the fallback. */
+export function encodeState(returnTo: string, clientId?: string, codeChallenge?: string): string {
+  if (!clientId && !codeChallenge) return returnTo;
+  return Buffer.from(
+    JSON.stringify({
+      r: returnTo,
+      ...(clientId ? { c: clientId } : {}),
+      ...(codeChallenge ? { ch: codeChallenge } : {}),
+    }),
+    "utf8",
+  ).toString("base64url");
 }
 
-export function decodeState(state: string): { returnTo: string; clientId?: string } {
+export function decodeState(state: string): { returnTo: string; clientId?: string; codeChallenge?: string } {
   try {
-    const parsed = JSON.parse(Buffer.from(state, "base64url").toString("utf8")) as { r?: unknown; c?: unknown };
+    const parsed = JSON.parse(Buffer.from(state, "base64url").toString("utf8")) as {
+      r?: unknown;
+      c?: unknown;
+      ch?: unknown;
+    };
     if (typeof parsed?.r === "string") {
-      return { returnTo: parsed.r, clientId: typeof parsed.c === "string" ? parsed.c : undefined };
+      return {
+        returnTo: parsed.r,
+        clientId: typeof parsed.c === "string" ? parsed.c : undefined,
+        codeChallenge: typeof parsed.ch === "string" ? parsed.ch : undefined,
+      };
     }
   } catch {
     // not encoded — fall through to the legacy plain-returnTo form
@@ -235,12 +250,25 @@ export class SsoService {
     if (opts?.codeChallenge !== undefined) {
       const method = opts.codeChallengeMethod ?? PKCE_METHOD_S256;
       if (method !== PKCE_METHOD_S256 || !CODE_CHALLENGE_RE.test(opts.codeChallenge)) {
-        throw new Error("sso_pkce_invalid");
+        throw new BadRequestException("sso_pkce_invalid");
       }
       codeChallenge = opts.codeChallenge;
       codeChallengeMethod = PKCE_METHOD_S256;
     } else if (opts?.codeChallengeMethod !== undefined) {
-      throw new Error("sso_pkce_invalid");
+      throw new BadRequestException("sso_pkce_invalid");
+    }
+    // M5 (ANT-802): PKCE is MANDATORY for public clients (apps without a
+    // backend secret — SPAs / mobile apps that cannot hold one). Without a
+    // challenge, anyone who sees the redirect URL can exchange the code, and
+    // the secret check at consume is vacuous for these apps
+    // (clientSecretValid always passes). Confidential clients authenticate
+    // with their secret at exchange instead, so they are exempt. Fail closed:
+    // no challenge, no code.
+    if (opts?.clientId && !codeChallenge) {
+      const app = await this.apps.findActive(opts.clientId).catch(() => null);
+      if (app && !app.clientSecretHash) {
+        throw new BadRequestException("sso_pkce_invalid");
+      }
     }
     const code = randomBytes(24).toString("base64url");
     await this.prisma.ssoCode.create({
@@ -296,6 +324,14 @@ export class SsoService {
       if (row.clientId !== clientId) throw new SsoCodeInvalidError("client_mismatch");
       const app = await this.apps.findActive(row.clientId);
       if (!app) throw new SsoCodeInvalidError("app_unknown");
+      // M5 (ANT-802) defense in depth: a public-client code minted before
+      // enforcement carries no challenge, and the secret check below is
+      // vacuous for public clients — so it must never exchange. (issue()
+      // already refuses to mint such codes; this closes the pre-enforcement
+      // window.)
+      if (!app.clientSecretHash && !row.codeChallenge) {
+        throw new SsoCodeInvalidError("pkce_mismatch");
+      }
       if (!this.apps.clientSecretValid(app, clientSecret ?? "")) {
         throw new SsoCodeInvalidError("secret_invalid");
       }

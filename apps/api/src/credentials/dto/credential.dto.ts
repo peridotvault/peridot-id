@@ -1,4 +1,4 @@
-import { IsObject, IsOptional, IsString } from "class-validator";
+import { IsObject, IsOptional, IsString, Matches } from "class-validator";
 
 // Mirrors @simplewebauthn/typescript-types' RegistrationResponseJSON /
 // AuthenticationResponseJSON — the WebAuthn verification library enforces the crypto, this
@@ -78,4 +78,12 @@ export class AuthenticateFinishDto {
   @IsOptional()
   @IsString()
   clientId?: string;
+
+  /**
+   * PKCE S256 challenge (M5, ANT-802): required when `clientId` names a
+   * public client (no backend secret). Bound to the pid_code at issue time.
+   */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_-]{43,128}$/, { message: "Invalid code_challenge" })
+  codeChallenge?: string;
 }

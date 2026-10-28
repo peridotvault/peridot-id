@@ -20,6 +20,9 @@ export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 export interface OAuthStatePayload {
   returnTo: string;
   clientId?: string;
+  /** PKCE S256 challenge for public-client logins (M5, ANT-802) — carried
+   * inside the signed envelope so the callback can bind the pid_code. */
+  codeChallenge?: string;
 }
 
 /** Fresh opaque nonce for one login attempt (128-bit, single-use). */
@@ -27,7 +30,7 @@ export function newOAuthNonce(): string {
   return randomBytes(16).toString("base64url");
 }
 
-/** Sign `{returnTo, clientId, nonce}` — returns the `state` query param value. */
+/** Sign `{returnTo, clientId, codeChallenge, nonce}` — returns the `state` query param value. */
 export function signOAuthState(
   payload: OAuthStatePayload,
   nonce: string,
@@ -37,6 +40,7 @@ export function signOAuthState(
   const body = {
     r: payload.returnTo,
     ...(payload.clientId ? { c: payload.clientId } : {}),
+    ...(payload.codeChallenge ? { ch: payload.codeChallenge } : {}),
     n: nonce,
     exp: nowMs + OAUTH_STATE_TTL_MS,
   };
@@ -69,11 +73,12 @@ export function verifyOAuthState(
     return null;
   }
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
-  let body: { r?: unknown; c?: unknown; n?: unknown; exp?: unknown };
+  let body: { r?: unknown; c?: unknown; ch?: unknown; n?: unknown; exp?: unknown };
   try {
     body = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as {
       r?: unknown;
       c?: unknown;
+      ch?: unknown;
       n?: unknown;
       exp?: unknown;
     };
@@ -83,7 +88,11 @@ export function verifyOAuthState(
   if (typeof body.r !== "string" || body.r.length === 0) return null;
   if (body.n !== nonce) return null;
   if (typeof body.exp !== "number" || body.exp <= nowMs) return null;
-  return { returnTo: body.r, ...(typeof body.c === "string" ? { clientId: body.c } : {}) };
+  return {
+    returnTo: body.r,
+    ...(typeof body.c === "string" ? { clientId: body.c } : {}),
+    ...(typeof body.ch === "string" ? { codeChallenge: body.ch } : {}),
+  };
 }
 
 /**
