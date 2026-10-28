@@ -1,5 +1,8 @@
 //! Sponsored SPL-token withdrawal, V3 authorization (authorized by a secp256r1 passkey).
 //!
+//! ANT-800: CLOSED for new intents (H1) — see `withdraw_sol.rs`. V4 only
+//! (`withdraw_token_v4.rs`); frozen here solely for in-flight V3 settlement.
+//!
 //! Peridot's relayer signs the transaction and floats the network fee; the smart account
 //! reimburses the attested `network_fee` in full to the relayer plus `protocol_fee`
 //! (recomputed on-chain from the signed fee-policy version) to the canonical revenue

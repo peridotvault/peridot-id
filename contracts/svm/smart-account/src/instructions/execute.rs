@@ -1,5 +1,8 @@
 //! Generic CPI execution, V3 authorization (authorized by a secp256r1 passkey).
 //!
+//! ANT-800: CLOSED for new intents (H1) — see `withdraw_sol.rs`. V4 only
+//! (`execute_v4.rs`); frozen here solely for in-flight V3 settlement.
+//!
 //! Wallet parity with the EVM `execute`: one passkey-signed intent drives an
 //! arbitrary call — here a cross-program invocation with the smart-account PDA
 //! as signer. Fully generic + minimal deny-list: any target program except this

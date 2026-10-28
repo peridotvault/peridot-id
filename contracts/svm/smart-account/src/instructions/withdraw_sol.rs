@@ -1,5 +1,10 @@
 //! Sponsored SOL withdrawal, V3 authorization (authorized by a secp256r1 passkey).
 //!
+//! ANT-800: CLOSED for new intents (H1). V3 carries no user-approved
+//! `max_total_fee` — an unbounded attested fee could settle. Backend + SDK +
+//! relayer paths now broadcast V4 only (`withdraw_sol_v4.rs`, fee-capped);
+//! this entrypoint stays frozen solely to settle in-flight V3 signatures.
+//!
 //! The smart account is a PDA and cannot be a transaction fee payer. Peridot's relayer
 //! signs the transaction and floats the network fee; the smart account reimburses the
 //! attested `network_fee` in full to the relayer plus `protocol_fee` (recomputed
