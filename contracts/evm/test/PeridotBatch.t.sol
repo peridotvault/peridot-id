@@ -412,6 +412,22 @@ contract PeridotBatchTest is Test {
         assertEq(account.accountId(), "peridot.pid-account-batch.v4");
     }
 
+    /// @dev ANT-763 Tobias follow-up: the executor allowlist must reject
+    /// everything outside single+batch, and the frozen v1 forwarder must
+    /// reject batch (fail-closed; account would revert anyway).
+    function test_ExecutorGarbageModeRejected() public {
+        PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
+        _installModule(2, address(executor));
+        bytes32 batchMode = account.MODE_BATCH();
+        bytes32 garbage = bytes32(uint256(0xFF) << 248);
+        vm.expectRevert(PeridotPermissionExecutor.UnsupportedExecutionMode.selector);
+        executor.executeViaPermissionV2(payable(address(account)), garbage, "");
+        vm.expectRevert(PeridotPermissionExecutor.UnsupportedExecutionMode.selector);
+        executor.executeViaPermissionV2(payable(address(account)), bytes32(uint256(1)), "");
+        vm.expectRevert(PeridotPermissionExecutor.UnsupportedExecutionMode.selector);
+        executor.executeViaPermission(payable(address(account)), batchMode, "");
+    }
+
     // ---- session batch (via executor) ----
 
     function test_BatchSessionHappy() public {

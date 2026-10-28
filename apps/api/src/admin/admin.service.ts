@@ -72,7 +72,7 @@ export class AdminService {
   async upsertContract(pid: string, chainId: string, dto: UpsertContractDto) {
     const chain = await this.prisma.chain.findUnique({ where: { id: chainId } });
     if (!chain) throw new NotFoundException("Chain not found");
-    if (chain.namespace === "solana" && (dto.type === "factory" || dto.type === "account_implementation")) {
+    if (chain.namespace === "solana" && (dto.type === "factory" || dto.type === "account_implementation" || dto.type === "factory_v2" || dto.type === "account_implementation_v2")) {
       throw new ConflictException("EVM contract types do not apply to Solana chains");
     }
     const contract = await this.prisma.chainContract.upsert({

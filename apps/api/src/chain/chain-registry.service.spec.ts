@@ -81,6 +81,39 @@ describe("ChainRegistryService", () => {
     expect(await service.deployableEvmChains()).toEqual([]);
   });
 
+  // ANT-763: dual-factory reads. v2 rows (batch family) are invisible to the
+  // v1 default (old accounts keep resolving the frozen implementation); an
+  // explicit version selects the v2 pair.
+  it("isolates the v2 batch family from the v1 default", async () => {
+    const row = dbRow({
+      contracts: [
+        { type: "factory_v2", address: FACTORY, versionLabel: "v2-batch" },
+        { type: "account_implementation_v2", address: IMPL, versionLabel: "v2-batch" },
+      ],
+    });
+    const service = setup([row]);
+    expect(await service.deployableEvmChains()).toEqual([]);
+    expect(await service.deploymentFor("97")).toBeNull();
+    expect(await service.deploymentFor("97", 2)).toEqual({ factory: FACTORY, implementation: IMPL });
+    expect(await service.deployableEvmChains(2)).toHaveLength(1);
+  });
+
+  it("resolves both families independently on dual-factory chains", async () => {
+    const other = "0x0000000000000000000000000000000000000002";
+    const row = dbRow({
+      contracts: [
+        { type: "factory", address: FACTORY, versionLabel: "v1" },
+        { type: "account_implementation", address: IMPL, versionLabel: "v1" },
+        { type: "factory_v2", address: other, versionLabel: "v2-batch" },
+        { type: "account_implementation_v2", address: other, versionLabel: "v2-batch" },
+      ],
+    });
+    const service = setup([row]);
+    expect(await service.deploymentFor("97")).toEqual({ factory: FACTORY, implementation: IMPL });
+    expect(await service.deploymentFor("97", 2)).toEqual({ factory: other, implementation: other });
+    expect(await service.deploymentFor("97", 1)).toEqual({ factory: FACTORY, implementation: IMPL });
+  });
+
   it("falls back to the local-dev RPC default with no env involved", async () => {
     const service = setup([]);
     expect(await service.rpcUrlForReference("97")).toBe("http://localhost:8545");

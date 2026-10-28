@@ -102,7 +102,9 @@ export class SetEvmRelayerDto {
 }
 
 export class UpsertContractDto {
-  @IsIn(["factory", "account_implementation", "verifier", "paymaster", "program"])
+  // ANT-763: v2 rows (factory_v2, account_implementation_v2) register the
+  // batch deployment family alongside the frozen v1 rows (dual-factory reads).
+  @IsIn(["factory", "account_implementation", "factory_v2", "account_implementation_v2", "verifier", "paymaster", "program"])
   type!: string;
 
   @IsString()
