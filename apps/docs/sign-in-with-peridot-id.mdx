@@ -114,7 +114,7 @@ const r = await fetch('https://api.peridot.id/v1/auth/exchange', {
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ code, clientId: 'pidapp_...' }),
 });
-const identity = await r.json(); // single-use code, 5-minute expiry
+const identity = await r.json(); // single-use code, 60-second expiry
 // identity.accessToken → keep server-side, send as Authorization: Bearer
 // for reads (GET /v1/identity/me, /v1/fiat/balance, …). Set your own
 // httpOnly cookie for the browser — that cookie is your session, not ours.
@@ -124,7 +124,7 @@ Know the limits before promising anything to your users:
 
 - The bearer is **read-only** (`scope: "read"`): balance/ledger/identity/profile
   are reachable, transfers and writes always return 403.
-- It lasts **30 days, non-refreshable** — afterwards the user re-clicks login
+- It lasts **24 hours, non-refreshable** — afterwards the user re-clicks login
   (one tap if their PeridotID session is alive). Never log the bearer.
 - There is **no single-token revoke**: a leaked bearer stays valid until expiry
   unless the whole identity is deactivated. The read-only scope is the
@@ -141,7 +141,7 @@ Know the limits before promising anything to your users:
 
 - Passkey login always runs on a PeridotID-hosted page (browsers bind WebAuthn to our
   domain) and returns with `pid_code` like Google does.
-- Codes are single-use, expire in ~5 minutes, and are bound to your `client_id`.
+- Codes are single-use, expire in 60 seconds, and are bound to your `client_id`.
 - Integrator API surface (all on `peridot.auth`): `loginPopup({ clientId?, returnTo? })`
   (popup, tab fallback) or `loginTab({ clientId?, returnTo? })` for a tab outright;
   `loginWithPasskey({ clientId?, returnTo? })`; and

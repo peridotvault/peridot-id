@@ -34,7 +34,7 @@ All configuration is loaded from `.env` in the API package. Copy
 | `ACCESS_TOKEN_TTL` | no | Access token lifetime (default `15m`) |
 | `REFRESH_TOKEN_TTL` | no | Refresh token lifetime (default `30d`) |
 | `APP_TOKEN_TTL` | no | Machine (client-credentials) token lifetime (default `1h`) |
-| `PORT` | no | HTTP port (default `3301`) |
+| `PORT` | no | HTTP port (default `3300`) |
 
 > **Solana chains/RPC/program id are not env.** They live in the chain registry
 > (DB), seeded by `pnpm db:seed` and edited in the workspace admin
@@ -52,6 +52,7 @@ balance lives on the internal fiat ledger. See [Fiat & payments](/fiat).
 | `DOKU_CLIENT_ID` / `DOKU_SECRET_KEY` | yes* | DOKU merchant credentials (Checkout) |
 | `DOKU_PRIVATE_KEY` | no | RSA PEM for legacy Sub-Account calls (not needed for Checkout-only) |
 | `DOKU_WEBHOOK_URL` | no | Public URL for DOKU payment notifications (`/v1/fiat/webhook`) |
+| `DOKU_WEBHOOK_SECRET` | no | Shared secret for DOKU webhook source authentication (generate, set, rotate — see below) |
 | `DOKU_CHECKOUT_NOTIFY_URL` | no | Per-payment notify override (defaults to `DOKU_WEBHOOK_URL`) |
 | `PID_FIAT_LEDGER_ENABLED` | no | Master switch (default `true`) |
 | `PID_FIAT_LEDGER_FROZEN` | no | Freeze new issues/sends (default `false`) |
@@ -62,6 +63,23 @@ balance lives on the internal fiat ledger. See [Fiat & payments](/fiat).
 is versioned in the DB (`fiat_fee_policies`) and can be published by an admin
 (`POST /v1/fiat/admin/fee-policy`); per-app fees are configured per app in the
 workspace.
+
+> **DOKU webhook source authentication.** Generate a secret
+> (`openssl rand -hex 32`), set it as `DOKU_WEBHOOK_SECRET` on the API, and
+> configure the tunnel/proxy delivering DOKU notifies to sign every payload
+> with `X-Doku-Signature: sha256=<hex HMAC-SHA256(rawBody, secret)>` (bare
+> 64-char hex is also accepted). When the secret is set, the inbox verifies
+> the signature with a timing-safe compare and rejects unsigned/forged pushes
+> with `401` **before any DB write**. Rotate by updating the secret on both
+> sides at once. When unset, the inbox is unauthenticated: forged notifies are
+> accepted for persistence (up to the 120 req/min route throttle) and the
+> persist-then-corroborate model below is the only money safety — never run
+> production without the secret.
+>
+> **Persist-then-corroborate.** The webhook inbox is persist-first: every
+> notify is stored (deduped on `X-EXTERNAL-ID`), then corroborated
+> server-side against DOKU before any `fiat_issue`. A forged or unknown event
+> can never move funds — it stays `received` for admin review.
 
 `*` Google endpoints return `503` until these are set. Dev and prod run the
 identical OAuth code path — only the values differ per environment. Create a
