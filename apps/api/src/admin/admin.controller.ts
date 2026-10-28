@@ -4,7 +4,7 @@ import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AdminGuard } from "../common/admin.guard";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CloseBreakerDto, CloseRelayerBreakerDto, CreateChainDto, CreateFeePolicyDto, CreateTokenDto, OpenRelayerBreakerDto, PreviewChainDto, PreviewTokenDto, SetEvmRelayerDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto, VerifyAppDto } from "./admin.dto";
+import { CloseBreakerDto, CloseRelayerBreakerDto, CreateChainDto, CreateFeePolicyDto, CreateTokenDto, OpenRelayerBreakerDto, PreviewChainDto, PreviewTokenDto, SetEvmRelayerDto, UpdateChainDto, UpdateTokenDeploymentDto, UpdateTokenDto, UpsertContractDto, VerificationDto, VerifyAppDto } from "./admin.dto";
 import { AdminService } from "./admin.service";
 import { ChainPreviewService } from "./chain-preview.service";
 import { CircuitBreakerService } from "../relayer/circuit-breaker.service";
@@ -135,6 +135,37 @@ export class AdminController {
     @Body() dto: VerifyAppDto,
   ) {
     return this.adminService.setAppVerified(user.pid, id, dto.verified);
+  }
+
+  /**
+   * ANT-804 §6.3: grant/revoke verification per clientId (admin + audit) →
+   * 200 {clientId, isVerified, updatedBy, updatedAt}. Justification required;
+   * expiry flips to unverified automatically (lazy sweep on every read).
+   */
+  @Patch("apps/:clientId/verification")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  setAppVerification(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("clientId") clientId: string,
+    @Body() dto: VerificationDto,
+  ) {
+    return this.adminService.grantVerification(user.pid, clientId, dto);
+  }
+
+  /** ANT-804 §6.3: verification queue (?state=verified|unverified|expired|all). */
+  @Get("apps/verifications")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  listVerifications(
+    @Query("state") state?: string,
+    @Query("limit", new ParseIntPipe({ optional: true })) limit?: number,
+    @Query("offset", new ParseIntPipe({ optional: true })) offset?: number,
+  ) {
+    const allowed = ["verified", "unverified", "expired", "all"];
+    const s = (state ?? "verified").toLowerCase();
+    if (!allowed.includes(s)) throw new BadRequestException(`state must be one of ${allowed.join("|")}`);
+    return this.adminService.listVerifications(s, limit, offset);
   }
 
   @Get("apps")

@@ -8,6 +8,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { APP_CLIENT_SECRET_GRACE, APP_CLIENT_SECRET_MAX_AGE, parseTtlMs } from "../common/app-config";
 import { encryptSecret } from "../common/secret-crypto";
 import { PrismaService } from "../prisma/prisma.service";
+import { SecurityEventService } from "../security/security-event.service";
 
 /**
  * Normalize a developer-supplied origin: strip trailing slashes, reject anything
@@ -27,7 +28,30 @@ export class PidAppsService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly config?: ConfigService,
+    @Optional() private readonly security?: SecurityEventService,
   ) {}
+
+  /**
+   * Immutable verification-audit write. Tolerant of delegates that lack the
+   * model (older generated clients / unit-test doubles).
+   */
+  private async auditVerification(data: Record<string, unknown>): Promise<void> {
+    const prisma = this.prisma as unknown as {
+      pidVerificationAudit?: { create: (args: { data: Record<string, unknown> }) => Promise<unknown> };
+    };
+    await prisma.pidVerificationAudit?.create({ data }).catch(() => null);
+  }
+
+  /**
+   * ANT-804 D3: effective verification. Grants expire — an expired grant
+   * behaves as unverified everywhere (fee waiver dies with it) without a
+   * cron job. Callers must use this instead of reading `isVerified` raw.
+   */
+  static isVerificationActive(app: { isVerified: boolean; verificationExpiresAt?: Date | string | null } | null | undefined): boolean {
+    if (!app?.isVerified) return false;
+    if (!app.verificationExpiresAt) return true;
+    return new Date(app.verificationExpiresAt).getTime() > Date.now();
+  }
 
   /** Never expose secret material in API responses (hash or plaintext). */
   private static readonly PUBLIC_OMIT = {
@@ -49,8 +73,11 @@ export class PidAppsService {
 
   async create(ownerPid: string, name: string, allowedOrigins: string[] = []) {
     const clientId = `pidapp_${randomBytes(16).toString("hex")}`;
+    // ANT-804 D3.1 deny-by-default: self-serve registration NEVER produces a
+    // verified app, even if a caller smuggles isVerified into the payload.
+    // Verification is an admin-recorded grant only (AdminService).
     return this.prisma.pidApp.create({
-      data: { clientId, ownerPid, name, allowedOrigins: [...new Set(allowedOrigins.map(normalizeOrigin))] },
+      data: { clientId, ownerPid, name, isVerified: false, allowedOrigins: [...new Set(allowedOrigins.map(normalizeOrigin))] },
       omit: PidAppsService.PUBLIC_OMIT,
     });
   }
@@ -66,25 +93,64 @@ export class PidAppsService {
     return safe;
   }
 
-  async update(ownerPid: string, id: string, patch: { name?: string; allowedOrigins?: string[]; isActive?: boolean }) {
-    await this.ownedApp(ownerPid, id);
-    return this.prisma.pidApp.update({
+  async update(ownerPid: string, id: string, patch: { name?: string; allowedOrigins?: string[]; isActive?: boolean; isVerified?: boolean }) {
+    const app = await this.ownedApp(ownerPid, id);
+    // ANT-804 D3.3 (negative): self-serve update can never set isVerified —
+    // a smuggled field is stripped (ignored, not trusted). Admin grants flow
+    // through AdminService.grantVerification only.
+    const { isVerified: _dropped, ...safePatch } = patch;
+    void _dropped;
+    const nextOrigins = safePatch.allowedOrigins !== undefined
+      ? [...new Set(safePatch.allowedOrigins.map(normalizeOrigin))]
+      : undefined;
+    // ANT-804 D3 edge 7: origins change on a verified app forces re-review —
+    // the waiver dies immediately until an admin re-grants.
+    const originsChanged = nextOrigins !== undefined &&
+      JSON.stringify([...(app.allowedOrigins as string[] ?? [])].sort()) !== JSON.stringify([...nextOrigins].sort());
+    const mustRevoke = originsChanged && PidAppsService.isVerificationActive(app as never);
+    const updated = await this.prisma.pidApp.update({
       where: { id },
       data: {
-        ...(patch.name !== undefined ? { name: patch.name } : {}),
-        ...(patch.allowedOrigins !== undefined
-          ? { allowedOrigins: [...new Set(patch.allowedOrigins.map(normalizeOrigin))] }
-          : {}),
-        ...(patch.isActive !== undefined ? { isActive: patch.isActive } : {}),
+        ...(safePatch.name !== undefined ? { name: safePatch.name } : {}),
+        ...(nextOrigins !== undefined ? { allowedOrigins: nextOrigins } : {}),
+        ...(safePatch.isActive !== undefined ? { isActive: safePatch.isActive } : {}),
+        ...(mustRevoke ? { isVerified: false } : {}),
       },
       omit: PidAppsService.PUBLIC_OMIT,
     });
+    if (mustRevoke) {
+      await this.auditVerification({
+        clientId: (app as { clientId: string }).clientId,
+        action: "re_review",
+        justification: "allowedOrigins changed — re-review required before waiver resumes",
+        actorPid: ownerPid,
+      });
+      await this.security?.log(ownerPid, "app.verification.revoked", {
+        clientId: (app as { clientId: string }).clientId, reason: "origins_changed",
+      }).catch(() => null);
+    }
+    return updated;
   }
 
   /** Active app by client_id (null when unknown/disabled) — used by the SSO checks. */
   async findActive(clientId: string) {
     const app = await this.prisma.pidApp.findUnique({ where: { clientId } });
-    return app && app.isActive ? app : null;
+    if (!app || !app.isActive) return null;
+    // ANT-804 D3 edge 6: lazy expiry — an overdue grant flips to unverified
+    // on read (no cron), so display labels and SSO checks never show a dead
+    // grant as verified. Fee quotes enforce the same via isVerificationActive.
+    if (app.isVerified && app.verificationExpiresAt && new Date(app.verificationExpiresAt).getTime() <= Date.now()) {
+      const cleared = await this.prisma.pidApp.update({
+        where: { clientId },
+        data: { isVerified: false },
+      }).catch(() => null);
+      await this.auditVerification({
+        clientId, action: "expired", justification: "grant expired — waiver off", actorPid: "system",
+      });
+      await this.security?.log(app.ownerPid, "app.verification.revoked", { clientId, reason: "expired" }).catch(() => null);
+      return cleared ?? { ...app, isVerified: false };
+    }
+    return app;
   }
 
   /** SHA-256 hex of a plaintext secret (what's stored — never the secret itself). */

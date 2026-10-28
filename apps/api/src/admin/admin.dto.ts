@@ -94,6 +94,26 @@ export class VerifyAppDto {
   verified!: boolean;
 }
 
+/**
+ * ANT-804 §6.3: admin verification grant/revoke per clientId (deny-by-default,
+ * recorded justification, optional expiry). Auth: admin role + audit.
+ */
+export class VerificationDto {
+  @IsBoolean()
+  isVerified!: boolean;
+
+  @IsString()
+  @MinLength(5, { message: "justification is required (min 5 chars)" })
+  @MaxLength(2000)
+  justification!: string;
+
+  /** Grant expiry (ISO datetime, must be future). Omitted = no expiry. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  expiresAt?: string;
+}
+
 /** Write-only EVM auto-deploy relayer key (0x-prefixed 32-byte hex). Never returned by any endpoint. */
 export class SetEvmRelayerDto {
   @IsString()

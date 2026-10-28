@@ -120,9 +120,13 @@ export class FiatLedgerService {
   async resolveAppContext(clientId?: string | null): Promise<{ id: string; ownerPid: string; isVerified: boolean } | null> {
     if (!clientId) return null;
     const app = await this.prisma.pidApp
-      .findUnique({ where: { clientId }, select: { id: true, ownerPid: true, isActive: true, isVerified: true } })
+      .findUnique({ where: { clientId }, select: { id: true, ownerPid: true, isActive: true, isVerified: true, verificationExpiresAt: true } })
       .catch(() => null);
-    return app && app.isActive ? { id: app.id, ownerPid: app.ownerPid, isVerified: app.isVerified } : null;
+    if (!app || !app.isActive) return null;
+    // ANT-804 D3 edge 6: an expired grant behaves as unverified (waiver off).
+    // Fee formula unchanged — verified still means globalFee=0 (D3 contract).
+    const effective = app.isVerified && (!app.verificationExpiresAt || app.verificationExpiresAt.getTime() > Date.now());
+    return { id: app.id, ownerPid: app.ownerPid, isVerified: effective };
   }
 
   /** App fee for an amount (0 when no app / not enabled). Clamp: min/max, 0 = unbounded. */
