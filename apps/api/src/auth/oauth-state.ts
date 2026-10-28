@@ -20,8 +20,7 @@ export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 export interface OAuthStatePayload {
   returnTo: string;
   clientId?: string;
-  /** PKCE S256 challenge for public-client logins (M5, ANT-802) — carried
-   * inside the signed envelope so the callback can bind the pid_code. */
+  /** PKCE S256 challenge bound at login time (H4/ANT-799) — minted into the pid_code at callback. */
   codeChallenge?: string;
 }
 
@@ -30,7 +29,7 @@ export function newOAuthNonce(): string {
   return randomBytes(16).toString("base64url");
 }
 
-/** Sign `{returnTo, clientId, codeChallenge, nonce}` — returns the `state` query param value. */
+/** Sign `{returnTo, clientId, nonce}` — returns the `state` query param value. */
 export function signOAuthState(
   payload: OAuthStatePayload,
   nonce: string,

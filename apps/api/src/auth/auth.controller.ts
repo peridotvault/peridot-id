@@ -20,7 +20,7 @@ import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { isPendingGoogleClaim } from "./google.strategy";
 import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto, GrantScopeDto } from "./dto/auth.dto";
 import { PidAppsService } from "./apps.service";
-import { encodeState, SsoCodeInvalidError, SsoService } from "./sso.service";
+import { encodeState, isLoopbackReturnTo, SsoCodeInvalidError, SsoService } from "./sso.service";
 import { randomBytes } from "node:crypto";
 import { oauthStateSecret, verifyOAuthState } from "./oauth-state";
 import { resolveServiceUrls } from "../common/app-config";
@@ -98,8 +98,11 @@ export class AuthController {
       if (!resolved) {
         throw new BadRequestException("returnTo is not an allowed origin");
       }
-      // state round-trips through Google: carries returnTo (+ clientId when present,
-      // + PKCE challenge for public clients — bound to the pid_code at issue time).
+      // H4: the PKCE challenge rides the state envelope to the callback, which
+      // binds it into the minted pid_code (public clients must present one —
+      // issue() fails closed without it). The verified gate itself is enforced
+      // at callback time, not here.
+      // state round-trips through Google: carries returnTo (+ clientId when present).
       // Handles are never chosen here — new credentials land on the PID picker.
       url += `?returnTo=${encodeURIComponent(encodeState(resolved.redirectTo, resolved.clientId, dto.codeChallenge))}`;
     }
@@ -160,10 +163,28 @@ export class AuthController {
       if (!resolved) {
         throw new BadRequestException("returnTo is not an allowed origin");
       }
-      const pidCode = await this.ssoService.issue(pid, resolved.redirectTo, {
-        clientId: resolved.clientId,
-        ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
-      });
+      // H4: silent auto-issue is first-party/verified-only. Unverified apps
+      // must use the explicit consent endpoint (authorize) so the user sees
+      // the app's name + unverified warning before any code is minted.
+      try {
+        this.ssoService.requireVerifiedForAutoIssue(resolved);
+      } catch {
+        throw new BadRequestException(
+          "App is not verified — approve it on the PeridotID consent screen before continuing.",
+        );
+      }
+      let pidCode: string;
+      try {
+        pidCode = await this.ssoService.issue(pid, resolved.redirectTo, {
+          clientId: resolved.clientId,
+          ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+        });
+      } catch (err) {
+        if (err instanceof Error && err.message === "sso_pkce_invalid") {
+          throw new BadRequestException("A code_challenge is required for this app (public client).");
+        }
+        throw err;
+      }
       return { ok: true, pidCode };
     }
     return { ok: true };
@@ -199,10 +220,26 @@ export class AuthController {
     if (identity) {
       await this.authService.issueSession(res, identity.pid, req.headers["user-agent"], undefined, "email");
       if (resolved) {
-        const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, {
-          clientId: resolved.clientId,
-          ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
-        });
+        // H4: same verified-gate as passkey — unverified apps go through consent.
+        try {
+          this.ssoService.requireVerifiedForAutoIssue(resolved);
+        } catch {
+          throw new BadRequestException(
+            "App is not verified — approve it on the PeridotID consent screen before continuing.",
+          );
+        }
+        let pidCode: string;
+        try {
+          pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, {
+            clientId: resolved.clientId,
+            ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+          });
+        } catch (err) {
+          if (err instanceof Error && err.message === "sso_pkce_invalid") {
+            throw new BadRequestException("A code_challenge is required for this app (public client).");
+          }
+          throw err;
+        }
         return { ok: true, pidCode };
       }
       return { ok: true };
@@ -266,10 +303,18 @@ export class AuthController {
     if (await this.ssoService.isRevoked(user.pid, resolved.redirectTo)) {
       throw new BadRequestException("App connection revoked — sign in again from the site to reconnect.");
     }
-    const pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, {
-      clientId: resolved.clientId,
-      ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
-    });
+    let pidCode: string;
+    try {
+      pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, {
+        clientId: resolved.clientId,
+        ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message === "sso_pkce_invalid") {
+        throw new BadRequestException("A code_challenge is required for this app (public client).");
+      }
+      throw err;
+    }
     return { pidCode };
   }
 
@@ -403,10 +448,30 @@ export class AuthController {
     await this.authService.issueSession(res, identity.pid, req.headers["user-agent"], undefined, "google");
 
     if (resolved) {
-      const pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, {
-        clientId: resolved.clientId,
-        ...(codeChallenge ? { codeChallenge } : {}),
-      });
+      // H4: unverified apps are not auto-issued here — the user lands on the
+      // wallet with a session and approves via the consent screen (authorize).
+      // Redirect without a code so no phishing-grade pid_code leaks silently.
+      try {
+        this.ssoService.requireVerifiedForAutoIssue(resolved);
+      } catch {
+        this.logger.warn(`google callback: unverified app ${resolved.clientId} — no auto pid_code, consent required`);
+        res.redirect(resolved.redirectTo);
+        return;
+      }
+      let pidCode: string;
+      try {
+        pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, {
+          clientId: resolved.clientId,
+          ...(codeChallenge ? { codeChallenge } : {}),
+        });
+      } catch (err) {
+        if (err instanceof Error && err.message === "sso_pkce_invalid") {
+          this.logger.warn(`google callback: public client ${resolved.clientId} missing code_challenge`);
+          res.redirect(withErrorFlag(successUrl, "pkce_required"));
+          return;
+        }
+        throw err;
+      }
       res.redirect(withPidCode(resolved.redirectTo, pidCode));
       return;
     }
@@ -438,10 +503,25 @@ export class AuthController {
     if (redirectTo) {
       const resolved = await this.ssoService.resolveReturnTo(redirectTo, clientId);
       if (resolved) {
-        const pidCode = await this.ssoService.issue(pid, resolved.redirectTo, {
-          clientId: resolved.clientId,
-          ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
-        });
+        // H4: unverified apps are not auto-issued on claim — the new user
+        // lands on the wallet with a session and approves via consent.
+        try {
+          this.ssoService.requireVerifiedForAutoIssue(resolved);
+        } catch {
+          return { ok: true, pid };
+        }
+        let pidCode: string;
+        try {
+          pidCode = await this.ssoService.issue(pid, resolved.redirectTo, {
+            clientId: resolved.clientId,
+            ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+          });
+        } catch (err) {
+          if (err instanceof Error && err.message === "sso_pkce_invalid") {
+            throw new BadRequestException("A code_challenge is required for this app (public client).");
+          }
+          throw err;
+        }
         return { ok: true, pid, pidCode, redirectTo: resolved.redirectTo };
       }
     }

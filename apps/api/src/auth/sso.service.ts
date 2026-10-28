@@ -48,6 +48,7 @@ export type SsoCodeFailureReason =
   | "client_mismatch"
   | "app_unknown"
   | "secret_invalid"
+  | "unverified_no_consent"
   | "replay";
 
 export class SsoCodeInvalidError extends Error {
@@ -75,10 +76,16 @@ export interface SsoIdentity {
   expiresIn: number;
 }
 
-/** Validated cross-domain return target: where to redirect + which app asked. */
+/** Validated cross-domain return target: where to redirect + which app asked.
+ * `isVerified` mirrors the app's operator-verified flag (H4): auto-issue login
+ * paths must NOT mint pid_codes for unverified non-loopback apps — the user
+ * must go through the explicit consent step (POST /v1/auth/authorize) which
+ * surfaces appInfo (name + isVerified) first. First-party (no clientId) and
+ * loopback targets are trusted by topology and report true. */
 export interface ResolvedReturnTo {
   redirectTo: string;
   clientId?: string;
+  isVerified: boolean;
 }
 
 function validHttpUrl(value: string): boolean {
@@ -123,7 +130,7 @@ export interface SsoGrantView {
   lastUsedAt: Date;
 }
 /** Opaque Google `state` carrying returnTo (+ optional clientId + PKCE challenge).
- * Plain returnTo strings (pre-client_id clients like Live2Dev) decode via the fallback. */
+ *  Plain returnTo strings (pre-client_id clients like Live2Dev) decode via the fallback. */
 export function encodeState(returnTo: string, clientId?: string, codeChallenge?: string): string {
   if (!clientId && !codeChallenge) return returnTo;
   return Buffer.from(
@@ -212,14 +219,28 @@ export class SsoService {
    * real app could never exchange. Returns null when rejected. Arbitrary
    * hosts are NEVER allowed (open-redirector identity theft) — register them
    * via POST /v1/apps instead.
+   *
+   * H4: the resolved target carries the app's `isVerified` flag. Loopback and
+   * first-party (no clientId) targets report true — loopback is safe by
+   * topology (a code sent to the victim's own machine is unusable remotely),
+   * and the global allowlist is operator-controlled. Callers gating auto-issue
+   * login paths must reject unverified non-loopback apps (see
+   * requireVerifiedForAutoIssue); the explicit consent endpoint
+   * (POST /v1/auth/authorize) is the only path that may mint for them.
    */
   async resolveReturnTo(returnTo: string | undefined, clientId?: string): Promise<ResolvedReturnTo | null> {
     if (!returnTo || !validHttpUrl(returnTo)) return null;
     if (isLoopbackReturnTo(returnTo)) {
       // Binding still recorded when supplied, so exchange rules stay uniform —
       // but the app must exist, or the code could never be exchanged.
-      if (clientId && !(await this.apps.findActive(clientId))) return null;
-      return { redirectTo: returnTo, clientId };
+      // Loopback reports verified: the code lands on the victim's own machine,
+      // so a remote phisher gains nothing (H4 gate exempts loopback dev).
+      if (clientId) {
+        const app = await this.apps.findActive(clientId);
+        if (!app) return null;
+        return { redirectTo: returnTo, clientId, isVerified: true };
+      }
+      return { redirectTo: returnTo, clientId, isVerified: true };
     }
     if (clientId) {
       const app = await this.apps.findActive(clientId);
@@ -231,12 +252,32 @@ export class SsoService {
         return null;
       }
       if (!app.allowedOrigins.includes(origin)) return null;
-      return { redirectTo: returnTo, clientId };
+      return { redirectTo: returnTo, clientId, isVerified: app.isVerified === true };
     }
-    return this.isAllowedReturnTo(returnTo) ? { redirectTo: returnTo } : null;
+    return this.isAllowedReturnTo(returnTo) ? { redirectTo: returnTo, isVerified: true } : null;
   }
 
-  /** Issue a single-use code bound to an identity (called right after login). */
+  /**
+   * H4 gate for silent (no-consent) code issuance. Full-login paths
+   * (passkey/email/Google/claim) must call this after resolveReturnTo and
+   * refuse to mint when it throws: unverified non-loopback apps only get codes
+   * through the explicit consent endpoint (authorize), where the user has seen
+   * the app's name + unverified warning. Throws a plain Error with a stable
+   * code (`sso_consent_required`) — callers map it to 403.
+   */
+  requireVerifiedForAutoIssue(resolved: ResolvedReturnTo): void {
+    if (resolved.clientId && !resolved.isVerified && !isLoopbackReturnTo(resolved.redirectTo)) {
+      throw new Error("sso_consent_required");
+    }
+  }
+
+  /** Issue a single-use code bound to an identity (called right after login).
+   * H4/PKCE: public clients (apps with no backend secret) MUST bind an S256
+   * challenge at issue time — fail-closed at mint, not at exchange. The
+   * controller forwards the client's `codeChallenge` on every issue path
+   * (passkey/email/Google/claim/authorize); confidential clients and
+   * first-party (no clientId) codes keep PKCE optional (secret / allowlist
+   * binding already authenticates them). */
   async issue(
     pid: string,
     redirectTo: string,
@@ -257,16 +298,16 @@ export class SsoService {
     } else if (opts?.codeChallengeMethod !== undefined) {
       throw new BadRequestException("sso_pkce_invalid");
     }
-    // M5 (ANT-802): PKCE is MANDATORY for public clients (apps without a
-    // backend secret — SPAs / mobile apps that cannot hold one). Without a
-    // challenge, anyone who sees the redirect URL can exchange the code, and
-    // the secret check at consume is vacuous for these apps
-    // (clientSecretValid always passes). Confidential clients authenticate
-    // with their secret at exchange instead, so they are exempt. Fail closed:
-    // no challenge, no code.
-    if (opts?.clientId && !codeChallenge) {
-      const app = await this.apps.findActive(opts.clientId).catch(() => null);
-      if (app && !app.clientSecretHash) {
+    // H4 (ANT-799, subsumes ANT-802 M5): a public-client code without a
+    // challenge is unusable at exchange (see consume), so minting one only
+    // creates confusion — reject here with the same stable code (400, not
+    // 500: the controllers match on the message for friendly mapping).
+    // Unknown/disabled apps are rejected too: resolveReturnTo already gates
+    // them, this is defense-in-depth for direct issue() callers.
+    if (opts?.clientId) {
+      const app = await this.apps.findActive(opts.clientId);
+      if (!app) throw new Error("sso_app_unknown");
+      if (!app.clientSecretHash && codeChallenge === null) {
         throw new BadRequestException("sso_pkce_invalid");
       }
     }
@@ -324,16 +365,19 @@ export class SsoService {
       if (row.clientId !== clientId) throw new SsoCodeInvalidError("client_mismatch");
       const app = await this.apps.findActive(row.clientId);
       if (!app) throw new SsoCodeInvalidError("app_unknown");
-      // M5 (ANT-802) defense in depth: a public-client code minted before
-      // enforcement carries no challenge, and the secret check below is
-      // vacuous for public clients — so it must never exchange. (issue()
-      // already refuses to mint such codes; this closes the pre-enforcement
-      // window.)
-      if (!app.clientSecretHash && !row.codeChallenge) {
-        throw new SsoCodeInvalidError("pkce_mismatch");
-      }
       if (!this.apps.clientSecretValid(app, clientSecret ?? "")) {
         throw new SsoCodeInvalidError("secret_invalid");
+      }
+      // H4 defense-in-depth (ANT-799): pre-fix codes for public or unverified
+      // apps carry no challenge. Public clients must always use PKCE, and
+      // unverified non-loopback apps may only be issued through the explicit
+      // consent endpoint (which enforces PKCE) — so a challengeless code on
+      // either path is a legacy/confused issuance and must not exchange.
+      // Same uniform error either way — no oracle.
+      const isPublic = !app.clientSecretHash;
+      const loopback = isLoopbackReturnTo(row.redirectTo);
+      if (!row.codeChallenge && (isPublic || (!app.isVerified && !loopback))) {
+        throw new SsoCodeInvalidError(isPublic ? "pkce_mismatch" : "unverified_no_consent");
       }
     }
 

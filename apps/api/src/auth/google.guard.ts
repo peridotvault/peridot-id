@@ -81,6 +81,8 @@ export class GoogleGuard extends AuthGuard("google") {
     // login with invalid_state.
     // Unwrap the login-step envelope (plain returnTo or app-bound encoding),
     // then re-wrap it signed + nonce-bound for the Google round-trip.
+    // The PKCE challenge (H4) rides along the same envelope so the callback
+    // can bind the minted pid_code to the public client's verifier.
     const { returnTo: target, clientId, codeChallenge } = returnTo
       ? decodeState(returnTo)
       : { returnTo: resolveServiceUrls((key, def) => this.config.get(key, def)).walletUrl };
