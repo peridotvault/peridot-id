@@ -4,8 +4,12 @@ import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Length, 
  * A bare http(s) origin: scheme + host + optional port, no path/query/fragment.
  * Trailing slashes are tolerated (normalized away) — anything else is rejected so
  * developers learn the model instead of silently storing something looser.
+ *
+ * ANT-826 F1: wildcards are never allowed. The host class excludes `*`
+ * explicitly (old `[^/:?#]+` admitted `https://*.example.com`), so the DTO
+ * layer rejects wildcards with a 400 before normalizeOrigin runs.
  */
-export const ORIGIN_PATTERN = /^https?:\/\/[^/:?#]+(?::\d+)?\/?$/;
+export const ORIGIN_PATTERN = /^https?:\/\/[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(?::\d+)?\/?$/;
 
 export class CreatePidAppDto {
   @IsString()

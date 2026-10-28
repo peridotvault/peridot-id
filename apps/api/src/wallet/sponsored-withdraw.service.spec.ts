@@ -41,10 +41,7 @@ const adapterMock = {
   treasuryAddress: jest.fn(() => new MockPublicKey(TREASURY_PDA)),
   parseTransaction: jest.fn(async () => ({ signature: "sig", fee: 5000 })),
   getHistory: jest.fn(async (): Promise<{ signature: string; err: unknown }[]> => []),
-  sponsoredWithdrawSolV3: jest.fn(async () => "sig-sponsor-sol") as jest.Mock,
-  sponsoredWithdrawTokenV3: jest.fn(async () => "sig-sponsor-token") as jest.Mock,
   estimateExecuteFee: jest.fn(async () => 10000n) as jest.Mock,
-  sponsoredExecuteV3: jest.fn(async () => "sig-execute") as jest.Mock,
   waitForConfirmation: jest.fn(async () => "confirmed" as const),
   // ANT-729 (WS3) lazy-activation doubles.
   estimateCompositeWithdrawFee: jest.fn(async () => 8000n) as jest.Mock,
@@ -122,7 +119,9 @@ beforeEach(() => {
     return s === RELAYER ? relayerBalance : 100_000_000;
   });
   adapterMock.waitForConfirmation.mockResolvedValue("confirmed");
-  adapterMock.sponsoredWithdrawSolV3.mockResolvedValue("sig-sponsor-sol");
+  adapterMock.sponsoredWithdrawSolV4.mockResolvedValue("sig-sponsor-sol");
+  adapterMock.sponsoredWithdrawTokenV4.mockResolvedValue("sig-sponsor-token");
+  adapterMock.sponsoredExecuteV4.mockResolvedValue("sig-execute");
 });
 
 describe("SponsoredWithdrawService", () => {
@@ -193,7 +192,7 @@ describe("SponsoredWithdrawService", () => {
       expect(res.status).toBe("confirmed");
       expect(res.activation).toEqual({ mode: "svm-composite" });
       expect(adapterMock.sponsoredActivatePlusWithdrawSolV4).toHaveBeenCalledTimes(1);
-      expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+      expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
     });
 
     it("fail-closed re-quote when the activation leg is missing (never the legacy gate)", async () => {
@@ -208,6 +207,7 @@ describe("SponsoredWithdrawService", () => {
     it("falls back to 2-step on TxTooLarge with identical UX + mode report", async () => {
       const { service } = setup();
       adapterMock.sponsoredActivatePlusWithdrawSolV4.mockRejectedValueOnce(new Error("TxTooLarge: composite exceeds packet ceiling"));
+      adapterMock.sponsoredWithdrawSolV4.mockResolvedValueOnce("sig-spend-sol");
       const res = await service.withdraw(IDENTITY_ID, firstActionBase);
       expect(res.signature).toBe("sig-spend-sol");
       expect(res.activation).toEqual({ mode: "svm-fallback-2step" });
@@ -239,19 +239,20 @@ describe("SponsoredWithdrawService", () => {
     expect(res.status).toBe("confirmed");
     expect(res.networkFeeLamports).toBe("5000");
     expect(res.protocolFeeLamports).toBe("2500");
-    expect(adapterMock.sponsoredWithdrawSolV3).toHaveBeenCalledTimes(1);
-    expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][0]).toBe("pid_01HASH");
-    expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][4]).toBe(2); // policy version
-    expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][5]).toBe(5000n); // attested networkFee
+    expect(adapterMock.sponsoredWithdrawSolV4).toHaveBeenCalledTimes(1);
+    expect(adapterMock.sponsoredWithdrawSolV4.mock.calls[0][0]).toBe("pid_01HASH");
+    expect(adapterMock.sponsoredWithdrawSolV4.mock.calls[0][4]).toBe(2); // policy version
+    expect(adapterMock.sponsoredWithdrawSolV4.mock.calls[0][5]).toBe(5000n); // attested networkFee
+    expect(adapterMock.sponsoredWithdrawSolV4.mock.calls[0][6]).toBe(22000n); // user-approved maxTotalFee (ANT-800 H1)
     // ANT-635: the service omits treasury — the adapter derives the ["treasury"] PDA.
-    expect(adapterMock.sponsoredWithdrawSolV3.mock.calls[0][10]).toBeUndefined();
+    expect(adapterMock.sponsoredWithdrawSolV4.mock.calls[0][11]).toBeUndefined();
   });
 
   it("rejects a stale nonce before broadcasting", async () => {
     const { service } = setup();
     adapterMock.getNonce.mockResolvedValue(9n); // differs from dto.nonce=7
     await expect(service.withdraw(IDENTITY_ID, base)).rejects.toThrow(ConflictException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("rejects insufficient wallet balance (amount + network + protocol)", async () => {
@@ -261,14 +262,14 @@ describe("SponsoredWithdrawService", () => {
       return s === RELAYER ? relayerBalance : 1000; // wallet has ~nothing
     });
     await expect(service.withdraw(IDENTITY_ID, base)).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("503 and no broadcast when the relayer float is unfunded", async () => {
     const { service } = setup();
     relayerBalance = 0;
     await expect(service.withdraw(IDENTITY_ID, base)).rejects.toThrow(ServiceUnavailableException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("rejects an unknown/inactive credential", async () => {
@@ -277,32 +278,32 @@ describe("SponsoredWithdrawService", () => {
     const prisma = (service as unknown as { prisma: { authority: { findFirst: jest.Mock } } }).prisma;
     prisma.authority.findFirst.mockResolvedValue(null);
     await expect(service.withdraw(IDENTITY_ID, base)).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("rejects a garbage SPL mint with 400 (never 500) before broadcasting", async () => {
     const { service } = setup();
     await expect(service.withdraw(IDENTITY_ID, { ...base, asset: "!!!not-a-mint" })).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
-    expect(adapterMock.sponsoredWithdrawTokenV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawTokenV4).not.toHaveBeenCalled();
   });
 
   it("routes token withdrawals through the token sponsor and requires an existing ATA", async () => {
     const { service } = setup();
     adapterMock.hasAccount.mockResolvedValue(false);
     await expect(service.withdraw(IDENTITY_ID, { ...base, asset: "USDCmint11111111111111111111111111111111" })).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredWithdrawTokenV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawTokenV4).not.toHaveBeenCalled();
 
     adapterMock.hasAccount.mockResolvedValue(true);
     const res = await service.withdraw(IDENTITY_ID, { ...base, asset: "USDCmint11111111111111111111111111111111" });
     expect(res.signature).toBe("sig-sponsor-token");
-    expect(adapterMock.sponsoredWithdrawTokenV3).toHaveBeenCalledTimes(1);
+    expect(adapterMock.sponsoredWithdrawTokenV4).toHaveBeenCalledTimes(1);
   });
 
   it("rejects drift beyond 120% of the quoted network fee without broadcasting", async () => {
     const { service, security } = setup();
     await expect(service.withdraw(IDENTITY_ID, { ...base, quotedNetworkFeeLamports: "1000" })).rejects.toThrow(ConflictException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
     // H1.v + H1.ii: drift pair with the exact contract keys.
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
@@ -321,26 +322,26 @@ describe("SponsoredWithdrawService", () => {
     const { service } = setup();
     const res = await service.withdraw(IDENTITY_ID, { ...base, quotedNetworkFeeLamports: "4167" });
     expect(res.signature).toBe("sig-sponsor-sol");
-    expect(adapterMock.sponsoredWithdrawSolV3).toHaveBeenCalledTimes(1);
+    expect(adapterMock.sponsoredWithdrawSolV4).toHaveBeenCalledTimes(1);
   });
 
   it("rejects attestation one unit above the 120% boundary", async () => {
     // attested 5000 vs quoted 4166: 5000×100 == 500000 > 4166×120 == 499920 → rejects.
     const { service } = setup();
     await expect(service.withdraw(IDENTITY_ID, { ...base, quotedNetworkFeeLamports: "4166" })).rejects.toThrow(ConflictException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("rejects an authorization lifetime beyond 600 seconds", async () => {
     const { service } = setup();
     await expect(service.withdraw(IDENTITY_ID, { ...base, expiry: 1_000_601 })).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("rejects an unsupported fee policy version", async () => {
     const { service } = setup();
     await expect(service.withdraw(IDENTITY_ID, { ...base, feePolicyVersion: 99 })).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("rejects a token withdrawal exceeding the SPL balance", async () => {
@@ -349,7 +350,7 @@ describe("SponsoredWithdrawService", () => {
     await expect(
       service.withdraw(IDENTITY_ID, { ...base, asset: "USDCmint11111111111111111111111111111111", amount: "99999999" }),
     ).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredWithdrawTokenV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawTokenV4).not.toHaveBeenCalled();
   });
 
   it("logs reconciliation with formula-exact protocol fee", async () => {
@@ -450,12 +451,13 @@ describe("SponsoredWithdrawService", () => {
     expect(res.status).toBe("confirmed");
     expect(res.networkFeeLamports).toBe("10000");
     expect(res.protocolFeeLamports).toBe("5000");
-    expect(adapterMock.sponsoredExecuteV3).toHaveBeenCalledTimes(1);
-    const call = adapterMock.sponsoredExecuteV3.mock.calls[0];
+    expect(adapterMock.sponsoredExecuteV4).toHaveBeenCalledTimes(1);
+    const call = adapterMock.sponsoredExecuteV4.mock.calls[0];
     expect(call[0]).toBe("pid_01HASH");
     expect(call[5]).toBe(2); // policy version
     expect(call[6]).toBe(10000n); // attested networkFee
-    expect(call[11]).toBeUndefined(); // ANT-635: adapter derives the ["treasury"] PDA
+    expect(call[7]).toBe(27000n); // user-approved maxTotalFee (ANT-800 H1)
+    expect(call[12]).toBeUndefined(); // ANT-635: adapter derives the ["treasury"] PDA
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
       "execute.submitted",
@@ -486,7 +488,7 @@ describe("SponsoredWithdrawService", () => {
     await expect(
       service.execute(IDENTITY_ID, { ...executeBase, target: "PidProgram1111111111111111111111111111111" }),
     ).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredExecuteV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredExecuteV4).not.toHaveBeenCalled();
   });
 
   it("execute rejects a call that does not delegate the PDA as signer", async () => {
@@ -497,14 +499,14 @@ describe("SponsoredWithdrawService", () => {
         metas: [{ address: "AtAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaAAA", writable: true, signer: false }],
       }),
     ).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredExecuteV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredExecuteV4).not.toHaveBeenCalled();
   });
 
   it("execute rejects drift beyond 120% of the quoted network fee", async () => {
     const { service } = setup();
     adapterMock.estimateExecuteFee.mockResolvedValue(12001n); // 12001×100 > 10000×120
     await expect(service.execute(IDENTITY_ID, executeBase)).rejects.toThrow(ConflictException);
-    expect(adapterMock.sponsoredExecuteV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredExecuteV4).not.toHaveBeenCalled();
   });
 
   it("execute rejects a total above the user-authorized maxTotalFee without broadcasting", async () => {
@@ -513,7 +515,7 @@ describe("SponsoredWithdrawService", () => {
     await expect(
       service.execute(IDENTITY_ID, { ...executeBase, maxTotalFeeLamports: "14999" }),
     ).rejects.toThrow(ConflictException);
-    expect(adapterMock.sponsoredExecuteV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredExecuteV4).not.toHaveBeenCalled();
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
       "execute.max_total_exceeded",
@@ -562,7 +564,7 @@ describe("SponsoredWithdrawService", () => {
     await expect(
       service.withdraw(IDENTITY_ID, { ...base, maxTotalFeeLamports: "7499" }),
     ).rejects.toThrow(ConflictException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
       "withdraw.max_total_exceeded",
@@ -575,7 +577,7 @@ describe("SponsoredWithdrawService", () => {
     await expect(
       service.withdraw(IDENTITY_ID, { ...base, maxTotalFeeLamports: "unlimited" }),
     ).rejects.toThrow(BadRequestException);
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("quote omits the chain echo when the registry has no Solana row", async () => {
@@ -663,7 +665,7 @@ describe("SponsoredWithdrawService", () => {
       "quote.drift_rejected",
       expect.objectContaining({ entryPoint: "withdraw", quoted: "5000", attested: "7000" }),
     );
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("emits over_attested + pnl on reconcile divergence, never rebroadcasts (H-AC4)", async () => {
@@ -681,7 +683,7 @@ describe("SponsoredWithdrawService", () => {
       "relayer.pnl",
       expect.objectContaining({ entryPoint: "withdraw", absorbed: "0" }),
     );
-    expect(adapterMock.sponsoredWithdrawSolV3).toHaveBeenCalledTimes(1);
+    expect(adapterMock.sponsoredWithdrawSolV4).toHaveBeenCalledTimes(1);
   });
 
   it("resolves a duplicate claim without submission via chain state (H-AC7)", async () => {
@@ -693,7 +695,7 @@ describe("SponsoredWithdrawService", () => {
     adapterMock.getHistory.mockResolvedValue([{ signature: "sig-h", err: null }]);
     const landed = await service.withdraw(IDENTITY_ID, base);
     expect(landed).toMatchObject({ signature: "sig-h", status: "confirmed" });
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
     // Nonce unconsumed ⇒ proven non-landing ⇒ the single allowed broadcast.
     adapterMock.getNonce.mockReset();
     adapterMock.getNonce.mockResolvedValue(7n);
@@ -701,7 +703,7 @@ describe("SponsoredWithdrawService", () => {
     idempotency.claimSlot.mockResolvedValue({ decision: "duplicate", signature: null });
     const fresh = await service.withdraw(IDENTITY_ID, base);
     expect(fresh.signature).toBe("sig-sponsor-sol");
-    expect(adapterMock.sponsoredWithdrawSolV3).toHaveBeenCalledTimes(1);
+    expect(adapterMock.sponsoredWithdrawSolV4).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -744,7 +746,7 @@ describe("SponsoredWithdrawService — DB fee legs ignored (ANT-743 pure percent
       expect.anything(),
       expect.objectContaining({ entryPoint: "withdraw", cause: "policy-unknown" }),
     );
-    expect(adapterMock.sponsoredWithdrawSolV3).not.toHaveBeenCalled();
+    expect(adapterMock.sponsoredWithdrawSolV4).not.toHaveBeenCalled();
   });
 
   it("withdraw accepts one version back with a warning and settles under the signed version", async () => {

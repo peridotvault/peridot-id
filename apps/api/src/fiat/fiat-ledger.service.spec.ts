@@ -156,19 +156,59 @@ describe("FiatLedgerService.issueForDeposit", () => {
   });
 });
 
+// M7 (ANT-802): Phase-1 escrow-only — every transfer needs an allowlisted
+// app PID on one side. Money-moving tests run against a live2dev@pid
+// allowlist; the gate itself is pinned in the transfers block.
+const ESCROW = { PID_FIAT_LEDGER_APP_ALLOWLIST: "live2dev@pid" };
+
 describe("FiatLedgerService transfers", () => {
-  it("allows sending to any user", async () => {
-    const { service, events, prisma } = setup();
+  it("rejects user→user sends when neither side is allowlisted (M7)", async () => {
+    const { service, prisma } = setup(ESCROW);
+    prisma.identity.findUnique.mockResolvedValue({ pid: "rani@pid" });
+    await expect(
+      service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "rani@pid" }),
+    ).rejects.toThrow("Transfers are limited to escrow recipients");
+    expect(prisma.fiatLedgerEntry.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects ALL transfers when the allowlist is empty/missing (M7 fail-closed)", async () => {
+    const { service, prisma } = setup();
+    prisma.identity.findUnique.mockResolvedValue({ pid: "live2dev@pid" });
+    await expect(
+      service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" }),
+    ).rejects.toThrow("Transfers are limited to escrow recipients");
+    expect(prisma.fiatLedgerEntry.create).not.toHaveBeenCalled();
+  });
+
+  it("re-checks the allowlist at confirm (pre-enforcement intents never post, M7)", async () => {
+    // Intent sides are both outside the allowlist: even a `created` intent
+    // (minted before enforcement) dies at confirm.
+    const { service, prisma } = setup(ESCROW);
+    prisma.fiatLedgerEntry.findFirst.mockResolvedValue({
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      entryGroup: "CT-OLD", amountIdr: 100_000n, status: "created",
+      feePolicyVersion: 3, counterparty: {}, createdAt: new Date(),
+    });
+    // In-txn recheck sees `created` (passes the race gate), so the failure
+    // asserted is the allowlist re-check, not the race guard.
+    prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
+      $queryRaw: jest.fn(async () => []),
+      fiatLedgerEntry: { findFirst: jest.fn(async () => ({ id: "intent1", status: "created" })) },
+    }));
+    await expect(service.transferConfirm("dev@pid", "intent1")).rejects.toThrow(
+      "Transfers are limited to escrow recipients",
+    );
+  });
+
+  it("still rejects self-transfer before the allowlist gate", async () => {
+    const { service, prisma } = setup(ESCROW);
     await expect(service.transferInquiry("dev@pid", { amountIdr: "100", beneficiaryPid: "dev@pid" }))
       .rejects.toThrow("Cannot transfer to yourself");
-    prisma.identity.findUnique.mockResolvedValueOnce({ pid: "rani@pid" });
-    const inq = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "rani@pid" });
-    expect(inq.grossIdr).toBe("500000");
-    expect(inq.beneficiaryPid).toBe("rani@pid");
+    expect(prisma.fiatLedgerEntry.create).not.toHaveBeenCalled();
   });
 
   it("allows user→app escrow inquiry and app→user confirm posts balanced legs", async () => {
-    const { service, prisma, created } = setup();
+    const { service, prisma, created } = setup(ESCROW);
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
     const inq = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" });
     expect(inq.grossIdr).toBe("500000");
@@ -251,23 +291,23 @@ describe("FiatLedgerService transfers", () => {
   });
 
   it("allows machine tokens with fiat:transfer scope on money paths (ANT-344 H3)", async () => {
-    const { service, events, prisma } = setup();
-    prisma.identity.findUnique.mockResolvedValueOnce({ pid: "rani@pid" });
+    const { service, events, prisma } = setup(ESCROW);
+    prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
     const inq = await service.transferInquiry(
       "dev@pid",
-      { amountIdr: "500000", beneficiaryPid: "rani@pid" },
+      { amountIdr: "500000", beneficiaryPid: "live2dev@pid" },
       "pidapp_x",
       { app: "pidapp_x", scope: "fiat:transfer" },
     );
     expect(inq.grossIdr).toBe("500000");
     // User sessions (no app claim) are unaffected by the scope gate.
-    prisma.identity.findUnique.mockResolvedValueOnce({ pid: "rani@pid" });
-    const inq2 = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "rani@pid" });
+    prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
+    const inq2 = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" });
     expect(inq2.grossIdr).toBe("500000");
   });
 
   it("rejects confirm on insufficient balance without posting", async () => {
-    const { service, prisma, created } = setup();
+    const { service, prisma, created } = setup(ESCROW);
     prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
       id: "intent1", kind: "fiat_transfer_out", pid: "live2dev@pid", counterpartyPid: "s1@pid",
       entryGroup: "CT-X", amountIdr: 100_000n, status: "created",
@@ -315,11 +355,11 @@ describe("FiatLedgerService transfers", () => {
   });
 
   it("counts the guard the same way replay does (fee/tax legs do not debit the owner)", async () => {
-    const { service, prisma, created } = setup();
+    const { service, prisma, created } = setup(ESCROW);
     // Replay balance after a 475k-net deposit with a 25k fee leg is 475k.
     // The old direction-only guard read 450k and wrongly rejected a 475k send.
     prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
-      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "live2dev@pid",
       entryGroup: "CT-FEE", amountIdr: 475_000n, status: "created",
       feePolicyVersion: 3,
       counterparty: { feeQuote: "25000", taxQuote: "0", netQuote: "450000" },
@@ -345,7 +385,7 @@ describe("FiatLedgerService transfers", () => {
     }));
     prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
       id: "intent1", kind: "fiat_transfer_out", entryGroup: "CT-FEE",
-      counterpartyPid: "rani@pid", amountIdr: 475_000n, status: "posted",
+      counterpartyPid: "live2dev@pid", amountIdr: 475_000n, status: "posted",
       counterparty: { feeQuote: "25000", taxQuote: "0", netQuote: "450000" },
       createdAt: new Date(),
     });
@@ -543,7 +583,7 @@ describe("FiatLedgerService callbacks", () => {
   });
 
   it("enqueues a callback when an app owns a transfer party", async () => {
-    const { service, events, prisma } = setup();
+    const { service, events, prisma } = setup(ESCROW);
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
     prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", webhookUrl: "https://x/hook" }]);
     const inq = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" });
@@ -590,7 +630,7 @@ describe("FiatLedgerService callbacks", () => {
   });
 
   it("skips a duplicate outbox enqueue on retried confirm", async () => {
-    const { service, events, prisma } = setup();
+    const { service, events, prisma } = setup(ESCROW);
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
     prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", webhookUrl: "https://x/hook" }]);
     // A previous confirm already enqueued this movement's callback.
@@ -827,11 +867,11 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
   });
 
   it("emits fiat.transfer.app_token with app+scope on inquiry AND confirm", async () => {
-    const { service, events, prisma, security } = setup();
-    prisma.identity.findUnique.mockResolvedValue({ pid: "rani@pid" });
+    const { service, events, prisma, security } = setup(ESCROW);
+    prisma.identity.findUnique.mockResolvedValue({ pid: "live2dev@pid" });
     const inq = await service.transferInquiry(
       "dev@pid",
-      { amountIdr: "500000", beneficiaryPid: "rani@pid" },
+      { amountIdr: "500000", beneficiaryPid: "live2dev@pid" },
       null,
       { app: "pidapp_x", scope: "fiat:transfer" },
     );
@@ -842,7 +882,7 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
     );
 
     prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
-      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "live2dev@pid",
       entryGroup: inq.entryGroup, amountIdr: 500_000n, status: "created",
       feePolicyVersion: 3, counterparty: {}, createdAt: new Date(),
     });
@@ -859,7 +899,7 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
       $executeRaw: jest.fn(async () => 1),
     }));
     prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
-      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "rani@pid",
+      id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "live2dev@pid",
       entryGroup: inq.entryGroup, amountIdr: 500_000n, status: "posted",
       direction: "out", counterparty: {}, createdAt: new Date(),
     });

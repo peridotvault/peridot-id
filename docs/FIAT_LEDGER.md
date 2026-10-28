@@ -187,6 +187,8 @@ PPN is folded into `Transfer Fee`; the API still returns the parts separately.
 | `PID_FIAT_LEDGER_ENABLED` | `true` | master switch for issue + send |
 | `PID_FIAT_LEDGER_FROZEN` | `false` | when `true`: new issues/sends rejected, reads stay |
 | `PID_FIAT_LEDGER_TREASURY_PID` | `` | treasury label PID (env) |
+| `PID_FIAT_LEDGER_APP_ALLOWLIST` | `` | Phase-1 escrow-only (M7): comma-separated PIDs; every transfer must have one side on this list. Fail-closed — empty/missing denies ALL transfers. REQUIRED in deployed envs. |
+| `DOKU_WEBHOOK_SECRET` | `` | Source auth for `POST /v1/fiat/webhook` (M11): when set, pushes must carry `X-Doku-Signature: sha256=<hex HMAC-SHA256(rawBody)>` (else 401 before any DB write). Provision in deployed envs. |
 
 In-memory freeze override exists for ops (`POST /v1/fiat/admin/freeze`; env is
 the default).

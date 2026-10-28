@@ -947,8 +947,9 @@ export class SponsoredWithdrawService {
 
     // V4 user bound (spec B5/B-AC5): the passkey-signed authorization carries
     // `maxTotalFee`; the backend enforces `totalFee ≤ maxTotalFee` pre-broadcast
-    // (fail-closed re-quote). The on-chain V4 program enforces the same bound;
-    // V3 payloads stay frozen (Troy, ANT-556).
+    // (fail-closed re-quote). The on-chain V4 program enforces the same bound.
+    // V3 is closed for new intents (ANT-800) — the frozen on-chain entrypoints
+    // settle in-flight signatures only; this path broadcasts V4 exclusively.
     const maxTotalFee = this.amountOr400(dto.maxTotalFeeLamports, "Max total fee");
     if (exceedsMaxTotalFee(totalFee, maxTotalFee)) {
       await this.security.log(pid, "withdraw.max_total_exceeded", {
@@ -1070,6 +1071,10 @@ export class SponsoredWithdrawService {
       // Proven non-landing → fall through to the single allowed broadcast.
     }
 
+    // ANT-800: ACTIVE path is V4-only (H1). V3 broadcast is closed: the
+    // passkey-signed authorization carries `maxTotalFee` and the V4 program
+    // enforces `total ≤ maxTotalFee` (FeeExceedsMax). Fee recipients stay
+    // canonical (relayer signer + treasury PDA) — never caller-chosen (M1).
     let signature: string | null;
     if (dto.asset === "SOL") {
       const out = await this.idempotency.broadcastWithResolveThenAct({
@@ -1079,13 +1084,14 @@ export class SponsoredWithdrawService {
         entryPoint: "withdraw",
         broadcast: () =>
           adapter
-            .sponsoredWithdrawSolV3(
+            .sponsoredWithdrawSolV4(
               pid,
               authorityCompressed,
               this.pubkeyOr400(PublicKey, dto.to, "Destination"),
               amount,
               version,
               networkFee,
+              maxTotalFee,
               nonce,
               expiry,
               assertion,
@@ -1115,7 +1121,7 @@ export class SponsoredWithdrawService {
         entryPoint: "withdraw",
         broadcast: () =>
           adapter
-            .sponsoredWithdrawTokenV3(
+            .sponsoredWithdrawTokenV4(
               pid,
               authorityCompressed,
               mint,
@@ -1123,6 +1129,7 @@ export class SponsoredWithdrawService {
               amount,
               version,
               networkFee,
+              maxTotalFee,
               nonce,
               expiry,
               assertion as never,
@@ -1816,7 +1823,7 @@ export class SponsoredWithdrawService {
       entryPoint: "execute",
       broadcast: () =>
         adapter
-          .sponsoredExecuteV3(
+          .sponsoredExecuteV4(
             pid,
             authorityCompressed,
             decoded.target,
@@ -1824,6 +1831,7 @@ export class SponsoredWithdrawService {
             decoded.data,
             version,
             networkFee,
+            maxTotalFee,
             chainNonce,
             dto.expiry,
             assertion,

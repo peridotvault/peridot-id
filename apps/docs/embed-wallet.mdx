@@ -3,22 +3,30 @@ title: Embed the wallet
 description: Render the PeridotID wallet inside your React app; sign-in and money actions open the PeridotID popup
 ---
 
-Drop the PeridotID wallet into any React app (Vite, Next, …) with one component.
+Drop the PeridotID wallet into any React app (Vite, Next.js, …) with one component.
 The wallet renders in an `<iframe>` on the PeridotID origin; **every
 trust-critical action — sign-in, send, top-up, transfer — opens a popup on the
 PeridotID origin**, so the browser address bar stays visible as the unforgeable
 trust signal. Nothing that signs or moves money runs in your DOM.
+
+Supported: React 18+ (Vite, Next.js App Router as a **client component** —
+the file that renders the embed needs `"use client"` at the top; the
+ceremony needs `window` and cannot run in a server component). Other
+frameworks: no drop-in component is shipped — use the framework-free
+[`sign-in`](/sign-in-with-peridot-id) SDK calls instead (not verified).
 
 ```bash
 npm install @peridotvault/pid-react-embed
 ```
 
 ```tsx
+"use client"; // required in Next.js App Router — the embed needs window
+
 import { PeridotWalletEmbed } from "@peridotvault/pid-react-embed";
 
 export function WalletPage() {
   return (
-    <div style={{ width: 420, height: 720 }}>
+    <div style={{ width: "100%", maxWidth: 420, height: 720 }}>
       <PeridotWalletEmbed
         clientId="pidapp_…" // your registered app id
         onIdentity={(id) => console.log("signed in as", id.pid)}
@@ -28,6 +36,11 @@ export function WalletPage() {
   );
 }
 ```
+
+Size the embed from the host (`style`/`className` — full width up to ~420px,
+~720px tall scrolls the least on desktop and mobile). The component throws
+when no wallet host resolves (custom `baseUrl` without a matching
+`popupBaseUrl`/`walletUrl`).
 
 The component owns the whole ceremony:
 
@@ -79,5 +92,11 @@ browser blocks the frame.
   production and the environment preset applies.
 - `onIdentity` fires after each successful connect (carries `pid`, `profile`,
   `credentials` — never the bearer).
-- The read-only bearer lasts 30 days and is non-refreshable; when it expires the
+- The read-only bearer lasts 24 hours and is non-refreshable; when it expires the
   user re-connects (one tap if their PeridotID session is alive).
+- Chain support mirrors the [SDK](/sdk#chain-support): Solana is stable, EVM
+  counterfactuals are experimental testnet-only, Stellar is planned with no
+  `wallet.*` methods yet. Discover live rows with `GET /v1/chains`.
+- History shown in the wallet is on-chain activity (RPC-parsed + local cache);
+  the IDR balance/statement is the separate internal fiat ledger
+  (see [Fiat & payments](/fiat)) — not on-chain and not the same list.

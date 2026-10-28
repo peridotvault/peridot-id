@@ -896,7 +896,14 @@ model PidApp {
   // Verified partner (admin-only): the global PeridotID fiat fee is waived
   // for movements in this app's context. The app's own stacked fee, DOKU
   // provider fees, and on-chain fees still apply. See docs/RP_SESSIONS.md.
+  // ANT-804 D3: deny-by-default (existing + new rows start false), grants are
+  // recorded in PidVerificationAudit; expiry is enforced lazily AND in fee
+  // quotes via PidAppsService.isVerificationActive (expired => unverified).
   isVerified            Boolean   @default(false)
+  // Optional grant metadata (admin-set, nullable for pre-804 rows).
+  verificationExpiresAt DateTime? @db.Timestamptz(3)
+  verifiedBy            String?
+  verificationJustification String?  @db.Text
   // Optional backend secret (confidential clients). SHA-256 hex (peppered when
   // PID_APP_SECRET_PEPPER is set — see PidAppsService), never plaintext.
   // When set, code exchange requires the matching secret.
@@ -933,6 +940,90 @@ model PidApp {
 
   @@index([ownerPid])
   @@map("pid_apps")
+}
+
+// ANT-804 D1+D2: claim idempotency receipts + takedown reports + bulk flags.
+// Claim receipts make POST /v1/pids/claim retries safe (same key + same
+// handle replays the original 201; same key + different handle is 409).
+model PidClaimReceipt {
+  idempotencyKey String   @id
+  pid            String
+  handle         String
+  // ANT-826 D2.1: per-actor bulk detection. Nullable for pre-migration rows
+  // (expand-only); new receipts always carry the ticket-derived actorRef.
+  actorRef       String?
+  createdAt      DateTime @db.Timestamptz(3) @default(now())
+
+  @@index([pid])
+  @@index([actorRef])
+  @@map("pid_claim_receipts")
+}
+
+// ANT-804 D2: reactive takedown intake. States: received → triaging →
+// awaiting_counterparty → decided|appealable → closed. `decision` is one of
+// keep|release|transfer. Release snapshots the claim history into
+// `auditSnapshot` before freeing the handle (identity subtree deleted, audit
+// retained here ≥2y); transfer records the intended recipient who re-claims
+// via the normal flow (no hold state in MVP Opsi A).
+model PidTakedownReport {
+  id               String    @id @default(uuid())
+  handle           String
+  normalizedHandle String
+  grounds          String
+  evidence         String    @db.Text
+  reporterContact  String
+  reporterPid      String?
+  state            String    @default("received")
+  decision         String?
+  decidedAt        DateTime? @db.Timestamptz(3)
+  decidedBy        String?
+  appealCount      Int       @default(0)
+  appealedAt       DateTime? @db.Timestamptz(3)
+  transferToPid    String?
+  slaRespondBy     DateTime  @db.Timestamptz(3)
+  // ANT-826 F5: reporter-contact verification timestamp (NULL = unverified).
+  // The 3-business-day SLA clock starts only after verification; the service
+  // sets this synchronously once the contact format verifies (authenticated
+  // reporter), full out-of-band OTP is future work.
+  reporterContactVerifiedAt DateTime? @db.Timestamptz(3)
+  auditSnapshot    Json?
+  createdAt        DateTime  @db.Timestamptz(3) @default(now())
+  updatedAt        DateTime  @db.Timestamptz(3) @updatedAt
+
+  @@index([normalizedHandle])
+  @@index([state])
+  @@index([reporterPid])
+  @@map("pid_takedown_reports")
+}
+
+// ANT-804 D2.1: bulk-claim review flags (>10 successful claims / actor /
+// 24h). Advisory only in MVP — never blocks a legitimate claim.
+model PidHandleReview {
+  id               String   @id @default(uuid())
+  normalizedHandle String?
+  reason           String
+  actorRef         String
+  metadata         Json?
+  createdAt        DateTime @db.Timestamptz(3) @default(now())
+
+  @@index([actorRef])
+  @@map("pid_handle_reviews")
+}
+
+// ANT-804 D3: immutable verification audit (grant/revoke/expire/re-review).
+// One row per decision; retensi ≥2 tahun via table retention (never updated,
+// never deleted by application code).
+model PidVerificationAudit {
+  id            String    @id @default(uuid())
+  clientId      String
+  action        String
+  justification String?   @db.Text
+  expiresAt     DateTime? @db.Timestamptz(3)
+  actorPid      String
+  createdAt     DateTime  @db.Timestamptz(3) @default(now())
+
+  @@index([clientId])
+  @@map("pid_verification_audits")
 }
 
 // Per-app fee schedule (stacks on top of the global PeridotID fee). Charged

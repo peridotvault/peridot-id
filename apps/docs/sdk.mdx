@@ -108,9 +108,14 @@ labels above can be updated. There is no endpoint that changes, reuses, or reass
 
 ## Wallet
 
-Each identity owns **one personal wallet** — its chain rows (Solana smart account
-+ EVM counterfactuals), all derived from the PID. Custody is **record-only**:
-Peridot never generates, holds, or returns any key material.
+Each identity owns **one personal wallet** — its chain rows (Solana smart
+account + EVM counterfactuals), all derived from the PID. Custody is
+**non-custodial**: Peridot never generates, holds, or returns any key
+material. The authority is the user's sec256r1 passkey (verified on-chain);
+the fee payer is a client-held Ed25519 keypair (fee-SOL only), and sponsored
+writes go through the relayer (the server pays, the account reimburses +
+protocol fee). Discover live chains with `GET /v1/chains` — never hardcode
+them.
 
 ```ts
 const rows = await peridot.wallet.me();
@@ -125,6 +130,63 @@ const created = await peridot.wallet.createAccount();
 - The wallet belongs to the PID, not to Google (or any other provider). Unlinking a
   credential leaves it untouched, and logging in from another device does not change it.
 - `create` returns the API error object on validation failure (`400`).
+
+### Chain support
+
+| Chain | Status | SDK reads | SDK writes |
+|---|---|---|---|
+| Solana (devnet + testnet rows, `program` contract) | **stable** | `getBalance`, `tokens`, `tokensEnriched`, `tokensRegistry`, `nfts`, `history`/`activity`, `activation`, `feePolicy` | `topup` (direct deposit), `withdraw`/`quoteWithdraw`, `execute`/`quoteExecute` (relayer-sponsored), `activate`, `rotate` |
+| EVM counterfactuals (`eip155` testnets: `10143` monad, `97` bsc-testnet, `421614` arbitrum-sepolia, `84532` base-sepolia; `factory` + `account_implementation` required) | **experimental (testnet-only)** | `evmSmartAccountAddress(chainReference)`, `evmActivation(chainReference)` | EVM batch path (`estimateBatch` / `submitBatch` / `getBatchStatus`, relayer-executed sequential — not EIP-4337) |
+| Stellar (`stellar-testnet` row; `factory` contract lands at deploy) | **planned** — no `wallet.*` methods yet; only `packages/stellar` scope/network helpers | — | — |
+
+### Balances, history, and what is NOT the wallet
+
+```ts
+const lamports = await peridot.wallet.getBalance(); // SOL, on-chain RPC read
+const spl = await peridot.wallet.tokens();           // SPL balances + ATA addresses
+const list = await peridot.wallet.tokensEnriched();  // balances joined with the curated registry
+const nfts = await peridot.wallet.nfts();            // heuristic SPL 0-decimal x1 inventory
+const txs = await peridot.wallet.history(30);       // on-chain signatures parsed + merged into the local cache
+const one = await peridot.wallet.activity(txs[0]?.id); // cache read only — no API round-trip
+```
+
+- **On-chain vs internal ledger vs gateway.** `history`/`activity` read
+  Solana RPC and merge into a local cache (`LocalHistoryStore`; cache
+  returned on RPC failure) — they are NOT the server ledger.
+  `submitTransaction({ intentId, txHash })` records an executed tx against a
+  pending intent (`POST /v1/wallet/transactions/submit`). The IDR balance,
+  statements, and sends live on the **internal fiat ledger**
+  (`peridot.fiat.*`, see [Fiat & payments](/fiat)) — money in via the DOKU
+  gateway, never on-chain. XP lives on its own ledger (see
+  [Levels & XP](/leveling)).
+- Amounts are base-unit decimal strings (lamports/wei/raw units) — never
+  floats in fee paths. Fee quotes carry `networkFee`, `platformFee`
+  (`serviceFee` is the same EVM value under another name), `totalFee`,
+  `maxTotalFee`, `quoteId`/`quotedAt`/`expiresAt`; re-quote past expiry.
+- `waitForConfirmation` / `getTransactionStatus` report `confirmed` /
+  `failed` / `pending` — treat `pending` as unconfirmed (reorg/finality:
+  poll, never assume inclusion).
+
+### Passkey authorities
+
+`peridot.passkey` manages the secp256r1 signing authorities on the wallet —
+Google OAuth proves identity, a passkey authorizes it:
+
+```ts
+const authorities = await peridot.passkey.list();
+const created = await peridot.passkey.register(); // first credential registers freely
+await peridot.passkey.revoke(id);
+```
+
+### Batched execution (experimental)
+
+`POST /v1/wallet/execute/batch/*` (quote → submit → optional flush, cancel while
+queued) is **experimental** and has no `peridot.wallet` wrapper yet — call it
+through the raw client or the standalone `estimateBatch(api, …)` /
+`submitBatch(api, …)` / `getBatchStatus(api, …)` / `cancelQueuedBatch(api, …)`
+helpers. Quote IDs bind the exact op set; a changed op set
+rejects with `400 QUOTE_MISMATCH` (re-estimate). Single withdraw/execute quotes
+go stale instead: `410` (re-quote).
 
 ## Money (fiat)
 

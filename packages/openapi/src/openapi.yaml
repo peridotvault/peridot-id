@@ -123,6 +123,9 @@ paths:
                 clientId:
                   type: string
                   description: Registered app id (binds the pid_code to your app)
+                codeChallenge:
+                  type: string
+                  description: PKCE S256 challenge (43-128 base64url chars). REQUIRED when clientId names a public client (no backend secret); the challenge is bound to the pid_code and the verifier is presented at exchange.
             examples:
               sso:
                 summary: Third-party SSO login
@@ -313,6 +316,9 @@ paths:
                 clientId:
                   type: string
                   description: Registered app id (binds the pid_code to your app)
+                codeChallenge:
+                  type: string
+                  description: PKCE S256 challenge (43-128 base64url chars). REQUIRED when clientId names a public client; bound to the pid_code at issue time.
       responses:
         "200":
           description: Verified — session cookies set, or claim pending
@@ -394,6 +400,9 @@ paths:
                   type: string
                   pattern: "^[a-z0-9_]{3,20}$"
                   description: Permanent handle for `<handle>@pid`
+                codeChallenge:
+                  type: string
+                  description: PKCE S256 challenge (43-128 base64url chars). REQUIRED when the ticket's clientId names a public client; the wallet resends the challenge generated at login start.
             example:
               handle: "ifal"
       responses:
@@ -444,8 +453,10 @@ paths:
       description: |
         Consumes a `pid_code` issued by a Google or passkey login with `returnTo`
         (optionally bound to a `clientId`) and returns the PeridotID identity.
-        Codes are single-use and expire after ~5 minutes. Call server-to-server;
+        Codes are single-use and expire after ~60 seconds. Call server-to-server;
         when the code is bound to an app, the same `clientId` must be presented.
+        Public-client codes always carry a PKCE challenge, so the exchange must
+        present the matching `codeVerifier`.
       requestBody:
         required: true
         content:
@@ -465,7 +476,7 @@ paths:
                   description: Required only when the bound app has a secret set (backend-only, never ship in frontend code)
                 codeVerifier:
                   type: string
-                  description: PKCE verifier (RFC 7636); required iff the code was issued with a codeChallenge
+                  description: PKCE verifier (RFC 7636); required iff the code was issued with a codeChallenge (always, for public-client codes)
             example:
               code: "mF8xQ2vT9nR4kL7pZ3wX6yA1bD5eF0gH"
               clientId: "pidapp_0123456789abcdef0123456789abcdef"
@@ -800,7 +811,7 @@ paths:
                   description: Binds the issued code to the app
                 codeChallenge:
                   type: string
-                  description: PKCE S256 challenge (43-128 base64url chars); the exchange must present the matching verifier. Public clients only — confidential clients use their secret instead.
+                  description: PKCE S256 challenge (43-128 base64url chars); REQUIRED when clientId names a public client. The exchange must present the matching verifier. Confidential clients use their secret instead.
       responses:
         "200":
           description: The minted code
@@ -892,6 +903,41 @@ paths:
       responses:
         "200":
           description: Session ended and cookies cleared
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/sessions:
+    delete:
+      tags: [auth]
+      summary: Log out everywhere (global revoke)
+      description: |
+        Revokes EVERY session on EVERY device owned by the caller — all
+        browsers, scoped app sessions, and linked-identity sessions for this
+        pid. After this call no refresh token for the pid exchanges or
+        rotates (already-issued access tokens stay valid until their 15m
+        expiry). The current browser's cookies are NOT cleared; call
+        POST /auth/logout for the local-cookie path. Returns the number of
+        sessions revoked.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: All sessions revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, revoked]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  revoked:
+                    type: integer
+                    description: Number of sessions revoked
+                    example: 3
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -1960,13 +2006,22 @@ paths:
       summary: Sub-Account notification inbox (persist-first, corroborated before apply)
       description: |
         No published V2 webhook signing contract — events persist on X-EXTERNAL-ID
-        and apply only after DOKU transactions-status corroboration. Public; always 200 after persist.
+        and apply only after DOKU transactions-status corroboration. Always 200 after persist.
+        When `DOKU_WEBHOOK_SECRET` is set, the source must prove itself with
+        `X-Doku-Signature: sha256=<hex HMAC-SHA256(rawBody)>` (else 401, before any
+        DB write). The 120 req/min throttle applies either way.
       parameters:
         - name: X-EXTERNAL-ID
           in: header
           required: true
           schema:
             type: string
+        - name: X-Doku-Signature
+          in: header
+          required: false
+          schema:
+            type: string
+          description: sha256=<hex HMAC-SHA256(rawBody, DOKU_WEBHOOK_SECRET)>; required when the server sets the secret
       responses:
         "200":
           description: Acknowledged
@@ -1978,6 +2033,8 @@ paths:
                   ok:
                     type: boolean
                     example: true
+        "401":
+          description: Webhook signature missing or invalid (only when DOKU_WEBHOOK_SECRET is set)
 
   /fiat/admin/webhooks:
     get:
@@ -2238,7 +2295,9 @@ paths:
       summary: Confirm an internal-credit send (atomic, idempotent)
       description: |
         Posts sender-out + recipient-in + treasury-fee legs in one DB
-        transaction. Re-confirming a posted intent returns the view.
+        transaction. Re-confirming a posted intent returns the view. The
+        escrow allowlist is re-checked here, so pre-enforcement intents can
+        never confirm once the flag lands.
       security:
         - cookieAuth: []
       parameters:
@@ -2258,6 +2317,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Neither transfer side is on the escrow allowlist
         "404":
           $ref: "#/components/responses/NotFound"
 

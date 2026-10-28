@@ -1,5 +1,6 @@
-import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import {
   buildInvoiceNumber,
@@ -42,6 +43,31 @@ const MAX_CHECKOUT_GROSS = 999_999_999_999n;
 /** Minimum Checkout top-up, NET IDR, enforced by the Peridot API only.
  *  No minimum-deposit rule is configured at DOKU. */
 export const MIN_CHECKOUT_NET_IDR = 50_000n;
+
+/**
+ * Shared-secret verification for the DOKU notification inbox (M11, ANT-802).
+ *
+ * DOKU's notify contract for this rail is unsigned, so server-side
+ * corroboration stays the money-safety (a forged push can never move funds —
+ * it only ever lands in `received`). This authenticates the SOURCE before any
+ * DB write: the tunnel/proxy delivering notifies holds `DOKU_WEBHOOK_SECRET`
+ * and sends `X-Doku-Signature: sha256=<hex HMAC-SHA256(rawBody)>` (bare hex
+ * also accepted). Constant-time compare; malformed signatures are rejected
+ * without touching the key.
+ */
+export function verifyWebhookSignature(rawBody: string, signature: string, secret: string): boolean {
+  if (!signature || !secret) return false;
+  const hex = signature.startsWith("sha256=") ? signature.slice("sha256=".length) : signature;
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) return false;
+  const expected = createHmac("sha256", secret).update(rawBody, "utf8").digest();
+  let actual: Buffer;
+  try {
+    actual = Buffer.from(hex, "hex");
+  } catch {
+    return false;
+  }
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
 
 /** Gateway payloads are JSON by contract — cast once, at the boundary. */
 const json = (v: unknown): Prisma.InputJsonValue => v as Prisma.InputJsonValue;
@@ -125,6 +151,8 @@ interface FeeParams {
 @Injectable()
 export class FiatSubAccountService {
   private readonly logger = new Logger(FiatSubAccountService.name);
+  /** Warn-once flag for the unset-secret path (M11) — avoids log spam per push. */
+  private static unsignedWebhookWarned = false;
   /** Pids with a register call currently in flight (single-instance guard —
    *  a second concurrent call gets 409 instead of forking a second account).
    *  NOTE: not shared across horizontally-scaled instances. */
@@ -2655,8 +2683,16 @@ export class FiatSubAccountService {
    */
   async adminBackfill(input: { pid?: string; take?: number }) {
     const take = Math.min(Math.max(input.take ?? 100, 1), 500);
+    // ANT-800 (ANT-798 item 2): paid-unissued blind spot. The legacy-txStatus
+    // fallback (`syncLegacyDeposit`) records movement as `processing` while the
+    // payment column stays `success` — filtering on providerStatus alone misses
+    // those paid rows. Include `providerPaymentStatus = success` in the sweep.
     const rows = await this.prisma.fiatProviderTransaction.findMany({
-      where: { kind: "deposit", providerStatus: { in: ["settled", "success"] }, ...(input.pid ? { pid: input.pid } : {}) },
+      where: {
+        kind: "deposit",
+        OR: [{ providerStatus: { in: ["settled", "success"] } }, { providerPaymentStatus: "success" }],
+        ...(input.pid ? { pid: input.pid } : {}),
+      },
       orderBy: { createdAt: "asc" }, take: take * 2,
     });
     const todo = rows.filter((r) => (r.ledgerStatus ?? "") !== "issued").slice(0, take);
@@ -2710,8 +2746,24 @@ export class FiatSubAccountService {
    * DOKU before applying any state change. Forged/unknown events stay
    * `received` for admin review. Checkout notifies carry the invoice number
    * as partnerReferenceNo and are corroborated the same way.
+   *
+   * M11 (ANT-802): source authentication. When `DOKU_WEBHOOK_SECRET` is set,
+   * the inbox requires a valid `X-Doku-Signature` HMAC — unsigned/forged
+   * pushes are rejected (401) BEFORE any DB write, and the 120 req/min route
+   * throttle stays as the rate bound. When unset, the legacy persist +
+   * corroborate path applies (fail-open with a warn at first rejection —
+   * corroboration remains the money safety).
    */
-  async webhook(externalId: string | undefined, rawBody: string): Promise<{ ok: boolean }> {
+  async webhook(externalId: string | undefined, rawBody: string, signature?: string): Promise<{ ok: boolean }> {
+    const secret = this.config.get<string>("DOKU_WEBHOOK_SECRET", "") || "";
+    if (secret && !verifyWebhookSignature(rawBody, signature ?? "", secret)) {
+      this.logger.warn("webhook signature rejected: missing or invalid X-Doku-Signature");
+      throw new UnauthorizedException("Invalid webhook signature");
+    }
+    if (!secret && !FiatSubAccountService.unsignedWebhookWarned) {
+      FiatSubAccountService.unsignedWebhookWarned = true;
+      this.logger.warn("DOKU_WEBHOOK_SECRET is not set — webhook source is unauthenticated (persist + corroborate only)");
+    }
     if (!externalId) return { ok: false };
     // ANT-271: size cap before parse/persist — oversized forged payloads are
     // dropped without a DB write (DB-fill via large bodies). Route-level

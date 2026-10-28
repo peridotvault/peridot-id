@@ -10,6 +10,22 @@ export function normalizePidHandle(handle: string): string {
   return handle.trim().toLowerCase();
 }
 
+/**
+ * ANT-804 edge 1: canonical server-side normalization for claim intake.
+ * NFKC + strip zero-width/invisible chars + trim + lowercase, so unicode
+ * confusable padding, surrounding spaces, and capitalization collapse to one
+ * canonical handle before validation. Visually-confusable but distinct
+ * spellings (e.g. `perid0t` vs `peridot`) stay distinct — those are covered
+ * by the curated trademark list in takedown review, not by folding.
+ */
+export function canonicalizePidHandle(handle: string): string {
+  return (handle ?? "")
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF\u2060]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 export function isPidHandle(handle: string): boolean {
   return PID_HANDLE_REGEX.test(handle);
 }

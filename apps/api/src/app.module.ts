@@ -17,6 +17,7 @@ import { IdentityModule } from "./identity/identity.module";
 import { IntentModule } from "./intent/intent.module";
 import { OpenApiModule } from "./openapi/openapi.module";
 import { PermissionsModule } from "./permissions/permissions.module";
+import { PidsModule } from "./pids/pids.module";
 import { ProfileModule } from "./profile/profile.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { SecurityModule } from "./security/security-event.module";
@@ -57,6 +58,7 @@ import { HealthModule } from "./health/health.module";
     FiatModule,
     IntentModule,
     PermissionsModule,
+    PidsModule,
     SessionKeysModule,
     SecurityModule,
     OpenApiModule,
