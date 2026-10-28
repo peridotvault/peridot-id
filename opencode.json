@@ -2,5 +2,21 @@
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     "@dietrichgebert/ponytail"
-  ]
+  ],
+  "mcp": {
+    "servers": {
+      "postgres": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@modelcontextprotocol/server-postgres",
+          "{env:DATABASE_URL}"
+        ],
+        "environment": {
+          "DATABASE_URL": "{env:DATABASE_URL}"
+        }
+      }
+    }
+  }
 }
