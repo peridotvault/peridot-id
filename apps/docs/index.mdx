@@ -12,7 +12,7 @@ account.
 - **Authentication** — provider sign-in with secure, rotating sessions
 - **Identity** — a permanent PID for each user across the Antigane ecosystem (`<handle>@pid`, e.g. `ifal@pid`) — user-chosen once, never changeable, reused, or reassigned
 - **Profile** — per-user mutable labels (`displayName`, `avatarUrl`, `locale`)
-- **Wallet** — a Solana wallet address associated with the PID (record-only custody, one per PID)
+- **Wallet** — one per PID; Solana smart account + EVM counterfactuals (non-custodial, no key material). Stellar is planned, not yet in the SDK — see [SDK](/sdk) for per-chain status
 - **Fiat** — an IDR balance per identity: DOKU Checkout top-up, internal fiat ledger, and sends to any identity (escrow/payouts)
 - **Apps** — third-party apps with their own `client_id`, origins, backend secret, fees, and escrow account
 
