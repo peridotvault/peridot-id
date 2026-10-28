@@ -59,6 +59,23 @@ export interface SolanaMainnetAvailability {
   rpcUrl: string | null;
 }
 
+/** EVM deployment families (ANT-763): v1 = frozen legacy implementation,
+ * v2 = batch implementation (`PeridotAccountBatch`, MODE_BATCH). A chain may
+ * carry both (dual-factory reads); old accounts keep resolving v1. */
+export const FACTORY_V1 = "factory";
+export const ACCOUNT_IMPL_V1 = "account_implementation";
+export const FACTORY_V2 = "factory_v2";
+export const ACCOUNT_IMPL_V2 = "account_implementation_v2";
+export type EvmDeploymentVersion = 1 | 2;
+
+function factoryTypeFor(version: EvmDeploymentVersion): string {
+  return version === 2 ? FACTORY_V2 : FACTORY_V1;
+}
+
+function implementationTypeFor(version: EvmDeploymentVersion): string {
+  return version === 2 ? ACCOUNT_IMPL_V2 : ACCOUNT_IMPL_V1;
+}
+
 const CACHE_TTL_MS = 30_000;
 
 /** Local-dev EVM default when no registry row carries an RPC URL. */
@@ -87,24 +104,32 @@ export class ChainRegistryService {
     return chains;
   }
 
-  /** Active eip155 chains that have a factory + implementation (deployable). */
-  async deployableEvmChains(): Promise<RegistryChain[]> {
+  /** Active eip155 chains that have a factory + implementation (deployable).
+   * Version selects the deployment family; default v1 preserves behavior —
+   * old accounts keep resolving the frozen implementation. */
+  async deployableEvmChains(version: EvmDeploymentVersion = 1): Promise<RegistryChain[]> {
     const chains = await this.activeChains();
+    const factoryType = factoryTypeFor(version);
+    const implType = implementationTypeFor(version);
     return chains.filter(
       (c) =>
         c.namespace === "eip155" &&
-        c.contracts.some((k) => k.type === "factory") &&
-        c.contracts.some((k) => k.type === "account_implementation"),
+        c.contracts.some((k) => k.type === factoryType) &&
+        c.contracts.some((k) => k.type === implType),
     );
   }
 
-  /** Factory + implementation for one EVM chain, or null when not configured. */
-  async deploymentFor(chainReference: string): Promise<{ factory: string; implementation: string } | null> {
+  /** Factory + implementation for one EVM chain, or null when not configured.
+   * Version selects the deployment family (default v1 = frozen behavior). */
+  async deploymentFor(
+    chainReference: string,
+    version: EvmDeploymentVersion = 1,
+  ): Promise<{ factory: string; implementation: string } | null> {
     const chains = await this.activeChains();
     const chain = chains.find((c) => c.namespace === "eip155" && c.reference === chainReference);
     if (!chain) return null;
-    const factory = chain.contracts.find((k) => k.type === "factory")?.address;
-    const implementation = chain.contracts.find((k) => k.type === "account_implementation")?.address;
+    const factory = chain.contracts.find((k) => k.type === factoryTypeFor(version))?.address;
+    const implementation = chain.contracts.find((k) => k.type === implementationTypeFor(version))?.address;
     if (!factory || !implementation) return null;
     return { factory, implementation };
   }

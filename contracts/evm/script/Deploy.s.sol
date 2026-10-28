@@ -3,10 +3,14 @@ pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
 import {PeridotAccount} from "../src/PeridotAccount.sol";
+import {PeridotAccountBatch} from "../src/PeridotAccountBatch.sol";
 import {PeridotFactory} from "../src/PeridotFactory.sol";
 import {PeridotPermissionExecutor} from "../src/PeridotPermissionExecutor.sol";
 
 /// @notice Deploy implementation + factory. Env: IMPLEMENTATION (optional reuse),
+/// USE_BATCH_IMPL (optional "1": deploy the V4-only batch implementation
+/// `PeridotAccountBatch` instead of the frozen legacy `PeridotAccount` —
+/// the Phase-1b path; old accounts stay on the legacy factory/implementation),
 /// ADMINS (required — comma-separated revenue-admin addresses, same on every chain;
 /// the factory itself is the canonical revenue vault, so no treasury address),
 /// DEPLOYER_PRIVATE_KEY. Same-address flow: first deploy the implementation via
@@ -18,16 +22,18 @@ import {PeridotPermissionExecutor} from "../src/PeridotPermissionExecutor.sol";
 contract Deploy is Script {
     function run() external {
         address implementation = vm.envOr("IMPLEMENTATION", address(0));
+        bool useBatch = vm.envOr("USE_BATCH_IMPL", false);
         address[] memory admins = vm.envAddress("ADMINS", ",");
         uint256 key = vm.envUint("DEPLOYER_PRIVATE_KEY");
         vm.startBroadcast(key);
         if (implementation == address(0)) {
-            implementation = address(new PeridotAccount());
+            implementation = useBatch ? address(new PeridotAccountBatch()) : address(new PeridotAccount());
         }
         PeridotFactory factory = new PeridotFactory(implementation, admins);
         PeridotPermissionExecutor executor = new PeridotPermissionExecutor();
         vm.stopBroadcast();
         console.log("IMPLEMENTATION=%s", implementation);
+        console.log("BATCH_IMPL=%s", useBatch ? "yes" : "no");
         console.log("FACTORY=%s", address(factory));
         console.log("EXECUTOR=%s", address(executor));
         console.log("INIT_CODE_HASH=%s", vm.toString(factoryCreationCodeHash(implementation)));

@@ -9,11 +9,13 @@ import {
   buildEvmAuthorizationPayloadV2,
   buildEvmAuthorizationPayloadV3,
   buildEvmAuthorizationPayloadV4,
+  buildEvmPermissionPayload,
   deriveEvmSmartAccountAddress,
   fromAscii,
   fromHex,
   keccak256,
   OP_EVM,
+  OP_PERM,
   toHex,
 } from "@peridotvault/pid-core/dist/evm";
 import type { Bytes } from "@peridotvault/pid-core/dist/evm";
@@ -683,6 +685,165 @@ export class EvmAdapter {
     return sel + abiEncodeCall([{ t: "bytes32", value: args.mode }, { t: "tuple", fields: exec7579FieldsV4(args.exec) }]);
   }
 
+  /** ERC-7579 batch mode (mirrors `PeridotAccount.MODE_BATCH`): CallType 0x01
+   * (batch) + ExecType 0x00 (default = atomic). Valid only on the v2
+   * fee-capped 7579 entrypoints. */
+  static readonly MODE_BATCH_HEX = "0x0100000000000000000000000000000000000000000000000000000000000000";
+
+  /** `opsHash = keccak256(abi.encode(targets, values, datas))` — the exact
+   * binding the contract recomputes for batch payloads. */
+  buildBatchOpsHash(args: { targets: string[]; values: Array<bigint | number>; datas: Bytes[] }): Uint8Array {
+    return keccak256(
+      fromHex(
+        abiEncodeCall([
+          { t: "address[]", values: args.targets },
+          { t: "uint256[]", values: args.values },
+          { t: "bytes[]", values: args.datas },
+        ]),
+      ),
+    );
+  }
+
+  /** V4 owner batch authorization payload (what the passkey signs as the
+   * WebAuthn challenge for `executeV4(MODE_BATCH, …)`).
+   * Field-for-field match of `_executeBatchV4`:
+   * `keccak256(DOMAIN_PERM_V2 ‖ OP_EXEC7579 ‖ MODE_BATCH ‖ chainid ‖ account
+   * ‖ nonce:uint64 ‖ opsHash ‖ deadline:uint64 ‖ feePolicyVersion:uint16 ‖
+   * maxTotalFee)`. MODE_BATCH + opsHash bind the exact op array, so a
+   * single-call signature can never verify as a batch (and vice versa). */
+  buildBatchExecutePayloadV4(args: {
+    chainId: bigint | number;
+    account: string;
+    nonce: bigint | number;
+    opsHash: Bytes;
+    deadline: bigint | number;
+    feePolicyVersion: number;
+    maxTotalFee: bigint | number;
+  }): Uint8Array {
+    mustBytes(args.opsHash, 32, "opsHash");
+    return buildEvmPermissionPayload(OP_PERM.exec7579, [
+      fromHex(EvmAdapter.MODE_BATCH_HEX.slice(2)),
+      ube(args.chainId, 32),
+      hexBytes(args.account, 20),
+      ube(args.nonce, 8),
+      args.opsHash,
+      ube(args.deadline, 8),
+      ube(args.feePolicyVersion, 2),
+      ube(args.maxTotalFee, 32),
+    ]);
+  }
+
+  /** V4 owner `executeV4(MODE_BATCH, …)` calldata.
+   * Inner tuple: `abi.encode(targets[], values[], datas[], deadline,
+   * feePolicyVersion, maxTotalFee, networkFee, authenticatorData,
+   * clientDataJSON, r, s)` (field-for-field with `_executeBatchV4`). */
+  buildBatchExecuteDataV4(args: {
+    targets: string[];
+    values: Array<bigint | number>;
+    datas: Bytes[];
+    deadline: bigint | number;
+    feePolicyVersion: number;
+    maxTotalFee: bigint | number;
+    networkFee: bigint | number;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const sel = "0x" + toHex(selector("executeV4(bytes32,bytes)"));
+    constCoderCheck(args.authenticatorData, args.clientDataJSON, args.r, args.s);
+    const inner = abiEncodeCall([
+      { t: "address[]", values: args.targets },
+      { t: "uint256[]", values: args.values },
+      { t: "bytes[]", values: args.datas },
+      { t: "uint", bytes: 8, value: args.deadline },
+      { t: "uint", bytes: 2, value: args.feePolicyVersion },
+      { t: "uint", bytes: 32, value: args.maxTotalFee },
+      { t: "uint", bytes: 32, value: args.networkFee },
+      { t: "bytes", value: args.authenticatorData },
+      { t: "bytes", value: args.clientDataJSON },
+      { t: "bytes32", value: args.r },
+      { t: "bytes32", value: args.s },
+    ]);
+    const mode = fromHex(EvmAdapter.MODE_BATCH_HEX.slice(2));
+    return sel + abiEncodeCall([{ t: "bytes32", value: mode }, { t: "bytes", value: fromHex(inner) }]);
+  }
+
+  /** V4 session batch authorization payload (what the session key signs for
+   * `executeFromExecutorV2(MODE_BATCH, …)`).
+   * Field-for-field match of `_executeBatchPermission`:
+   * `keccak256(DOMAIN_PERM_V2 ‖ OP_PERM_EXEC ‖ MODE_BATCH ‖ chainid ‖ account
+   * ‖ permissionId ‖ seq:uint64 ‖ opsHash ‖ deadline:uint64 ‖
+   * feePolicyVersion:uint16 ‖ maxTotalFee)`. */
+  buildBatchPermissionPayload(args: {
+    chainId: bigint | number;
+    account: string;
+    permissionId: Bytes;
+    seq: bigint | number;
+    opsHash: Bytes;
+    deadline: bigint | number;
+    feePolicyVersion: number;
+    maxTotalFee: bigint | number;
+  }): Uint8Array {
+    mustBytes(args.permissionId, 32, "permissionId");
+    mustBytes(args.opsHash, 32, "opsHash");
+    return buildEvmPermissionPayload(OP_PERM.permExec, [
+      fromHex(EvmAdapter.MODE_BATCH_HEX.slice(2)),
+      ube(args.chainId, 32),
+      hexBytes(args.account, 20),
+      args.permissionId,
+      ube(args.seq, 8),
+      args.opsHash,
+      ube(args.deadline, 8),
+      ube(args.feePolicyVersion, 2),
+      ube(args.maxTotalFee, 32),
+    ]);
+  }
+
+  /** V4 session `executeFromExecutorV2(MODE_BATCH, …)` calldata.
+   * Inner tuple: `abi.encode(permissionId, targets[], values[], datas[],
+   * deadline, seq, feePolicyVersion, maxTotalFee, networkFee, feeRecipient,
+   * authenticatorData, clientDataJSON, r, s)` (field-for-field with
+   * `_executeBatchPermission`). */
+  buildBatchExecuteFromExecutorDataV2(args: {
+    permissionId: Bytes;
+    targets: string[];
+    values: Array<bigint | number>;
+    datas: Bytes[];
+    deadline: bigint | number;
+    seq: bigint | number;
+    feePolicyVersion: number;
+    maxTotalFee: bigint | number;
+    networkFee: bigint | number;
+    feeRecipient: string;
+    authenticatorData: Bytes;
+    clientDataJSON: Bytes;
+    r: Bytes;
+    s: Bytes;
+  }): string {
+    const sel = "0x" + toHex(selector("executeFromExecutorV2(bytes32,bytes)"));
+    mustBytes(args.permissionId, 32, "permissionId");
+    constCoderCheck(args.authenticatorData, args.clientDataJSON, args.r, args.s);
+    const inner = abiEncodeCall([
+      { t: "bytes32", value: args.permissionId },
+      { t: "address[]", values: args.targets },
+      { t: "uint256[]", values: args.values },
+      { t: "bytes[]", values: args.datas },
+      { t: "uint", bytes: 8, value: args.deadline },
+      { t: "uint", bytes: 8, value: args.seq },
+      { t: "uint", bytes: 2, value: args.feePolicyVersion },
+      { t: "uint", bytes: 32, value: args.maxTotalFee },
+      { t: "uint", bytes: 32, value: args.networkFee },
+      { t: "address", value: args.feeRecipient },
+      { t: "bytes", value: args.authenticatorData },
+      { t: "bytes", value: args.clientDataJSON },
+      { t: "bytes32", value: args.r },
+      { t: "bytes32", value: args.s },
+    ]);
+    const mode = fromHex(EvmAdapter.MODE_BATCH_HEX.slice(2));
+    return sel + abiEncodeCall([{ t: "bytes32", value: mode }, { t: "bytes", value: fromHex(inner) }]);
+  }
+
   /** ERC-7579 `executeFromExecutor(bytes32,bytes)` calldata (PermExecArgs tuple, frozen v1). */
   buildExecuteFromExecutorData(args: { mode: Bytes; exec: PermExecTuple }): string {
     const sel = "0x" + toHex(selector("executeFromExecutor(bytes32,bytes)"));
@@ -804,6 +965,28 @@ function encodeBytes(data: Bytes): string {
   return toHex(out);
 }
 
+/** ABI-encode a 1-D array. `bytes[]` element offsets are relative to the
+ * start of the array content (right after the length word), matching
+ * `abi.encode` tuple-style dynamic encoding. Returns hex without 0x. */
+function encodeArray(v: Extract<AbiValue, { t: "address[]" | "uint256[]" | "bytes[]" }>): string {
+  const len = v.values.length;
+  const lenWord = toHex(ube(len, 32));
+  if (v.t === "address[]") {
+    return lenWord + v.values.map((a) => encodeAddress(a)).join("");
+  }
+  if (v.t === "uint256[]") {
+    return lenWord + v.values.map((n) => toHex(ube(n, 32))).join("");
+  }
+  const elemEncs = v.values.map((b) => encodeBytes(b));
+  let head = "";
+  let tailBytes = 0;
+  for (const e of elemEncs) {
+    head += toHex(ube(len * 32 + tailBytes, 32));
+    tailBytes += e.length / 2;
+  }
+  return lenWord + head + elemEncs.join("");
+}
+
 function encBytes32(data: Bytes): string {
   if (data.length !== 32) throw new Error("expected 32 bytes");
   return toHex(data);
@@ -818,17 +1001,24 @@ function mustBytes(v: Bytes, expected: number, name: string): void {
   if (v.length !== expected) throw new Error(`expected ${expected} bytes for ${name}`);
 }
 
-/** Minimal ABI coder: static scalars + `bytes` + nested tuples (no arrays). */
+/** Minimal ABI coder: static scalars + `bytes` + nested tuples + 1-D arrays. */
 export type AbiValue =
   | { t: "uint"; bytes: number; value: bigint | number }
   | { t: "address"; value: string }
   | { t: "bytes32"; value: Bytes }
   | { t: "bytesN"; bytes: number; value: Bytes }
   | { t: "bytes"; value: Bytes }
-  | { t: "tuple"; fields: AbiValue[] };
+  | { t: "tuple"; fields: AbiValue[] }
+  | { t: "address[]"; values: string[] }
+  | { t: "uint256[]"; values: Array<bigint | number> }
+  | { t: "bytes[]"; values: Bytes[] };
+
+function isArrayValue(v: AbiValue): v is Extract<AbiValue, { t: "address[]" | "uint256[]" | "bytes[]" }> {
+  return v.t === "address[]" || v.t === "uint256[]" || v.t === "bytes[]";
+}
 
 function isDynamic(v: AbiValue): boolean {
-  return v.t === "bytes" || (v.t === "tuple" && v.fields.some(isDynamic));
+  return v.t === "bytes" || isArrayValue(v) || (v.t === "tuple" && v.fields.some(isDynamic));
 }
 
 function encodeStatic(v: AbiValue): string {
@@ -872,6 +1062,10 @@ function abiEncodeSequence(values: AbiValue[]): string {
     statics.push(toHex(ube(staticSize + tailBytes, 32)));
     if (v.t === "bytes") {
       const tail = encodeBytes(v.value);
+      dynamics.push(tail);
+      tailBytes += tail.length / 2;
+    } else if (isArrayValue(v)) {
+      const tail = encodeArray(v);
       dynamics.push(tail);
       tailBytes += tail.length / 2;
     } else if (v.t === "tuple") {

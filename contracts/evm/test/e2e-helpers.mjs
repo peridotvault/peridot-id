@@ -212,4 +212,115 @@ export function revokePermissionData({ permissionId, deadline, authData, clientD
   ).trim();
 }
 
+// --- V4 batch (ANT-763): MODE_BATCH owner + session paths on PeridotAccountBatch ---
+// Payload shapes mirror PeridotAccountBatch._executeBatchV4/_executeBatchPermission
+// field-for-field (DOMAIN_PERM_V2 ‖ opTag ‖ MODE_BATCH ‖ … ‖ opsHash ‖ …).
+
+export const DOMAIN_V4 = Buffer.from("PID|EVM|SMART_ACCOUNT|v4", "ascii");
+export const MODE_BATCH = "0x0100000000000000000000000000000000000000000000000000000000000000";
+const MODE_BATCH_BUF = Buffer.from(MODE_BATCH.slice(2), "hex");
+
+export function actPayloadV4({ salt, x, y, feePolicyVersion, maxTotalFee, deadline, chainId, factory }) {
+  return keccak(Buffer.concat([
+    DOMAIN_V4, Buffer.from([0x05]),
+    b32(salt), b32(x), b32(y),
+    u8(feePolicyVersion, 2), u8(maxTotalFee, 32), u8(deadline, 8), u8(chainId, 32),
+    addrBuf(factory),
+  ]));
+}
+
+export function deployAndInitV4Data({ salt, x, y, feePolicyVersion, maxTotalFee, deadline, networkFee, authData, clientDataJSON, r, s }) {
+  return execSync(
+    `${CAST} calldata "deployAndInitV4(bytes32,bytes32,bytes32,uint16,uint256,uint64,uint256,bytes,bytes,bytes32,bytes32)" ` +
+    `${hx(salt)} ${hx(x)} ${hx(y)} ${feePolicyVersion} ${maxTotalFee} ${deadline} ${networkFee} ${hx(authData)} ${hx(clientDataJSON)} ${hx(r)} ${hx(s)}`,
+    { encoding: "utf8" },
+  ).trim();
+}
+
+// Raw ABI encoding (no selector) for opsHash + 7579 inner tuples.
+export function abiEncode(sig, ...args) {
+  const q = args.map((a) => `"${a}"`).join(" ");
+  const out = execSync(`${CAST} abi-encode "${sig}" ${q}`, { encoding: "utf8", maxBuffer: 1 << 20 }).trim();
+  return Buffer.from(out.slice(2), "hex");
+}
+
+const strArr = (xs) => `[${xs.map((x) => String(x)).join(",")}]`;
+const hexArr = (xs) => `[${xs.map((x) => hx(x)).join(",")}]`;
+
+export function opsHash({ targets, values, datas }) {
+  return keccak(abiEncode("f(address[],uint256[],bytes[])", strArr(targets), strArr(values), hexArr(datas)));
+}
+
+export function batchOwnerPayload({ chainId, account, nonce, opsHash: h, deadline, feePolicyVersion, maxTotalFee }) {
+  return keccak(Buffer.concat([
+    DOMAIN_PERM, Buffer.from([0x15]), MODE_BATCH_BUF,
+    u8(chainId, 32), addrBuf(account), u8(nonce, 8), b32(h),
+    u8(deadline, 8), u8(feePolicyVersion, 2), u8(maxTotalFee, 32),
+  ]));
+}
+
+export function batchSessionPayload({ chainId, account, permissionId: pid, seq, opsHash: h, deadline, feePolicyVersion, maxTotalFee }) {
+  return keccak(Buffer.concat([
+    DOMAIN_PERM, Buffer.from([0x12]), MODE_BATCH_BUF,
+    u8(chainId, 32), addrBuf(account), b32(pid),
+    u8(seq, 8), b32(h),
+    u8(deadline, 8), u8(feePolicyVersion, 2), u8(maxTotalFee, 32),
+  ]));
+}
+
+export function batchOwnerInner({ targets, values, datas, deadline, feePolicyVersion, maxTotalFee, networkFee, authData, clientDataJSON, r, s }) {
+  return "0x" + abiEncode(
+    "f(address[],uint256[],bytes[],uint64,uint16,uint256,uint256,bytes,bytes,bytes32,bytes32)",
+    strArr(targets), strArr(values), hexArr(datas),
+    String(deadline), String(feePolicyVersion), String(maxTotalFee), String(networkFee),
+    hx(authData), hx(clientDataJSON), hx(r), hx(s),
+  ).toString("hex");
+}
+
+export function batchSessionInner({ permissionId, targets, values, datas, deadline, seq, feePolicyVersion, maxTotalFee, networkFee, feeRecipient, authData, clientDataJSON, r, s }) {
+  return "0x" + abiEncode(
+    "f(bytes32,address[],uint256[],bytes[],uint64,uint64,uint16,uint256,uint256,address,bytes,bytes,bytes32,bytes32)",
+    hx(permissionId), strArr(targets), strArr(values), hexArr(datas),
+    String(deadline), String(seq), String(feePolicyVersion), String(maxTotalFee), String(networkFee),
+    feeRecipient, hx(authData), hx(clientDataJSON), hx(r), hx(s),
+  ).toString("hex");
+}
+
+export function executeBatchV4Data(a) {
+  return execSync(
+    `${CAST} calldata "executeV4(bytes32,bytes)" ${MODE_BATCH} ${batchOwnerInner(a)}`,
+    { encoding: "utf8", maxBuffer: 1 << 20 },
+  ).trim();
+}
+
+export function executeBatchSessionV2Data(a) {
+  return execSync(
+    `${CAST} calldata "executeFromExecutorV2(bytes32,bytes)" ${MODE_BATCH} ${batchSessionInner(a)}`,
+    { encoding: "utf8", maxBuffer: 1 << 20 },
+  ).trim();
+}
+
+export function executeViaPermissionV2Data({ account, mode, execCalldata }) {
+  return execSync(
+    `${CAST} calldata "executeViaPermissionV2(address,bytes32,bytes)" ${account} ${mode} ${execCalldata}`,
+    { encoding: "utf8", maxBuffer: 1 << 20 },
+  ).trim();
+}
+
+export function installPayload({ chainId, account, moduleTypeId, module, initDataHash, nonce, deadline }) {
+  return keccak(Buffer.concat([
+    DOMAIN_PERM, Buffer.from([0x13]),
+    u8(chainId, 32), addrBuf(account), u8(moduleTypeId, 32), addrBuf(module), b32(initDataHash),
+    u8(nonce, 8), u8(deadline, 8),
+  ]));
+}
+
+export function installModuleData({ moduleTypeId, module, initData, deadline, authData, clientDataJSON, r, s }) {
+  return execSync(
+    `${CAST} calldata "installModule(uint256,address,bytes,uint64,bytes,bytes,bytes32,bytes32)" ` +
+    `${moduleTypeId} ${module} ${hx(initData)} ${deadline} ${hx(authData)} ${hx(clientDataJSON)} ${hx(r)} ${hx(s)}`,
+    { encoding: "utf8" },
+  ).trim();
+}
+
 export { assert };

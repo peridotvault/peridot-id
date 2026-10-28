@@ -78,10 +78,13 @@ forge test
 ```sh
 cd contracts/evm
 anvil &   # localhost:8545, funded default keys
-DEPLOYER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6bb9d3777c8a7f2383c692335d6779b7f1549d21b7 \
+DEPLOYER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 ADMINS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
   forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
 ```
+(The key above is anvil's documented default test key #0 — localnet only,
+never mainnet. The previous README revision carried a corrupted 63-hex-digit
+variant that `cast`/forge cannot decode; corrected ANT-763.)
 
 First run deploys implementation + factory and prints `IMPLEMENTATION`, `FACTORY`,
 `INIT_CODE_HASH` — note them. Creation is permissionless (ANT-610): any submitter
@@ -139,6 +142,31 @@ Phase-1 chains — same flow on each, same addresses everywhere:
    Chain fee minima come from the chain fee policy (dashboard admin API
    `POST /v1/admin/fee-policies`, public read `GET /v1/fee-policy`) —
    `serviceFee = max(networkFee × bps / 10_000, MIN_FEE[chain])`.
+
+## Batch factory (Phase-1b, ANT-763)
+
+`PeridotAccount` (frozen legacy) is 27,392 deployed bytes — over the EIP-170
+24,576 limit, so it can never be deployed again. New accounts use the V4-only
+`PeridotAccountBatch` (21,280 bytes), deployed behind a NEW factory instance
+(the old factory's `implementation` is immutable; old accounts are untouched).
+
+1. Deploy the batch factory with `USE_BATCH_IMPL=1` (same keyless-CREATE2
+   discipline as above for identical addresses everywhere):
+    ```sh
+    USE_BATCH_IMPL=1 IMPLEMENTATION=0x... ADMINS=0x... DEPLOYER_PRIVATE_KEY=0x... \
+      forge script script/Deploy.s.sol --rpc-url $EVM_RPC_URL_10143 --broadcast
+    ```
+   With `IMPLEMENTATION` unset the script deploys the batch implementation
+   itself; prefilling it reuses one audited bytecode address on every chain.
+2. Register the batch pair as `factory_v2` / `account_implementation_v2`
+   contract rows on the same chain (dashboard admin API contract upsert —
+   `versionLabel` e.g. `v2-batch`). The API resolves v1 rows by default;
+   callers pass `version: 2` for batch (`deploymentFor(ref, 2)`).
+   No migration: existing accounts keep resolving their v1 factory/impl.
+3. Testnet first: batch factory joins a chain ONLY after testnet proof +
+   Tobias audit + board approval (mainnet gating). Never self-execute a
+   mainnet/value-bearing deploy — hand the audited bytecode + addresses to
+   Trevor (DevOps) for the testnet pipeline and to the board for mainnet.
 
 ## Mainnet
 
