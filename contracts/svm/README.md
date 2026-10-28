@@ -147,10 +147,43 @@ Deploy with the **same** program keypair (see above) — new id = new addresses
 everywhere (the id is part of the PDA derivation). Procedure, not values:
 
 1. Reuse the canonical program keypair. Never generate a fresh one per env.
-2. Fund a deployer, deploy, verify the id on-chain.
+2. Fund a deployer, then run the ATOMIC deploy+init flow below — never a bare
+   `solana program deploy`. Init must land in the same operator execution as
+   the deploy (same operator keypair as initer == initial admin, ANT-801 H3),
+   or a frontrunner wins the deploy->init race and self-appoints (first-writer
+   wins, and owns the fee stream via WithdrawRevenue).
 3. Transfer the upgrade authority to a **stakeholder-held hardware/multisig key**
    before launch (see `contracts/WHITEPAPER.md` §12 for the audit gate).
 4. Set `SOLANA_NETWORK=mainnet-beta` + 2+ production RPCs in deploy env.
+
+## Atomic deploy + treasury init (ANT-806, all clusters incl. mainnet)
+
+No mainnet execution without a board order. Operator flow (one execution):
+
+```sh
+# 0. Build with the cluster program id baked in (guarded by ANT-215):
+PID_PROGRAM_ID=<program-id> ../assert-program-id.sh \
+  --keypair <program-keypair.json> --require-explicit
+PID_PROGRAM_ID=<program-id> cargo build-sbf
+# 1+2. Deploy AND init_treasury back-to-back, verify admins[0] == operator:
+./deploy/svm-deploy-init-atomic.sh \
+  --program-keypair <program-keypair.json> \
+  --operator-keypair <operator-keypair.json> \
+  --rpc-url <cluster-rpc> \
+  --so-path contracts/svm/smart-account/target/deploy/peridot_smart_account.so
+# fresh program: omit --upgrade. Existing program: add --upgrade.
+```
+
+What the script enforces (fail-closed, exit non-zero = do NOT cut over):
+
+- Same operator keypair signs the deploy AND the `init_treasury` (disc 15)
+  with `initial_admin == initer` (on-chain H3 binding; no delegated appoint).
+- Post-send verify reads the `[b"config"]` PDA: len 264, version 1,
+  `admins[0] == operator`, program-owned config + treasury.
+- Pre-check makes retries safe: already-initialized-with-operator exits 0;
+  initialized-with-stranger exits 3 (RACE LOST — redeploy under a FRESH
+  program keypair, never reuse a raced id: init is first-writer-wins and
+  irreversible on that program id).
 
 One keypair everywhere = one blast radius: the multisig is the single guard.
 Funds on old-program PDAs stay there — nothing migrates them.
