@@ -303,10 +303,18 @@ export class AuthController {
     if (await this.ssoService.isRevoked(user.pid, resolved.redirectTo)) {
       throw new BadRequestException("App connection revoked — sign in again from the site to reconnect.");
     }
-    const pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, {
-      clientId: resolved.clientId,
-      ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
-    });
+    let pidCode: string;
+    try {
+      pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, {
+        clientId: resolved.clientId,
+        ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.message === "sso_pkce_invalid") {
+        throw new BadRequestException("A code_challenge is required for this app (public client).");
+      }
+      throw err;
+    }
     return { pidCode };
   }
 
