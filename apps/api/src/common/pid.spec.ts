@@ -1,8 +1,20 @@
-import { PID_HANDLE_REGEX, PID_REGEX, isPid, isPidHandle, normalizePidHandle, toPid } from "./pid";
+import { PID_HANDLE_REGEX, PID_REGEX, canonicalizePidHandle, isPid, isPidHandle, normalizePidHandle, toPid } from "./pid";
 
 describe("normalizePidHandle", () => {
   it("lowercases and trims", () => {
     expect(normalizePidHandle("  Ifal ")).toBe("ifal");
+  });
+});
+
+describe("canonicalizePidHandle (ANT-804 edge 1)", () => {
+  it("collapses case, spacing, NFKC and zero-width chars to one canonical form", () => {
+    expect(canonicalizePidHandle("  ALICE ")).toBe("alice");
+    expect(canonicalizePidHandle("alice​")).toBe("alice");
+    expect(canonicalizePidHandle("ＡＬＩＣＥ")).toBe("alice");
+  });
+
+  it("keeps distinct spellings distinct (confusables covered by trademark review, not folding)", () => {
+    expect(canonicalizePidHandle("perid0t")).not.toBe(canonicalizePidHandle("peridot"));
   });
 });
 
