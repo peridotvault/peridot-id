@@ -1,24 +1,53 @@
-# Docs sync notes (ANT-845) — baked index contract
+# Docs sync notes (ANT-850 Phase 2) — baked index contract
 
-## Current state (Phase 1)
+## Current state (Phase 2)
 
-All four tool datasets live in `src/tools.rs` as hardcoded `&'static`
-constants compiled into the canister (`DOCS`, `GUIDES`, `EXAMPLES`,
-`SDK_DOCS`). There is **no per-request HTTPS outcall** in the canister —
-verify with:
+All four tool datasets live in the **committed generated module**
+`src/generated_docs.rs` (175 search entries + 15 guides + 8 verbatim
+examples + 3 SDK modules, ~96 KiB), emitted offline by
+`scripts/sync-docs` from the in-repo Mintlify tree (`apps/docs/`).
+`src/tools.rs` holds the domain types, frozen ranking, and lookups;
+`src/generated_docs.meta.json` pins `sourceSha`, `contentHash`,
+`entryCounts`, and `builtAt`.
+
+There is **no per-request HTTPS outcall** in the canister — verify with:
 
 ```bash
 # from apps/mcp/ — must print nothing
-grep -rn "http_request_outcall\|management_canister\|fetch(" src/ || true
+grep -rn "http_request_outcall\|management_canister" src/ || true
 grep -rn "set_timer\|set_timer_interval" src/ || true
+# Cargo.toml gains no HTTP-client dependency (check [dependencies] by eye).
 ```
 
-Updating content = editing `tools.rs` (+ tests) and redeploying. This is
-intentional for Phase 1: the corpus is tiny (< 10 KB) and changes rarely.
+Updating content = `./scripts/sync-docs` (+ tests) and redeploying.
+`./scripts/sync-docs --check` runs in CI and fails on drift.
 
-## Future sync-job contract (not implemented)
+## Index-update story
 
-When a Mintlify/`llms.txt` sync job is built (Phase 2+), it MUST:
+- `contentHash` (sha256 over normalized extracted content) is stored in the
+  generated header and `generated_docs.meta.json`. CI recomputes it;
+  re-sync **only** on source change (no-op when unchanged).
+- Upgrade: stateless canister → redeploy new wasm (no state migration
+  exists by design). Rollback: redeploy previous wasm; the previous
+  generated artifact stays in git history. Rollback AC: `dfx deploy` of the
+  prior commit serves the prior `rev` in `source` fields (local smoke,
+  never mainnet).
+- budgets: generated artifact ≤ 160 KiB; wasm delta ≤ +250 KiB vs the
+  Phase 1 `paperclip` build; per-hit caps enforced by unit tests
+  (excerpt ≤ 500 chars, guide body ≤ 8 KiB, example code ≤ 8 KiB,
+  ≤ 32 symbols/module; frozen `MAX_RESULTS=5`, `MAX_QUERY_CHARS=500`,
+  response ≤ 32 KiB).
+
+## Original Phase 1 notes (kept for history)
+
+Phase 1 served hardcoded `&'static` constants in `src/tools.rs`
+(`DOCS` 3 entries, `GUIDES` 3 topics, `EXAMPLES` 3 names, `SDK_DOCS`
+3 modules). Updating content meant editing `tools.rs` (+ tests) and
+redeploying — intentional while the corpus was tiny.
+
+## Sync-job rules (standing contract, from ANT-841)
+
+Any future Mintlify/`llms.txt` sync job MUST:
 
 1. Run **outside** the request path (offline script or timer-driven updater,
    never per-request outcalls).
