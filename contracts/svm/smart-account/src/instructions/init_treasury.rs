@@ -3,13 +3,18 @@
 //! Creates the config PDA (`[b"config"]`, 264 bytes, v1) and the treasury PDA
 //! (`[b"treasury"]`, 0 bytes) via system `create_account` with PDA signer
 //! seeds, owner = runtime `program_id`. Writes config v1 with
-//! `admins[0] = initial_admin`. First-writer-wins: fails with
+//! `admins[0] = initial_admin` (= initer signer, ANT-801 H3 binding).
+//! First-writer-wins: fails with
 //! `ConfigAlreadyInitialized` if either PDA is already program-owned.
 //!
 //! Deny coverage: touches ONLY config + treasury PDAs (+ system program).
 //! NEVER user PDA state, session PDAs, or BACKEND (D1/D3). No WebAuthn, no
-//! auth payload — the initer is the deployer/upgrade-authority keypair and
-//! gains nothing by itself beyond funding rent.
+//! auth payload — ANT-801 (H3): `initial_admin` MUST equal the initer signer.
+//! The initer funds rent AND becomes `admins[0]` atomically; anyone winning
+//! the deploy->init race would otherwise appoint themselves via
+//! `withdraw_revenue.rs` and drain fees. Production must init atomically in
+//! the deploy flow with the same operator keypair (Trevor owns script
+//! atomicity).
 
 use crate::errors::PeridotError;
 #[cfg(any(target_os = "solana", target_arch = "bpf"))]
@@ -21,6 +26,8 @@ use pinocchio::{account::AccountView, error::ProgramError, Address, ProgramResul
 use super::InstructionData;
 
 /// Instruction data layout: `initial_admin [u8; 32]` (no auth payload).
+/// ANT-801 (H3, Access control): `initial_admin` MUST equal `accounts[0]`
+/// (the initer signer) — genesis appoints self only, `Unauthorized` otherwise.
 pub fn process(
     program_id: &Address,
     accounts: &[AccountView],
@@ -47,6 +54,12 @@ pub fn process(
     }
 
     let initial_admin: [u8; 32] = data.read_array::<32>(0)?;
+    // H3 binding (checks-effects-interactions: before any create_account CPI;
+    // Gas optimization: single 32-byte compare, no extra syscalls):
+    // the signer that funds rent IS the genesis admin — no delegated appoint.
+    if initial_admin != *initer.address().as_array() {
+        return Err(PeridotError::Unauthorized.into());
+    }
 
     // Verify derivations against the runtime program_id (no split-brain).
     #[cfg(any(target_os = "solana", target_arch = "bpf"))]

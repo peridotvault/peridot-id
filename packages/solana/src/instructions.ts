@@ -943,14 +943,18 @@ export function assertCanonicalTreasury(
 /**
  * Build `InitTreasury(initial_admin)` (disc 15). Accounts (§5a):
  * `[initer signer/writable, config PDA writable, treasury PDA writable,
- * system program]`. No auth payload — the initer (deployer/upgrade-authority
- * holder) funds the rent-exempt minimums and gains nothing by itself.
+ * system program]`. No auth payload — ANT-801 (H3): `initialAdmin` MUST
+ * equal `initer` (genesis appoints self only; on-chain enforces with
+ * `Unauthorized`). The initer funds rent AND becomes `admins[0]` atomically.
  */
 export function buildInitTreasuryInstruction(
   initer: PublicKey,
   initialAdmin: PublicKey,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  if (!initer.equals(initialAdmin)) {
+    throw new Error("initTreasury: initialAdmin must equal initer (ANT-801 H3)");
+  }
   const [config] = deriveRevenueConfigPda(programId);
   const [treasury] = deriveTreasuryPda(programId);
   return new TransactionInstruction({

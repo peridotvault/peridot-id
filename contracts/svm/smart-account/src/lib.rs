@@ -497,6 +497,7 @@ mod ant612_permissionless_tests {
 /// 0-24 are frozen so old SDK decoders keep working.
 #[cfg(test)]
 mod ant635_vault_pins {
+    use super::assert_effect_before_interaction;
     use crate::errors::PeridotError;
     use crate::instructions::Instruction;
 
@@ -583,6 +584,30 @@ mod ant635_vault_pins {
         assert!(include_str!("instructions/add_admin.rs").contains("PeridotEvent::AdminAdded"));
         assert!(include_str!("instructions/remove_admin.rs")
             .contains("PeridotEvent::AdminRemoved"));
+    }
+
+    /// ANT-801 (H3): genesis binds `initial_admin` to the initer signer.
+    /// A delegated appoint (`initial_admin != initer`) fails `Unauthorized`
+    /// BEFORE any `create_account` CPI (checks-effects-interactions), so a
+    /// deploy->init race winner cannot crown an arbitrary admin and drain
+    /// fees via `WithdrawRevenue`.
+    #[test]
+    fn init_treasury_binds_admin_to_initer() {
+        let src = include_str!("instructions/init_treasury.rs");
+        assert!(
+            src.contains("initial_admin != *initer.address().as_array()"),
+            "init_treasury.rs: must compare initial_admin to the initer signer"
+        );
+        assert!(
+            src.contains("PeridotError::Unauthorized"),
+            "init_treasury.rs: delegated appoint must fail Unauthorized"
+        );
+        assert_effect_before_interaction(
+            "init_treasury.rs",
+            src,
+            "initial_admin != *initer.address().as_array()",
+            "        pinocchio_system::create_account_with_minimum_balance_signed(",
+        );
     }
 
     #[test]
