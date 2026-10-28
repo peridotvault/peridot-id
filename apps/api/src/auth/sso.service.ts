@@ -3,7 +3,7 @@
 // travels in the redirect URL, then is exchanged server-to-server — no cross-site cookie
 // sharing. Single-use, short TTL, bound to the issuing identity.
 
-import { Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -291,23 +291,24 @@ export class SsoService {
     if (opts?.codeChallenge !== undefined) {
       const method = opts.codeChallengeMethod ?? PKCE_METHOD_S256;
       if (method !== PKCE_METHOD_S256 || !CODE_CHALLENGE_RE.test(opts.codeChallenge)) {
-        throw new Error("sso_pkce_invalid");
+        throw new BadRequestException("sso_pkce_invalid");
       }
       codeChallenge = opts.codeChallenge;
       codeChallengeMethod = PKCE_METHOD_S256;
     } else if (opts?.codeChallengeMethod !== undefined) {
-      throw new Error("sso_pkce_invalid");
+      throw new BadRequestException("sso_pkce_invalid");
     }
-    // H4 (ANT-799): a public-client code without a challenge is unusable at
-    // exchange (see consume), so minting one only creates confusion — reject
-    // here with the same stable code. Unknown/disabled apps are rejected too:
-    // resolveReturnTo already gates them, this is defense-in-depth for direct
-    // issue() callers.
+    // H4 (ANT-799, subsumes ANT-802 M5): a public-client code without a
+    // challenge is unusable at exchange (see consume), so minting one only
+    // creates confusion — reject here with the same stable code (400, not
+    // 500: the controllers match on the message for friendly mapping).
+    // Unknown/disabled apps are rejected too: resolveReturnTo already gates
+    // them, this is defense-in-depth for direct issue() callers.
     if (opts?.clientId) {
       const app = await this.apps.findActive(opts.clientId);
       if (!app) throw new Error("sso_app_unknown");
       if (!app.clientSecretHash && codeChallenge === null) {
-        throw new Error("sso_pkce_invalid");
+        throw new BadRequestException("sso_pkce_invalid");
       }
     }
     const code = randomBytes(24).toString("base64url");

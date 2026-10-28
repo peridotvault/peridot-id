@@ -459,4 +459,22 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
   }
+
+  /**
+   * Global revoke (M6, ANT-802): revoke EVERY session on EVERY device owned by
+   * the identity — all browsers, all scoped app sessions, all linked
+   * identities' sessions for this pid. This is the "log me out everywhere"
+   * path: after this call, no refresh token for this pid exchanges or
+   * rotates (rotateSession rejects revoked jtis; listAccounts drops dead
+   * sessions). Already-issued access tokens stay valid until their 15m
+   * expiry (stateless) — rotation is what dies immediately.
+   * Returns the number of sessions revoked.
+   */
+  async revokeAllSessions(pid: string): Promise<{ revoked: number }> {
+    const res = await this.prisma.session.updateMany({
+      where: { device: { pid }, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return { revoked: res.count };
+  }
 }

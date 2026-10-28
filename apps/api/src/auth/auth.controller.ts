@@ -587,6 +587,22 @@ export class AuthController {
     return this.authService.listSessions(user.pid, currentJti);
   }
 
+  /**
+   * Global revoke (M6, ANT-802): log this identity out EVERYWHERE — every
+   * session on every device, including scoped app sessions. The current
+   * browser's cookies are NOT cleared here (the caller may be a different
+   * device); use POST /v1/auth/logout for the local-cookie path. Returns
+   * the number of sessions revoked.
+   */
+  @Delete("sessions")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async revokeAllSessions(@CurrentUser() user: AuthenticatedUser): Promise<{ ok: true; revoked: number }> {
+    const { revoked } = await this.authService.revokeAllSessions(user.pid);
+    return { ok: true, revoked };
+  }
+
   @Delete("sessions/revoke-others")
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard, UserTokenGuard)

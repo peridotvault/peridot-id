@@ -1,6 +1,7 @@
+import { createHmac } from "node:crypto";
 import { ConfigService } from "@nestjs/config";
 import { calcServiceFee, parseIdrStrict, type DokuCheckoutClient, type SubAccountProvider } from "@peridotvault/pid-payments";
-import { FiatSubAccountService } from "./fiat-subaccount.service";
+import { FiatSubAccountService, verifyWebhookSignature } from "./fiat-subaccount.service";
 import { PaymentFeeService } from "./payment-fee.service";
 
 function configStub(store: Record<string, string> = {}) {
@@ -621,6 +622,43 @@ describe("FiatSubAccountService", () => {
     expect(prisma.fiatProviderTransaction.findUnique).not.toHaveBeenCalled();
     expect(prisma.fiatProviderTransaction.upsert).not.toHaveBeenCalled();
     expect(ledger.issueForDeposit).not.toHaveBeenCalled();
+  });
+
+  // M11 (ANT-802): source authentication for the notification inbox.
+  describe("webhook source authentication (M11)", () => {
+    const SECRET = "wh-test-secret-0123456789abcdef";
+    const sign = (body: string) => `sha256=${createHmac("sha256", SECRET).update(body, "utf8").digest("hex")}`;
+
+    it("verifyWebhookSignature accepts prefixed and bare hex, rejects forgeries", () => {
+      const body = JSON.stringify({ partnerReferenceNo: "DP1" });
+      const hex = createHmac("sha256", SECRET).update(body, "utf8").digest("hex");
+      expect(verifyWebhookSignature(body, `sha256=${hex}`, SECRET)).toBe(true);
+      expect(verifyWebhookSignature(body, hex, SECRET)).toBe(true);
+      expect(verifyWebhookSignature(body, `sha256=${hex}`, "wrong-secret")).toBe(false);
+      expect(verifyWebhookSignature(`${body} `, `sha256=${hex}`, SECRET)).toBe(false);
+      expect(verifyWebhookSignature(body, "sha256=zzzz", SECRET)).toBe(false);
+      expect(verifyWebhookSignature(body, "", SECRET)).toBe(false);
+      expect(verifyWebhookSignature(body, `sha256=${hex}`, "")).toBe(false);
+    });
+
+    it("rejects unsigned and forged pushes before any DB write when the secret is set", async () => {
+      const { service, prisma } = setup({ DOKU_WEBHOOK_SECRET: SECRET });
+      const body = JSON.stringify({ partnerReferenceNo: "DP1" });
+      await expect(service.webhook("ext-m11a", body)).rejects.toThrow("Invalid webhook signature");
+      await expect(service.webhook("ext-m11b", body, sign(`${body} `))).rejects.toThrow("Invalid webhook signature");
+      expect(prisma.fiatWebhookEvent.create).not.toHaveBeenCalled();
+      expect(prisma.fiatProviderTransaction.findUnique).not.toHaveBeenCalled();
+    });
+
+    it("accepts a correctly signed push and persists it (legacy path intact)", async () => {
+      const { service, prisma } = setup({ DOKU_WEBHOOK_SECRET: SECRET });
+      prisma.fiatProviderTransaction.findUnique.mockResolvedValueOnce(null);
+      prisma.fiatProviderAccount.findFirst.mockResolvedValueOnce(null);
+      prisma.fiatProviderAccount.findMany.mockResolvedValueOnce([]);
+      const body = JSON.stringify({ partnerReferenceNo: "DP1" });
+      await expect(service.webhook("ext-m11c", body, sign(body))).resolves.toEqual({ ok: true });
+      expect(prisma.fiatWebhookEvent.create).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("spoofed-notify flood persists as received without issuance (ANT-271)", async () => {

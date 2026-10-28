@@ -110,13 +110,21 @@ export class FiatController {
    * apply only after server-side corroboration; always 200 after persist.
    * Oversized bodies (>32kb service cap, >64kb route cap) are dropped before
    * any DB write — real notifies are ~1-2kb.
+   *
+   * M11 (ANT-802): when `DOKU_WEBHOOK_SECRET` is set, the source must prove
+   * itself with `X-Doku-Signature` (else 401, before any DB write). The
+   * 120 req/min throttle is unchanged.
    */
   @Post("webhook")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 120, ttl: 60000 } })
-  webhook(@Headers("x-external-id") externalId: string | undefined, @Req() req: Request) {
+  webhook(
+    @Headers("x-external-id") externalId: string | undefined,
+    @Headers("x-doku-signature") signature: string | undefined,
+    @Req() req: Request,
+  ) {
     const rawBody: string = (req as Request & { rawBody?: string }).rawBody ?? JSON.stringify(req.body ?? {});
-    return this.fiat.webhook(externalId ?? (req.headers["x-external-id"] as string | undefined), rawBody);
+    return this.fiat.webhook(externalId ?? (req.headers["x-external-id"] as string | undefined), rawBody, signature);
   }
 
   /** Admin: backfill ledger credit for paid deposits that missed issuance. */

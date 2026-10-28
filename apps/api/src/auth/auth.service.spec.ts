@@ -107,12 +107,24 @@ function prismaMock() {
           if (s) s.revokedAt = data.revokedAt;
           return s ?? null;
         }),
-        updateMany: jest.fn(async ({ where, data }: { where: { id?: string; deviceId?: string }; data: { revokedAt: Date } }) => {
+        updateMany: jest.fn(async ({ where, data }: { where: { id?: string; deviceId?: string; device?: { pid: string }; revokedAt?: null }; data: { revokedAt: Date } }) => {
           // Family-wide revocation (M2 fail-closed): revoke every session on the device.
           if (where.deviceId) {
             let count = 0;
             for (const s of sessions.values()) {
               if (s.deviceId === where.deviceId && !s.revokedAt) {
+                s.revokedAt = data.revokedAt;
+                count++;
+              }
+            }
+            return { count };
+          }
+          // Global revoke (M6): every live session on every device owned by the pid.
+          if (where.device?.pid) {
+            let count = 0;
+            for (const s of (sessions as Map<string, StoredSession & { deviceId: string }>).values()) {
+              const device = devices.get(s.deviceId);
+              if (device && (device as StoredDevice & { pid: string }).pid === where.device.pid && !s.revokedAt) {
                 s.revokedAt = data.revokedAt;
                 count++;
               }
@@ -521,6 +533,48 @@ describe("AuthService app sessions (per-first-party logout isolation)", () => {
       cookies: { pid_refresh: appRefresh, pid_refresh_web: appRefresh },
     } as never);
     expect(accounts.map((x) => x.pid)).toContain(A);
+  });
+});
+
+describe("AuthService global revoke (M6: log out everywhere)", () => {
+  const A = "ifal@pid";
+
+  it("revokeAllSessions revokes every session on every device owned by the pid", async () => {
+    const { service, prisma, res } = setup();
+    // Two sessions on two devices (separate logins), plus a scoped app session.
+    const first = await service.issueSession(res as never, A, "ua");
+    const second = await service.issueSession(res as never, A, "other-ua");
+    await service.grantAppSession(res as never, A, "web", "ua");
+    const appRefresh = (res.cookie as jest.Mock).mock.calls.filter(([n]) => n === "pid_refresh_web").pop()[1] as string;
+
+    const { revoked } = await service.revokeAllSessions(A);
+    expect(revoked).toBe(3);
+    expect(prisma.session.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ device: { pid: A } }) }),
+    );
+
+    // Every refresh token is now dead — no live accounts, no rotation.
+    const accounts = await service.listAccounts({
+      cookies: {
+        pid_refresh: second.refreshToken,
+        [accountRefreshCookieName(A)]: first.refreshToken,
+        pid_refresh_web: appRefresh,
+      },
+    } as never);
+    expect(accounts).toEqual([]);
+    await expect(service.rotateSession(reqWithToken(second.refreshToken), res as never)).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it("revokeAllSessions is scoped to the pid and a no-op when nothing is live", async () => {
+    const { service, res } = setup();
+    const B = "kupuakz@pid";
+    const b = await service.issueSession(res as never, B, "ua");
+    await expect(service.revokeAllSessions(A)).resolves.toEqual({ revoked: 0 });
+    // B's session survives A's global revoke.
+    const accounts = await service.listAccounts({ cookies: { pid_refresh: b.refreshToken } } as never);
+    expect(accounts.map((x) => x.pid)).toEqual([B]);
   });
 });
 

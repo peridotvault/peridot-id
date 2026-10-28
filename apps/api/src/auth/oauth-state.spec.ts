@@ -18,6 +18,20 @@ describe("oauth-state (M3)", () => {
     });
   });
 
+  it("round-trips the PKCE challenge inside the signed envelope (M5)", () => {
+    const nonce = newOAuthNonce();
+    const state = signOAuthState(
+      { returnTo: "https://mygame.dev/callback", clientId: "pidapp_abc", codeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" },
+      nonce,
+      SECRET,
+    );
+    expect(verifyOAuthState(state, nonce, SECRET)).toEqual({
+      returnTo: "https://mygame.dev/callback",
+      clientId: "pidapp_abc",
+      codeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+    });
+  });
+
   it("rejects a nonce mismatch (foreign browser replay)", () => {
     const state = signOAuthState({ returnTo: "https://live2dev.com/" }, newOAuthNonce(), SECRET);
     expect(verifyOAuthState(state, newOAuthNonce(), SECRET)).toBeNull();

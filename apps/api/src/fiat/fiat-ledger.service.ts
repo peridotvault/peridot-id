@@ -63,13 +63,12 @@ export interface FiatLedgerEntryView {
  * Generic infra only: account/identity, balance/credit, send/receive,
  * immutable journal. No campaign/developer/streamer/deal concepts here.
  *
- * Recipient policy (ANT-254: stated, not enforced): Phase-1 intends
- * escrow-only sends (an allowlisted app PID on one side, user→user
- * rejected), but transferInquiry/transferConfirm currently accept ANY active
- * PeridotID recipient — no allowlist check exists in this service. The
- * docstring on transferInquiry carries the same warning. Enforcing the
- * allowlist (PID_FIAT_LEDGER_APP_ALLOWLIST) is an open policy gap for the
- * product owner, not something this change silently introduces.
+ * Recipient policy (Phase-1 escrow-only, enforced): every transfer must have
+ * an allowlisted app PID on one side — user→user sends are rejected. The
+ * allowlist is `PID_FIAT_LEDGER_APP_ALLOWLIST` (comma-separated PIDs, e.g.
+ * `live2dev@pid`); it is fail-closed (empty/missing = no transfers). Enforced
+ * in transferInquiry AND re-checked in transferConfirm, so pre-enforcement
+ * intents can never confirm after the flag lands.
  */
 @Injectable()
 export class FiatLedgerService {
@@ -107,6 +106,30 @@ export class FiatLedgerService {
   treasuryPid(): string | null {
     const raw = (this.config.get<string>("PID_FIAT_LEDGER_TREASURY_PID", "") || "").trim().toLowerCase();
     return raw || null;
+  }
+
+  /**
+   * Escrow-recipient allowlist (M7, ANT-802): comma-separated PIDs with an
+   * allowlisted app on one side of every transfer (e.g. `live2dev@pid`).
+   * Normalized (trimmed, lowercased, deduped, empties dropped).
+   */
+  fiatAllowlist(): string[] {
+    const raw = this.config.get<string>("PID_FIAT_LEDGER_APP_ALLOWLIST", "") || "";
+    return [...new Set(raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean))];
+  }
+
+  /**
+   * Phase-1 escrow-only gate (M7, ANT-802): at least one side of the transfer
+   * must be an allowlisted app PID — user→user sends are rejected. Fail
+   * closed: an empty/missing allowlist denies ALL transfers (never silently
+   * open). The allowlist itself is never echoed (the caller already knows
+   * the recipient they sent).
+   */
+  private requireAllowlistedSide(pid: string, beneficiaryPid: string): void {
+    const allow = this.fiatAllowlist();
+    if (allow.length === 0 || (!allow.includes(pid) && !allow.includes(beneficiaryPid))) {
+      throw new ForbiddenException("Transfers are limited to escrow recipients");
+    }
   }
 
   private requireUsable(): void {
@@ -419,9 +442,8 @@ export class FiatLedgerService {
    * Send inquiry (moves no money). GROSS-in: requested amount is gross;
    * fee quote + net computed under the active policy and pinned by
    * feePolicyVersion. Creates the intent row (`created`) the confirm step
-   * posts atomically. Any active PeridotID identity can be a recipient —
-   * NO allowlist is enforced here (see the class doc: Phase-1 escrow-only
-   * is a stated policy with no check; user→user sends succeed today).
+   * posts atomically. M7 (ANT-802): the recipient (or the sender) must be an
+   * allowlisted escrow app — user→user inquiries are rejected.
    */
   /**
    * ANT-344 H3 defense in depth: money paths reject machine tokens without
@@ -447,6 +469,8 @@ export class FiatLedgerService {
     if (beneficiaryPid === pid) throw new BadRequestException("Cannot transfer to yourself");
     const recipient = await this.prisma.identity.findUnique({ where: { pid: beneficiaryPid } }).catch(() => null);
     if (!recipient) throw new NotFoundException("Recipient has no PeridotID account yet");
+    // M7 (ANT-802): escrow-only — enforced before any row is written.
+    this.requireAllowlistedSide(pid, beneficiaryPid);
     // Global PeridotID fee (+ its PPN) + (when an app initiated this) the app's own
     // fee for the operation (default "transaction"; "escrow" legs carry no app fee).
     const { globalFee, peridotTaxIdr, appFee, appId, appOwnerPid, policyVersion } = await this.quoteFees(appClientId, input.operation ?? "transaction", gross);
@@ -524,6 +548,9 @@ export class FiatLedgerService {
         if (!fresh || fresh.status !== "created") {
           throw new BadRequestException("Transfer is closed — start a new inquiry");
         }
+        // M7 (ANT-802) re-check: intents minted before enforcement (or with a
+        // since-emptied allowlist) can never confirm.
+        this.requireAllowlistedSide(pid, beneficiaryPid);
         const senderBalance = await this.postedBalanceTx(tx as never, pid);
         if (senderBalance < gross) {
           throw new BadRequestException("Insufficient internal credit");

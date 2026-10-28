@@ -203,6 +203,13 @@ describe("SsoService", () => {
     expect(decodeState(encodeState("https://live2dev.com"))).toEqual({ returnTo: "https://live2dev.com" });
     const withApp = encodeState("https://mygame.dev/callback", "pidapp_abc");
     expect(decodeState(withApp)).toEqual({ returnTo: "https://mygame.dev/callback", clientId: "pidapp_abc" });
+    // M5: the PKCE challenge rides the same envelope for public-client logins.
+    const withPkce = encodeState("https://mygame.dev/callback", "pidapp_abc", CHALLENGE);
+    expect(decodeState(withPkce)).toEqual({
+      returnTo: "https://mygame.dev/callback",
+      clientId: "pidapp_abc",
+      codeChallenge: CHALLENGE,
+    });
     // legacy plain returnTo states keep working
     expect(decodeState("https://live2dev.com")).toEqual({ returnTo: "https://live2dev.com" });
   });
@@ -272,12 +279,24 @@ describe("SsoService", () => {
 
   it("binds issued codes to the app: exchange requires the same client_id", async () => {
     const { service } = setup();
-    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc")).resolves.toMatchObject({ pid: "pid_1" });
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", {
+      clientId: "pidapp_abc",
+      codeChallenge: CHALLENGE,
+    });
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", undefined, VERIFIER)).resolves.toMatchObject({
+      pid: "pid_1",
+    });
 
-    const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await expect(service.consume(code2, "https://mygame.dev/callback", "pidapp_other")).rejects.toThrow("sso_code_invalid");
-    await expect(service.consume(code2, "https://mygame.dev/callback")).rejects.toThrow("sso_code_invalid");
+    const code2 = await service.issue("pid_1", "https://mygame.dev/callback", {
+      clientId: "pidapp_abc",
+      codeChallenge: CHALLENGE,
+    });
+    await expect(service.consume(code2, "https://mygame.dev/callback", "pidapp_other", undefined, VERIFIER)).rejects.toThrow(
+      "sso_code_invalid",
+    );
+    await expect(service.consume(code2, "https://mygame.dev/callback", undefined, undefined, VERIFIER)).rejects.toThrow(
+      "sso_code_invalid",
+    );
   });
 
   it("records an app grant when a code is exchanged", async () => {
@@ -330,8 +349,11 @@ describe("SsoService", () => {
     const { service } = setup({
       findActive: async (id) => (id === "pidapp_abc" ? { ...DEV_APP, name: "My Game" } : null),
     });
-    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    await service.consume(code, "https://mygame.dev/callback", "pidapp_abc");
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", {
+      clientId: "pidapp_abc",
+      codeChallenge: CHALLENGE,
+    });
+    await service.consume(code, "https://mygame.dev/callback", "pidapp_abc", undefined, VERIFIER);
     await expect(service.listGrants("pid_1")).resolves.toMatchObject([
       { origin: "https://mygame.dev", clientId: "pidapp_abc", name: "My Game" },
     ]);
@@ -368,12 +390,19 @@ describe("SsoService", () => {
 
   it("rejects redirect_uri drift even on app-bound codes (M1)", async () => {
     const { service } = setup();
-    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    // Right client, wrong path on the same origin: still rejected (exact match, not origin match).
-    await expect(service.consume(code, "https://mygame.dev/other", "pidapp_abc")).rejects.toThrow("sso_code_invalid");
-    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc")).resolves.toMatchObject({
-      pid: "pid_1",
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", {
+      clientId: "pidapp_abc",
+      codeChallenge: CHALLENGE,
     });
+    // Right client, wrong path on the same origin: still rejected (exact match, not origin match).
+    await expect(service.consume(code, "https://mygame.dev/other", "pidapp_abc", undefined, VERIFIER)).rejects.toThrow(
+      "sso_code_invalid",
+    );
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", undefined, VERIFIER)).resolves.toMatchObject(
+      {
+        pid: "pid_1",
+      },
+    );
   });
 
   it("rejects an expired app secret at exchange (uniform error, code unconsumed)", async () => {
@@ -432,6 +461,25 @@ describe("SsoService", () => {
     expect(pkceVerifyS256("short", CHALLENGE)).toBe(false);
   });
 
+  // M5 (ANT-802) + H4 (ANT-799): PKCE is mandatory for public clients.
+  // The default mock app is verified-confidential, so the fail-closed mint
+  // and challengeless-consume pins live in the H4 block below
+  // ("issue fails closed when a public client omits the PKCE challenge",
+  // "consume rejects challengeless codes"); this one pins the complementary
+  // confidential exemption against the default mock.
+  it("still mints confidential-client codes without a challenge (secret at exchange instead)", async () => {
+    const withSecret = {
+      ...DEV_APP,
+      clientSecretHash: "abcdef",
+      clientSecretValid: () => true,
+    };
+    const { service } = setup({ findActive: async () => withSecret, clientSecretValid: withSecret.clientSecretValid });
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).resolves.toMatchObject({
+      pid: "pid_1",
+    });
+  });
+
   // ANT-693: every exchange rejection carries a machine-readable reason for
   // the server log while the public message stays uniform (no oracle).
   it("tags exchange failures with a machine reason (public message stays uniform)", async () => {
@@ -459,9 +507,15 @@ describe("SsoService", () => {
     await service.consume(code, "https://live2dev.com/auth/callback");
     expect((await take(service.consume(code, "https://live2dev.com/auth/callback"))).reason).toBe("unknown_or_consumed");
 
-    // Client mismatch on an app-bound code.
-    const appCode = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
-    expect((await take(service.consume(appCode, "https://mygame.dev/callback", "pidapp_other"))).reason).toBe("client_mismatch");
+    // Client mismatch on an app-bound code (verifier supplied so the
+    // failure asserted is the binding, not PKCE — PKCE runs first).
+    const appCode = await service.issue("pid_1", "https://mygame.dev/callback", {
+      clientId: "pidapp_abc",
+      codeChallenge: CHALLENGE,
+    });
+    expect((await take(service.consume(appCode, "https://mygame.dev/callback", "pidapp_other", undefined, VERIFIER))).reason).toBe(
+      "client_mismatch",
+    );
   });
 
   // H4 (ANT-799): isVerified gate + PKCE mandatory for public clients.
