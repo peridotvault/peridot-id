@@ -55,6 +55,25 @@ export interface ChainEcho {
   reference: string;
 }
 
+/**
+ * ANT-729 (WS3, spec WS1 §7.1): lazy-activation segment of a quote. Always
+ * present so clients never branch on version: `mode: "none"` + `required:
+ * false` preserves today's behavior byte-for-byte for ACTIVE accounts (AC-15).
+ */
+export type ActivationMode = "none" | "svm-composite" | "svm-fallback-2step";
+export interface ActivationQuote {
+  /** True when the account is not yet ACTIVE and this quote funds its creation. */
+  required: boolean;
+  /** True when `estimate` is already inside `totalFee` (no hidden surcharge). */
+  includedInTotal: boolean;
+  /** Base-unit estimate of the creation cost (`rent(80B) + composite message fee`). */
+  estimate: string;
+  /** Human-readable basis of `estimate` (audit trail, not machine-parsed). */
+  estimateBasis: string;
+  /** How the submit will land the activation (`none` = already ACTIVE). */
+  mode: ActivationMode;
+}
+
 export interface WithdrawQuote {
   /** Realtime network-cost estimate the backend will attest near (lamports). */
   networkFeeLamports: string;
@@ -93,6 +112,21 @@ export interface WithdrawQuote {
   /** Quote timestamps (ISO-8601; `expiresAt − quotedAt` ≤ 300s, NFR-3). */
   quotedAt: string;
   expiresAt: string;
+  /** Lazy-activation segment (spec WS1 §7.1; always present — AC-15). */
+  activation: ActivationQuote;
+}
+
+/** Passkey-signed first-action authorization (spec WS1 §7.2). */
+export interface FirstActionAuth {
+  /** Chain-time expiry (unix seconds) the activation passkey signed against. */
+  expiry: number;
+  /** Signed fee-policy version for the activation leg (must equal quote version). */
+  feePolicyVersion: number;
+  /** The quoted activation estimate the client signed against (drift reference). */
+  quotedActivationLamports: string;
+  /** User-approved upper bound on the activation leg's `networkFee + platformFee`. */
+  maxTotalFeeLamports: string;
+  assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
 }
 
 export interface SponsoredWithdrawResult {
@@ -102,6 +136,8 @@ export interface SponsoredWithdrawResult {
   status: "confirmed" | "pending";
   /** Present when the signed version trails the active policy by one (NFR-6/AC-11). */
   feePolicyWarning?: string;
+  /** How the activation landed on a first-action submit (absent = already ACTIVE). */
+  activation?: { mode: Exclude<ActivationMode, "none"> };
 }
 
 /** Maximum authorization lifetime (seconds) — bounds cross-cluster replay. */
@@ -368,13 +404,34 @@ export class SponsoredWithdrawService {
   }
 
   private async assertActivated(adapter: SolanaAdapter, address: string): Promise<void> {
-    let activated = false;
-    try {
-      activated = await adapter.isActivated(address);
-    } catch {
-      // fall through to the false branch
+    if (!(await this.isActivated(adapter, address))) {
+      throw new ConflictException("Wallet must be activated before sending");
     }
-    if (!activated) throw new ConflictException("Wallet must be activated before sending");
+  }
+
+  /**
+   * ANT-729 (WS3): activation probe. `false` routes the caller into the lazy
+   * first-action path — it is never a rejection reason for a first action
+   * (spec WS1 §3.3, AC-5). `assertActivated` above stays only for call sites
+   * that genuinely require a pre-existing account.
+   */
+  private async isActivated(adapter: SolanaAdapter, address: string): Promise<boolean> {
+    try {
+      return await adapter.isActivated(address);
+    } catch {
+      return false;
+    }
+  }
+
+  /** No-op activation segment for ACTIVE accounts (backward compat — AC-15). */
+  private noActivation(): ActivationQuote {
+    return {
+      required: false,
+      includedInTotal: false,
+      estimate: "0",
+      estimateBasis: "account-active",
+      mode: "none",
+    };
   }
 
   /** Realtime network-cost estimate (no margin — the protocol fee is a separate percentage). */
@@ -386,14 +443,410 @@ export class SponsoredWithdrawService {
   async quote(pid: string, selection?: SolanaSelection): Promise<WithdrawQuote> {
     const adapter = await this.adapter(selection);
     const { chain } = await this.resolveSmart(pid);
-    await this.assertActivated(adapter, chain.address);
-    const networkFee = await this.networkFeeLamports(adapter);
     const leg = await this.solanaFeeLeg(selection);
     const chainTime = await adapter.chainTime();
     const solChain = await this.chains.solanaChain(selection).catch(() => undefined);
+    const chainEcho = solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {};
+    if (await this.isActivated(adapter, chain.address)) {
+      const networkFee = await this.networkFeeLamports(adapter);
+      return {
+        ...this.quoteEnvelope(networkFee, leg, chainTime, adapter.treasuryAddress().toBase58()),
+        activation: this.noActivation(),
+        ...chainEcho,
+      };
+    }
+    // ANT-729 (WS3) first action: the quote funds creation — networkFee is the
+    // full attested base `rent(80B) + getFeeForMessage(composite)`, quoted
+    // under the DB-first leg (pure percentage since ANT-743).
+    const [compositeFee, rent] = await Promise.all([
+      adapter.estimateCompositeWithdrawFee(),
+      adapter.rentExemption(),
+    ]);
+    const networkFee = compositeFee + rent;
     return {
       ...this.quoteEnvelope(networkFee, leg, chainTime, adapter.treasuryAddress().toBase58()),
-      ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
+      activation: {
+        required: true,
+        includedInTotal: true,
+        estimate: networkFee.toString(),
+        estimateBasis: `rent(80B,${rent})+getFeeForMessage(composite-activate_v4+withdraw_sol_v4,${compositeFee})`,
+        mode: "svm-composite",
+      },
+      ...chainEcho,
+    };
+  }
+
+  /** Decode a client-supplied assertion into adapter wire shape (throws 400 on garbage). */
+  private toPasskeyAssertion(a: { id: string; signature: string; authenticatorData: string; clientDataJSON: string }): PasskeyAssertion {
+    const { b64urlToBytes } = this.pidSolana;
+    return {
+      credentialId: a.id,
+      signature: b64urlToBytes(a.signature) as unknown as Uint8Array<ArrayBufferLike>,
+      authenticatorData: b64urlToBytes(a.authenticatorData) as unknown as Uint8Array<ArrayBufferLike>,
+      clientDataJSON: b64urlToBytes(a.clientDataJSON) as unknown as Uint8Array<ArrayBufferLike>,
+    };
+  }
+
+  /**
+   * ANT-729 (WS3): lazy first-action withdraw — `[activate_v4 + spend]` in one
+   * atomic tx, with automatic 2-step fallback (relayer-float + claim) when the
+   * composite exceeds the packet ceiling. Same 1-click UX either way; the
+   * result reports which mode landed (spec WS1 §3.2, AC-3/AC-4).
+   *
+   * Lenses: checks-effects-interactions (FeeExceedsMax pre-claim, slot claim
+   * pre-broadcast); reorg/finality (waitForConfirmation, H2 resolve paths
+   * reused); gas (rent 80B basis, composite message fee attested 1:1).
+   */
+  private async withdrawFirstAction(
+    pid: string,
+    adapter: SolanaAdapter,
+    accountAddress: string,
+    dto: {
+      asset: string;
+      to: string;
+      amount: string;
+      nonce: string;
+      expiry: number;
+      feePolicyVersion: number;
+      quotedNetworkFeeLamports: string;
+      maxTotalFeeLamports: string;
+      assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
+      activation?: FirstActionAuth;
+    },
+    selection?: SolanaSelection,
+  ): Promise<SponsoredWithdrawResult> {
+    if (!dto.activation) {
+      // Fail-closed re-quote — the client must sign the activation leg too.
+      // This is lazy routing, NOT an activation gate (AC-5).
+      throw new ConflictException(
+        "Account is not active yet — re-quote for first action and sign the activation segment",
+      );
+    }
+    const first = dto.activation;
+
+    await this.breaker.requireClosed(BROADCAST_CHAIN_SOLANA, "withdraw");
+
+    const authority = await this.prisma.authority.findFirst({
+      where: { pid, credentialId: dto.assertion.id, status: "active" },
+    });
+    if (!authority) {
+      return this.reject(pid, "withdraw", dto.nonce, "unauthorized", new BadRequestException("Unknown or inactive passkey"));
+    }
+    if (first.assertion.id !== dto.assertion.id) {
+      return this.reject(
+        pid,
+        "withdraw",
+        dto.nonce,
+        "unauthorized",
+        new BadRequestException("Activation and spend must be signed by the same passkey"),
+      );
+    }
+
+    const amount = this.amountOr400(dto.amount, "Amount");
+    if (amount <= 0n) throw new BadRequestException("Amount must be greater than 0");
+    // Submit settles under the SIGNED version (NFR-6: active + one-back with a
+    // warning via gateSubmitVersion); activation and spend must settle the
+    // same version (one intent, one fee leg).
+    const feePolicyWarning = await this.gateSubmitVersion(pid, "withdraw", dto.nonce, dto.feePolicyVersion);
+    const version = dto.feePolicyVersion;
+    if (first.feePolicyVersion !== version) {
+      return this.reject(
+        pid,
+        "withdraw",
+        dto.nonce,
+        "policy-unknown",
+        new BadRequestException("Activation and spend must be quoted under the same fee policy version"),
+      );
+    }
+    const leg = await this.solanaFeeLeg(selection, version);
+
+    // Nonce starts at 0 for an uninitialized PDA; any other value is stale.
+    const chainNonce = await adapter.getNonce(pid).catch(() => 0n);
+    if (BigInt(dto.nonce) !== chainNonce) {
+      return this.reject(
+        pid,
+        "withdraw",
+        dto.nonce,
+        "stale-nonce",
+        new ConflictException("Authorization is stale — please try again (a newer nonce is active)"),
+      );
+    }
+    const chainTime = await adapter.chainTime();
+    for (const exp of [dto.expiry, first.expiry]) {
+      if (exp <= chainTime) {
+        return this.reject(pid, "withdraw", dto.nonce, "expired", new BadRequestException("Authorization expired — please try again"));
+      }
+      if (exp - chainTime > MAX_TTL_SECS) {
+        return this.reject(
+          pid,
+          "withdraw",
+          dto.nonce,
+          "expired",
+          new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again"),
+        );
+      }
+    }
+
+    // Attest the full first-action base: rent(80B) + composite message fee.
+    // Drift and maxTotalFee are enforced BEFORE any claim (no half-activated
+    // state can burn fee — AC-3; `FeeExceedsMax` pre-claim per §3.2).
+    const [compositeFee, rent] = await Promise.all([
+      adapter.estimateCompositeWithdrawFee(),
+      adapter.rentExemption(),
+    ]);
+    const networkFee = compositeFee + rent;
+    const quoted = BigInt(dto.quotedNetworkFeeLamports);
+    if (exceedsDriftBound(networkFee, quoted)) {
+      await this.driftRejected(pid, "withdraw", quoted, networkFee);
+      return this.reject(
+        pid,
+        "withdraw",
+        dto.nonce,
+        "drift",
+        new ConflictException("Network fee moved — re-quote and try again"),
+      );
+    }
+    const protocolFee = protocolFeeOf(networkFee, leg.bps);
+    const totalFee = networkFee + protocolFee;
+    const maxTotalFee = this.amountOr400(dto.maxTotalFeeLamports, "Max total fee");
+    if (exceedsMaxTotalFee(totalFee, maxTotalFee)) {
+      await this.security.log(pid, "withdraw.max_total_exceeded", {
+        firstAction: true,
+        totalFee: totalFee.toString(),
+        maxTotalFee: maxTotalFee.toString(),
+        networkFee: networkFee.toString(),
+        protocolFee: protocolFee.toString(),
+        feePolicyVersion: version,
+      });
+      throw new ConflictException("Total fee exceeds your authorized maximum — re-quote and try again");
+    }
+
+    if (dto.to === accountAddress) {
+      return this.reject(
+        pid,
+        "withdraw",
+        dto.nonce,
+        "policy-unknown",
+        new BadRequestException("Destination cannot be the smart account"),
+      );
+    }
+    // Prefund lives at the PDA pre-activation — same balance math as normal.
+    if (dto.asset === "SOL") {
+      const smart = BigInt(await adapter.getBalanceOf(accountAddress));
+      if (smart < amount + totalFee) {
+        return this.reject(
+          pid,
+          "withdraw",
+          dto.nonce,
+          "insufficient-funds",
+          new BadRequestException(`Insufficient balance — need ${amount + totalFee} lamports, have ${smart}`),
+        );
+      }
+    } else {
+      const smartSol = BigInt(await adapter.getBalanceOf(accountAddress));
+      if (smartSol < totalFee) {
+        return this.reject(
+          pid,
+          "withdraw",
+          dto.nonce,
+          "insufficient-funds",
+          new BadRequestException(`Insufficient SOL for fee — need ${totalFee} lamports, have ${smartSol}`),
+        );
+      }
+    }
+
+    const relayerBal = await adapter.getBalanceOf(this.relayer().publicKey.toBase58());
+    if (BigInt(relayerBal) < compositeFee) {
+      await this.security.log(pid, "withdraw.relayer_unfunded", { firstAction: true });
+      throw new ServiceUnavailableException(
+        "Peridot's fee service is briefly unavailable. No SOL was deducted from your wallet — please try again in a moment.",
+      );
+    }
+
+    const authorityCompressed = coseToCompressedSecp256r1(Buffer.from(authority.publicKey)) as unknown as Uint8Array<ArrayBufferLike>;
+    const spendAssertion = this.toPasskeyAssertion(dto.assertion);
+    const activateAssertion = this.toPasskeyAssertion(first.assertion);
+    const { PublicKey } = this.pidSolana;
+    const activateLeg = {
+      feePolicyVersion: version,
+      networkFeeLamports: networkFee,
+      maxTotalFeeLamports: this.amountOr400(first.maxTotalFeeLamports, "Activation max total fee"),
+      expiry: first.expiry,
+      assertion: activateAssertion,
+    };
+    if (exceedsMaxTotalFee(totalFee, activateLeg.maxTotalFeeLamports)) {
+      throw new ConflictException("Total fee exceeds your authorized activation maximum — re-quote and try again");
+    }
+
+    const slotHash = this.intentHash("withdraw", dto.assertion.signature, [
+      dto.asset,
+      dto.to,
+      dto.amount,
+      dto.nonce,
+      dto.expiry,
+      version,
+      "first-action",
+      first.assertion.signature,
+    ]);
+    const claim = await this.idempotency.claimSlot(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, slotHash, "withdraw");
+    if (claim.decision === "duplicate" && claim.signature) {
+      return {
+        signature: claim.signature,
+        networkFeeLamports: networkFee.toString(),
+        protocolFeeLamports: protocolFee.toString(),
+        status: "confirmed",
+        ...(feePolicyWarning ? { feePolicyWarning } : {}),
+      };
+    }
+    if (claim.decision === "duplicate") {
+      const resolved = await this.resolveDuplicateSlot(pid, adapter, accountAddress, "withdraw", dto.nonce, chainNonce, networkFee, protocolFee);
+      if (resolved) return resolved;
+    }
+
+    let mode: Exclude<ActivationMode, "none"> = "svm-composite";
+    const broadcastComposite = (): Promise<{ signature: string; result: null }> => {
+      if (dto.asset === "SOL") {
+        return adapter
+          .sponsoredActivatePlusWithdrawSolV4(
+            pid,
+            authorityCompressed,
+            activateLeg,
+            {
+              destination: this.pubkeyOr400(PublicKey, dto.to, "Destination"),
+              amount,
+              feePolicyVersion: version,
+              networkFeeLamports: networkFee,
+              maxTotalFeeLamports: maxTotalFee,
+              nonce: chainNonce,
+              expiry: dto.expiry,
+              assertion: spendAssertion,
+            },
+            this.relayer(),
+            undefined,
+          )
+          .then((sig) => ({ signature: sig, result: null }));
+      }
+      const mint = this.pubkeyOr400(PublicKey, dto.asset, "Asset mint");
+      return adapter
+        .tokenAta(pid, mint)
+        .then((ata) =>
+          adapter.sponsoredActivatePlusWithdrawTokenV4(
+            pid,
+            authorityCompressed,
+            activateLeg,
+            {
+              mint,
+              destinationAta: this.pubkeyOr400(PublicKey, dto.to, "Destination"),
+              amount,
+              feePolicyVersion: version,
+              networkFeeLamports: networkFee,
+              maxTotalFeeLamports: maxTotalFee,
+              nonce: chainNonce,
+              expiry: dto.expiry,
+              assertion: spendAssertion,
+            },
+            this.relayer(),
+            undefined,
+          ),
+        )
+        .then((sig) => ({ signature: sig, result: null }));
+    };
+
+    let out: { signature: string | null };
+    try {
+      out = await this.idempotency.broadcastWithResolveThenAct({
+        pid,
+        nonce: dto.nonce,
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "withdraw",
+        broadcast: broadcastComposite,
+        resolveState: () => this.resolveSvmState(adapter, pid, accountAddress, chainNonce),
+      });
+    } catch (err) {
+      // TxTooLarge ⇒ automatic 2-step fallback, identical UX (AC-4).
+      if (!(err instanceof Error) || !/TxTooLarge/.test(err.message)) throw err;
+      mode = "svm-fallback-2step";
+      await this.security.log(pid, "withdraw.first_action_fallback", { reason: "tx-too-large", mode });
+      const relayer = this.relayer();
+      await adapter.activateV4(pid, authorityCompressed, version, networkFee, activateLeg.maxTotalFeeLamports, first.expiry, relayer, undefined, activateAssertion);
+      const fallbackSpend = (): Promise<{ signature: string; result: null }> => {
+        if (dto.asset === "SOL") {
+          return adapter
+            .sponsoredWithdrawSolV4(
+              pid, authorityCompressed,
+              this.pubkeyOr400(PublicKey, dto.to, "Destination"),
+              amount, version, networkFee, maxTotalFee, chainNonce, dto.expiry, spendAssertion, relayer, undefined,
+            )
+            .then((sig) => ({ signature: sig, result: null }));
+        }
+        return adapter
+          .sponsoredWithdrawTokenV4(
+            pid, authorityCompressed,
+            this.pubkeyOr400(PublicKey, dto.asset, "Asset mint"),
+            this.pubkeyOr400(PublicKey, dto.to, "Destination"),
+            amount, version, networkFee, maxTotalFee, chainNonce, dto.expiry, spendAssertion, relayer, undefined,
+          )
+          .then((sig) => ({ signature: sig, result: null }));
+      };
+      // Retry-safe: if the process dies between the two steps, the account is
+      // ACTIVE and the same nonce retries through the normal withdraw path.
+      out = await this.idempotency.broadcastWithResolveThenAct({
+        pid,
+        nonce: dto.nonce,
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "withdraw",
+        broadcast: fallbackSpend,
+        resolveState: () => this.resolveSvmState(adapter, pid, accountAddress, chainNonce),
+      });
+    }
+    const signature = out.signature;
+    if (!signature) {
+      await this.security.log(pid, RelayerH1Events.resolveLanded, {
+        entryPoint: "withdraw",
+        chain: BROADCAST_CHAIN_SOLANA,
+        nonce: dto.nonce,
+        unattributed: true,
+      });
+      throw new ServiceUnavailableException(
+        "The withdrawal landed but its receipt is unreadable — support has been alerted, please check your balance before retrying",
+      );
+    }
+
+    const confirmation = await adapter.waitForConfirmation(signature, 8, 1000);
+    if (confirmation === "failed") {
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "withdraw", "failed", signature);
+      await this.security.log(pid, "withdraw.confirm_failed", { entryPoint: "withdraw", chain: BROADCAST_CHAIN_SOLANA, signature, firstAction: true, mode });
+    }
+    const status = confirmation === "confirmed" ? "confirmed" : "pending";
+    await this.security.log(pid, "withdraw.submitted", {
+      signature,
+      amount: amount.toString(),
+      asset: dto.asset,
+      networkFee: networkFee.toString(),
+      protocolFee: protocolFee.toString(),
+      feePolicyVersion: version,
+      firstAction: true,
+      mode,
+    });
+    if (status === "confirmed") {
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "withdraw", "confirmed", signature);
+      await this.security.log(pid, RelayerH1Events.resolveLanded, {
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "withdraw",
+        nonce: dto.nonce,
+        signature,
+      });
+    }
+    await this.reconcile(pid, adapter, signature, networkFee, protocolFee, leg).catch((err) =>
+      this.logger.warn(`withdraw reconcile failed for ${signature}: ${(err as Error).message}`),
+    );
+    return {
+      signature,
+      networkFeeLamports: networkFee.toString(),
+      protocolFeeLamports: protocolFee.toString(),
+      status,
+      activation: { mode },
+      ...(feePolicyWarning ? { feePolicyWarning } : {}),
     };
   }
 
@@ -415,12 +868,22 @@ export class SponsoredWithdrawService {
        */
       maxTotalFeeLamports: string;
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
+      /**
+       * ANT-729 (WS3): first-action authorization. Required when the account
+       * is not yet ACTIVE — the submit then lands `[activate_v4 + spend]`
+       * atomically (or the automatic 2-step fallback) in the same 1-click
+       * flow. Absent + inactive ⇒ fail-closed re-quote (never the legacy
+       * "must be activated" rejection — AC-5).
+       */
+      activation?: FirstActionAuth;
     },
     selection?: SolanaSelection,
   ): Promise<SponsoredWithdrawResult> {
     const adapter = await this.adapter(selection);
     const { chain } = await this.resolveSmart(pid);
-    await this.assertActivated(adapter, chain.address);
+    if (!(await this.isActivated(adapter, chain.address))) {
+      return this.withdrawFirstAction(pid, adapter, chain.address, dto, selection);
+    }
 
     // H3: fail-closed while the per-chain spend-rate breaker is open.
     await this.breaker.requireClosed(BROADCAST_CHAIN_SOLANA, "withdraw");
@@ -858,15 +1321,315 @@ export class SponsoredWithdrawService {
   ): Promise<WithdrawQuote> {
     const adapter = await this.adapter(selection);
     const { chain } = await this.resolveSmart(pid);
-    await this.assertActivated(adapter, chain.address);
-    const decoded = await this.decodeExecuteCall(chain.address, call, selection);
-    const networkFee = await adapter.estimateExecuteFee(decoded.target, decoded.metas, decoded.data.length);
     const leg = await this.solanaFeeLeg(selection);
     const chainTime = await adapter.chainTime();
     const solChain = await this.chains.solanaChain(selection).catch(() => undefined);
+    const chainEcho = solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {};
+    const decoded = await this.decodeExecuteCall(chain.address, call, selection);
+    if (await this.isActivated(adapter, chain.address)) {
+      const networkFee = await adapter.estimateExecuteFee(decoded.target, decoded.metas, decoded.data.length);
+      return {
+        ...this.quoteEnvelope(networkFee, leg, chainTime, adapter.treasuryAddress().toBase58()),
+        activation: this.noActivation(),
+        ...chainEcho,
+      };
+    }
+    // ANT-729 (WS3) first action: rent(80B) + composite message fee.
+    const [compositeFee, rent] = await Promise.all([
+      adapter.estimateCompositeExecuteFee(decoded.target, decoded.metas, decoded.data.length),
+      adapter.rentExemption(),
+    ]);
+    const networkFee = compositeFee + rent;
     return {
       ...this.quoteEnvelope(networkFee, leg, chainTime, adapter.treasuryAddress().toBase58()),
-      ...(solChain ? { chain: { namespace: "solana" as const, reference: solChain.reference } } : {}),
+      activation: {
+        required: true,
+        includedInTotal: true,
+        estimate: networkFee.toString(),
+        estimateBasis: `rent(80B,${rent})+getFeeForMessage(composite-activate_v4+execute_v4,${compositeFee})`,
+        mode: "svm-composite",
+      },
+      ...chainEcho,
+    };
+  }
+
+  /**
+   * ANT-729 (WS3): lazy first-action execute — `[activate_v4 + execute_v4]`
+   * atomically, else the automatic 2-step fallback. Mirrors
+   * `withdrawFirstAction` (pre-claim FeeExceedsMax, H2 slot, reconcile).
+   */
+  private async executeFirstAction(
+    pid: string,
+    adapter: SolanaAdapter,
+    accountAddress: string,
+    decoded: { target: PublicKey; metas: { address: PublicKey; writable: boolean; signer: boolean }[]; data: Uint8Array },
+    dto: {
+      nonce: string;
+      expiry: number;
+      feePolicyVersion: number;
+      quotedNetworkFeeLamports: string;
+      maxTotalFeeLamports: string;
+      assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
+      activation?: FirstActionAuth;
+    },
+    selection?: SolanaSelection,
+  ): Promise<SponsoredWithdrawResult> {
+    void selection;
+    if (!dto.activation) {
+      throw new ConflictException(
+        "Account is not active yet — re-quote for first action and sign the activation segment",
+      );
+    }
+    const first = dto.activation;
+
+    await this.breaker.requireClosed(BROADCAST_CHAIN_SOLANA, "execute");
+
+    const authority = await this.prisma.authority.findFirst({
+      where: { pid, credentialId: dto.assertion.id, status: "active" },
+    });
+    if (!authority) {
+      return this.reject(pid, "execute", dto.nonce, "unauthorized", new BadRequestException("Unknown or inactive passkey"));
+    }
+    if (first.assertion.id !== dto.assertion.id) {
+      return this.reject(
+        pid,
+        "execute",
+        dto.nonce,
+        "unauthorized",
+        new BadRequestException("Activation and spend must be signed by the same passkey"),
+      );
+    }
+
+    // Submit settles under the SIGNED version (NFR-6: active + one-back with a
+    // warning via gateSubmitVersion); activation and spend must settle the
+    // same version (one intent, one fee leg).
+    const feePolicyWarning = await this.gateSubmitVersion(pid, "execute", dto.nonce, dto.feePolicyVersion);
+    const version = dto.feePolicyVersion;
+    if (first.feePolicyVersion !== version) {
+      return this.reject(
+        pid,
+        "execute",
+        dto.nonce,
+        "policy-unknown",
+        new BadRequestException("Activation and spend must be quoted under the same fee policy version"),
+      );
+    }
+    const leg = await this.solanaFeeLeg(selection, version);
+
+    const chainNonce = await adapter.getNonce(pid).catch(() => 0n);
+    if (BigInt(dto.nonce) !== chainNonce) {
+      return this.reject(
+        pid,
+        "execute",
+        dto.nonce,
+        "stale-nonce",
+        new ConflictException("Authorization is stale — please try again (a newer nonce is active)"),
+      );
+    }
+    const chainTime = await adapter.chainTime();
+    for (const exp of [dto.expiry, first.expiry]) {
+      if (exp <= chainTime) {
+        return this.reject(pid, "execute", dto.nonce, "expired", new BadRequestException("Authorization expired — please try again"));
+      }
+      if (exp - chainTime > MAX_TTL_SECS) {
+        return this.reject(
+          pid,
+          "execute",
+          dto.nonce,
+          "expired",
+          new BadRequestException("Authorization lifetime exceeds 600 seconds — re-quote and try again"),
+        );
+      }
+    }
+
+    const [compositeFee, rent] = await Promise.all([
+      adapter.estimateCompositeExecuteFee(decoded.target, decoded.metas, decoded.data.length),
+      adapter.rentExemption(),
+    ]);
+    const networkFee = compositeFee + rent;
+    const quoted = BigInt(dto.quotedNetworkFeeLamports);
+    if (exceedsDriftBound(networkFee, quoted)) {
+      await this.driftRejected(pid, "execute", quoted, networkFee);
+      return this.reject(
+        pid,
+        "execute",
+        dto.nonce,
+        "drift",
+        new ConflictException("Network fee moved — re-quote and try again"),
+      );
+    }
+    const protocolFee = protocolFeeOf(networkFee, leg.bps);
+    const totalFee = networkFee + protocolFee;
+    const maxTotalFee = this.amountOr400(dto.maxTotalFeeLamports, "Max total fee");
+    if (exceedsMaxTotalFee(totalFee, maxTotalFee)) {
+      await this.security.log(pid, "execute.max_total_exceeded", {
+        firstAction: true,
+        totalFee: totalFee.toString(),
+        maxTotalFee: maxTotalFee.toString(),
+        networkFee: networkFee.toString(),
+        protocolFee: protocolFee.toString(),
+        feePolicyVersion: version,
+      });
+      throw new ConflictException("Total fee exceeds your authorized maximum — re-quote and try again");
+    }
+
+    // Fee must be covered by the prefunded PDA (no separate funding step).
+    const smartSol = BigInt(await adapter.getBalanceOf(accountAddress));
+    if (smartSol < totalFee) {
+      return this.reject(
+        pid,
+        "execute",
+        dto.nonce,
+        "insufficient-funds",
+        new BadRequestException(`Insufficient SOL for fee — need ${totalFee} lamports, have ${smartSol}`),
+      );
+    }
+    const relayerBal = await adapter.getBalanceOf(this.relayer().publicKey.toBase58());
+    if (BigInt(relayerBal) < compositeFee) {
+      await this.security.log(pid, "execute.relayer_unfunded", { firstAction: true });
+      throw new ServiceUnavailableException(
+        "Peridot's fee service is briefly unavailable. No SOL was deducted from your wallet — please try again in a moment.",
+      );
+    }
+
+    const authorityCompressed = coseToCompressedSecp256r1(Buffer.from(authority.publicKey)) as unknown as Uint8Array<ArrayBufferLike>;
+    const spendAssertion = this.toPasskeyAssertion(dto.assertion);
+    const activateAssertion = this.toPasskeyAssertion(first.assertion);
+    const activateLeg = {
+      feePolicyVersion: version,
+      networkFeeLamports: networkFee,
+      maxTotalFeeLamports: this.amountOr400(first.maxTotalFeeLamports, "Activation max total fee"),
+      expiry: first.expiry,
+      assertion: activateAssertion,
+    };
+    if (exceedsMaxTotalFee(totalFee, activateLeg.maxTotalFeeLamports)) {
+      throw new ConflictException("Total fee exceeds your authorized activation maximum — re-quote and try again");
+    }
+
+    const slotHash = this.intentHash("execute", dto.assertion.signature, [
+      decoded.target.toBase58(),
+      decoded.data.length,
+      dto.nonce,
+      dto.expiry,
+      version,
+      "first-action",
+      first.assertion.signature,
+    ]);
+    const claim = await this.idempotency.claimSlot(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, slotHash, "execute");
+    if (claim.decision === "duplicate" && claim.signature) {
+      return {
+        signature: claim.signature,
+        networkFeeLamports: networkFee.toString(),
+        protocolFeeLamports: protocolFee.toString(),
+        status: "confirmed",
+        ...(feePolicyWarning ? { feePolicyWarning } : {}),
+      };
+    }
+    if (claim.decision === "duplicate") {
+      const resolved = await this.resolveDuplicateSlot(pid, adapter, accountAddress, "execute", dto.nonce, chainNonce, networkFee, protocolFee);
+      if (resolved) return resolved;
+    }
+
+    let mode: Exclude<ActivationMode, "none"> = "svm-composite";
+    let out: { signature: string | null };
+    try {
+      out = await this.idempotency.broadcastWithResolveThenAct({
+        pid,
+        nonce: dto.nonce,
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "execute",
+        broadcast: () =>
+          adapter
+            .sponsoredActivatePlusExecuteV4(
+              pid,
+              authorityCompressed,
+              activateLeg,
+              {
+                target: decoded.target,
+                metas: decoded.metas,
+                data: decoded.data,
+                feePolicyVersion: version,
+                networkFeeLamports: networkFee,
+                maxTotalFeeLamports: maxTotalFee,
+                nonce: chainNonce,
+                expiry: dto.expiry,
+                assertion: spendAssertion,
+              },
+              this.relayer(),
+              undefined,
+            )
+            .then((sig) => ({ signature: sig, result: null })),
+        resolveState: () => this.resolveSvmState(adapter, pid, accountAddress, chainNonce),
+      });
+    } catch (err) {
+      if (!(err instanceof Error) || !/TxTooLarge/.test(err.message)) throw err;
+      mode = "svm-fallback-2step";
+      await this.security.log(pid, "execute.first_action_fallback", { reason: "tx-too-large", mode });
+      const relayer = this.relayer();
+      await adapter.activateV4(pid, authorityCompressed, version, networkFee, activateLeg.maxTotalFeeLamports, first.expiry, relayer, undefined, activateAssertion);
+      // Retry-safe: ACTIVE + same nonce retries through the normal execute path.
+      out = await this.idempotency.broadcastWithResolveThenAct({
+        pid,
+        nonce: dto.nonce,
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "execute",
+        broadcast: () =>
+          adapter
+            .sponsoredExecuteV4(
+              pid, authorityCompressed,
+              decoded.target, decoded.metas, decoded.data,
+              version, networkFee, maxTotalFee, chainNonce, dto.expiry, spendAssertion, relayer, undefined,
+            )
+            .then((sig) => ({ signature: sig, result: null })),
+        resolveState: () => this.resolveSvmState(adapter, pid, accountAddress, chainNonce),
+      });
+    }
+    const signature = out.signature;
+    if (!signature) {
+      await this.security.log(pid, RelayerH1Events.resolveLanded, {
+        entryPoint: "execute",
+        chain: BROADCAST_CHAIN_SOLANA,
+        nonce: dto.nonce,
+        unattributed: true,
+      });
+      throw new ServiceUnavailableException(
+        "The transaction landed but its receipt is unreadable — support has been alerted, please check your balance before retrying",
+      );
+    }
+
+    const confirmation = await adapter.waitForConfirmation(signature, 8, 1000);
+    if (confirmation === "failed") {
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "execute", "failed", signature);
+      await this.security.log(pid, "execute.confirm_failed", { entryPoint: "execute", chain: BROADCAST_CHAIN_SOLANA, signature, firstAction: true, mode });
+    }
+    const status = confirmation === "confirmed" ? "confirmed" : "pending";
+    await this.security.log(pid, "execute.submitted", {
+      signature,
+      networkFee: networkFee.toString(),
+      protocolFee: protocolFee.toString(),
+      feePolicyVersion: version,
+      firstAction: true,
+      mode,
+    });
+    if (status === "confirmed") {
+      await this.idempotency.recordOutcome(pid, dto.nonce, BROADCAST_CHAIN_SOLANA, "execute", "confirmed", signature);
+      await this.security.log(pid, RelayerH1Events.resolveLanded, {
+        chain: BROADCAST_CHAIN_SOLANA,
+        entryPoint: "execute",
+        nonce: dto.nonce,
+        signature,
+      });
+    }
+    await this.reconcile(pid, adapter, signature, networkFee, protocolFee, leg, "execute").catch((err) =>
+      this.logger.warn(`execute reconcile failed for ${signature}: ${(err as Error).message}`),
+    );
+    return {
+      signature,
+      networkFeeLamports: networkFee.toString(),
+      protocolFeeLamports: protocolFee.toString(),
+      status,
+      activation: { mode },
+      ...(feePolicyWarning ? { feePolicyWarning } : {}),
     };
   }
 
@@ -888,13 +1651,18 @@ export class SponsoredWithdrawService {
        */
       maxTotalFeeLamports: string;
       assertion: { id: string; signature: string; authenticatorData: string; clientDataJSON: string };
+      /** ANT-729 (WS3): first-action authorization (required when not ACTIVE). */
+      activation?: FirstActionAuth;
     },
     selection?: SolanaSelection,
   ): Promise<SponsoredWithdrawResult> {
     const adapter = await this.adapter(selection);
     const { chain } = await this.resolveSmart(pid);
-    await this.assertActivated(adapter, chain.address);
-    const decoded = await this.decodeExecuteCall(chain.address, dto, selection);
+    const preDecoded = await this.decodeExecuteCall(chain.address, dto, selection);
+    if (!(await this.isActivated(adapter, chain.address))) {
+      return this.executeFirstAction(pid, adapter, chain.address, preDecoded, dto, selection);
+    }
+    const decoded = preDecoded;
 
     // H3: fail-closed while the per-chain spend-rate breaker is open.
     await this.breaker.requireClosed(BROADCAST_CHAIN_SOLANA, "execute");
