@@ -90,7 +90,7 @@ fn ac2_tools_list_returns_four_tools_twice_identical() {
 }
 
 #[test]
-fn tools_call_wallet_returns_doc_hit() {
+fn tools_call_wallet_returns_doc_hits() {
     let (status, body) = post(&rpc(
         "tools/call",
         json!(3),
@@ -100,14 +100,17 @@ fn tools_call_wallet_returns_doc_hit() {
     assert!(body.get("error").is_none());
     let text = body["result"]["content"][0]["text"].as_str().unwrap();
     let payload: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(payload["resultCount"], json!(1));
-    assert_eq!(payload["results"][0]["title"], json!("Wallet Integration Guide"));
-    assert!(
-        payload["results"][0]["url"]
+    let count = payload["resultCount"].as_u64().unwrap();
+    assert!(count >= 1, "wallet must hit the source-backed corpus");
+    assert!(count <= 5);
+    assert_eq!(payload["results"].as_array().unwrap().len() as u64, count);
+    for hit in payload["results"].as_array().unwrap() {
+        assert!(hit["url"]
             .as_str()
             .unwrap()
-            .starts_with("https://docs.peridot.id/")
-    );
+            .starts_with("https://docs.peridot.id/"));
+        assert!(hit["source"]["url"].as_str().unwrap() == hit["url"].as_str().unwrap());
+    }
 }
 
 #[test]
@@ -151,7 +154,7 @@ fn full_handshake_flow_across_all_tools() {
         (TOOL_GET_EXAMPLE, json!({"name": "passkey-login"})),
         (
             TOOL_GET_SDK_REF,
-            json!({"module": "@peridotvault/pid-sdk-js", "symbol": "startLogin"}),
+            json!({"module": "@peridotvault/pid-sdk-js", "symbol": "auth.login"}),
         ),
         (TOOL_NAME, json!({"query": "passkey"})),
     ];

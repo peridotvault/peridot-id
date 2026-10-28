@@ -37,13 +37,13 @@ pub const TOOL_GET_EXAMPLE: &str = "get_example";
 pub const TOOL_GET_SDK_REF: &str = "get_sdk_reference";
 /// Back-compat alias: the original single-tool contract name.
 pub const TOOL_NAME: &str = TOOL_SEARCH_DOCS;
-/// Tool descriptions, byte-stable contract.
+/// Tool descriptions, byte-stable contract (counts corrected for Phase 2).
 pub const DESC_SEARCH_DOCS: &str =
-    "Search official PeridotID documentation. Phase 1: stub over 3 hardcoded docs.";
+    "Search official PeridotID documentation: Mintlify guides and API reference.";
 /// Back-compat alias for the original description.
 pub const TOOL_DESCRIPTION: &str = DESC_SEARCH_DOCS;
 pub const DESC_GET_GUIDE: &str =
-    "Get a step-by-step PeridotID integration guide for a topic (authentication, wallet, payments).";
+    "Get a step-by-step PeridotID integration guide for a topic (e.g. authentication, fiat, embed-wallet, leveling).";
 pub const DESC_GET_EXAMPLE: &str =
     "Get a runnable PeridotID code example by name.";
 pub const DESC_GET_SDK_REF: &str =
@@ -305,7 +305,14 @@ pub fn render_tools_call(id: &Value, hits: &[DocHit]) -> Value {
 fn call_payload(hits: &[DocHit], truncated: bool) -> Value {
     let results: Vec<Value> = hits
         .iter()
-        .map(|h| json!({"title": h.title, "url": h.url, "excerpt": h.excerpt}))
+        .map(|h| {
+            json!({
+                "title": h.title,
+                "url": h.url,
+                "excerpt": h.excerpt,
+                "source": {"url": h.url, "rev": tools::SOURCE_REV},
+            })
+        })
         .collect();
     let result_count = results.len();
     let mut payload = json!({"results": results, "resultCount": result_count});
@@ -484,6 +491,7 @@ fn call_get_guide(id: Value, args: &serde_json::Map<String, Value>) -> HttpOutco
                 "title": hit.title,
                 "url": hit.url,
                 "body": hit.body,
+                "source": {"url": hit.url, "rev": tools::SOURCE_REV},
             });
             if let Some(s) = stack {
                 payload["stack"] = json!(s);
@@ -514,6 +522,7 @@ fn call_get_example(id: Value, args: &serde_json::Map<String, Value>) -> HttpOut
                 "language": hit.language,
                 "code": hit.code,
                 "description": hit.description,
+                "source": {"url": hit.source_url, "rev": tools::SOURCE_REV},
             }),
         ),
         None => tool_error(
@@ -569,6 +578,7 @@ fn call_get_sdk_ref(id: Value, args: &serde_json::Map<String, Value>) -> HttpOut
                 "version": hit.version,
                 "summary": hit.summary,
                 "symbols": hit.symbols,
+                "source": {"url": "https://docs.peridot.id/sdk", "rev": tools::SOURCE_REV},
             }),
         ),
         None => tool_error(
@@ -701,8 +711,17 @@ mod tests {
         let body: Value = serde_json::from_slice(&out.body).unwrap();
         let text = body["result"]["content"][0]["text"].as_str().unwrap();
         let payload: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(payload["language"], json!("typescript"));
+        assert_eq!(payload["language"], json!("ts")); // verbatim fence tag
         assert!(!payload["code"].as_str().unwrap().is_empty());
+        // Additive source attribution rides every hit.
+        assert_eq!(
+            payload["source"]["rev"],
+            json!(tools::SOURCE_REV)
+        );
+        assert!(payload["source"]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://docs.peridot.id/"));
 
         let out = call(
             "tools/call",
@@ -720,7 +739,7 @@ mod tests {
         let body: Value = serde_json::from_slice(&out.body).unwrap();
         let text = body["result"]["content"][0]["text"].as_str().unwrap();
         let payload: Value = serde_json::from_str(text).unwrap();
-        assert_eq!(payload["symbols"].as_array().unwrap().len(), 3);
+        assert!(!payload["symbols"].as_array().unwrap().is_empty());
 
         let out = call(
             "tools/call",

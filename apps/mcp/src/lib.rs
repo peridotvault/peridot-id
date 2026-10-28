@@ -1,9 +1,11 @@
-//! PeridotID Developer MCP Server, Phase 1 (ANT-845: 4-tool surface).
+//! PeridotID Developer MCP Server, Phase 2 (ANT-850: Mintlify-sourced index).
 //!
 //! Rust ICP canister exposing four read-only MCP tools (`search_docs`,
 //! `get_integration_guide`, `get_example`, `get_sdk_reference`) over
 //! Streamable HTTP (MCP 2025-11-25, JSON response mode, stateless) at
-//! `POST /mcp`.
+//! `POST /mcp`. Tool content comes from the committed generated index in
+//! [`generated_docs`] (built offline from `apps/docs/`); every hit carries
+//! additive `source: {url, rev}` attribution.
 //!
 //! * [`http_request`] (query): `POST /mcp` returns `upgrade: true` so the
 //!   gateway re-issues the request as an update call; deterministic error
@@ -15,8 +17,9 @@
 //!   the protocol. `Mcp-Session-Id` is never emitted.
 //!
 //! No timers, no HTTPS outcalls, no inter-canister calls, no stable-memory
-//! persistence in Phase 1 (verified by grep, see README).
+//! persistence (verified by grep, see README).
 
+pub mod generated_docs;
 pub mod http;
 pub mod protocol;
 pub mod tools;
