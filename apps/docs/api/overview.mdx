@@ -34,3 +34,16 @@ access token expires.
 Browse the endpoints in the sidebar, or read the raw
 [OpenAPI 3.0 specification](https://api.peridot.id/v1/openapi.yaml) (also served at
 `GET /v1/openapi.yaml` on either API host; a copy ships with these docs as `openapi.yaml`).
+
+## Coverage notes
+
+Stable, documented, and covered above: auth (login, Google, email OTP, claim,
+refresh, sessions, grants), identity, profile, wallet, fiat money-in and ledger
+transfers, app registry, credentials, and the public chain/token/fee reads.
+
+**Experimental** (implemented, behavior may change): batched execution
+(`POST /v1/wallet/execute/batch/*`), outbound ledger-event webhooks, sandbox
+faucet (`POST /v1/fiat/test-credit`, sandbox only). **Admin-only** registry,
+breaker, fee-policy, XP-policy, and settings endpoints are not part of the
+public reference — they are documented in the repo reference specs
+(`docs/API_SPEC.md`, `docs/FIAT_LEDGER.md`).

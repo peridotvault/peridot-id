@@ -115,8 +115,13 @@ funds to it (escrow); the app releases them per its own logic. Read the app's
 balance with the machine token above, or `GET /v1/fiat/balance` in the dashboard.
 See [Fiat & payments → Escrow](/fiat#escrow-pattern).
 
-## Callbacks (deferred)
+## Callbacks (experimental)
 
-Outbound callbacks (`POST /v1/apps/:id/webhook`) are **not in use yet**. The
-ledger is the source of truth: poll `GET /v1/fiat/ledger` / `balance`, or rely on
-the machine-token balance.
+Outbound callbacks (`POST /v1/apps/:id/webhook`) are **experimental**: register a
+URL, and PeridotID `POST`s signed ledger events (for example
+`fiat.transfer.posted`) with `X-Pid-Event` and
+`X-Pid-Signature: sha256=<hex HMAC-SHA256(body)>` headers. Delivery runs through
+the outbox (`POST /v1/fiat/admin/dispatch-events` triggers a dispatch run),
+with backoff and admin review after repeated failures. The ledger remains the source of truth:
+poll `GET /v1/fiat/ledger` / `balance` as the primary read path and treat
+callbacks as a notification aid.

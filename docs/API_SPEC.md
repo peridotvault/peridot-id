@@ -50,6 +50,29 @@ GET /v1/admin/chains · POST /v1/admin/chains · PATCH /v1/admin/chains/:id
 POST /v1/admin/chains/:id/contracts
 GET /v1/admin/apps?clientId=… · PATCH /v1/admin/apps/:id/verify (verified partners skip the PeridotID fiat fee)
 
+## Implemented but not in `openapi.yaml` yet (audit 2026-10-28)
+
+These routes exist in `apps/api/src/**` but have no entry in
+`packages/openapi/src/openapi.yaml` — consult the controllers until the spec
+is regenerated:
+
+- Batch execution (experimental): `POST /v1/wallet/execute/batch/{quote,submit,flush}`,
+  `GET /v1/wallet/execute/batch/{:id,metrics/summary}`, `POST /v1/wallet/execute/batch/:id/cancel`
+- PID reports: `POST /v1/pids/claim`, `GET /v1/pids/:handle/status`,
+  `POST /v1/pids/reports`, `GET /v1/pids/reports/:id`, `POST /v1/pids/reports/:id/{appeal,decision}`
+- Auth extras: `POST /v1/auth/email/{start,verify}`, `POST /v1/auth/accounts/{switch,signout}`,
+  `GET /v1/auth/accounts`, `GET /v1/auth/claim/status`, `POST /v1/auth/session/scope`,
+  `DELETE /v1/auth/sessions` (global revoke)
+- Wallet reads/writes: `GET /v1/wallet/transactions`, `POST /v1/wallet/transactions`,
+  `POST /v1/wallet/execute[/quote]`, `POST /v1/wallet/rotate`,
+  `POST /v1/account/evm/:chainRef/first-action`
+- Fiat admin: `POST /v1/fiat/admin/{adjust,freeze}`, `GET /v1/fiat/admin/{journal/:pid,chain/head}`,
+  `POST /v1/fiat/admin/chain/backfill`, `GET /v1/fiat/admin/events`
+- Registry/admin: relayer breaker (`/v1/admin/relayer*`), fee-policy versions
+  (`/v1/admin/fee-policies/*`), token deployments, subsidy-ledger summary,
+  XP-policy and settings admin (`/v1/admin/experience/*`, `/v1/admin/settings/*`,
+  `/v1/admin/xp/*`), `POST /v1/experience/events` (S2S app-credential auth)
+
 ## Client
 
 The SDK (`@peridotvault/pid-sdk-js`) wraps these:
