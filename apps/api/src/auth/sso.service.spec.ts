@@ -94,8 +94,14 @@ function setup(apps?: {
     },
   };
   const pidApps = {
-    findActive: jest.fn(async () => ({ redirectUris: ["https://mygame.dev/callback"] })),
-    // Default mock: public client (no secret set) — always valid.
+    // Default mock: verified confidential client — PKCE optional, auto-issue allowed.
+    findActive: jest.fn(async () => ({
+      redirectUris: ["https://mygame.dev/callback"],
+      allowedOrigins: ["https://mygame.dev"],
+      isVerified: true,
+      clientSecretHash: PidAppsService.hashSecret("pidsk_testsecret000000000000000000000000000001"),
+    })),
+    // Confidential-client secret check — always valid unless overridden per-test.
     clientSecretValid: jest.fn(() => true),
     ...apps,
   };
@@ -103,7 +109,14 @@ function setup(apps?: {
   return { service, rows, security };
 }
 
-const DEV_APP = { allowedOrigins: ["https://mygame.dev"] };
+const DEV_SECRET = "pidsk_testsecret000000000000000000000000000001";
+// Confidential + verified partner app: PKCE optional (secret authenticates),
+// auto-issue allowed. Public/unverified variants are built per-test below.
+const DEV_APP = {
+  allowedOrigins: ["https://mygame.dev"],
+  isVerified: true,
+  clientSecretHash: PidAppsService.hashSecret(DEV_SECRET),
+};
 
 describe("SsoService", () => {
   it("only allows configured origins in the returnTo allowlist", () => {
@@ -199,11 +212,13 @@ describe("SsoService", () => {
     await expect(service.resolveReturnTo("https://mygame.dev/callback", "pidapp_abc")).resolves.toEqual({
       redirectTo: "https://mygame.dev/callback",
       clientId: "pidapp_abc",
+      isVerified: true,
     });
     // exact return URL passed in code — any path on the origin works
     await expect(service.resolveReturnTo("https://mygame.dev/other/path?x=1", "pidapp_abc")).resolves.toEqual({
       redirectTo: "https://mygame.dev/other/path?x=1",
       clientId: "pidapp_abc",
+      isVerified: true,
     });
     await expect(service.resolveReturnTo("https://evil.com/steal", "pidapp_abc")).resolves.toBeNull();
     await expect(service.resolveReturnTo("https://mygame.dev.evil.com/", "pidapp_abc")).resolves.toBeNull();
@@ -214,6 +229,7 @@ describe("SsoService", () => {
     const { service } = setup();
     await expect(service.resolveReturnTo("https://live2dev.com")).resolves.toEqual({
       redirectTo: "https://live2dev.com",
+      isVerified: true,
     });
     await expect(service.resolveReturnTo("https://evil.com")).resolves.toBeNull();
     await expect(service.resolveReturnTo(undefined)).resolves.toBeNull();
@@ -224,6 +240,7 @@ describe("SsoService", () => {
     await expect(service.resolveReturnTo("http://localhost:3000")).resolves.toEqual({
       redirectTo: "http://localhost:3000",
       clientId: undefined,
+      isVerified: true,
     });
     await expect(service.resolveReturnTo("http://localhost:8081/auth/callback?x=1")).resolves.toMatchObject({
       redirectTo: "http://localhost:8081/auth/callback?x=1",
@@ -232,9 +249,11 @@ describe("SsoService", () => {
       redirectTo: "http://127.0.0.1:4000/",
     });
     // Known clientId recorded, no origin-registry check needed on loopback.
+    // Loopback reports verified (safe by topology — H4 gate exempts dev).
     await expect(service.resolveReturnTo("http://localhost:3000", "pidapp_known")).resolves.toEqual({
       redirectTo: "http://localhost:3000",
       clientId: "pidapp_known",
+      isVerified: true,
     });
     // ANT-284: unknown clientIds are rejected even on loopback — a code bound
     // to them could never be exchanged, so minting it only creates confusion.
@@ -443,5 +462,91 @@ describe("SsoService", () => {
     // Client mismatch on an app-bound code.
     const appCode = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
     expect((await take(service.consume(appCode, "https://mygame.dev/callback", "pidapp_other"))).reason).toBe("client_mismatch");
+  });
+
+  // H4 (ANT-799): isVerified gate + PKCE mandatory for public clients.
+  const PUBLIC_APP = { allowedOrigins: ["https://mygame.dev"], isVerified: false };
+  const UNVERIFIED_CONFIDENTIAL = {
+    ...DEV_APP,
+    isVerified: false,
+  };
+
+  it("resolveReturnTo exposes isVerified:false for unverified apps", async () => {
+    const { service } = setup({ findActive: async (id) => (id === "pidapp_evil" ? PUBLIC_APP : null) });
+    await expect(service.resolveReturnTo("https://mygame.dev/callback", "pidapp_evil")).resolves.toEqual({
+      redirectTo: "https://mygame.dev/callback",
+      clientId: "pidapp_evil",
+      isVerified: false,
+    });
+  });
+
+  it("requireVerifiedForAutoIssue blocks unverified apps, allows verified + loopback", async () => {
+    const { service } = setup({ findActive: async (id) => (id === "pidapp_evil" ? PUBLIC_APP : null) });
+    const unverified = await service.resolveReturnTo("https://mygame.dev/callback", "pidapp_evil");
+    expect(() => service.requireVerifiedForAutoIssue(unverified!)).toThrow("sso_consent_required");
+    // verified app passes
+    const { service: s2 } = setup({ findActive: async () => DEV_APP });
+    const verified = await s2.resolveReturnTo("https://mygame.dev/callback", "pidapp_abc");
+    expect(() => s2.requireVerifiedForAutoIssue(verified!)).not.toThrow();
+    // loopback with an unverified app passes (safe by topology — H4 dev exemption)
+    const { service: s3 } = setup({ findActive: async () => PUBLIC_APP });
+    const loopback = await s3.resolveReturnTo("http://localhost:3000/cb", "pidapp_evil");
+    expect(() => s3.requireVerifiedForAutoIssue(loopback!)).not.toThrow();
+  });
+
+  it("issue fails closed when a public client omits the PKCE challenge", async () => {
+    const { service } = setup({ findActive: async () => PUBLIC_APP });
+    await expect(service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_evil" })).rejects.toThrow(
+      "sso_pkce_invalid",
+    );
+    // with a challenge the mint succeeds
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", {
+      clientId: "pidapp_evil",
+      codeChallenge: pkceS256Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+    });
+    expect(code).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+  });
+
+  it("issue rejects unknown/disabled apps fail-closed", async () => {
+    const { service } = setup({ findActive: async () => null });
+    await expect(
+      service.issue("pid_1", "https://mygame.dev/callback", {
+        clientId: "pidapp_nope",
+        codeChallenge: pkceS256Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+      }),
+    ).rejects.toThrow("sso_app_unknown");
+  });
+
+  it("consume rejects challengeless codes for public and unverified apps", async () => {
+    // Public app: mint WITH challenge, then strip it to simulate a pre-fix code.
+    const pub = setup({ findActive: async () => ({ ...PUBLIC_APP, isVerified: true }) });
+    const pubCode = await pub.service.issue("pid_1", "https://mygame.dev/callback", {
+      clientId: "pidapp_evil",
+      codeChallenge: pkceS256Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+    });
+    (pub.rows.get(pubCode) as Record<string, unknown>).codeChallenge = null;
+    await expect(pub.service.consume(pubCode, "https://mygame.dev/callback", "pidapp_evil")).rejects.toThrow(
+      "sso_code_invalid",
+    );
+    // Unverified confidential app with a challengeless code: same uniform error.
+    const unv = setup({ findActive: async () => UNVERIFIED_CONFIDENTIAL });
+    const unvCode = await unv.service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    await expect(unv.service.consume(unvCode, "https://mygame.dev/callback", "pidapp_abc")).rejects.toThrow(
+      "sso_code_invalid",
+    );
+  });
+
+  it("encode/decode state round-trips the PKCE challenge", () => {
+    expect(decodeState(encodeState("https://mygame.dev/cb", "pidapp_abc", CHALLENGE))).toEqual({
+      returnTo: "https://mygame.dev/cb",
+      clientId: "pidapp_abc",
+      codeChallenge: CHALLENGE,
+    });
+    // legacy states without a challenge keep working
+    expect(decodeState(encodeState("https://mygame.dev/cb", "pidapp_abc"))).toEqual({
+      returnTo: "https://mygame.dev/cb",
+      clientId: "pidapp_abc",
+      codeChallenge: undefined,
+    });
   });
 });
