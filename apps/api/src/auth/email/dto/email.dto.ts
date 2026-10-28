@@ -38,4 +38,12 @@ export class EmailVerifyDto {
   @IsOptional()
   @IsString()
   clientId?: string;
+
+  /**
+   * PKCE S256 challenge (H4/ANT-799): required when the app is a public
+   * client (no backend secret). 43-128 base64url chars.
+   */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_-]{43,128}$/, { message: "Invalid code_challenge" })
+  codeChallenge?: string;
 }
