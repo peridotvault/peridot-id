@@ -1070,6 +1070,10 @@ export class SponsoredWithdrawService {
       // Proven non-landing → fall through to the single allowed broadcast.
     }
 
+    // ANT-800: ACTIVE path is V4-only (H1). V3 broadcast is closed: the
+    // passkey-signed authorization carries `maxTotalFee` and the V4 program
+    // enforces `total ≤ maxTotalFee` (FeeExceedsMax). Fee recipients stay
+    // canonical (relayer signer + treasury PDA) — never caller-chosen (M1).
     let signature: string | null;
     if (dto.asset === "SOL") {
       const out = await this.idempotency.broadcastWithResolveThenAct({
@@ -1079,13 +1083,14 @@ export class SponsoredWithdrawService {
         entryPoint: "withdraw",
         broadcast: () =>
           adapter
-            .sponsoredWithdrawSolV3(
+            .sponsoredWithdrawSolV4(
               pid,
               authorityCompressed,
               this.pubkeyOr400(PublicKey, dto.to, "Destination"),
               amount,
               version,
               networkFee,
+              maxTotalFee,
               nonce,
               expiry,
               assertion,
@@ -1115,7 +1120,7 @@ export class SponsoredWithdrawService {
         entryPoint: "withdraw",
         broadcast: () =>
           adapter
-            .sponsoredWithdrawTokenV3(
+            .sponsoredWithdrawTokenV4(
               pid,
               authorityCompressed,
               mint,
@@ -1123,6 +1128,7 @@ export class SponsoredWithdrawService {
               amount,
               version,
               networkFee,
+              maxTotalFee,
               nonce,
               expiry,
               assertion as never,
@@ -1816,7 +1822,7 @@ export class SponsoredWithdrawService {
       entryPoint: "execute",
       broadcast: () =>
         adapter
-          .sponsoredExecuteV3(
+          .sponsoredExecuteV4(
             pid,
             authorityCompressed,
             decoded.target,
@@ -1824,6 +1830,7 @@ export class SponsoredWithdrawService {
             decoded.data,
             version,
             networkFee,
+            maxTotalFee,
             chainNonce,
             dto.expiry,
             assertion,
