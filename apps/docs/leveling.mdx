@@ -45,6 +45,10 @@ summary as its optional `level` field.
 
 ### SDK helper
 
+```bash
+npm install @peridotvault/pid-sdk-js
+```
+
 ```ts
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
@@ -63,10 +67,17 @@ performs no awarding. Re-read instead of persisting.
 the summary. Pass your own client (preferred — reuses its auth) or let the
 badge build a narrow internal one from `env` / `baseUrl`:
 
+```bash
+npm install @peridotvault/pid-react-embed
+```
+
 ```tsx
+import { Peridot } from '@peridotvault/pid-sdk-js';
 import { PeridotLevelBadge } from '@peridotvault/pid-react-embed';
 
-<PeridotLevelBadge pid="ifal@pid" client={peridot} showProgress />;
+const peridot = Peridot({ clientId: 'pidapp_…' });
+
+<PeridotLevelBadge pid="ifal@pid" client={peridot} showProgress />
 ```
 
 All four states render: loading (`role="status"`), empty (no `pid`),

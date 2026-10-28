@@ -32,9 +32,16 @@ server-side (the dashboard page is only a convenience).
 
 ## Register an app
 
+Prerequisites: `npm install @peridotvault/pid-sdk-js`, a `Peridot` client,
+and a PeridotID session (cookie) — registration is owner-scoped, so
+anonymous calls fail.
+
 ```ts
+import { Peridot } from '@peridotvault/pid-sdk-js';
+
+const peridot = Peridot({ clientId: 'pidapp_…' });
 const res = await peridot.post('/v1/apps', { name: 'My Game' });
-// { id, clientId: "pidapp_...", name, allowedOrigins: [], isActive: true, ... }
+// res.data → { id, clientId: "pidapp_...", name, allowedOrigins: [], isActive: true, ... }
 ```
 
 Then add origins (`PATCH /v1/apps/:id` with `allowedOrigins`) — bare

@@ -3,6 +3,19 @@ title: Getting started
 description: Base URLs, versioning, and your first request
 ---
 
+## Prerequisites
+
+- Node.js 20+
+- A registered app (`client_id` starting with `pidapp_…`) — see
+  [Sign in with PeridotID](/sign-in-with-peridot-id#1-register-your-app)
+- The browser SDK for app code:
+  ```bash
+  npm install @peridotvault/pid-sdk-js
+  ```
+  API base URLs are preset by environment (`production` vs `sandbox`); pass
+  `baseUrl` only for self-host/localhost (`http://localhost:3300` by default —
+  see [Self-hosting](/self-hosting)).
+
 ## Base URLs
 
 All endpoints are prefixed with `/v1`.
@@ -11,7 +24,7 @@ All endpoints are prefixed with `/v1`.
 |---|---|
 | Production | `https://api.peridot.id/v1` |
 | Sandbox | `https://sandbox-api.peridot.id/v1`. Separate deployment, not a path prefix — verify with `GET /v1/env`. |
-| Local development | `http://localhost:3301/v1` |
+| Local development | `http://localhost:3300/v1` |
 
 Sandbox has a **faucet** for instant test money (`POST /v1/fiat/test-credit`,
 caps Rp50.000/call, Rp100.000/day) and a manual

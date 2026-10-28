@@ -6,15 +6,29 @@ description: Let users sign into your app with their PeridotID (Google or passke
 Add "Sign in with PeridotID" to any web app in three steps. Your users authenticate
 against PeridotID production — no local setup, no secrets to manage.
 
+## Prerequisites
+
+```bash
+npm install @peridotvault/pid-sdk-js
+```
+
+Supported: any web app that can open a popup/tab and run browser
+JavaScript — React (Vite) and Next.js (client component, `"use client"`)
+via the snippet below, or vanilla JS with the same two calls. There is no
+provider component to install. Server-side rendering cannot run the
+sign-in ceremony — call it from browser event handlers only.
+
 ## 1. Register your app
 
-Call `POST /v1/apps` with your PeridotID session (cookie) to get a public `client_id`.
-List every URL PeridotID may return users to — codes are only issued to these:
+Register in the dashboard to get a public `client_id`, or — if you already
+hold a PeridotID session cookie — via the API. List every URL PeridotID
+may return users to — codes are only issued to these:
 
 ```ts
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
-const peridot = Peridot({ clientId: 'pidapp_…' });
+// No clientId yet — registration is authenticated by your session cookie.
+const peridot = Peridot();
 // Register with just a name — allowed origins are managed after, in the dashboard
 // (local dev: http://localhost:3303) (or PATCH /v1/apps).
 const res = await peridot.post('/v1/apps', { name: 'My Game' });
@@ -32,10 +46,6 @@ always allowed — arbitrary production hosts are never accepted without registr
 
 ## 2. Open the login popup
 
-```bash
-npm install @peridotvault/pid-sdk-js
-```
-
 ```ts
 import { Peridot } from '@peridotvault/pid-sdk-js';
 
@@ -44,7 +54,8 @@ const peridot = Peridot({ clientId: 'pidapp_…' }); // environment auto-detecte
 async function signIn() {
   const { pidCode } = await peridot.auth.loginPopup(); // opens a popup (tab fallback)
   if (pidCode) {
-    const identity = await peridot.auth.exchange(pidCode, window.location.origin + window.location.pathname);
+    // redirectUri must byte-match the URL the code was issued for (default: this origin)
+    const identity = await peridot.auth.exchange(pidCode, window.location.origin);
     // { pid, profile: { displayName, avatarUrl }, credentials: [{ provider, email }] }
   }
 }
@@ -131,9 +142,14 @@ Know the limits before promising anything to your users:
 - Passkey login always runs on a PeridotID-hosted page (browsers bind WebAuthn to our
   domain) and returns with `pid_code` like Google does.
 - Codes are single-use, expire in ~5 minutes, and are bound to your `client_id`.
-- No framework? The snippet in step 2 is already framework-free: `loginPopup`
-  (popup, tab fallback) or `openLoginTab`/`openLoginPopup`, plus
-  `loginWithPasskey({ clientId, returnTo })` and `exchange(code, clientId)`.
+- Integrator API surface (all on `peridot.auth`): `loginPopup({ clientId?, returnTo? })`
+  (popup, tab fallback) or `loginTab({ clientId?, returnTo? })` for a tab outright;
+  `loginWithPasskey({ clientId?, returnTo? })`; and
+  `exchange(code, redirectUri, clientId?, clientSecret?)` where `redirectUri`
+  must exactly equal the URL the code was issued for (default: `window.location.origin`).
+  Pass `clientSecret` only server-side, and only when the app has a secret set.
+  Lower-level popup helpers (`openLoginPopup`/`openLoginTab` in the SDK) are
+  not part of the integration contract.
 
 ## Verified partners
 

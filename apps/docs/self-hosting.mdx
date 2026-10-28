@@ -67,7 +67,7 @@ workspace.
 identical OAuth code path — only the values differ per environment. Create a
 client per environment at the
 [Google Cloud console](https://console.cloud.google.com/apis/credentials):
-register `GOOGLE_CALLBACK_URL` (e.g. `http://localhost:3301/v1/auth/google/callback`)
+register `GOOGLE_CALLBACK_URL` (e.g. `http://localhost:3300/v1/auth/google/callback`)
 on the dev client and the prod callback URL on the prod client.
 
 ## Local development with Docker
@@ -76,7 +76,7 @@ on the dev client and the prod callback URL on the prod client.
 docker compose up -d          # Postgres
 pnpm install
 pnpm db:migrate               # apply Prisma migrations
-pnpm dev                      # API on http://localhost:3301, docs on http://localhost:3300
+pnpm dev                      # API on http://localhost:3300 (docs: run `mintlify dev` in apps/docs)
 ```
 
 ## Deploy to Vercel + Supabase
