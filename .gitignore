@@ -22,6 +22,9 @@ mutagen.yml.lock
 # Rust / Solana program builds
 contracts/**/target/
 contracts/**/test-ledger/
+# Rust canister builds (Phase 1: apps/mcp) + dfx local state
+apps/mcp/target/
+apps/mcp/.dfx/
 
 test-ledger/
 .infisical.json
