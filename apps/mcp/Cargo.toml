@@ -2,7 +2,7 @@
 name = "peridot_mcp"
 version = "0.1.0"
 edition = "2021"
-description = "PeridotID Developer MCP Server (Phase 1): Rust ICP canister exposing four read-only MCP tools (search_docs, get_integration_guide, get_example, get_sdk_reference) over Streamable HTTP JSON response mode."
+description = "PeridotID Developer MCP Server (Phase 2): Rust ICP canister exposing four read-only MCP tools (search_docs, get_integration_guide, get_example, get_sdk_reference) over a Mintlify-sourced generated index, Streamable HTTP JSON response mode."
 license = "MIT OR Apache-2.0"
 
 [lib]

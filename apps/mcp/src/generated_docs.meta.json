@@ -1,0 +1,14 @@
+{
+  "builtAt": "2026-10-28T16:12:36Z",
+  "contentHash": "e82240351bc92a28318f596f89df50925058e58f4ff73e83258528a17f4b9329",
+  "entryCounts": {
+    "docs": 175,
+    "examples": 8,
+    "guides": 15,
+    "sdkModules": 3,
+    "sdkSymbols": 23
+  },
+  "generator": "apps/mcp/scripts/sync-docs",
+  "llmsEntryCount": null,
+  "sourceSha": "2dc3b0ffb006ded9bfc44f80f54319e4865c2cdf"
+}

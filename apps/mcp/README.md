@@ -1,14 +1,47 @@
-# Peridot MCP Canister (Phase 1 — ANT-845: 4-tool surface)
+# Peridot MCP Canister (Phase 2 — ANT-830: Mintlify-sourced index)
 
 Rust ICP canister exposing **four read-only MCP tools** over
 **Streamable HTTP (MCP 2025-11-25, JSON response mode, stateless)** at
 `POST /mcp`: `search_docs`, `get_integration_guide`, `get_example`,
 `get_sdk_reference`.
 
-Parent research: ANT-841 (handoff rev `8b6616c5`, approved by Arthur CEO
-2026-10-28 — update-call-only `/mcp`, no `ic-http-certification` tree for the
-dynamic endpoint). Prior build: ANT-843 (one-tool canister, PR #153).
-Implementation task: ANT-845.
+Parent research: ANT-841 (handoff — update-call-only `/mcp`, no
+`ic-http-certification` tree for the dynamic endpoint). Phase 1 build:
+ANT-845 (4-tool surface over baked stub datasets, PR #154). Phase 2
+(ANT-850, this change): the stub datasets are replaced by a committed
+generated index built offline from the in-repo Mintlify tree
+(`apps/docs/`); every tool response carries additive `source: {url, rev}`
+attribution. Frozen limits, protocol version, and tool names are unchanged.
+
+## Docs sync pipeline (Phase 2)
+
+The canister serves a **committed generated artifact** — no network fetch,
+no HTTPS outcalls, no timers on the request path (statically checked, see
+`docs/sync-notes.md`).
+
+```bash
+# from apps/mcp/
+./scripts/sync-docs          # regenerate src/generated_docs.rs + src/generated_docs.meta.json
+./scripts/sync-docs --check  # fail loudly on drift (CI runs this)
+cargo test -p peridot_mcp    # 55 tests, must be green
+```
+
+Inputs: `apps/docs/*.mdx` (12 guides) + `apps/docs/api/overview.mdx` +
+`apps/docs/openapi.yaml` + `apps/docs/docs.json` (canonical slug list).
+Output: `src/generated_docs.rs` (175 search entries + 15 guides +
+8 verbatim examples + 3 SDK modules, ~96 KiB; budget ≤ 160 KiB) plus
+`src/generated_docs.meta.json` (`sourceSha`, `contentHash`, `entryCounts`,
+`builtAt`). Regeneration is deterministic and byte-identical; `--check`
+compares the `.rs` bytes plus the meta hash/counts (only `builtAt` differs).
+
+Design decision (spec open question 1): **generated Rust module**, not
+JSON + `include_str!` — zero runtime parse cost, smaller wasm (no JSON
+parser on the hot path), and the Rust compiler type-checks the index
+shape. OpenAPI `operationId`s do not exist in `openapi.yaml` today, so
+`openapi.yaml` feeds `search_docs` only (spec open question 3);
+`get_sdk_reference` is grounded in `sdk.mdx`. Frozen `payments`/`wallet`
+topics resolve as documented aliases (`fiat`, `embed-wallet` — spec open
+question 2: `docs.json` has no such slugs).
 
 ## Layout
 
