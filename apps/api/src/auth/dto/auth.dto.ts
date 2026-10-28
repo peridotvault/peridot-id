@@ -11,6 +11,15 @@ export class LoginDto {
   @IsOptional()
   @IsString()
   clientId?: string;
+
+  /**
+   * PKCE S256 challenge (H4/ANT-799): public clients must bind the minted
+   * pid_code at login time; the verifier is presented at exchange. 43-128
+   * base64url chars. Carried through the signed OAuth state to the callback.
+   */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_-]{43,128}$/, { message: "Invalid code_challenge" })
+  codeChallenge?: string;
 }
 
 export class ExchangeDto {
@@ -36,8 +45,10 @@ export class ExchangeDto {
   clientSecret?: string;
 
   /**
-   * PKCE verifier (ANT-284): required at exchange iff the code was issued
-   * with an S256 challenge (public clients). RFC 7636 §4.1 charset.
+   * PKCE verifier (ANT-284, mandatory for public clients per ANT-799):
+   * required at exchange iff the code was issued with an S256 challenge
+   * (public clients always are — issue() fails closed without one).
+   * RFC 7636 §4.1 charset.
    */
   @IsOptional()
   @Matches(/^[A-Za-z0-9_~.-]{43,128}$/, { message: "Invalid code_verifier" })
@@ -53,6 +64,15 @@ export class ClaimDto {
   @Transform(({ value }) => (typeof value === "string" ? value.toLowerCase() : value))
   @Matches(PID_HANDLE_REGEX, { message: "handle must be 3-20 chars: lowercase letters, numbers, underscore" })
   handle!: string;
+
+  /**
+   * PKCE S256 challenge (H4/ANT-799): the claim UI re-supplies the challenge
+   * the login started with, so the minted pid_code binds to the public
+   * client's verifier. Required when the ticket's app is a public client.
+   */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_-]{43,128}$/, { message: "Invalid code_challenge" })
+  codeChallenge?: string;
 }
 
 /**
