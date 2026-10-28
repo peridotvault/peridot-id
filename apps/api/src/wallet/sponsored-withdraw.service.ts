@@ -947,8 +947,9 @@ export class SponsoredWithdrawService {
 
     // V4 user bound (spec B5/B-AC5): the passkey-signed authorization carries
     // `maxTotalFee`; the backend enforces `totalFee ≤ maxTotalFee` pre-broadcast
-    // (fail-closed re-quote). The on-chain V4 program enforces the same bound;
-    // V3 payloads stay frozen (Troy, ANT-556).
+    // (fail-closed re-quote). The on-chain V4 program enforces the same bound.
+    // V3 is closed for new intents (ANT-800) — the frozen on-chain entrypoints
+    // settle in-flight signatures only; this path broadcasts V4 exclusively.
     const maxTotalFee = this.amountOr400(dto.maxTotalFeeLamports, "Max total fee");
     if (exceedsMaxTotalFee(totalFee, maxTotalFee)) {
       await this.security.log(pid, "withdraw.max_total_exceeded", {
