@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ServiceUnavailableException } from "@nestjs/common";
-import { keccak256, fromAscii, toHex } from "@peridotvault/pid-evm";
+import { keccak256, fromAscii, toHex, EvmAdapter } from "@peridotvault/pid-evm";
 import { EvmActivationService, deployGasEstimateFor, DEPLOY_GAS_ESTIMATE_DEFAULT, ACTIVATION_IN_PROGRESS } from "./evm-activation.service";
 import { mockSecurity, mockIdempotency, mockBreaker, COSE_HEX } from "../../test/factories";
 import { coseToRawXy } from "../credentials/cose";
@@ -785,6 +785,26 @@ describe("EVM lazy first-action (WS2 — WS1 §3.1/§5/§7)", () => {
     expect(res.executeTxHash).toBe("0xexec2");
     expect(sendDeploy).not.toHaveBeenCalled();
     expect((service as unknown as { sendExecuteTx: jest.Mock }).sendExecuteTx).toHaveBeenCalledTimes(1);
+  });
+
+  it("execute-only on policy 2 routes through executeV4 calldata with maxTotalFee (ANT-800 H2)", async () => {
+    code = "0x6080604052";
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = jest.fn();
+    mockExecuteLeg(service as never, "0xexecV4");
+    const v4 = jest.spyOn(EvmAdapter.prototype, "buildExecuteDataV4");
+    const v3 = jest.spyOn(EvmAdapter.prototype, "buildExecuteDataV3");
+    try {
+      const res = await service.activateAndExecute({ pid: IDENTITY_ID }, "97", firstActionDto());
+      expect(res.executeTxHash).toBe("0xexecV4");
+      expect(v4).toHaveBeenCalledTimes(2); // gas-estimate draft + submit calldata
+      expect(v4).toHaveBeenCalledWith(expect.objectContaining({ feePolicyVersion: 2, maxTotalFee: 150000000000000n }));
+      expect(v3).not.toHaveBeenCalled();
+    } finally {
+      v4.mockRestore();
+      v3.mockRestore();
+    }
   });
 
   it("duplicate firstActionId returns the same execute hash without rebroadcast (AC-16)", async () => {

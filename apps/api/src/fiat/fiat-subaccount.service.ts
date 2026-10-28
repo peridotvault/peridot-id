@@ -2655,8 +2655,16 @@ export class FiatSubAccountService {
    */
   async adminBackfill(input: { pid?: string; take?: number }) {
     const take = Math.min(Math.max(input.take ?? 100, 1), 500);
+    // ANT-800 (ANT-798 item 2): paid-unissued blind spot. The legacy-txStatus
+    // fallback (`syncLegacyDeposit`) records movement as `processing` while the
+    // payment column stays `success` — filtering on providerStatus alone misses
+    // those paid rows. Include `providerPaymentStatus = success` in the sweep.
     const rows = await this.prisma.fiatProviderTransaction.findMany({
-      where: { kind: "deposit", providerStatus: { in: ["settled", "success"] }, ...(input.pid ? { pid: input.pid } : {}) },
+      where: {
+        kind: "deposit",
+        OR: [{ providerStatus: { in: ["settled", "success"] } }, { providerPaymentStatus: "success" }],
+        ...(input.pid ? { pid: input.pid } : {}),
+      },
       orderBy: { createdAt: "asc" }, take: take * 2,
     });
     const todo = rows.filter((r) => (r.ledgerStatus ?? "") !== "issued").slice(0, take);

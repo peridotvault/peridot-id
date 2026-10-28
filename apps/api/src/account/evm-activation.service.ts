@@ -857,10 +857,16 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     const clientData = Buffer.from(dto.assertion.clientDataJSON, "base64url");
     const r = fromHexDto(dto.assertion.r);
     const s = fromHexDto(dto.assertion.s);
-    const draftData = adapter.buildExecuteDataV3({
-      to: dto.to, value, data, deadline: dto.deadline, feePolicyVersion: version,
-      networkFee: 0n, authenticatorData: authData, clientDataJSON: clientData, r, s,
-    });
+    const draftData =
+      version === 2
+        ? adapter.buildExecuteDataV4({
+            to: dto.to, value, data, deadline: dto.deadline, feePolicyVersion: version,
+            maxTotalFee: 0n, networkFee: 0n, authenticatorData: authData, clientDataJSON: clientData, r, s,
+          })
+        : adapter.buildExecuteDataV3({
+            to: dto.to, value, data, deadline: dto.deadline, feePolicyVersion: version,
+            networkFee: 0n, authenticatorData: authData, clientDataJSON: clientData, r, s,
+          });
     const gasPrice = await rpc.gasPrice().catch(() => 1_000_000_000n);
     const estGas = await this.estimateTxGas(chainReference, accountAddress, draftData);
     const networkFee = estGas * gasPrice;
@@ -892,10 +898,29 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
         return this.reject(user.pid, feeChain, "drift", new ConflictException("Network fee exceeds maxTotalFee — re-quote and try again"), "execute");
       }
     }
-    const execData = adapter.buildExecuteDataV3({
-      to: dto.to, value, data, deadline: dto.deadline, feePolicyVersion: version,
-      networkFee, authenticatorData: authData, clientDataJSON: clientData, r, s,
-    });
+    // ANT-800: V4-only execute calldata for fee policy v2 (H2). The v2
+    // assertion is passkey-signed over the V4 payload (binds maxTotalFee);
+    // broadcasting it through V3 calldata would drop the user-approved bound.
+    // v1 stays on frozen V3 calldata (sunset) — new quotes are v2 canonical.
+    const execData =
+      version === 2
+        ? adapter.buildExecuteDataV4({
+            to: dto.to,
+            value,
+            data,
+            deadline: dto.deadline,
+            feePolicyVersion: version,
+            maxTotalFee,
+            networkFee,
+            authenticatorData: authData,
+            clientDataJSON: clientData,
+            r,
+            s,
+          })
+        : adapter.buildExecuteDataV3({
+            to: dto.to, value, data, deadline: dto.deadline, feePolicyVersion: version,
+            networkFee, authenticatorData: authData, clientDataJSON: clientData, r, s,
+          });
     const exec = await this.broadcastExecute(chainReference, user.pid, accountAddress, dto, secret, execData);
     if (exec.resolved) {
       if (!exec.signature) {
