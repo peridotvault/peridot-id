@@ -9,16 +9,18 @@
 // D2: reactive takedown with §4.3 thresholds. Reports are triaged async;
 // the status endpoint only ever returns available|claimed|under_review
 // (never `reserved` in MVP Opsi A).
-import { BadRequestException, ConflictException, ForbiddenException, GoneException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, GoneException, HttpException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import { isPidHandle, canonicalizePidHandle, toPid } from "../common/pid";
 import { isP2002 } from "../prisma/prisma-error";
 import { PrismaService } from "../prisma/prisma.service";
 import { ClaimService } from "../auth/claim.service";
 import { SecurityEventService } from "../security/security-event.service";
-import { HANDLE_INVALID, HANDLE_TAKEN } from "./dto/pids.dto";
+import { HANDLE_INVALID, HANDLE_TAKEN, HANDLE_UNDER_REVIEW } from "./dto/pids.dto";
 
 export const IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_KEY_REUSED";
 export const REPORT_OPEN_STATES = ["received", "triaging", "awaiting_counterparty"] as const;
+/** States that keep a handle frozen as under_review until a final decision (closed). */
+export const UNDER_REVIEW_STATES = [...REPORT_OPEN_STATES, "decided", "appealable"] as const;
 
 /** ANT-804 §4.3: bulk threshold — >10 successful claims / actor / 24h flags review. */
 export const BULK_CLAIM_THRESHOLD = 10;
@@ -27,6 +29,25 @@ export const BULK_CLAIM_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const TAKEDOWN_SLA_BUSINESS_DAYS = 3;
 /** ANT-804 §4.3: one appeal per decision, within 14 days. */
 export const APPEAL_WINDOW_DAYS = 14;
+/** ANT-826 F5: per-reporter intake throttle — ~5 reports/hour (429 past the cap). */
+export const REPORTER_THROTTLE_LIMIT = 5;
+export const REPORTER_THROTTLE_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * ANT-826 F5: reporter-contact verification gate. The 3-business-day SLA
+ * clock starts only after the contact verifies (synchronously here: valid
+ * email or E.164 phone on an authenticated report). Returns the verifiedAt
+ * timestamp or throws 400 REPORT_CONTACT_INVALID.
+ */
+export function verifyReporterContact(reporterContact: string): Date {
+  const v = (reporterContact ?? "").trim();
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  const isPhone = /^\+?[0-9]{7,15}$/.test(v.replace(/[\s()-]/g, ""));
+  if (!isEmail && !isPhone) {
+    throw new BadRequestException({ code: "REPORT_CONTACT_INVALID", message: "reporterContact must be a valid email or phone number" });
+  }
+  return new Date();
+}
 
 export function addBusinessDays(from: Date, days: number): Date {
   const d = new Date(from);
@@ -64,6 +85,15 @@ export class PidsService {
     if (!ticketId) {
       throw new GoneException("No pending claim — sign in again to get a fresh one.");
     }
+    // ANT-826 F5: freeze claims while the handle is under_review (409 until
+    // a final decision closes the report). Checked before any write.
+    const frozen = await this.prisma.pidTakedownReport.findFirst({
+      where: { normalizedHandle: normalized, state: { in: [...UNDER_REVIEW_STATES] } },
+      select: { id: true },
+    }).catch(() => null);
+    if (frozen) {
+      throw new ConflictException({ code: HANDLE_UNDER_REVIEW, message: "Handle is under takedown review and cannot be claimed or transferred right now" });
+    }
     // Idempotency: same key + same handle replays the original 201 without a
     // second claim; same key + different handle is a deterministic 409.
     const prior = await this.prisma.pidClaimReceipt.findUnique({ where: { idempotencyKey } }).catch(() => null);
@@ -93,8 +123,11 @@ export class PidsService {
       throw err;
     }
     let receiptCreatedAt: Date;
+    let actorRefForReceipt: string | null = null;
     try {
-      const receipt = await this.prisma.pidClaimReceipt.create({ data: { idempotencyKey, pid, handle: normalized } });
+      const ticket = await this.prisma.claimTicket.findUnique({ where: { id: ticketId } }).catch(() => null);
+      actorRefForReceipt = ticket ? `${ticket.provider}:${ticket.providerUserId}` : `pid:${pid}`;
+      const receipt = await this.prisma.pidClaimReceipt.create({ data: { idempotencyKey, pid, handle: normalized, actorRef: actorRefForReceipt } });
       receiptCreatedAt = receipt.createdAt;
     } catch (err) {
       if (isP2002(err)) {
@@ -112,19 +145,19 @@ export class PidsService {
     return { handle: normalized, normalizedHandle: normalized, claimedAt: receiptCreatedAt.toISOString() };
   }
 
-  /** D2.1: flag actors past the bulk threshold (advisory — never blocks). */
+  /**
+   * D2.1 (ANT-826 fix): flag actors past the bulk threshold (advisory — never
+   * blocks). Counts receipts per-actor (actorRef column) in the trailing 24h.
+   * Old code counted per-pid, which can never exceed 1 (1 credential = 1 pid)
+   * and so never fired vs BULK_CLAIM_THRESHOLD(10).
+   */
   private async flagBulkIfNeeded(pid: string, normalizedHandle: string, ticketId: string): Promise<void> {
     const ticket = await this.prisma.claimTicket.findUnique({ where: { id: ticketId } }).catch(() => null);
     const actorRef = ticket ? `${ticket.provider}:${ticket.providerUserId}` : `pid:${pid}`;
     const since = new Date(Date.now() - BULK_CLAIM_WINDOW_MS);
     const recent = await this.prisma.pidClaimReceipt.count({
-      // Receipts carry no actor column (expand-only schema): join via tickets is
-      // out of scope for MVP, so count this pid's receipts as the actor proxy
-      // for ticket-bound claims (1 credential = 1 pid by the email/credential
-      // uniqueness guards in ClaimService).
-      where: { pid, createdAt: { gte: since } },
+      where: { actorRef, createdAt: { gte: since } },
     }).catch(() => 0);
-    void actorRef;
     if (recent > BULK_CLAIM_THRESHOLD) {
       await this.prisma.pidHandleReview.create({
         data: { normalizedHandle, reason: "bulk", actorRef, metadata: { recent24h: recent } },
@@ -146,20 +179,41 @@ export class PidsService {
     const claimed = !!identity && identity.status !== "deleted";
     if (!claimed) return { handle: normalized, normalizedHandle: normalized, state: "available" };
     const open = await this.prisma.pidTakedownReport.findFirst({
-      where: { normalizedHandle: normalized, state: { in: [...REPORT_OPEN_STATES, "decided", "appealable"] } },
+      where: { normalizedHandle: normalized, state: { in: [...UNDER_REVIEW_STATES] } },
       select: { id: true },
     }).catch(() => null);
     if (open) return { handle: normalized, normalizedHandle: normalized, state: "under_review", reasonCode: "takedown_review" };
     return { handle: normalized, normalizedHandle: normalized, state: "claimed" };
   }
 
-  /** File a takedown report → 202 + SLA response deadline (3 business days). */
+  /**
+   * File a takedown report → 202 + SLA response deadline (3 business days).
+   * ANT-826 F5 hardening:
+   * - per-reporter throttle (~5/hour → 429);
+   * - reporterContact verification BEFORE the SLA clock starts (the SLA is
+   *   computed from the verifiedAt timestamp, not from request arrival);
+   * - the created row carries reporterContactVerifiedAt for audit.
+   */
   async createReport(reporterPid: string | null, dto: { handle: string; grounds: string; evidence: string; reporterContact: string }): Promise<{ reportId: string; slaRespondBy: string }> {
     const normalized = canonicalizePidHandle(dto.handle);
     if (!isPidHandle(normalized)) {
       throw new BadRequestException({ code: HANDLE_INVALID, message: "handle must be 3-20 chars: lowercase letters, numbers, underscore" });
     }
-    const slaRespondBy = addBusinessDays(new Date(), TAKEDOWN_SLA_BUSINESS_DAYS);
+    if (reporterPid) {
+      const hourAgo = new Date(Date.now() - REPORTER_THROTTLE_WINDOW_MS);
+      const recentByReporter = await this.prisma.pidTakedownReport.count({
+        where: { reporterPid, createdAt: { gte: hourAgo } },
+      }).catch(() => 0);
+      if (recentByReporter >= REPORTER_THROTTLE_LIMIT) {
+        throw new HttpException(
+          { code: "REPORT_THROTTLED", message: "Too many reports — try again later" },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
+    // Verification gate runs before the SLA clock starts.
+    const verifiedAt = verifyReporterContact(dto.reporterContact);
+    const slaRespondBy = addBusinessDays(verifiedAt, TAKEDOWN_SLA_BUSINESS_DAYS);
     const row = await this.prisma.pidTakedownReport.create({
       data: {
         handle: normalized,
@@ -170,6 +224,7 @@ export class PidsService {
         reporterPid,
         state: "received",
         slaRespondBy,
+        reporterContactVerifiedAt: verifiedAt,
       },
       select: { id: true, slaRespondBy: true },
     });
@@ -239,6 +294,20 @@ export class PidsService {
     if (row.state === "closed") throw new ConflictException("Report is already closed");
     if (dto.decision === "transfer" && !dto.targetPid) {
       throw new BadRequestException("targetPid is required for transfer");
+    }
+    // ANT-826 F5: freeze transfers into a handle that is itself under_review.
+    // The recipient re-claims through the normal flow, which is frozen for
+    // under_review handles — so a transfer targeting one must fail 409 here
+    // instead of creating a handle that can never be claimed.
+    if (dto.decision === "transfer" && dto.targetPid) {
+      const targetHandle = dto.targetPid.replace(/@pid$/, "").toLowerCase();
+      const targetFrozen = await this.prisma.pidTakedownReport.findFirst({
+        where: { normalizedHandle: targetHandle, state: { in: [...UNDER_REVIEW_STATES] } },
+        select: { id: true },
+      }).catch(() => null);
+      if (targetFrozen && targetFrozen.id !== id) {
+        throw new ConflictException({ code: HANDLE_UNDER_REVIEW, message: "Transfer target is under takedown review" });
+      }
     }
     const pid = toPid(row.normalizedHandle);
     if (dto.decision === "release" || dto.decision === "transfer") {

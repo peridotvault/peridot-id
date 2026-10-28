@@ -949,9 +949,13 @@ model PidClaimReceipt {
   idempotencyKey String   @id
   pid            String
   handle         String
+  // ANT-826 D2.1: per-actor bulk detection. Nullable for pre-migration rows
+  // (expand-only); new receipts always carry the ticket-derived actorRef.
+  actorRef       String?
   createdAt      DateTime @db.Timestamptz(3) @default(now())
 
   @@index([pid])
+  @@index([actorRef])
   @@map("pid_claim_receipts")
 }
 
@@ -977,12 +981,18 @@ model PidTakedownReport {
   appealedAt       DateTime? @db.Timestamptz(3)
   transferToPid    String?
   slaRespondBy     DateTime  @db.Timestamptz(3)
+  // ANT-826 F5: reporter-contact verification timestamp (NULL = unverified).
+  // The 3-business-day SLA clock starts only after verification; the service
+  // sets this synchronously once the contact format verifies (authenticated
+  // reporter), full out-of-band OTP is future work.
+  reporterContactVerifiedAt DateTime? @db.Timestamptz(3)
   auditSnapshot    Json?
   createdAt        DateTime  @db.Timestamptz(3) @default(now())
   updatedAt        DateTime  @db.Timestamptz(3) @updatedAt
 
   @@index([normalizedHandle])
   @@index([state])
+  @@index([reporterPid])
   @@map("pid_takedown_reports")
 }
 

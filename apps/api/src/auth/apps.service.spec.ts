@@ -1,4 +1,5 @@
 import { decryptSecret } from "../common/secret-crypto";
+import { ORIGIN_PATTERN } from "./dto/app.dto";
 import { normalizeOrigin, PidAppsService } from "./apps.service";
 
 // ANT-286a test data key (clearly labeled fixture — never a real secret).
@@ -52,6 +53,24 @@ describe("PidAppsService", () => {
     ]) {
       expect(() => normalizeOrigin(bad)).toThrow();
     }
+  });
+
+  it("F1: rejects wildcard origins in both layers (fails on old code)", () => {
+    // Layer 1 (DTO pattern): wildcards never match.
+    for (const wild of ["https://*.example.com", "https://evil*.x.com", "https://*"]) {
+      expect(ORIGIN_PATTERN.test(wild)).toBe(false);
+    }
+    // Legit origins still match the DTO pattern.
+    for (const ok of ["https://mygame.dev", "https://mygame.dev:8443", "http://localhost:3000"]) {
+      expect(ORIGIN_PATTERN.test(ok)).toBe(true);
+    }
+    // Layer 2 (normalizeOrigin): wildcard throws origin_wildcard even when
+    // a caller bypasses DTO validation.
+    for (const wild of ["https://*.example.com", "https://evil*.x.com", "https://*.example.com/"]) {
+      expect(() => normalizeOrigin(wild)).toThrow(/origin_wildcard/);
+    }
+    // Legit origins still normalize.
+    expect(normalizeOrigin("https://mygame.dev")).toBe("https://mygame.dev");
   });
 
   it("creates an app with name only; origins managed after", async () => {
