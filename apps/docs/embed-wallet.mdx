@@ -81,3 +81,9 @@ browser blocks the frame.
   `credentials` — never the bearer).
 - The read-only bearer lasts 30 days and is non-refreshable; when it expires the
   user re-connects (one tap if their PeridotID session is alive).
+- Chain support mirrors the [SDK](/sdk#chain-support): Solana is stable, EVM
+  counterfactuals are experimental testnet-only, Stellar is planned with no
+  `wallet.*` methods yet. Discover live rows with `GET /v1/chains`.
+- History shown in the wallet is on-chain activity (RPC-parsed + local cache);
+  the IDR balance/statement is the separate internal fiat ledger
+  (see [Fiat & payments](/fiat)) — not on-chain and not the same list.
