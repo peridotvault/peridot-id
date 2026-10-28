@@ -1,0 +1,672 @@
+#!/usr/bin/env python3
+"""Offline docs sync for the PeridotID MCP canister (ANT-830 Phase 2).
+
+Reads the in-repo Mintlify tree (`apps/docs/`) and emits ONE committed
+generated Rust module (`src/generated_docs.rs`) plus `src/generated_docs.meta.json`,
+baked into the canister at build time. No network access, no `dfx` dependency,
+stdlib only. Deterministic: byte-identical regeneration (`sync-docs --check`).
+
+Usage (from `apps/mcp/`):
+    ./scripts/sync-docs           # regenerate generated_docs.rs + meta
+    ./scripts/sync-docs --check   # exit 0 iff regeneration is byte-identical
+"""
+from __future__ import annotations
+
+import datetime
+import hashlib
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+MCP_DIR = Path(__file__).resolve().parent.parent
+REPO_ROOT = MCP_DIR.parent.parent
+DOCS_DIR = REPO_ROOT / "apps" / "docs"
+OUT_RS = MCP_DIR / "src" / "generated_docs.rs"
+OUT_META = MCP_DIR / "src" / "generated_docs.meta.json"
+
+SITE = "https://docs.peridot.id"
+MAX_EXCERPT_CHARS = 300
+MAX_GUIDE_BODY_CHARS = 1500
+MAX_EXAMPLE_CODE_CHARS = 8 * 1024
+ARTIFACT_BUDGET_BYTES = 160 * 1024
+
+# Spec AC-4 probes: every probe must return >= 1 search_docs hit, or the
+# script fails naming the probe. Keeps CI coverage honest when docs evolve.
+PROBES = [
+    "passkey",
+    "faucet",
+    "DOKU",
+    "webhook",
+    "sandbox",
+    "refresh token",
+    "PID handle",
+    "leveling",
+    "session cookies",
+    "openapi",
+]
+
+# Phase 1 stub strings: must appear nowhere in the generated output (AC-5).
+STUB_STRINGS = [
+    "Accept fiat and crypto payments with automatic settlement",
+    "Sign users in with passkeys and hosted login in minutes",
+    "Create wallets, read balances, and send transactions across EVM and Solana chains.",
+]
+
+ELLIPSIS = "\u2026"
+
+
+def fail(msg: str) -> None:
+    print(f"sync-docs: error: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        fail(f"missing input file: {path.relative_to(REPO_ROOT)}")
+    except OSError as exc:
+        fail(f"cannot read {path.relative_to(REPO_ROOT)}: {exc}")
+    raise AssertionError("unreachable")
+
+
+def git_tree_sha() -> str:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD:apps/docs"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        fail(f"cannot run git for source revision: {exc}")
+    if out.returncode != 0:
+        fail(f"cannot resolve git tree SHA of apps/docs: {out.stderr.strip()}")
+    return out.stdout.strip()
+
+
+def slugify_anchor(text: str) -> str:
+    s = text.strip().lower()
+    s = re.sub(r"`", "", s)
+    s = re.sub(r"[^a-z0-9 _-]", "", s)
+    return re.sub(r"[\s_]+", "-", s).strip("-")
+
+
+def collapse_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0] or text[:limit]
+    return cut.rstrip() + ELLIPSIS
+
+
+FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
+FENCE_RE = re.compile(r"^```(\w*)\s*\n(.*?)^```\s*$", re.MULTILINE | re.DOTALL)
+HEADING_RE = re.compile(r"^(#{2,3})\s+(.*)$", re.MULTILINE)
+
+
+def parse_frontmatter(text: str, rel: str) -> tuple[str, str, str]:
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        fail(f"unparseable frontmatter (missing --- block): {rel}")
+    head = m.group(1)
+    title = next(
+        (ln.split(":", 1)[1].strip() for ln in head.splitlines() if ln.startswith("title:")),
+        "",
+    )
+    desc = next(
+        (
+            ln.split(":", 1)[1].strip()
+            for ln in head.splitlines()
+            if ln.startswith("description:")
+        ),
+        "",
+    )
+    if not title:
+        fail(f"unparseable frontmatter (missing title:): {rel}")
+    return title, desc, text[m.end() :]
+
+
+def strip_fences(text: str) -> str:
+    return FENCE_RE.sub("", text)
+
+
+def page_prose(body: str) -> str:
+    """Prose of a page with fences/frontmatter removed, headings kept as text."""
+    text = strip_fences(body)
+    lines = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+    return collapse_ws("\n".join(lines))
+
+
+def split_sections(body: str) -> list[tuple[str, int, str]]:
+    """Split page body into (heading, level, prose) sections; skips fences."""
+    # Mask fences so headings inside code blocks are ignored. The mask
+    # preserves string length (index alignment with `body` depends on it).
+    masked = FENCE_RE.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), body)
+    matches = list(HEADING_RE.finditer(masked))
+    sections: list[tuple[str, int, str]] = []
+    for i, m in enumerate(matches):
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        raw = body[start:end]
+        prose = collapse_ws(strip_fences(raw))
+        heading = collapse_ws(re.sub(r"`", "", m.group(2)))
+        if heading and prose:
+            sections.append((heading, len(m.group(1)), prose))
+    return sections
+
+
+def rs_escape(text: str) -> str:
+    out = []
+    for ch in text:
+        if ch == '"':
+            out.append('\\"')
+        elif ch == "\\":
+            out.append("\\\\")
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ord(ch) < 0x20:
+            out.append(f"\\u{{{ord(ch):x}}}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def rs_str(text: str) -> str:
+    return f'"{rs_escape(text)}"'
+
+
+def load_nav_slugs() -> list[str]:
+    raw = read_text(DOCS_DIR / "docs.json")
+    try:
+        cfg = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        fail(f"unparseable docs.json: {exc}")
+    slugs: list[str] = []
+    try:
+        for tab in cfg["navigation"]["tabs"]:
+            for group in tab["groups"]:
+                if "pages" in group:
+                    slugs.extend(group["pages"])
+    except (KeyError, TypeError) as exc:
+        fail(f"unparseable docs.json nav: {exc}")
+    if len(set(slugs)) != len(slugs):
+        dupes = sorted({s for s in slugs if slugs.count(s) > 1})
+        fail(f"duplicate slugs in docs.json nav: {', '.join(dupes)}")
+    return slugs
+
+
+PAGE_FILES = {
+    "api/overview": DOCS_DIR / "api" / "overview.mdx",
+}
+
+
+def page_path(slug: str) -> Path:
+    if slug in PAGE_FILES:
+        return PAGE_FILES[slug]
+    return DOCS_DIR / f"{slug}.mdx"
+
+
+def page_url(slug: str) -> str:
+    return f"{SITE}/{slug}"
+
+
+def parse_openapi_ops(text: str) -> list[tuple[str, str, str, str]]:
+    """Minimal regex parse of openapi.yaml paths: (method, path, summary, tags).
+
+    The spec pins no `operationId`s today, so summaries + paths feed
+    search_docs only (sdk_reference stays sdk.mdx-grounded; see PR notes).
+    """
+    ops: list[tuple[str, str, str, str]] = []
+    current_path = ""
+    current_method = ""
+    current_tags = ""
+    for line in text.splitlines():
+        m_path = re.match(r"^  (/[^ :]*):\s*$", line)
+        if m_path:
+            current_path = m_path.group(1)
+            continue
+        m_method = re.match(r"^    (get|post|put|patch|delete|options|head):\s*$", line)
+        if m_method and current_path:
+            current_method = m_method.group(1).upper()
+            current_tags = ""
+            continue
+        m_tags = re.match(r"^      tags: \[(.*?)\]", line)
+        if m_tags and current_method:
+            current_tags = m_tags.group(1).strip()
+            continue
+        m_sum = re.match(r"^      summary: (.*)$", line)
+        if m_sum and current_path and current_method:
+            ops.append(
+                (current_method, current_path, m_sum.group(1).strip(), current_tags)
+            )
+            current_method = ""
+    if not ops:
+        fail("unparseable openapi.yaml: no (method, path, summary) operations found")
+    return ops
+
+
+# ---------------------------------------------------------------------------
+# Curated example + SDK selections. Every literal below is a verbatim span of
+# the cited source file; the build asserts containment and fails otherwise.
+# (slug, section heading, fence index within section, occurrence index file-wide)
+
+EXAMPLE_SPECS = [
+    # name, title, slug, heading, fence_no (0-based among ts/tsx fences in file)
+    ("passkey-login", "Manage passkey authorities", "sdk", "Passkey authorities", 0),
+    ("create-wallet", "Create a PeridotID wallet", "sdk", "Wallet", 0),
+    ("send-transaction", "Send IDR on the fiat ledger", "fiat", "Send / receive", 0),
+    ("fiat-topup", "Top up via DOKU Checkout", "fiat", "Top up (money in)", 0),
+    ("login-popup", "Open the login popup", "sign-in-with-peridot-id", "2. Open the login popup", 0),
+    ("exchange-code", "Verify the login code (backend)", "sign-in-with-peridot-id", "3. Handle the login", 0),
+    ("first-request", "Your first request", "getting-started", "Your first request", 0),
+    ("register-app", "Register your app", "sign-in-with-peridot-id", "1. Register your app", 0),
+]
+
+# (module, version, summary-span-source, [(symbol, kind, signature, doc)])
+# Signatures/docs are verbatim spans of sdk.mdx (asserted at build).
+SDK_SPECS = [
+    (
+        "@peridotvault/pid-sdk-js",
+        "1.x",
+        "The official PeridotID SDK for the browser",
+        [
+            ("Peridot", "function", "Peridot({", "That's the whole config."),
+            ("auth.login", "function", "peridot.auth.login()", "resolves the Google OAuth URL"),
+            ("auth.refresh", "function", "peridot.auth.refresh()", "try to refresh silently before redirecting to login"),
+            ("auth.claim", "function", 'peridot.auth.claim("ifal")', "the identity"),
+            ("auth.pidAvailable", "function", 'peridot.auth.pidAvailable("ifal")', "the handle can never be changed, reused, or reassigned"),
+            ("identity.me", "function", "peridot.identity.me()", "the stable per-user identity and its login credentials"),
+            ("level.get", "function", "peridot.level.get('ifal@pid')", "Read a level"),
+            ("profile.me", "function", "peridot.profile.me()", "public profile data"),
+            ("wallet.createAccount", "function", "peridot.wallet.createAccount()", "idempotent ensure"),
+            ("wallet.getBalance", "function", "peridot.wallet.getBalance()", "SOL, on-chain RPC read"),
+            ("fiat.balance", "function", "peridot.fiat.balance()", "covers top-up, balance, statement, and sends on the internal IDR ledger"),
+            ("auth.loginPopup", "function", "peridot.auth.loginPopup()", "opens a popup (tab fallback)"),
+        ],
+    ),
+    (
+        "@peridotvault/pid-solana",
+        "1.x",
+        "Solana (devnet + testnet rows, `program` contract)",
+        [
+            ("getBalance", "function", "peridot.wallet.getBalance()", "SOL, on-chain RPC read"),
+            ("tokens", "function", "peridot.wallet.tokens()", "SPL balances + ATA addresses"),
+            ("nfts", "function", "peridot.wallet.nfts()", "heuristic SPL 0-decimal x1 inventory"),
+            ("history", "function", "peridot.wallet.history(30)", "on-chain signatures parsed + merged into the local cache"),
+            ("activation", "function", "`activation`", "stable"),
+            ("rotate", "function", "`rotate`", "relayer-sponsored"),
+        ],
+    ),
+    (
+        "@peridotvault/pid-evm",
+        "1.x",
+        "EVM counterfactuals",
+        [
+            ("evmSmartAccountAddress", "function", "evmSmartAccountAddress(chainReference)", "experimental (testnet-only)"),
+            ("evmActivation", "function", "evmActivation(chainReference)", "experimental (testnet-only)"),
+            ("estimateBatch", "function", "estimateBatch(api,", "EVM batch path"),
+            ("submitBatch", "function", "submitBatch(api,", "relayer-executed sequential"),
+            ("getBatchStatus", "function", "getBatchStatus(api,", "relayer-executed sequential"),
+        ],
+    ),
+]
+
+# Frozen-alias topics keep Phase 1 contracts resolving with real content.
+GUIDE_ALIASES = {
+    "payments": "fiat",
+    "wallet": "embed-wallet",
+}
+
+
+def find_fences(slug: str, body: str, heading: str, fence_no: int) -> tuple[str, str]:
+    """Return (language, code) of the fence_no-th ts/tsx/bash fence in the
+    section under `heading` (verbatim, untrimmed)."""
+    sections = split_sections(body)
+    idx = next((i for i, (h, _, _) in enumerate(sections) if h == heading), None)
+    if idx is None:
+        fail(f"example section not found: {slug}#{heading}")
+    m = re.search(
+        r"^#{2,3}\s+" + re.escape(heading) + r"\s*$", body, re.MULTILINE
+    )
+    if not m:
+        fail(f"example section anchor not found: {slug}#{heading}")
+    start = m.end()
+    nxt = re.search(r"^#{2,3}\s+", body[start:], re.MULTILINE)
+    end = start + nxt.start() if nxt else len(body)
+    seg = body[start:end]
+    seg = body[start:end]
+    fences = [
+        (lang or "text", code)
+        for lang, code in FENCE_RE.findall(seg)
+        if (lang or "text") in ("ts", "tsx", "bash", "json")
+    ]
+    if fence_no >= len(fences):
+        fail(f"example fence {fence_no} missing in section: {slug}#{heading}")
+    return fences[fence_no]
+
+
+def main(check: bool) -> None:
+    nav_slugs = load_nav_slugs()
+    if "api/overview" not in nav_slugs:
+        nav_slugs.append("api/overview")
+
+    pages: dict[str, dict] = {}
+    for slug in nav_slugs:
+        path = page_path(slug)
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        text = read_text(path)
+        title, desc, body = parse_frontmatter(text, rel)
+        sections = split_sections(body)
+        if not sections:
+            fail(f"no parseable ## sections: {rel}")
+        pages[slug] = {
+            "title": title,
+            "desc": desc,
+            "body": body,
+            "sections": sections,
+            "url": page_url(slug),
+            "rel": rel,
+        }
+
+    openapi_text = read_text(DOCS_DIR / "openapi.yaml")
+    ops = parse_openapi_ops(openapi_text)
+
+    norm_sources: dict[str, str] = {
+        slug: collapse_ws(strip_fences(p["body"])) for slug, p in pages.items()
+    }
+    norm_full: dict[str, str] = {}
+    for slug in pages:
+        path = page_path(slug)
+        norm_full[slug] = collapse_ws(path.read_text(encoding="utf-8"))
+    norm_openapi = collapse_ws(openapi_text)
+    norm_sdk = collapse_ws(pages["sdk"]["body"])
+
+    def assert_span(span: str, where: str, what: str) -> None:
+        # Any in-repo Mintlify source counts: the zero-fabrication rule
+        # requires traceability to *a* source span, not a specific file.
+        # `where` names the primary source for error messages.
+        want = collapse_ws(span)
+        haystacks = [norm_openapi, norm_sdk, *norm_full.values(), *norm_sources.values()]
+        if not any(want in hay for hay in haystacks):
+            fail(f"untraceable {what} (not a span of {where}): {span[:80]!r}")
+
+    # ---- search_docs corpus: one entry per ##/### section + one per op ----
+    docs: list[dict] = []
+    for slug in sorted(pages):
+        p = pages[slug]
+        for heading, _level, prose in p["sections"]:
+            excerpt = truncate(prose, MAX_EXCERPT_CHARS)
+            assert_span(
+                excerpt.rstrip(ELLIPSIS), slug, f"excerpt for {slug}#{heading}"
+            )
+            docs.append(
+                {
+                    "title": f"{p['title']} \u2014 {heading}",
+                    "url": f"{p['url']}#{slugify_anchor(heading)}",
+                    "excerpt": excerpt,
+                }
+            )
+    for method, path, summary, tags in sorted(ops):
+        excerpt = truncate(f"{summary} \u2014 {method} {path}", MAX_EXCERPT_CHARS)
+        assert_span(summary, "openapi", f"openapi summary {method} {path}")
+        docs.append(
+            {
+                "title": f"{method} {path} \u2014 {summary}",
+                "url": f"{SITE}/api/overview",
+                "excerpt": excerpt,
+            }
+        )
+    docs.sort(key=lambda d: (d["title"], d["url"]))
+
+    # AC-4: every probe must hit the corpus (title+excerpt substring, ci).
+    lowered = [(d["title"] + "\n" + d["excerpt"]).lower() for d in docs]
+    for probe in PROBES:
+        if not any(probe.lower() in t for t in lowered):
+            fail(f"probe has zero hits in generated corpus: {probe!r}")
+
+    # ---- guides: 12 nav slugs + frozen aliases ----
+    guides: list[dict] = []
+    for slug in sorted(pages):
+        p = pages[slug]
+        body = truncate(page_prose(p["body"]), MAX_GUIDE_BODY_CHARS)
+        guides.append(
+            {"topic": slug, "title": p["title"], "url": p["url"], "body": body}
+        )
+    for alias in sorted(GUIDE_ALIASES):
+        target = pages[GUIDE_ALIASES[alias]]
+        body = truncate(page_prose(target["body"]), MAX_GUIDE_BODY_CHARS)
+        guides.append(
+            {"topic": alias, "title": target["title"], "url": target["url"], "body": body}
+        )
+    guides.sort(key=lambda g: g["topic"])
+    topics = [g["topic"] for g in guides]
+
+    # ---- examples: verbatim fences ----
+    examples: list[dict] = []
+    for name, title, slug, heading, fence_no in EXAMPLE_SPECS:
+        p = pages[slug]
+        lang, code = find_fences(slug, p["body"], heading, fence_no)
+        code = code.strip("\n")
+        if len(code) > MAX_EXAMPLE_CODE_CHARS:
+            code = code[:MAX_EXAMPLE_CODE_CHARS].rstrip() + ELLIPSIS
+        if collapse_ws(code.rstrip(ELLIPSIS)) not in collapse_ws(p["body"]):
+            fail(f"example code not verbatim in {slug}: {name}")
+        # Description: first prose sentence of the section (verbatim span).
+        prose = next(
+            pr for h, _, pr in p["sections"] if h == heading
+        )
+        desc = truncate(prose, 200)
+        examples.append(
+            {
+                "name": name,
+                "title": title,
+                "language": lang,
+                "code": code,
+                "description": desc,
+                "source_url": page_url(slug),
+            }
+        )
+    examples.sort(key=lambda e: e["name"])
+
+    # ---- sdk reference ----
+    sdk_modules: list[dict] = []
+    for module, version, summary, symbols in SDK_SPECS:
+        assert_span(summary, "sdk", f"sdk summary {module}")
+        sym_rows = []
+        for sym, kind, sig, doc in symbols:
+            assert_span(sig, "sdk", f"sdk signature {module}::{sym}")
+            assert_span(doc, "sdk", f"sdk doc {module}::{sym}")
+            sym_rows.append(
+                {"name": sym, "kind": kind, "signature": sig, "doc": doc}
+            )
+        sym_rows.sort(key=lambda s: s["name"].lower())
+        sdk_modules.append(
+            {
+                "module": module,
+                "version": version,
+                "summary": summary,
+                "symbols": sym_rows,
+            }
+        )
+    sdk_modules.sort(key=lambda m: m["module"])
+
+    for stub in STUB_STRINGS:
+        blob = json.dumps({"d": docs, "g": guides, "e": examples, "s": sdk_modules})
+        if stub in blob:
+            fail(f"Phase 1 stub string leaked into generated corpus: {stub[:50]!r}")
+
+    # ---- content hash over normalized extracted content ----
+    h = hashlib.sha256()
+    for d in docs:
+        h.update(("\0".join([d["title"], d["url"], d["excerpt"]]) + "\n").encode())
+    for g in guides:
+        h.update(("\0".join([g["topic"], g["title"], g["url"], g["body"]]) + "\n").encode())
+    for e in examples:
+        h.update(
+            ("\0".join([e["name"], e["title"], e["language"], e["code"], e["description"]]) + "\n").encode()
+        )
+    for m in sdk_modules:
+        h.update(("\0".join([m["module"], m["version"], m["summary"]]) + "\n").encode())
+        for s in m["symbols"]:
+            h.update(("\0".join([s["name"], s["kind"], s["signature"], s["doc"]]) + "\n").encode())
+    content_hash = h.hexdigest()
+    source_sha = git_tree_sha()
+
+    # ---- emit Rust module ----
+    lines = [
+        "//! Generated by `apps/mcp/scripts/sync-docs` \u2014 DO NOT EDIT.",
+        f"//! Source tree: `apps/docs/` @ `{source_sha}`.",
+        "//! All strings are verbatim spans of the Mintlify sources (truncation",
+        '//! marked with `\u2026`); the build asserts traceability.',
+        "",
+        "use crate::tools::{DocEntry, ExampleEntry, GuideEntry, SdkModule, SymbolEntry};",
+        "",
+        "/// Git tree SHA of `apps/docs/` at sync time.",
+        f"pub const SOURCE_REV: &str = {rs_str(source_sha)};",
+        "/// SHA-256 over the normalized extracted content.",
+        f"pub const CONTENT_HASH: &str = {rs_str(content_hash)};",
+        "",
+        f"/// Search corpus: {len(docs)} entries (guide sections + OpenAPI operations).",
+        f"pub const DOCS: [DocEntry; {len(docs)}] = [",
+    ]
+    for d in docs:
+        lines.append("    DocEntry {")
+        lines.append(f"        title: {rs_str(d['title'])},")
+        lines.append(f"        url: {rs_str(d['url'])},")
+        lines.append(f"        excerpt: {rs_str(d['excerpt'])},")
+        lines.append("    },")
+    lines.append("];")
+    lines.append("")
+    lines.append(f"/// Integration guides: {len(guides)} topics (12 nav slugs + frozen aliases).")
+    lines.append(f"pub const GUIDES: [GuideEntry; {len(guides)}] = [")
+    for g in guides:
+        lines.append("    GuideEntry {")
+        lines.append(f"        topic: {rs_str(g['topic'])},")
+        lines.append(f"        title: {rs_str(g['title'])},")
+        lines.append(f"        url: {rs_str(g['url'])},")
+        lines.append(f"        body: {rs_str(g['body'])},")
+        lines.append("    },")
+    lines.append("];")
+    lines.append("")
+    lines.append("/// Supported guide topics (lowercase, lexicographic order).")
+    lines.append(f"pub const GUIDE_TOPICS: [&str; {len(topics)}] = [")
+    for t in topics:
+        lines.append(f"    {rs_str(t)},")
+    lines.append("];")
+    lines.append("")
+    lines.append(f"/// Code examples: {len(examples)} verbatim fences.")
+    lines.append(f"pub const EXAMPLES: [ExampleEntry; {len(examples)}] = [")
+    example_names = [e["name"] for e in examples]
+    for e in examples:
+        lines.append("    ExampleEntry {")
+        lines.append(f"        name: {rs_str(e['name'])},")
+        lines.append(f"        title: {rs_str(e['title'])},")
+        lines.append(f"        language: {rs_str(e['language'])},")
+        lines.append(f"        code: {rs_str(e['code'])},")
+        lines.append(f"        description: {rs_str(e['description'])},")
+        lines.append(f"        source_url: {rs_str(e['source_url'])},")
+        lines.append("    },")
+    lines.append("];")
+    lines.append("")
+    lines.append("/// Supported example names (lowercase, lexicographic order).")
+    lines.append(f"pub const EXAMPLE_NAMES: [&str; {len(example_names)}] = [")
+    for n in example_names:
+        lines.append(f"    {rs_str(n)},")
+    lines.append("];")
+    lines.append("")
+    lines.append(f"/// SDK reference: {len(sdk_modules)} modules, grounded in sdk.mdx.")
+    lines.append(f"pub const SDK_DOCS: [SdkModule; {len(sdk_modules)}] = [")
+    for m in sdk_modules:
+        lines.append("    SdkModule {")
+        lines.append(f"        module: {rs_str(m['module'])},")
+        lines.append(f"        version: {rs_str(m['version'])},")
+        lines.append(f"        summary: {rs_str(m['summary'])},")
+        lines.append(f"        symbols: &[")
+        for s in m["symbols"]:
+            lines.append("            SymbolEntry {")
+            lines.append(f"                name: {rs_str(s['name'])},")
+            lines.append(f"                kind: {rs_str(s['kind'])},")
+            lines.append(f"                signature: {rs_str(s['signature'])},")
+            lines.append(f"                doc: {rs_str(s['doc'])},")
+            lines.append("            },")
+        lines.append("        ],")
+        lines.append("    },")
+    lines.append("];")
+    lines.append("")
+    lines.append("/// Supported module names (lexicographic order).")
+    sdk_names = [m["module"] for m in sdk_modules]
+    lines.append(f"pub const SDK_MODULES: [&str; {len(sdk_names)}] = [")
+    for n in sdk_names:
+        lines.append(f"    {rs_str(n)},")
+    lines.append("];")
+    lines.append("")
+    rs_text = "\n".join(lines)
+    if len(rs_text.encode()) > ARTIFACT_BUDGET_BYTES:
+        fail(
+            f"generated artifact {len(rs_text.encode())} bytes exceeds "
+            f"{ARTIFACT_BUDGET_BYTES} byte budget"
+        )
+
+    entry_counts = {
+        "docs": len(docs),
+        "guides": len(guides),
+        "examples": len(examples),
+        "sdkModules": len(sdk_modules),
+        "sdkSymbols": sum(len(m["symbols"]) for m in sdk_modules),
+    }
+    meta = {
+        "sourceSha": source_sha,
+        "contentHash": content_hash,
+        "entryCounts": entry_counts,
+        "builtAt": datetime.datetime.now(datetime.timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z"),
+        "generator": "apps/mcp/scripts/sync-docs",
+        "llmsEntryCount": None,
+    }
+
+    if check:
+        try:
+            current_rs = OUT_RS.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            fail(f"generated artifact missing: {OUT_RS.relative_to(REPO_ROOT)}")
+        if current_rs != rs_text:
+            fail("generated_docs.rs drifted: run ./scripts/sync-docs to regenerate")
+        try:
+            current_meta = json.loads(OUT_META.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            fail(f"generated meta missing: {OUT_META.relative_to(REPO_ROOT)}")
+        for key in ("sourceSha", "contentHash", "entryCounts"):
+            if current_meta.get(key) != meta[key]:
+                fail(f"generated_docs.meta.json drifted in {key!r}: regenerate")
+        print(
+            f"sync-docs --check: OK "
+            f"({entry_counts['docs']} docs, {entry_counts['guides']} guides, "
+            f"{entry_counts['examples']} examples, "
+            f"{entry_counts['sdkModules']} sdk modules; rev {source_sha[:12]})"
+        )
+        return
+
+    OUT_RS.write_text(rs_text, encoding="utf-8")
+    OUT_META.write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(
+        f"sync-docs: wrote {OUT_RS.relative_to(REPO_ROOT)} "
+        f"({len(rs_text.encode())} bytes) + meta rev {source_sha[:12]} "
+        f"({entry_counts['docs']} docs / {entry_counts['guides']} guides / "
+        f"{entry_counts['examples']} examples / {entry_counts['sdkModules']} modules)"
+    )
+
+
+if __name__ == "__main__":
+    main(check="--check" in sys.argv[1:])
