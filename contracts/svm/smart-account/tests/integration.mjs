@@ -316,9 +316,16 @@ async function main() {
     programId: PROGRAM,
     data: Buffer.concat([Buffer.from([15]), initialAdmin]),
   });
-  await expectOk(
+  // ANT-801 (H3): delegated appoint (initer != initial_admin) is rejected
+  // with Unauthorized — genesis appoints self only, before any state write.
+  await expectErr(
     new Transaction().add(initTreasuryIx(rentPayer.publicKey, adminKp.publicKey.toBuffer())),
     [rentPayer],
+    "delegated treasury appoint rejected (Unauthorized)",
+  );
+  await expectOk(
+    new Transaction().add(initTreasuryIx(adminKp.publicKey, adminKp.publicKey.toBuffer())),
+    [adminKp],
     "init treasury creates config + vault PDAs",
   );
   {
@@ -336,8 +343,8 @@ async function main() {
   }
   // Double-init fails (first-writer-wins, ConfigAlreadyInitialized).
   await expectErr(
-    new Transaction().add(initTreasuryIx(rentPayer.publicKey, adminKp.publicKey.toBuffer())),
-    [rentPayer],
+    new Transaction().add(initTreasuryIx(adminKp.publicKey, adminKp.publicKey.toBuffer())),
+    [adminKp],
     "double init rejected (ConfigAlreadyInitialized)",
   );
   // WithdrawRevenue (16): [treasury, config, admin signer, destination].
