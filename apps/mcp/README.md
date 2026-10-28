@@ -57,11 +57,14 @@ curl -s -X POST $GW/mcp \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_docs","arguments":{"query":"wallet"}}}'
 
-# certification check (AC5, Tristan's remit):
-curl -sI -X POST $GW/mcp \
-  -H 'Accept: application/json, text/event-stream' \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":9,"method":"tools/list","params":{}}' | grep -i '^IC-Certificate'
+# certification check (AC5, Tristan's remit): the query path carries v2
+# certification headers that the gateway verifies (a cert-disabled build
+# gets a 503 "response verification error" instead of the 405 below).
+curl -s -D - -o /dev/null $GW/mcp | grep -i '^IC-Certificate'
+# NOTE: POST /mcp content is served through update calls, which are
+# consensus-certified at the protocol layer (replicas sign, gateway verifies
+# during update polling) and carry no IC-Certificate response headers.
+# The GET check above proves the canister's tree certification end to end.
 ```
 
 ## OpenCode client config (NFR5 minimum client)

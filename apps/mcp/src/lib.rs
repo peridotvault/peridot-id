@@ -17,7 +17,7 @@ pub mod http;
 pub mod protocol;
 pub mod tools;
 
-use http::{certified_fixed, route, serve_fixed, to_candid, HeaderField, HttpRequest, HttpResponse, Route};
+use http::{route, serve_fixed, to_candid, HeaderField, HttpRequest, HttpResponse, Route};
 
 #[ic_cdk::init]
 fn init() {
@@ -42,12 +42,12 @@ fn http_request(req: HttpRequest) -> HttpResponse {
             upgrade: Some(true),
         },
         Route::Fixed(kind) => {
-            let certified = certified_fixed(kind);
             #[cfg(target_arch = "wasm32")]
             let data_certificate = ic_cdk::api::data_certificate();
             #[cfg(not(target_arch = "wasm32"))]
             let data_certificate: Option<Vec<u8>> = None;
-            let served = serve_fixed(data_certificate, &certified, kind.path());
+            let request_path = req.url.split('?').next().unwrap_or("");
+            let served = serve_fixed(data_certificate, kind, request_path);
             to_candid(&served, None)
         }
         // The query path never dispatches MCP calls; the gateway upgrades

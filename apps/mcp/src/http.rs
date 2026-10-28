@@ -65,8 +65,14 @@ pub enum FixedResponse {
 }
 
 impl FixedResponse {
-    pub fn path(&self) -> &'static str {
-        "/mcp"
+    /// Tree path for this response's certification entry: the 405 lives at
+    /// the exact `/mcp` path; the 404 (served for every other request path)
+    /// lives at the `/` wildcard prefix.
+    fn tree_path(&self) -> HttpCertificationPath<'static> {
+        match self {
+            FixedResponse::MethodNotAllowed => HttpCertificationPath::exact("/mcp"),
+            FixedResponse::NotFound => HttpCertificationPath::wildcard("/"),
+        }
     }
 
     pub fn status(&self) -> u16 {
@@ -124,13 +130,16 @@ fn response_only_cel() -> DefaultResponseOnlyCelExpression<'static> {
         .build()
 }
 
-/// A fixed response plus everything needed to certify it. All owned data
-/// (`'static`), so handlers rebuild tree entries per call without shared
-/// mutable state (stateless, ANT-842 FR1).
+/// A fixed response plus everything needed to certify it. All owned data,
+/// rebuilt deterministically per call from [`certified_fixed`] in a fixed
+/// order, so every handler reconstructs the exact tree whose root hash was
+/// persisted by [`install_certification`] — no shared mutable state
+/// (stateless, ANT-842 FR1).
 #[derive(Debug, Clone)]
 pub struct CertifiedFixed {
     pub cel: DefaultResponseOnlyCelExpression<'static>,
     pub response: CertResponse<'static>,
+    pub path: HttpCertificationPath<'static>,
     pub expr_path: Vec<String>,
 }
 
@@ -151,37 +160,68 @@ pub fn certified_fixed(kind: FixedResponse) -> CertifiedFixed {
         .build();
     // Validates the expression header is present and matching.
     HttpCertification::response_only(&cel, &response, None).expect("fixed response certifies");
-    let path = HttpCertificationPath::exact(kind.path());
+    let path = kind.tree_path();
     let expr_path = path.to_expr_path();
     CertifiedFixed {
         cel,
         response,
+        path,
         expr_path,
     }
 }
 
-/// Serve a fixed response, attaching a v2 `IC-Certificate` header when the
-/// gateway supplied a data certificate (`None` on direct `dfx canister call`
-/// invocations: the plain response is returned).
+/// All fixed certifications in insertion order. The order is part of the
+/// tree shape: [`install_certification`] and [`serve_fixed`] must use the
+/// same order so witnesses verify against the persisted root hash.
+fn all_fixed() -> [CertifiedFixed; 2] {
+    [
+        certified_fixed(FixedResponse::MethodNotAllowed),
+        certified_fixed(FixedResponse::NotFound),
+    ]
+}
+
+fn tree_with(entries: &[CertifiedFixed]) -> HttpCertificationTree {
+    let mut tree = HttpCertificationTree::default();
+    for e in entries {
+        let certification =
+            HttpCertification::response_only(&e.cel, &e.response, None).expect("re-certify");
+        tree.insert(&HttpCertificationTreeEntry::new(
+            e.path.clone(),
+            certification,
+        ));
+    }
+    tree
+}
+
+/// Serve a fixed response for `kind`, attaching a v2 `IC-Certificate` header
+/// when the gateway supplied a data certificate (`None` on direct
+/// `dfx canister call` invocations: the plain response is returned).
+/// `request_path` is the actual request path (query string stripped): it must
+/// be `/mcp` for the 405 and the real path for wildcard 404s.
 pub fn serve_fixed(
     data_certificate: Option<Vec<u8>>,
-    certified: &CertifiedFixed,
-    path: &str,
+    kind: FixedResponse,
+    request_path: &str,
 ) -> CertResponse<'static> {
-    let mut response = certified.response.clone();
+    let entries = all_fixed();
+    let found = entries.iter().find(|e| {
+        e.response.status_code().as_u16() == kind.status()
+    });
+    let found = found.expect("fixed entry for kind");
+    let mut response = found.response.clone();
     if let Some(cert) = data_certificate {
+        let tree = tree_with(&entries);
         let certification =
-            HttpCertification::response_only(&certified.cel, &response, None).expect("re-certify");
-        let cert_path = HttpCertificationPath::exact(path.to_string());
-        let entry = HttpCertificationTreeEntry::new(cert_path, certification);
-        let mut tree = HttpCertificationTree::default();
-        tree.insert(&entry);
-        if let Ok(witness) = tree.witness(&entry, path) {
+            HttpCertification::response_only(&found.cel, &found.response, None)
+                .expect("re-certify");
+        let entry =
+            HttpCertificationTreeEntry::new(found.path.clone(), certification);
+        if let Ok(witness) = tree.witness(&entry, request_path) {
             ic_http_certification::utils::add_v2_certificate_header(
                 &cert,
                 &mut response,
                 &witness,
-                &certified.expr_path,
+                &found.expr_path,
             );
         }
     }
@@ -189,21 +229,9 @@ pub fn serve_fixed(
 }
 
 /// Compute the certification root hash over the fixed responses, for
-/// [`install_certification`].
+/// [`install_certification`]. Same entries, same order as [`serve_fixed`].
 pub fn certification_root_hash() -> [u8; 32] {
-    let mut tree = HttpCertificationTree::default();
-    for kind in [FixedResponse::MethodNotAllowed, FixedResponse::NotFound] {
-        let certified = certified_fixed(kind);
-        let certification =
-            HttpCertification::response_only(&certified.cel, &certified.response, None)
-                .expect("re-certify");
-        let entry = HttpCertificationTreeEntry::new(
-            HttpCertificationPath::exact(kind.path()),
-            certification,
-        );
-        tree.insert(&entry);
-    }
-    tree.root_hash()
+    tree_with(&all_fixed()).root_hash()
 }
 
 /// Canister-only: persist the certification root hash. Must run in `init`
@@ -272,14 +300,17 @@ mod tests {
 
     #[test]
     fn certificate_header_attached_with_data_certificate() {
-        let certified = certified_fixed(FixedResponse::MethodNotAllowed);
-        let with_cert = serve_fixed(Some(vec![1, 2, 3]), &certified, "/mcp");
+        let with_cert = serve_fixed(
+            Some(vec![1, 2, 3]),
+            FixedResponse::MethodNotAllowed,
+            "/mcp",
+        );
         assert!(
             with_cert.headers().iter().any(|(n, _)| n == "IC-Certificate"),
             "v2 IC-Certificate header must be present, got: {:?}",
             with_cert.headers()
         );
-        let without_cert = serve_fixed(None, &certified, "/mcp");
+        let without_cert = serve_fixed(None, FixedResponse::MethodNotAllowed, "/mcp");
         assert!(
             without_cert
                 .headers()
@@ -287,6 +318,18 @@ mod tests {
                 .all(|(n, _)| n != "IC-Certificate"),
             "no IC-Certificate header without a data certificate"
         );
+    }
+
+    #[test]
+    fn wildcard_404_covers_arbitrary_paths() {
+        // The 404 entry must witness successfully for a non-/mcp path.
+        let with_cert = serve_fixed(Some(vec![7, 8, 9]), FixedResponse::NotFound, "/other/path");
+        assert!(
+            with_cert.headers().iter().any(|(n, _)| n == "IC-Certificate"),
+            "wildcard 404 must carry a v2 certificate header, got: {:?}",
+            with_cert.headers()
+        );
+        assert_eq!(with_cert.status_code().as_u16(), 404);
     }
 
     #[test]
