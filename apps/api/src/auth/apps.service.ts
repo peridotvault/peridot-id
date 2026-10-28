@@ -13,13 +13,19 @@ import { SecurityEventService } from "../security/security-event.service";
 /**
  * Normalize a developer-supplied origin: strip trailing slashes, reject anything
  * that isn't a bare http(s) origin (no path, query, or fragment).
+ *
+ * ANT-826 F1 (layer 2): wildcards are rejected even if a caller bypasses DTO
+ * validation. Any `*` anywhere in the raw value throws `origin_wildcard`.
  */
 export function normalizeOrigin(value: string): string {
   // Hostnames are case-insensitive; lowercase the whole bare origin (no path allowed).
+  if (value.includes("*")) throw new Error("origin_wildcard");
   const trimmed = value.trim().replace(/\/+$/, "").toLowerCase();
+  if (trimmed.includes("*")) throw new Error("origin_wildcard");
   const parsed = new URL(trimmed);
   if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("origin_not_http");
   if (parsed.origin !== trimmed) throw new Error("origin_not_bare");
+  if (parsed.hostname.includes("*")) throw new Error("origin_wildcard");
   return parsed.origin;
 }
 

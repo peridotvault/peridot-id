@@ -3,6 +3,8 @@ import { IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from "class
 
 export const HANDLE_TAKEN = "HANDLE_TAKEN";
 export const HANDLE_INVALID = "HANDLE_INVALID";
+/** ANT-826 F5: handle frozen while a takedown report is open (until closed). */
+export const HANDLE_UNDER_REVIEW = "HANDLE_UNDER_REVIEW";
 
 /** Idempotency keys are opaque client tokens (1..128 chars). */
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_:.~-]{1,128}$/;
@@ -39,7 +41,7 @@ export class CreateReportDto {
 
   @IsString()
   @MinLength(10, { message: "evidence must describe the claim (min 10 chars)" })
-  @MaxLength(5000)
+  @MaxLength(10000)
   evidence!: string;
 
   @IsString()
