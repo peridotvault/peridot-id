@@ -720,7 +720,12 @@ export class SolanaAdapter {
   }
 
   /**
-   * Sponsored SOL withdrawal, V3. The Peridot relayer signs & pays the network fee;
+   * Sponsored SOL withdrawal, V3 — DEPRECATED (ANT-800, H1).
+   * Closed for new intents: the V3 authorization carries no user-approved
+   * `maxTotalFee`, so an unbounded attested fee could settle. New code MUST use
+   * `sponsoredWithdrawSolV4`. This method stays only to settle in-flight V3
+   * signatures; backend ACTIVE paths no longer call it.
+   * The Peridot relayer signs & pays the network fee;
    * the smart account reimburses the attested `networkFeeLamports` in full plus the
    * on-chain-recomputed `protocolFee` (relayerFee → relayer, protocolFee → revenue
    * vault). The passkey assertion (V3 payload: op-tag, account, nonce/amount/
@@ -796,7 +801,9 @@ export class SolanaAdapter {
   }
 
   /**
-   * Sponsored SPL token withdrawal, V3 (token amount via SPL CPI; attested
+   * Sponsored SPL token withdrawal, V3 — DEPRECATED (ANT-800, H1). Use
+   * `sponsoredWithdrawTokenV4`. Stays only for in-flight V3 settlement.
+   * (token amount via SPL CPI; attested
    * networkFee reimbursed in full plus on-chain-recomputed protocolFee).
    */
   async sponsoredWithdrawTokenV3(
@@ -835,7 +842,8 @@ export class SolanaAdapter {
   }
 
   /**
-   * Sponsored generic execute, V3 (disc 6). The Peridot relayer signs & pays the
+   * Sponsored generic execute, V3 (disc 6) — DEPRECATED (ANT-800, H1). Use
+   * `sponsoredExecuteV4`. Stays only for in-flight V3 settlement. The Peridot relayer signs & pays the
    * network fee; the smart account reimburses the attested `networkFeeLamports`
    * in full plus the on-chain-recomputed `protocolFee`. The passkey assertion
    * (V3 payload: op-tag 6, account, nonce, expiry, policy, `call_hash` — no

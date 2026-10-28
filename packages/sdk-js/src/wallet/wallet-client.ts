@@ -1,7 +1,7 @@
 // Peridot wallet client (task 009) — the PRD_v5 §9 surface over the Solana adapter.
 
 import { PublicKey } from "@peridotvault/pid-core";
-import { b64url, b64urlToBytes, buildActivatePayload, buildActivatePayloadV2, buildActivatePayloadV3, buildExecutePayloadV3, buildUpdateAuthorityPayloadV2, buildUpdateAuthorityPayloadV3, buildWithdrawPayload, buildWithdrawPayloadV2, buildWithdrawPayloadV3, buildWithdrawTokenPayload, buildWithdrawTokenPayloadV2, buildWithdrawTokenPayloadV3, executeCallHash, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
+import { b64url, b64urlToBytes, buildActivatePayload, buildActivatePayloadV2, buildActivatePayloadV3, buildExecutePayloadV4, buildUpdateAuthorityPayloadV2, buildUpdateAuthorityPayloadV3, buildWithdrawPayload, buildWithdrawPayloadV2, buildWithdrawSolPayloadV4, buildWithdrawTokenPayload, buildWithdrawTokenPayloadV2, buildWithdrawTokenPayloadV4, executeCallHash, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import type { NftItem, ParsedTx, PasskeySigner, TokenBalance, TokenInfo, TransactionStatus } from "@peridotvault/pid-solana";
 import type { ApiError, Authority, Chain, ChainAccount, RegistryToken, WalletTransaction } from "@peridotvault/pid-types";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
@@ -452,11 +452,12 @@ export class PeridotWallet {
   }
 
   /**
-   * Relayer-sponsored withdrawal (V3). Peridot's relayer pays the network fee (the smart
+   * Relayer-sponsored withdrawal (V4, ANT-800). Peridot's relayer pays the network fee (the smart
    * account is a PDA and can't); the smart account reimburses the attested network cost
    * in full plus the on-chain-recomputed protocol fee. The client signs the intent plus
-   * the fee policy (never amounts) and echoes the quoted network fee as the drift
-   * reference; the server re-quotes once if fees moved beyond the drift bound.
+   * the fee policy AND the user-approved `maxTotalFee` bound; the V4 program enforces
+   * `total ≤ maxTotalFee` (FeeExceedsMax). V3 payloads are closed (H1) — this client
+   * only signs V4. Fee recipients stay canonical (relayer signer + treasury PDA, M1).
    *
    * Fee-policy v2 (ANT-555): the submit carries the passkey-signed V4 bound
    * `maxTotalFeeLamports` (offered `maxTotalFee`, defaults to the quoted
@@ -478,18 +479,28 @@ export class PeridotWallet {
       quote: NormalizedFeeQuote,
     ): Promise<SponsoredSubmitResult> => {
       const expiry = Math.floor(quote.chainTime) + 300;
+      const maxTotalFee = BigInt(quote.maxTotalFee);
       const p =
         input.asset === "SOL"
-          ? await buildWithdrawPayloadV3(accountId, n, amount, destination, expiry, quote.feePolicyVersion)
-          : await buildWithdrawTokenPayloadV3(
-              accountId,
-              n,
+          ? await buildWithdrawSolPayloadV4({
+              accountId32: accountId,
+              nonce: n,
               amount,
               destination,
               expiry,
-              quote.feePolicyVersion,
-              await adapter.tokenAta(pid, new PublicKey(input.asset)),
-            );
+              feePolicyVersion: quote.feePolicyVersion,
+              maxTotalFee,
+            })
+          : await buildWithdrawTokenPayloadV4({
+              accountId32: accountId,
+              nonce: n,
+              amount,
+              destinationAta: destination,
+              expiry,
+              feePolicyVersion: quote.feePolicyVersion,
+              maxTotalFee,
+              sourceAta: await adapter.tokenAta(pid, new PublicKey(input.asset)),
+            });
       const a = await this.signer().sign(p, {});
       const res = await this.api.post<SponsoredSubmitResult>("/v1/wallet/withdraw", {
         asset: input.asset,
@@ -565,10 +576,11 @@ export class PeridotWallet {
   }
 
   /**
-   * Relayer-sponsored generic execute (V3, disc 6) — wallet parity with the EVM
-   * `execute`: one passkey-signed intent drives an arbitrary Solana call with
-   * the PDA as signer. The client signs `call_hash` (target ‖ metas ‖ data) plus
-   * the fee policy; the server re-quotes once if fees moved beyond the drift bound.
+   * Relayer-sponsored generic execute (V4, disc 13, ANT-800) — wallet parity with the EVM
+   * `executeV4`: one passkey-signed intent drives an arbitrary Solana call with
+   * the PDA as signer. The client signs `call_hash` plus the fee policy AND
+   * `maxTotalFee`; the server re-quotes once if fees moved beyond the drift bound.
+   * V3 execute payloads are closed (H1).
    */
   async execute(input: ExecuteInput, opts?: { expectedPid?: string; onQuote?: FeeApprovalHandler }): Promise<SponsoredSubmitResult> {
     if (!this.passkeySigner) return this.viaPopup("execute", input, opts);
@@ -587,7 +599,7 @@ export class PeridotWallet {
     ): Promise<SponsoredSubmitResult> => {
       const expiry = Math.floor(quote.chainTime) + 300;
       const callHash = await executeCallHash(target, metas, data);
-      const p = await buildExecutePayloadV3(accountId, n, expiry, quote.feePolicyVersion, callHash);
+      const p = await buildExecutePayloadV4(accountId, n, expiry, quote.feePolicyVersion, BigInt(quote.maxTotalFee), callHash);
       const a = await this.signer().sign(p, {});
       const res = await this.api.post<SponsoredSubmitResult>("/v1/wallet/execute", {
         target: input.target,
