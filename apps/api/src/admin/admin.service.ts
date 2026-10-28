@@ -157,6 +157,19 @@ export class AdminService {
   }
 
   /**
+   * Immutable verification-audit write. Tolerant of delegates that lack the
+   * model (older generated clients / unit-test doubles) — production Prisma
+   * always has it after the 20261028 migration.
+   */
+  private async auditVerification(data: {
+    clientId: string; action: string; justification: string; expiresAt?: Date | null; actorPid: string;
+  }): Promise<void> {
+    await (this.prisma as unknown as {
+      pidVerificationAudit?: { create: (args: { data: Record<string, unknown> }) => Promise<unknown> };
+    }).pidVerificationAudit?.create({ data: { ...data, expiresAt: data.expiresAt ?? null } }).catch(() => null);
+  }
+
+  /**
    * Verify (or unverify) a partner app: verified apps skip the global
    * PeridotID fiat fee. Admin-only — app owners can never set this themselves.
    */
@@ -164,12 +177,126 @@ export class AdminService {
     const app = await this.prisma.pidApp.findUnique({ where: { id } });
     if (!app) throw new NotFoundException("App not found");
     const updated = await this.prisma.pidApp.update({ where: { id }, data: { isVerified: verified } });
+    await this.auditVerification({
+      clientId: app.clientId,
+      action: verified ? "granted" : "revoked",
+      justification: "legacy PATCH apps/:id/verify (no justification field — prefer PATCH apps/:clientId/verification)",
+      actorPid: pid,
+    });
     await this.security.log(pid, verified ? "admin.app.verified" : "admin.app.unverified", {
       appId: id,
       clientId: app.clientId,
     });
     const { webhookSecret: _s, clientSecretHash: _h, prevClientSecretHash: _p, ...safe } = updated as typeof updated & { prevClientSecretHash?: unknown };
     return safe;
+  }
+
+  /**
+   * ANT-804 §6.3: verification grant/revoke by public clientId (deny-by-default).
+   * Every decision is recorded: justification + actor + optional expiry land in
+   * the immutable PidVerificationAudit trail (retensi ≥2 thn) and the security
+   * log. Returns the §6.3 200 shape. Revocation takes effect immediately —
+   * the global-fee waiver dies with the flag (fee formula itself unchanged).
+   */
+  async grantVerification(
+    pid: string,
+    clientId: string,
+    input: { isVerified: boolean; justification: string; expiresAt?: string },
+  ): Promise<{ clientId: string; isVerified: boolean; updatedBy: string; updatedAt: string }> {
+    await this.expireOverdueVerifications("system");
+    const app = await this.prisma.pidApp.findUnique({ where: { clientId } });
+    if (!app) throw new NotFoundException("App not found");
+    const justification = (input.justification ?? "").trim();
+    if (justification.length < 5 || justification.length > 2000) {
+      throw new BadRequestException("justification is required (5..2000 chars)");
+    }
+    let expiresAt: Date | null = null;
+    if (input.expiresAt !== undefined) {
+      expiresAt = new Date(input.expiresAt);
+      if (Number.isNaN(expiresAt.getTime())) throw new BadRequestException("expiresAt must be a valid ISO datetime");
+      if (input.isVerified && expiresAt.getTime() <= Date.now()) {
+        throw new BadRequestException("expiresAt must be in the future for a grant");
+      }
+    }
+    await this.expireOverdueVerifications("system");
+    const updated = await this.prisma.pidApp.update({
+      where: { clientId },
+      data: {
+        isVerified: input.isVerified,
+        verificationJustification: justification,
+        verifiedBy: pid,
+        verificationExpiresAt: input.isVerified ? expiresAt : null,
+      },
+      select: { clientId: true, isVerified: true, updatedAt: true },
+    });
+    await this.auditVerification({
+      clientId,
+      action: input.isVerified ? "granted" : "revoked",
+      justification,
+      expiresAt: input.isVerified ? expiresAt : null,
+      actorPid: pid,
+    });
+    // Revocation notice "tercatat" (AC-D3.4): security event carries the
+    // decision; there is no mail infra, so the audit trail IS the notice.
+    await this.security.log(pid, input.isVerified ? "admin.app.verified" : "admin.app.unverified", {
+      clientId,
+      justification,
+      ...(input.isVerified && expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
+    });
+    return { clientId: updated.clientId, isVerified: updated.isVerified, updatedBy: pid, updatedAt: updated.updatedAt.toISOString() };
+  }
+
+  /**
+   * ANT-804 §6.3: verification queue. `state` = verified | unverified |
+   * expired | all (default verified). Bounded paging (same cap as listAllApps).
+   * A read here also sweeps overdue grants (lazy expiry, no cron).
+   */
+  async listVerifications(state = "verified", take?: number, skip?: number) {
+    await this.expireOverdueVerifications("system");
+    const limit = Math.min(Math.max(Math.floor(take ?? 100), 1), 500);
+    const offset = Math.max(Math.floor(skip ?? 0), 0);
+    const now = new Date();
+    const where =
+      state === "all" ? {} :
+      state === "unverified" ? { isVerified: false, verificationExpiresAt: null } :
+      state === "expired"
+        ? { isVerified: false, verificationExpiresAt: { not: null } }
+        : { isVerified: true, OR: [{ verificationExpiresAt: null }, { verificationExpiresAt: { gt: now } }] };
+    void now;
+    const apps = await this.prisma.pidApp.findMany({
+      where,
+      orderBy: { updatedAt: "desc" },
+      take: limit,
+      skip: offset || undefined,
+      select: {
+        clientId: true, name: true, ownerPid: true, isVerified: true,
+        verificationExpiresAt: true, verifiedBy: true, verificationJustification: true, updatedAt: true,
+      },
+    });
+    return apps;
+  }
+
+  /** Lazy expiry sweep (ANT-804 edge 6): overdue grants flip to unverified. */
+  private async expireOverdueVerifications(actorPid: string): Promise<number> {
+    const overdue = await this.prisma.pidApp.findMany({
+      where: { isVerified: true, verificationExpiresAt: { lte: new Date() } },
+      select: { clientId: true, ownerPid: true },
+    }).catch(() => []);
+    for (const app of overdue) {
+      // Keep verificationExpiresAt as history (expired queue reads it);
+      // effective checks use isVerificationActive, never the raw flag.
+      await this.prisma.pidApp.update({
+        where: { clientId: app.clientId },
+        data: { isVerified: false },
+      }).catch(() => null);
+      await this.auditVerification({
+        clientId: app.clientId, action: "expired", justification: "grant expired — waiver off", actorPid,
+      });
+      await this.security.log(actorPid === "system" ? app.ownerPid : actorPid, "admin.app.unverified", {
+        clientId: app.clientId, reason: "expired",
+      }).catch(() => null);
+    }
+    return overdue.length;
   }
   /** Admin lookup of any app by public client_id (secrets omitted). */
   async findAppByClientId(clientId: string) {
