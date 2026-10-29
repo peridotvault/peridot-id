@@ -99,6 +99,26 @@ describe("RotateService", () => {
     expect(security.log).toHaveBeenCalledWith(IDENTITY_ID, "credential.rotated", expect.any(Object));
   });
 
+  it("derives the vault from the RECORDED claiming key on second rotation (ANT-866/F1)", async () => {
+    // First rotation already revoked K0: oldest-active is now K1, but the
+    // vault still binds K0 (recorded at activation-heal). The second rotation
+    // must derive from K0, not oldest.
+    const { service, prisma } = setup();
+    const CLAIM = Buffer.from("02" + "11".repeat(32), "hex");
+    (prisma.chainAccount.findFirst as jest.Mock).mockResolvedValue({
+      id: "chain-1",
+      pid: IDENTITY_ID,
+      address: SMART_ADDR,
+      accountType: "smart_account",
+      status: "active",
+      claimAuthority: CLAIM,
+    });
+    const res = await service.rotate(IDENTITY_ID, base);
+    expect(res.signature).toBe("sig-rotate");
+    const call = (adapterMock.submitRotateAuthorityTx as jest.Mock).mock.calls[0];
+    expect(Buffer.from(call[call.length - 1] as Uint8Array)).toEqual(CLAIM);
+  });
+
   it("rejects when the assertion is not from the current credential", async () => {
     const { service } = setup();
     await expect(

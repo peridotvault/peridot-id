@@ -245,12 +245,21 @@ export class SponsoredWithdrawService {
   }
 
   /**
-   * Claiming key for PDA derivation (ANT-866 B1): the oldest active
-   * credential. API-managed vaults always bind this key (activation with any
-   * other key fails closed on-chain), so derivation stays correct across
-   * rotations while signing uses the asserting credential.
+   * Claiming key for PDA derivation (ANT-866 B1 + F1 fix): the key recorded
+   * on the chain row at activation-heal time. Falls back to oldest-active
+   * only for pre-B1 rows that have never healed (best-effort legacy path).
+   * NEVER oldest-active unconditionally: rotation revokes the oldest row and
+   * multi-key activation may claim with a newer key — both flip oldest away
+   * from the claiming key and would derive an unclaimable PDA (fail-closed
+   * on-chain, availability outage off-chain). The claiming key is per-pid
+   * (all rows of one identity bind the same key), so any smart row serves.
    */
   private async derivationAuthority(pid: string): Promise<Uint8Array> {
+    const row = await this.prisma.chainAccount.findFirst({
+      where: { pid, accountType: "smart_account" },
+      orderBy: { createdAt: "asc" },
+    });
+    if (row?.claimAuthority) return new Uint8Array(row.claimAuthority);
     const oldest = await requireActiveAuthority(this.prisma, pid);
     return coseToCompressedSecp256r1(Buffer.from(oldest.publicKey)) as unknown as Uint8Array;
   }

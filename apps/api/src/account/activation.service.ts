@@ -411,7 +411,15 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`svm address heal for ${user.pid}: ${chain.address} → ${boundAddress} (B1 binding)`);
         await this.prisma.chainAccount.update({
           where: { id: chain.id },
-          data: { address: boundAddress, activationBalance: null, activationRequired: null },
+          data: {
+            address: boundAddress,
+            activationBalance: null,
+            activationRequired: null,
+            // ANT-866/F1: the asserting key IS the claiming key by definition
+            // (the claim about to be broadcast commits to it). All later
+            // derivation reads this recorded key — never oldest-active.
+            claimAuthority: Buffer.from(assertingKey),
+          },
         });
         chain.address = boundAddress;
       }

@@ -58,10 +58,18 @@ export class RotateService {
   }
 
   /**
-   * Claiming key for PDA derivation (ANT-866 B1): the oldest active
-   * credential. Rotation never changes it (see `submitAndConfirm` callers).
+   * Claiming key for PDA derivation (ANT-866 B1 + F1 fix): the key recorded
+   * on the chain row at activation-heal time, falling back to oldest-active
+   * only for pre-B1 rows that never healed. See sponsored-withdraw's
+   * `derivationAuthority` for why oldest-active alone is wrong.
    */
   private async derivationAuthority(pid: string): Promise<Uint8Array> {
+    const row = await this.prisma.chainAccount.findFirst({
+      where: { pid, accountType: "smart_account" },
+      orderBy: { createdAt: "asc" },
+    });
+    const claimKey = (row as { claimAuthority?: Buffer | Uint8Array | null } | null)?.claimAuthority;
+    if (claimKey) return new Uint8Array(claimKey);
     const oldest = await this.prisma.authority.findFirst({
       where: { pid, status: "active" },
       orderBy: { createdAt: "asc" },

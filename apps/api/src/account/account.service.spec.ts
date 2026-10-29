@@ -64,8 +64,15 @@ describe("AccountService", () => {
         chainId: "chain-sol",
         address: expected,
         accountType: SMART,
+        claimAuthority: expect.anything(),
       },
     });
+    // F1: the claiming key is recorded (oldest-active at setup; activation
+    // overwrites with the asserting key).
+    const { coseToCompressedSecp256r1: compress } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
+    expect((prisma.chainAccount.create as jest.Mock).mock.calls[0][0].data.claimAuthority).toEqual(
+      compress(coseKey()),
+    );
     expect(security.log).toHaveBeenCalledWith("ifal@pid", "account.created", {});
     expect(views[0].address).not.toBe(DERIVED); // stale keyless PDA, never seeded
   });

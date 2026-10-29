@@ -148,8 +148,11 @@ impl<'data> SmartAccount<'data> {
     }
 
     /// Fail closed unless the vault is ACTIVE (ANT-866 B1): spend, rotate,
-    /// withdraw, and session operations must not run inside the close grace
-    /// window (`STATUS_CLOSING`) — only `close_cancel`/`close_finalize` may.
+    /// withdraw, registration, and gameplay operations must not run inside
+    /// the close grace window (`STATUS_CLOSING`) — only `close_cancel` /
+    /// `close_finalize` may, plus the session-teardown paths
+    /// (`revoke_session`, `close_session`), which stay live deliberately so
+    /// session rent can always be recovered before finalize orphans it.
     /// Pure: host-testable alongside the time check below.
     pub fn require_active(&self) -> Result<(), PeridotError> {
         if self.data[OFF_STATUS] != STATUS_ACTIVE {

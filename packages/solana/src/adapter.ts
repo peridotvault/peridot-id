@@ -982,7 +982,7 @@ export class SolanaAdapter {
     derivationAuthority?: Uint8Array,
   ): Promise<string> {
     const claimAuthority = derivationAuthority ?? currentAuthorityCompressed;
-    return this.requestClose(pid, currentAuthorityCompressed, destination, feePayer, signer, opts);
+    return this.requestClose(pid, currentAuthorityCompressed, destination, feePayer, signer, opts, claimAuthority);
   }
 
   /** ANT-866 B1 `close_request` (disc 33): see `close` (kept name for caller compat). */
@@ -993,11 +993,15 @@ export class SolanaAdapter {
     feePayer: Keypair,
     signer: PasskeySigner,
     opts: { allowCredentialId?: string; expiryTtlSeconds?: number } = {},
+    derivationAuthority?: Uint8Array,
   ): Promise<string> {
-    const smartAccount = this.getAddress(pid, currentAuthorityCompressed);
+    // ANT-866/F2: vault+ticket+nonce resolve under the CLAIMING key, which
+    // may differ from the signing (current) key post-rotation.
+    const claimAuthority = derivationAuthority ?? currentAuthorityCompressed;
+    const smartAccount = this.getAddress(pid, claimAuthority);
     const accountId = pidToSeed32(pid);
-    const ticket = deriveTicketAddress(accountId, currentAuthorityCompressed, this.programId).address;
-    const nonce = await this.getNonce(pid, currentAuthorityCompressed);
+    const ticket = deriveTicketAddress(accountId, claimAuthority, this.programId).address;
+    const nonce = await this.getNonce(pid, claimAuthority);
     const expiry = (await this.rpc.getBlockTime()) + (opts.expiryTtlSeconds ?? DEFAULT_EXPIRY_TTL_SECONDS);
 
     const payload = await buildCloseRequestPayload(accountId, nonce, destination, expiry);

@@ -30,7 +30,7 @@ import {
   exceedsDriftBound,
   MAX_TTL_SECS,
 } from "../common/solana-relay";
-import { coseToRawXy } from "../credentials/cose";
+import { coseToCompressedSecp256r1, coseToRawXy } from "../credentials/cose";
 import { PID_EVM_POLL_MS } from "../common/app-config";
 import { FeePolicyService } from "../fee/fee-policy.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -610,16 +610,23 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
 
     await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "activating" } });
     try {
-      const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
-      // B1 (ANT-866): the claim target is the PID-KEY BOUND address. Heal
-      // pre-binding rows (keyless derivation) so funding/verification land on
-      // the only address this key can claim.
+      // ANT-866/F1: the claim target is the bound PDA of the ASSERTING key
+      // (claim-time binding — the key this activation registers). Oldest-active
+      // is NOT used here: activating with a newer key while deriving from the
+      // oldest would broadcast to an address no signature can claim.
+      const { x, y } = coseToRawXy(Buffer.from(asserting.publicKey));
       const boundAddress = adapter.getAddressBound(user.pid, new Uint8Array(x), new Uint8Array(y));
       if (row.address.toLowerCase() !== boundAddress.toLowerCase()) {
         this.logger.warn(`evm address heal for ${user.pid}: ${row.address} → ${boundAddress} (B1 binding)`);
         await this.prisma.chainAccount.update({
           where: { id: row.id },
-          data: { address: boundAddress, activationBalance: null, activationRequired: null },
+          data: {
+            address: boundAddress,
+            activationBalance: null,
+            activationRequired: null,
+            // The asserting key IS the claiming key by definition.
+            claimAuthority: new Uint8Array(coseToCompressedSecp256r1(Buffer.from(asserting.publicKey))),
+          },
         });
         row.address = boundAddress;
       }

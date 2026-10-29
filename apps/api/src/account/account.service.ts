@@ -90,6 +90,9 @@ export class AccountService {
               chainId: chain.id,
               address: evm.address,
               accountType: ACCOUNT_TYPE_SMART,
+              // Provisional claiming key (oldest active); activation-heal
+              // overwrites with the asserting key (ANT-866/F1).
+              claimAuthority: new Uint8Array(coseToCompressedSecp256r1(Buffer.from(authority.publicKey))),
             },
           });
         } catch (err) {
@@ -123,9 +126,11 @@ export class AccountService {
       where: { pid, status: "active" },
       orderBy: { createdAt: "asc" },
     });
-    const derived = authority
-      ? deriveSmartAccountAddress(pid, programId, coseToCompressedSecp256r1(Buffer.from(authority.publicKey))).address
-      : null;
+    // ANT-866/F1: the claiming key recorded here is provisional (oldest
+    // active at setup); activation-heal overwrites it with the ASSERTING key,
+    // which is by definition the key the claim commits to.
+    const claimKey = authority ? coseToCompressedSecp256r1(Buffer.from(authority.publicKey)) : null;
+    const derived = claimKey ? deriveSmartAccountAddress(pid, programId, claimKey).address : null;
     const existingChain = await this.prisma.chainAccount.findFirst({
       where: {
         pid,
@@ -134,7 +139,7 @@ export class AccountService {
       },
     });
     if (!existingChain) {
-      if (derived === null) {
+      if (claimKey === null || derived === null) {
         // No passkey yet: defer the Solana row too (see above). EVM rows
         // defer the same way; getChains throws NotFound until any row lands.
       } else {
@@ -146,6 +151,7 @@ export class AccountService {
               chainId,
               address: derived,
               accountType: ACCOUNT_TYPE_SMART,
+              claimAuthority: Buffer.from(claimKey),
             },
           });
           await this.security.log(pid, "account.created", {});
@@ -160,7 +166,13 @@ export class AccountService {
       // would target a stale address that holds no funds.
       await this.prisma.chainAccount.update({
         where: { id: existingChain.id },
-        data: { address: derived, status: "inactivated", activationBalance: null, activationRequired: null },
+        data: {
+          address: derived,
+          status: "inactivated",
+          activationBalance: null,
+          activationRequired: null,
+          ...(claimKey ? { claimAuthority: Buffer.from(claimKey) } : {}),
+        },
       });
     }
 
