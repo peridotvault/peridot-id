@@ -107,3 +107,42 @@ test("activate honors a raised maxTotalFee (drift headroom)", async () => {
   await wallet.activate();
   assert.equal(api.posts[0].body.maxTotalFeeLamports, "30000");
 });
+
+// ANT-895/B2: activate signs the V4 payload (binds maxTotalFee) — the relayer
+// only broadcasts activateV4, and a V3-signed assertion would fail on-chain.
+test("activate signs the V4 payload binding policy + maxTotalFee + expiry", async () => {
+  const { buildActivatePayloadV4, buildActivatePayloadV3, pidToSeed32 } = await import("@peridotvault/pid-solana");
+  let signed = null;
+  const capturing = {
+    async sign(payload) {
+      signed = payload;
+      return {
+        credentialId: "cred-1",
+        signature: new Uint8Array([1, 2]),
+        authenticatorData: new Uint8Array([3]),
+        clientDataJSON: new Uint8Array([4]),
+      };
+    },
+  };
+  const api = mockApi(V2_VIEW);
+  const wallet = new PeridotWallet(api, { passkeySigner: capturing });
+  await wallet.activate();
+  assert.ok(signed, "expected a passkey signature");
+  const authority = new Uint8Array(33).fill(7);
+  const expiry = Math.floor(V2_VIEW.chainTime) + 300;
+  const expectedV4 = await buildActivatePayloadV4(
+    pidToSeed32("alice@pid"),
+    authority,
+    V2_VIEW.feePolicyVersion,
+    BigInt(V2_VIEW.maxTotalFee),
+    expiry,
+  );
+  assert.deepEqual(Buffer.from(signed), Buffer.from(expectedV4));
+  const legacyV3 = await buildActivatePayloadV3(
+    pidToSeed32("alice@pid"),
+    authority,
+    V2_VIEW.feePolicyVersion,
+    expiry,
+  );
+  assert.notDeepEqual(Buffer.from(signed), Buffer.from(legacyV3));
+});

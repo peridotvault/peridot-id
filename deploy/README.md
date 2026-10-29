@@ -303,6 +303,89 @@ Uses the shared infra Postgres server (`infra` `services` profile) — one serve
 many app databases. `db-init.sh` calls `/opt/infra/scripts/createdb.sh` to create
 the `peridot_id` role + database, then runs `prisma migrate deploy`.
 
+## SVM program deploy + treasury init (atomic, ANT-869)
+
+The revenue vault (`InitTreasury`, disc 15) is **first-writer-wins**: whoever
+lands `init_treasury` first becomes `admins[0]` and owns the fee stream via
+`WithdrawRevenue`. The contract (ANT-801 H3) additionally binds
+`initial_admin == initer signer` — genesis appoints self only, anything else
+fails `Unauthorized` (0x2). The deploy flow below closes the remaining
+deploy→init frontrunner window by running init **back-to-back in the same
+operator execution**, then verifying on-chain before declaring success.
+
+### Keys
+
+| Key | Role | Storage |
+|---|---|---|
+| Operator keypair | Upgrade authority (fresh deploys) + initer + `admins[0]` (same key, one execution) | Operator machine only, 0600. Never in repo, logs, or chat — reference the path, never the bytes |
+| Program keypair | Program id (`solana-keygen pubkey`) | Generated once per program; keep — redeploys/upgrades need it |
+| Buffer keypair | Ephemeral upgrade buffer | Generated + deleted inside the script; never stored |
+
+`PID_PROGRAM_ID` baked at build time (`cargo build-sbf`) MUST equal the
+program keypair pubkey (ANT-215 guard, enforced by the script's Step 0 and by
+the on-chain `check_id` gate). Mismatch = rebuild or wrong keypair, never
+override.
+
+### Order (never reorder, never skip)
+
+```sh
+export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
+PID_PROGRAM_ID=<program-id> cargo build-sbf        # contracts/svm/smart-account
+# fresh:
+./deploy/svm-deploy-init-atomic.sh \
+  --program-keypair <program-keypair.json> \
+  --operator-keypair <operator-keypair.json> \
+  --rpc-url <cluster-rpc> \
+  --so-path contracts/svm/smart-account/target/deploy/peridot_smart_account.so
+# existing program:
+./deploy/svm-deploy-init-atomic.sh --upgrade --program-id <program-id> ... # same flags
+```
+
+### Verification gate — before ANY funding
+
+```sh
+node deploy/svm-verify-treasury.mjs <program-id> \
+  --expected-admin <operator-pubkey> \
+  --rpc-url <cluster-rpc>          # read-only: no keypair, sends nothing
+# exit 0 = PASS (config v1, admin_count>=1, admins[0]==operator,
+#          config+treasury PDAs program-owned). Anything else = Do NOT fund.
+```
+
+No SOL, no tokens, no relayer funding moves to the treasury until this prints
+`OK treasury verified`. The verify script is safe to run against any cluster
+at any time.
+
+### Genesis admin decision (recorded, ANT-869 §3)
+
+**No hardcoded genesis admin in program code.** Rationale: the program id
+itself is already the trust anchor (baked `PID_PROGRAM_ID` + on-chain
+`check_id` gate); a hardcoded admin pubkey would add a rebuild-and-redeploy
+rotation path for zero frontrunning benefit, because H3 (`initial_admin ==
+initer`) + atomic deploy+init already makes the operator the only possible
+genesis admin. The admin set stays mutable on-chain (`AddAdmin`/`RemoveAdmin`)
+for rotation without redeploys.
+
+### Rollback
+
+Treasury init is **irreversible** on that program id (first-writer-wins has no
+undo). If init is not yours (script exits 3/4, or verify FAILs): do NOT retry
+init — redeploy under a **fresh** program keypair (new program id) and re-run
+the atomic flow. Never reuse a raced program id in production.
+
+### Mainnet gate
+
+NEVER run any of the above against mainnet without a board order recorded in
+the ticket. Local validator and devnet dry-runs are the default proof (paste
+tx sigs + `solana account` dumps in the task comment).
+
+### Observability
+
+Failures are unambiguous and name the recovery: the atomic script prints
+`ALERT ...` lines, the verify script prints `FAIL treasury verify: ...`
+(3am rule: any non-zero exit means "do NOT declare success / do NOT proceed
+to funding").
+No secret bytes ever enter logs — only pubkeys and signatures.
+
 ## Notes
 
 - Images build from source on the VPS (serially via `./deploy/up.sh`: api, app, dashboard); the

@@ -554,6 +554,52 @@ pub fn check_session_time(expires_at: i64, last_used: i64, now: i64) -> Result<(
 mod session_time_tests {
     use super::*;
 
+    /// Rent-exempt minimum (protocol constants, stable since genesis):
+    /// `(ACCOUNT_STORAGE_OVERHEAD + data_len) * LAMPORTS_PER_BYTE_YEAR * 2`.
+    /// Reference: a 0-byte account is 890_880 lamports.
+    const LAMPORTS_PER_BYTE_YEAR: u64 = 3_480;
+    const ACCOUNT_STORAGE_OVERHEAD: usize = 128;
+    const EXEMPTION_YEARS: u64 = 2;
+
+    fn rent_exempt_minimum(data_len: usize) -> u64 {
+        ((ACCOUNT_STORAGE_OVERHEAD + data_len) as u64)
+            * LAMPORTS_PER_BYTE_YEAR
+            * EXEMPTION_YEARS
+    }
+
+    #[test]
+    fn record_sizes_are_pinned() {
+        // ANT-870 P6.2: any layout growth moves these AND the rent pins
+        // below — rent-exemption boundaries must be re-derived deliberately.
+        // (ANT-863 B3 grew the session record 205 → 206 with the stamped
+        // generation byte; v1 205-byte records stay readable.)
+        assert_eq!(STATE_LEN_V1, 80);
+        assert_eq!(STATE_LEN_V2, 80);
+        assert_eq!(SESSION_STATE_LEN, 206);
+        assert_eq!(super::SESSION_STATE_LEN_V1, 205);
+    }
+
+    #[test]
+    fn rent_exemption_boundaries() {
+        // Sanity against the well-known 0-byte figure first.
+        assert_eq!(rent_exempt_minimum(0), 890_880);
+        // Vault record (80B) and session record (206B) minimums.
+        assert_eq!(rent_exempt_minimum(STATE_LEN_V2), 1_447_680);
+        assert_eq!(rent_exempt_minimum(SESSION_STATE_LEN), 2_324_640);
+    }
+
+    #[test]
+    fn rent_growth_headroom() {
+        // Future growth stays exactly computable: +32B on the vault and +64B
+        // on the session record (e.g. new authority fields) cost this much.
+        assert_eq!(rent_exempt_minimum(STATE_LEN_V2 + 32), 1_670_400);
+        assert_eq!(rent_exempt_minimum(SESSION_STATE_LEN + 64), 2_770_080);
+        // Close/drain edge: reclaiming a record returns its FULL rent minimum
+        // — close paths must move `lamports()` whole, never a cached figure.
+        assert!(rent_exempt_minimum(SESSION_STATE_LEN) > rent_exempt_minimum(0));
+        assert!(rent_exempt_minimum(STATE_LEN_V2) > rent_exempt_minimum(0));
+    }
+
     #[test]
     fn usable_inside_window() {
         assert!(check_session_time(2000, 1000, 1500).is_ok());

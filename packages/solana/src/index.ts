@@ -5,6 +5,7 @@ export {
   buildActivatePayload,
   buildActivatePayloadV2,
   buildActivatePayloadV3,
+  buildActivatePayloadV4,
   pidToSeed32,
   buildAuthorizationPayload,
   buildAuthorizationPayloadV2,

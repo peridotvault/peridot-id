@@ -199,7 +199,8 @@ describe("EvmActivationService", () => {
     const { service } = setup(); // no relayer secret
     await expect(service.activate({ pid: IDENTITY_ID }, "97", {
       quotedNetworkFeeWei: "1000000000000000",
-      feePolicyVersion: 1,
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
       deadline: 1000000300,
       assertion: {
         id: "cred-1",
@@ -217,7 +218,8 @@ describe("EvmActivationService", () => {
     const { service } = setup("0x" + "11".repeat(32));
     await expect(service.activate({ pid: IDENTITY_ID }, "97", {
       quotedNetworkFeeWei: "1000000000000000",
-      feePolicyVersion: 1,
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
       deadline: 1000000300,
       assertion: {
         id: "cred-1",
@@ -258,7 +260,8 @@ describe("EvmActivationService", () => {
     });
     const view = await service.activate({ pid: IDENTITY_ID }, "97", {
       quotedNetworkFeeWei: "1000000000000000",
-      feePolicyVersion: 1,
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
       deadline: 1000000300,
       assertion: {
         id: "cred-1",
@@ -303,7 +306,8 @@ describe("EvmActivationService", () => {
     });
     await service.activate({ pid: IDENTITY_ID }, "97", {
       quotedNetworkFeeWei: "1000000000000000",
-      feePolicyVersion: 1,
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
       deadline: 1000000300,
       assertion: {
         id: "cred-1",
@@ -351,7 +355,8 @@ describe("EvmActivationService", () => {
     const { service, security } = setup("0x" + "11".repeat(32));
     await expect(service.activate({ pid: IDENTITY_ID }, "97", {
       quotedNetworkFeeWei: "1",
-      feePolicyVersion: 1,
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
       deadline: 1000000300,
       assertion: {
         id: "cred-1",
@@ -412,7 +417,8 @@ describe("EvmActivationService", () => {
     });
     const view = await service.activate({ pid: IDENTITY_ID }, "97", {
       quotedNetworkFeeWei: "291666666666667",
-      feePolicyVersion: 1,
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
       deadline: 1000000300,
       assertion: {
         id: "cred-1",
@@ -432,7 +438,8 @@ describe("EvmActivationService", () => {
     const { service } = setup("0x" + "11".repeat(32));
     await expect(service.activate({ pid: IDENTITY_ID }, "97", {
       quotedNetworkFeeWei: "291666666666666",
-      feePolicyVersion: 1,
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
       deadline: 1000000300,
       assertion: {
         id: "cred-1",
@@ -449,7 +456,8 @@ describe("EvmActivationService", () => {
     const { service } = setup("0x" + "11".repeat(32));
     await expect(service.activate({ pid: IDENTITY_ID }, "97", {
       quotedNetworkFeeWei: "1000000000000000",
-      feePolicyVersion: 1,
+      feePolicyVersion: 2,
+      maxTotalFeeWei: "525000000000000",
       deadline: 1000000901,
       assertion: {
         id: "cred-1",
@@ -518,6 +526,27 @@ describe("EvmActivationService", () => {
     // deployAndInitV4 selector (fee-capped activation), not V3.
     expect(calldata.slice(0, 10).toLowerCase()).not.toBe("0x00000000");
     expect(prisma.transaction.create).toHaveBeenCalled();
+  });
+
+  it("activate with policy 1 is rejected (V3 sunset, ANT-895/B2)", async () => {
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    const sendDeploy = jest.fn();
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = sendDeploy;
+    await expect(service.activate({ pid: IDENTITY_ID }, "97", {
+      quotedNetworkFeeWei: "1000000000000000",
+      feePolicyVersion: 1,
+      maxTotalFeeWei: "525000000000000",
+      deadline: 1000000300,
+      assertion: {
+        id: "cred-1",
+        r: "0x" + "11".repeat(32),
+        s: "0x" + "22".repeat(32),
+        authenticatorData: "00".repeat(37),
+        clientDataJSON: Buffer.from("{}").toString("base64url"),
+      },
+    })).rejects.toThrow(/sunset/i);
+    expect(sendDeploy).not.toHaveBeenCalled();
   });
 
   it("activate with policy 2 requires maxTotalFeeWei", async () => {
@@ -805,6 +834,22 @@ describe("EVM lazy first-action (WS2 — WS1 §3.1/§5/§7)", () => {
       v4.mockRestore();
       v3.mockRestore();
     }
+  });
+
+  it("execute leg with policy 1 is rejected (V3 sunset, ANT-895/B2)", async () => {
+    code = "0x6080604052";
+    balance = "0x" + (10n ** 18n).toString(16);
+    const { service } = setup("0x" + "11".repeat(32));
+    (service as unknown as { sendDeployTx: jest.Mock }).sendDeployTx = jest.fn();
+    mockExecuteLeg(service as never, "0xexecV4");
+    const dto = firstActionDto();
+    const err = await service.activateAndExecute({ pid: IDENTITY_ID }, "97", {
+      ...dto,
+      execute: { ...dto.execute, feePolicyVersion: 1 },
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(String((err as Error).message)).toMatch(/sunset/i);
+    expect((service as unknown as { sendExecuteTx: jest.Mock }).sendExecuteTx).not.toHaveBeenCalled();
   });
 
   it("duplicate firstActionId returns the same execute hash without rebroadcast (AC-16)", async () => {
