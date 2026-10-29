@@ -380,8 +380,10 @@ tx sigs + `solana account` dumps in the task comment).
 
 ### Observability
 
-Every failure prints an `ALERT` line naming the recovery (3am rule: any
-non-zero exit means "do NOT declare success / do NOT proceed to funding").
+Failures are unambiguous and name the recovery: the atomic script prints
+`ALERT ...` lines, the verify script prints `FAIL treasury verify: ...`
+(3am rule: any non-zero exit means "do NOT declare success / do NOT proceed
+to funding").
 No secret bytes ever enter logs — only pubkeys and signatures.
 
 ## Notes
