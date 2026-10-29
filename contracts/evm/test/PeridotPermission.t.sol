@@ -148,20 +148,26 @@ contract PeridotPermissionTest is Test {
     }
 
     function _sigOwner(bytes32 payload) internal returns (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) {
-        auth = _authData();
-        client = _clientData(payload);
-        bytes32 h = sha256(bytes.concat(auth, sha256(client)));
-        (r, s) = _sign(1, h);
+        return _sigAs(1, payload);
     }
 
     function _sigSession(bytes32 payload)
         internal
         returns (bytes memory auth, bytes memory client, bytes32 r, bytes32 s)
     {
+        return _sigAs(2, payload);
+    }
+
+    /// @dev Sign `payload` with an explicit P-256 privkey (rotation tests:
+    /// owner and session keys change hands across rotations).
+    function _sigAs(uint256 privKey, bytes32 payload)
+        internal
+        returns (bytes memory auth, bytes memory client, bytes32 r, bytes32 s)
+    {
         auth = _authData();
         client = _clientData(payload);
         bytes32 h = sha256(bytes.concat(auth, sha256(client)));
-        (r, s) = _sign(2, h);
+        (r, s) = _sign(privKey, h);
     }
 
     // ---- payload builders (mirror the contract field-for-field) ----
@@ -254,20 +260,29 @@ contract PeridotPermissionTest is Test {
     /// @dev Grant a NONFINANCIAL permission (v2). perTxCap/totalLimit/nftId must
     /// be 0 under Option A hygiene; feeLimit caps lifetime session fees.
     function _grant(address target, bytes4 selector, uint256 feeLimit) internal returns (bytes32 pid) {
+        return _grantAs(1, SX, SY, target, selector, feeLimit);
+    }
+
+    /// @dev Grant with explicit owner privkey + session key (rotation tests:
+    /// after `updateAuthority` the owner is no longer privkey 1).
+    function _grantAs(uint256 ownerPriv, bytes32 sessX, bytes32 sessY, address target, bytes4 selector, uint256 feeLimit)
+        internal
+        returns (bytes32 pid)
+    {
         uint64 validAfter = 1_000_000;
         uint64 validUntil = 1_000_000 + 7 days;
         bytes32 salt = keccak256(abi.encode(target, selector, feeLimit, block.timestamp, account.nonce()));
-        pid = _pid(SX, SY, 1, target, selector, address(0), address(0), 0, validUntil, salt);
+        pid = _pid(sessX, sessY, 1, target, selector, address(0), address(0), 0, validUntil, salt);
         bytes32 payload = _grantPayload(
-            pid, SX, SY, 1, target, selector, address(0), address(0), 0, 0, feeLimit, 0, validAfter, validUntil,
+            pid, sessX, sessY, 1, target, selector, address(0), address(0), 0, 0, feeLimit, 0, validAfter, validUntil,
             account.nonce(), DEADLINE
         );
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigAs(ownerPriv, payload);
         account.grantPermission(
             PeridotAccount.GrantArgs({
                 permissionId: pid,
-                sessionX: SX,
-                sessionY: SY,
+                sessionX: sessX,
+                sessionY: sessY,
                 kind: 1,
                 target: target,
                 selector: selector,
@@ -355,8 +370,24 @@ contract PeridotPermissionTest is Test {
         uint256 maxTotalFee,
         uint256 netFee
     ) internal {
+        _execFullAs(2, pid, target, value, data, seq, policy, maxTotalFee, netFee);
+    }
+
+    /// @dev Full v2 execution signed by an explicit session privkey (rotation
+    /// tests: the session key may differ from privkey 2 after re-grants).
+    function _execFullAs(
+        uint256 sessPriv,
+        bytes32 pid,
+        address target,
+        uint256 value,
+        bytes memory data,
+        uint64 seq,
+        uint16 policy,
+        uint256 maxTotalFee,
+        uint256 netFee
+    ) internal {
         bytes32 payload = _execPayload(pid, seq, target, value, data, DEADLINE, policy, maxTotalFee);
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigAs(sessPriv, payload);
         account.executeWithPermission(pid, target, value, data, DEADLINE, seq, policy, maxTotalFee, netFee, auth, client, r, s);
     }
 
@@ -394,6 +425,14 @@ contract PeridotPermissionTest is Test {
     /// validAfter/validUntil/seq/kind/revoked. Proves the sunset path: legacy
     /// records keep v1 semantics, financial ones stay dead.
     function _fabricateRecord(bytes32 pid, uint8 kind, address target, bytes4 selector) internal {
+        _fabricateRecordGen(pid, kind, target, selector, 0);
+    }
+
+    /// @dev Fabricate with an explicit stamped generation (ANT-868 B3: the
+    /// struct-appended `generation` u8 lives at record slot base+12; 0 =
+    /// pre-upgrade legacy). Pins the struct layout: `getPermission` must read
+    /// the stamped value back.
+    function _fabricateRecordGen(bytes32 pid, uint8 kind, address target, bytes4 selector, uint8 gen) internal {
         bytes32 base = keccak256(abi.encode(pid, uint256(3)));
         vm.store(address(account), base, SX);
         vm.store(address(account), bytes32(uint256(base) + 1), SY);
@@ -403,6 +442,18 @@ contract PeridotPermissionTest is Test {
         vm.store(address(account), bytes32(uint256(base) + 2), bytes32(packed));
         uint256 scopeWord = uint256(uint160(target)) | (uint256(uint32(selector)) << 160);
         vm.store(address(account), bytes32(uint256(base) + 3), bytes32(scopeWord));
+        vm.store(address(account), bytes32(uint256(base) + 12), bytes32(uint256(gen)));
+        assertEq(account.getPermission(pid).generation, gen, "generation slot moved - update test");
+    }
+
+    /// @dev Rotate the owner authority with an explicit owner privkey.
+    function _rotate(uint256 ownerPriv, bytes32 newX, bytes32 newY) internal {
+        uint64 n = account.nonce();
+        bytes32 payload = keccak256(
+            abi.encodePacked(DOMAIN_V3, uint8(0x03), block.chainid, address(account), n, newX, newY, DEADLINE)
+        );
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigAs(ownerPriv, payload);
+        account.updateAuthority(newX, newY, DEADLINE, auth, client, r, s);
     }
 
     // ---- happy paths (non-financial only) ----
@@ -681,6 +732,149 @@ contract PeridotPermissionTest is Test {
         (bytes memory a3, bytes memory c3, bytes32 r3, bytes32 s3) = _sigOwner(execPayload2);
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
         account.executeV4(address(0x1234), 0, "", DEADLINE, POLICY_V1, 0, 0, a3, c3, r3, s3);
+    }
+
+    // ---- ANT-868 B3: rotation revokes sessions (EVM parity of the SVM u8 epoch) ----
+
+    /// @dev Grant → exec → rotate → stale. The pre-rotation session dies with
+    /// `SessionStaleGeneration` (not BadSeq/Unauthorized), and a re-grant
+    /// under the new owner recovers. Fails on old code: no epoch exists so
+    /// the post-rotation exec succeeds.
+    function test_RotateRevokesSessionsV2() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
+        assertEq(account.sessionGeneration(), 0, "fresh epoch must be 0");
+        assertEq(account.getPermission(pid).generation, 0, "grant must stamp current epoch");
+        _exec(pid, address(evil), 0, abi.encodeCall(EvilTarget.poke, (42)), 0);
+        assertEq(evil.number(), 42);
+
+        _rotate(1, SX, SY);
+        assertEq(account.sessionGeneration(), 1, "rotation must bump the epoch");
+        assertEq(account.authorityX(), SX, "rotation must still move authority");
+
+        // Same session, next seq, correctly signed — dead by epoch, not by seq.
+        _execFullReverts(
+            PeridotAccount.SessionStaleGeneration.selector,
+            pid,
+            address(evil),
+            0,
+            abi.encodeCall(EvilTarget.poke, (43)),
+            1,
+            POLICY_V1,
+            0,
+            0
+        );
+        assertEq(evil.number(), 42, "stale exec must not touch the target");
+
+        // Recovery: the new owner (key 2) re-grants the old owner key (key 1)
+        // as a session; the fresh stamp (1) executes.
+        bytes32 pid2 = _grantAs(2, GX, GY, address(evil), EvilTarget.poke.selector, 0.01 ether);
+        assertEq(account.getPermission(pid2).generation, 1, "re-grant must stamp the new epoch");
+        _execFullAs(1, pid2, address(evil), 0, abi.encodeCall(EvilTarget.poke, (7)), 0, POLICY_V1, 0, 0);
+        assertEq(evil.number(), 7);
+        // The old record stays dead even with a correct next-seq signature.
+        _execFullReverts(
+            PeridotAccount.SessionStaleGeneration.selector,
+            pid,
+            address(evil),
+            0,
+            abi.encodeCall(EvilTarget.poke, (44)),
+            1,
+            POLICY_V1,
+            0,
+            0
+        );
+    }
+
+    /// @dev The frozen v1 entrypoint is gated too (shared `_executePermission`
+    /// core): a legacy generation-0 record executes pre-rotation and dies
+    /// post-rotation.
+    function test_RotateRevokesFrozenV1() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = keccak256("legacy-b3-grant");
+        _fabricateRecord(pid, 1, address(evil), EvilTarget.poke.selector);
+        bytes memory data = abi.encodeCall(EvilTarget.poke, (42));
+        bytes32 payload = _execPayloadV1(pid, 0, address(evil), 0, data, DEADLINE, POLICY_V1);
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
+        account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 0, POLICY_V1, 0, auth, client, r, s);
+        assertEq(evil.number(), 42);
+
+        _rotate(1, SX, SY);
+        bytes32 payload2 = _execPayloadV1(pid, 1, address(evil), 0, data, DEADLINE, POLICY_V1);
+        (bytes memory a2, bytes memory c2, bytes32 r2, bytes32 s2) = _sigSession(payload2);
+        try account.executeWithPermission(pid, address(evil), 0, data, DEADLINE, 1, POLICY_V1, 0, a2, c2, r2, s2) {
+            fail("expected revert");
+        } catch (bytes memory ret) {
+            assertEq(bytes4(ret), PeridotAccount.SessionStaleGeneration.selector, "wrong revert selector");
+        }
+        assertEq(evil.number(), 42, "stale v1 exec must not touch the target");
+    }
+
+    /// @dev Fail-closed in the forward direction too: a record stamped NEWER
+    /// than the account epoch (crafted storage, never grantable) reverts
+    /// instead of executing.
+    function test_StaleCheckFailsClosedForward() public {
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = keccak256("future-generation-grant");
+        _fabricateRecordGen(pid, 1, address(evil), EvilTarget.poke.selector, 1);
+        _execFullReverts(
+            PeridotAccount.SessionStaleGeneration.selector,
+            pid,
+            address(evil),
+            0,
+            abi.encodeCall(EvilTarget.poke, (1)),
+            0,
+            POLICY_V1,
+            1 ether,
+            0
+        );
+        assertEq(evil.number(), 0);
+    }
+
+    /// @dev Saturation: at epoch 255 further rotations keep 255 (never wrap
+    /// to 0, which would revive generation-0 records). Current-epoch records
+    /// keep executing; generation-0 records stay dead.
+    function test_GenerationSaturatesAt255() public {
+        // `sessionGeneration` is the appended slot after `__gap`/`_lastResult`.
+        vm.store(address(account), bytes32(uint256(45)), bytes32(uint256(255)));
+        assertEq(account.sessionGeneration(), 255, "sessionGeneration slot moved - update test");
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = _grant(address(evil), EvilTarget.poke.selector, 0.01 ether);
+        assertEq(account.getPermission(pid).generation, 255);
+        _rotate(1, SX, SY);
+        assertEq(account.sessionGeneration(), 255, "epoch must saturate, not wrap");
+        // Current-epoch record executes (session key 2 == new owner key 2 here;
+        // the contract checks the stored session slot, which is unchanged).
+        _exec(pid, address(evil), 0, abi.encodeCall(EvilTarget.poke, (9)), 0);
+        assertEq(evil.number(), 9);
+        // Generation-0 record stays dead.
+        bytes32 old = keccak256("saturated-old-grant");
+        _fabricateRecord(old, 1, address(evil), EvilTarget.poke.selector);
+        _execFullReverts(
+            PeridotAccount.SessionStaleGeneration.selector,
+            old,
+            address(evil),
+            0,
+            abi.encodeCall(EvilTarget.poke, (1)),
+            0,
+            POLICY_V1,
+            1 ether,
+            0
+        );
+    }
+
+    /// @dev Rotation still bumps the epoch when no permission exists (epoch is
+    /// account state, not permission state) — and a later grant stamps it.
+    function test_RotateBumpsEpochWithoutPermissions() public {
+        assertEq(account.sessionGeneration(), 0);
+        _rotate(1, SX, SY);
+        _rotate(2, GX, GY);
+        assertEq(account.sessionGeneration(), 2, "each rotation must bump once");
+        EvilTarget evil = new EvilTarget(address(account));
+        bytes32 pid = _grantAs(1, SX, SY, address(evil), EvilTarget.poke.selector, 0.01 ether);
+        assertEq(account.getPermission(pid).generation, 2, "grant must stamp the current epoch");
+        _execFullAs(2, pid, address(evil), 0, abi.encodeCall(EvilTarget.poke, (3)), 0, POLICY_V1, 0, 0);
+        assertEq(evil.number(), 3);
     }
 
     // ---- V4 activation (fee-capped, factory V4 path) ----

@@ -143,4 +143,43 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PID_PROGRAM_ID");
     println!("cargo:rerun-if-env-changed=PID_PROGRAM_ID_REQUIRED");
     println!("cargo:rerun-if-env-changed=SOLANA_CLUSTER");
+
+    // ANT-868 B4 (V5 domain binding): the cluster id is baked at build time
+    // from `PID_CLUSTER_ID` (base58, 32 bytes — use the cluster's
+    // `solana genesis-hash`). V5 payloads bind it alongside the runtime
+    // `program_id`, so a signed assertion verifies on exactly one
+    // (program, cluster) pair: same-PDA replay across clusters fails with
+    // `InvalidChallenge`. Unset keeps the all-zero local default (with a
+    // warning); named-cluster deploys fail closed here, mirroring the
+    // `PID_PROGRAM_ID` gate above — a shared id across clusters would
+    // silently preserve the replay hole V5 exists to close.
+    let cluster_id_src = std::env::var("PID_CLUSTER_ID").unwrap_or_else(|_| {
+        if require_explicit {
+            panic!(
+                "PID_CLUSTER_ID must be set explicitly for this cluster \
+                 (PID_PROGRAM_ID_REQUIRED=1 / SOLANA_CLUSTER={:?}); refusing \
+                 the all-zero local default (use `solana genesis-hash`)",
+                std::env::var("SOLANA_CLUSTER").unwrap_or_default()
+            );
+        }
+        println!("cargo:warning=PID_CLUSTER_ID unset — using the all-zero local default (V5 binds zeros; replay across same-default validators still verifies — set distinct ids per validator under test)");
+        "11111111111111111111111111111111".to_string()
+    });
+    let cluster_id = decode_base58(cluster_id_src.trim(), "PID_CLUSTER_ID");
+    assert!(
+        cluster_id.len() == 32,
+        "PID_CLUSTER_ID must decode to 32 bytes"
+    );
+    let cluster_lit = cluster_id
+        .iter()
+        .map(|b| b.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    std::fs::write(
+        PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("cluster_id.rs"),
+        format!("pub const CLUSTER_ID: [u8; 32] = [{cluster_lit}];\n"),
+    )
+    .unwrap();
+    println!("cargo:warning=PID_CLUSTER_ID baked: {}", cluster_id_src.trim());
+    println!("cargo:rerun-if-env-changed=PID_CLUSTER_ID");
 }

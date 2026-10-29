@@ -2,10 +2,14 @@
 //
 // Runs against a local `solana-test-validator` with the smart-account program
 // AND the mock-forwarder program deployed. Proves the PDA-signer-isolation
-// boundary: the vault PDA never enters game CPIs; the session PDA (rent-only)
+// boundary: the vault PDA enters session_execute READ-ONLY (index 0, ANT-863
+// B3 epoch source) and never enters game CPIs; the session PDA (rent-only)
 // is the sole lent signer; protected accounts are hash-pinned pre/post CPI.
+// Rotation bumps the vault epoch and implicitly revokes every live session
+// (SessionStaleGeneration 0x1d); fresh sessions stamped with the new epoch
+// execute normally.
 //
-// 27 result lines (23 expect-calls + 4 state/layout assertions).
+// 31 result lines (27 expect-calls + 4 state/layout assertions).
 //
 // Two runtime facts this suite pins (verified against chain truth, not assumed):
 // - System transfers debit only data-less accounts ("from must not carry
@@ -51,7 +55,7 @@ const ACTIVATE_MAX_TOTAL_FEE = 150_000; // network + 50% protocol (V4 cap)
 const AUTH_PREFIX = crypto.createHash("sha256").update("test-rp").digest();
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 const SESSION_DISC = { register: 7, execute: 8, revoke: 9, close: 10 };
-const SESSION_STATE_LEN = 205;
+const SESSION_STATE_LEN = 206;
 
 const conn = new Connection("http://127.0.0.1:8899", "confirmed");
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest();
@@ -318,9 +322,11 @@ async function main() {
       buildSecpIx(s.comp, s.sig, s.messageData),
     );
   };
-  // Session-execute builder: exact accounts (no remaining), vault never present.
+  // Session-execute builder: exact accounts (no remaining), vault READ-ONLY
+  // at index 0 as the ANT-863 B3 epoch source (never forwarded into the CPI).
   const execTx = (sessPda, sessSigner, game, evidence, seq, gameData, metas, gameAccts, protectedAddrs) => new Transaction().add(new TransactionInstruction({
     keys: [
+      { pubkey: pda, isSigner: false, isWritable: false },
       { pubkey: sessPda, isSigner: false, isWritable: true },
       { pubkey: game, isSigner: false, isWritable: false },
       { pubkey: evidence, isSigner: false, isWritable: false },
@@ -345,9 +351,10 @@ async function main() {
   await expectOk(registerTx(sessionPda3, session3.publicKey, TOKEN_PROGRAM_ID, tokEvidence, expiresAt, tokRec, await vaultNonce(), exp()), [payer], "register session (token game)");
   {
     const d = (await conn.getAccountInfo(sessionPda)).data;
-    assert.equal(d.length, 205, "session record len 205");
-    assert.equal(d[0], 1, "session version 1");
+    assert.equal(d.length, 206, "session record len 206 (v2 + generation)");
+    assert.equal(d[0], 2, "session version 2");
     assert.equal(d[1], 0, "status active");
+    assert.equal(d[205], 0, "generation stamped 0 at genesis epoch");
     assert.ok(Buffer.from(d.subarray(2, 34)).equals(sessionKp.publicKey.toBuffer()), "session key stored");
     assert.ok(Buffer.from(d.subarray(34, 66)).equals(accountId32), "account id stored");
     assert.equal(d.readBigUInt64LE(82), 0n, "seq 0");
@@ -705,6 +712,71 @@ async function main() {
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       ], []);
     await expectErrCode(tx, [shortKp], "0x13", "expired session rejected (SessionExpired)");
+  }
+
+  // ---- ANT-863 B3: rotation revokes sessions (0x1d SessionStaleGeneration) ----
+  {
+    const { privateKey: newPriv, publicKey: newPub } = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const newOwner = { privateKey: newPriv, publicKey: newPub };
+    const newComp = compressedPub(newPub);
+    const nonce = await vaultNonce();
+    const payload = sha256(Buffer.concat([DOMAIN_V3, Buffer.from([3]), accountId32, u64(nonce), newComp, i64(exp())]));
+    const s = signPayload(owner, payload);
+    await expectOk(new Transaction().add(new TransactionInstruction({
+      keys: [
+        { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+      ],
+      programId: PROGRAM,
+      data: wdData(3, [u64(nonce), newComp, i64(exp())], s.clientDataJSON),
+    }), buildSecpIx(s.comp, s.sig, s.messageData)), [payer], "rotate authority (B3 epoch bump)");
+    assert.equal((await conn.getAccountInfo(pda)).data[3], 1, "vault epoch bumped to 1");
+
+    // Pre-rotation session3 gameplay dies with SessionStaleGeneration even
+    // with the correct next seq (rotation == revocation).
+    const seq3 = (await conn.getAccountInfo(sessionPda3)).data.readBigUInt64LE(82);
+    const staleData = Buffer.concat([Buffer.from([3]), u64(100)]);
+    const staleMetas = [
+      [sessionAta3.address.toBuffer(), F(true, false)],
+      [userAta.address.toBuffer(), F(true, false)],
+      [sessionPda3.toBuffer(), F(false, true)],
+    ];
+    const staleTx = execTx(sessionPda3, session3.publicKey, TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, seq3,
+      staleData, staleMetas, [
+        { pubkey: sessionAta3.address, isSigner: false, isWritable: true },
+        { pubkey: userAta.address, isSigner: false, isWritable: true },
+      ], []);
+    await expectErrCode(staleTx, [session3], "0x1d", "rotated session rejected (SessionStaleGeneration)");
+
+    // Recovery path: a fresh session registered under the NEW authority
+    // (stamped with the new epoch) executes normally. Fund its ATA first so
+    // the post-registration gameplay lands within one blockhash lifetime.
+    const freshKp = Keypair.generate();
+    await conn.confirmTransaction(await conn.requestAirdrop(freshKp.publicKey, LAMPORTS_PER_SOL), "confirmed");
+    const freshPda = sessionPdaOf(accountId32, freshKp.publicKey);
+    const freshAta = await getOrCreateAssociatedTokenAccount(conn, payer, mint, freshPda, true);
+    await mintTo(conn, payer, mint, freshAta.address, mintAuthority, 500_000n);
+    const nonce2 = await vaultNonce();
+    const rp = registerPayload(accountId32, nonce2, freshKp.publicKey.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), expiresAt, tokRec.hasAuth, Buffer.from(tokRec.auth), tokRec.slot, exp());
+    const rs = signPayload(newOwner, rp);
+    await expectOk(new Transaction().add(
+      registerIx(freshPda, freshKp.publicKey, TOKEN_PROGRAM_ID, tokEvidence, expiresAt, tokRec.hasAuth, Buffer.from(tokRec.auth), tokRec.slot, nonce2, exp(), rs),
+      buildSecpIx(rs.comp, rs.sig, rs.messageData),
+    ), [payer], "fresh session registered post-rotation");
+    assert.equal((await conn.getAccountInfo(freshPda)).data[205], 1, "fresh session stamped epoch 1");
+    const freshGameData = Buffer.concat([Buffer.from([3]), u64(50)]);
+    const freshExecTx = execTx(freshPda, freshKp.publicKey, TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, 0n,
+      freshGameData, [
+        [freshAta.address.toBuffer(), F(true, false)],
+        [userAta.address.toBuffer(), F(true, false)],
+        [freshPda.toBuffer(), F(false, true)],
+      ], [
+        { pubkey: freshAta.address, isSigner: false, isWritable: true },
+        { pubkey: userAta.address, isSigner: false, isWritable: true },
+      ], []);
+    const userBefore = BigInt((await conn.getTokenAccountBalance(userAta.address)).value.amount);
+    await expectOk(freshExecTx, [freshKp], "post-rotation session executes (recovery path)");
+    assert.equal(BigInt((await conn.getTokenAccountBalance(userAta.address)).value.amount) - userBefore, 50n, "recovery gameplay moved exactly 50");
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

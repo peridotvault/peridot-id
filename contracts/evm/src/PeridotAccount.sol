@@ -164,6 +164,11 @@ contract PeridotAccount {
     error NotModule();
     error AlreadyInstalled();
     error Reentrancy();
+    /// @dev ANT-868 B3 (EVM parity of the SVM generation epoch): a permission
+    /// executed after its stamped generation went stale (owner rotated since
+    /// registration). Distinct from `AlreadyRevoked` (explicit per-permission
+    /// revoke) so UX/indexers can tell "rotated, re-grant" apart.
+    error SessionStaleGeneration();
     /// @notice ANT-863 B2: the V3 fee paths are hard-closed on-chain. V3
     /// `networkFee` is attested-but-unsigned (the payload binds policy, NOT
     /// fee). The V3 `execute` overload and the factory V3 `deployAndInit`
@@ -193,6 +198,11 @@ contract PeridotAccount {
     /// `feeSpent + networkFee + protocolFee ≤ feeLimit`, accounted pre-call.
     /// Appended fields only — existing records read 0 for both (legacy = the
     /// frozen v1 entrypoint semantics, sunsetting naturally).
+    /// `generation` (ANT-868 B3, EVM parity of the SVM u8 session-generation
+    /// epoch): the account `sessionGeneration` stamped at grant time;
+    /// `updateAuthority` saturating-bumps the epoch, so rotation implicitly
+    /// revokes every permission stamped older. Appended last — pre-upgrade
+    /// records read 0, matching a fresh account epoch.
     struct Permission {
         bytes32 sessionX;
         bytes32 sessionY;
@@ -211,6 +221,7 @@ contract PeridotAccount {
         uint256 nftId;
         uint256 feeLimit;
         uint256 feeSpent;
+        uint8 generation;
     }
 
     /// @dev Owner-signed grant arguments (calldata struct to stay under stack limit).
@@ -580,6 +591,14 @@ contract PeridotAccount {
         _verify(expected, authenticatorData, clientDataJSON, r, s);
         authorityX = newX;
         authorityY = newY;
+        // ANT-868 B3 (EVM parity of the SVM u8 session-generation epoch):
+        // rotation implicitly revokes every live permission — permissions
+        // stamped with an older generation fail execution with
+        // `SessionStaleGeneration` until re-granted. Saturating: at 255
+        // further rotations keep the epoch instead of wrapping to 0 (wrapping
+        // would revive long-dead generation-0 permissions; every permission
+        // still carries its own ≤30d `validUntil`).
+        if (sessionGeneration < 255) sessionGeneration++;
         uint64 n = nonce++;
         emit AuthorityUpdated(newX, newY, n);
     }
@@ -845,7 +864,8 @@ contract PeridotAccount {
             spent: 0,
             nftId: g.nftId,
             feeLimit: g.feeLimit,
-            feeSpent: 0
+            feeSpent: 0,
+            generation: sessionGeneration
         });
         nonce++;
         emit PermissionGranted(pid, g.sessionX, g.sessionY, g.kind);
@@ -977,6 +997,13 @@ contract PeridotAccount {
         Permission storage p = _permissions[a.permissionId];
         if (p.sessionX == 0 && p.sessionY == 0) revert PermissionNotFound();
         if (p.revoked) revert AlreadyRevoked();
+        // ANT-868 B3: a permission that predates the latest rotation is dead —
+        // report the actionable error before expiry/sequence details (mirrors
+        // the SVM `session_execute` ordering). Fail-closed: any mismatch
+        // reverts, and pre-upgrade records read generation 0 (matching a
+        // fresh account epoch, so they execute normally until the first
+        // post-upgrade rotation).
+        if (p.generation != sessionGeneration) revert SessionStaleGeneration();
         if (block.timestamp < p.validAfter || block.timestamp > p.validUntil) revert PermissionExpired();
         if (a.seq != p.seq) revert BadSeq();
         bytes32 expected;
@@ -1048,6 +1075,16 @@ contract PeridotAccount {
 
     /// @dev Most recent permission/executor call returndata (for `executeFromExecutor`).
     bytes private _lastResult;
+
+    /// @dev Session-generation epoch (ANT-868 B3, EVM parity of the SVM u8
+    /// vault epoch): every `updateAuthority` saturates it upward by one and
+    /// `grantPermission` stamps the current value into each new permission
+    /// record; `_executePermission` requires record generation == account
+    /// generation, so rotation implicitly revokes all live permissions.
+    /// Declared after `__gap` (new state is appended, never reordered).
+    /// Fresh accounts read 0 — matching pre-upgrade records, which execute
+    /// normally until the first post-upgrade rotation.
+    uint8 public sessionGeneration;
 
     /// @dev First 4 bytes of `data` as a selector (reverts on short input via length checks at call sites).
     function _sel(bytes memory data) internal pure returns (bytes4 sel) {

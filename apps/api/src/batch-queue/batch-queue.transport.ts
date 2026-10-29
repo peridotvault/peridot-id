@@ -213,8 +213,10 @@ export function productionBatchPorts(chains: ChainRegistryService, config: Confi
           throw new ServiceUnavailableException("Batch session validation is not reachable");
         }
         const words = (raw.startsWith("0x") ? raw.slice(2) : raw).toLowerCase();
-        // Permission struct: 19 words (w2=validAfter, w3=validUntil,
-        // w4=seq, w6=revoked); short / all-zero = no grant on-chain.
+        // Permission struct: 18 words pre-B3 + appended `generation` u8
+        // (ANT-868 B3; w2=validAfter, w3=validUntil, w4=seq, w6=revoked).
+        // Appended-only: early offsets are stable across versions.
+        // Short / all-zero = no grant on-chain.
         if (words.length < 17 * 64 || /^0+$/.test(words)) {
           return { valid: false, revoked: true, expiresAt: 0 };
         }

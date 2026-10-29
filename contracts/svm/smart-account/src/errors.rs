@@ -81,13 +81,19 @@ pub enum PeridotError {
     /// ANT-635 revenue vault: `RemoveAdmin` targeting the last live admin
     /// (floor-1, EVM `PeridotFactory` parity). Additive-only (28).
     CannotRemoveLastAdmin = 28,
+    /// ANT-863 B3 rotation/session epoch: the session record's stamped
+    /// generation no longer matches the vault epoch (the owner rotated since
+    /// registration, implicitly revoking the session). Distinct from
+    /// `SessionRevoked` (explicit per-session revoke) so UX/indexers can
+    /// tell "rotated, re-register" apart. Additive-only (29).
+    SessionStaleGeneration = 29,
     /// ANT-863 B2: V3 fee paths (discs 1, 2, 5, 6) are hard-closed on-chain.
     /// V3 `network_fee` is attested-but-unsigned — the payload binds policy,
     /// NOT fee — so a relayer could settle any fee. Every V3 fee entrypoint
     /// rejects with this error before any other validation; V4 siblings
     /// (discs 11-14, `max_total_fee`-capped) are the only fee paths.
-    /// Additive-only (new discriminant 30; 29 was taken by B3's
-    /// `SessionStaleGeneration`).
+    /// Additive-only (new discriminant 30; error-code namespace is disjoint
+    /// from B4's reserved instruction discriminants 22-29/30-32).
     V3Deprecated = 30,
 }
 

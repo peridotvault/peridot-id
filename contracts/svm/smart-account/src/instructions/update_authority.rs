@@ -5,6 +5,11 @@
 //! rotation signature for one PID can never rotate a sibling account, even under a
 //! shared current key. The zero key is rejected: it could never authorize again and
 //! would brick the account. Rotation rewrites key bytes only — the PDA never moves.
+//!
+//! ANT-863 B3: rotation also bumps the vault session-generation epoch, which
+//! implicitly revokes every live session (sessions stamped with an older
+//! epoch fail `session_execute` with `SessionStaleGeneration`). Rotation now
+//! means revocation — no separate per-session revoke pass needed.
 
 use crate::{
     auth,
@@ -77,6 +82,9 @@ pub fn process(
     let mut data_ref = smart_account.try_borrow_mut()?;
     let mut state = SmartAccountMut::try_from_bytes(&mut data_ref)?;
     state.set_authority(new_authority);
+    // ANT-863 B3: rotation revokes all live sessions (epoch bump; sessions
+    // stamped older fail `session_execute` with `SessionStaleGeneration`).
+    state.bump_session_generation();
     state.increment_nonce();
     drop(data_ref);
 
