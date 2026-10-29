@@ -1,5 +1,7 @@
 import {
   deriveEvmSmartAccountAddress,
+  deriveEvmSmartAccountAddressBound,
+  pidKeyToSalt32,
   EVM_CHAINS,
   getCreate2Address,
   minimalProxyInitCode,
@@ -33,6 +35,23 @@ describe("evm-account", () => {
     const initCodeHash = keccak256(minimalProxyInitCode(impl));
     expect(getCreate2Address(factory, salt, initCodeHash)).toBe("0x883c7FcF54967D2Fc3F769E44Cd78f74560909D6");
     expect(toHex(initCodeHash)).toHaveLength(64);
+  });
+
+  it("binds the bound derivation to (pid, key) — forge parity (ANT-866/B1)", () => {
+    // P-256 generator (forge privkey 1); parity from `test_LogCreate2Parity` +
+    // `test_LogVectorActivate` (bound salt + predictBound, on-chain logs).
+    const gx = fromHex("6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296");
+    const gy = fromHex("4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5");
+    const factory = "0x2e234DAe75C793f67A35089C9d99245E1C58470b";
+    const impl = "0x5615dEB798BB3E4dFa0139dFa1b3D433Cc23b72f";
+    const bound = deriveEvmSmartAccountAddressBound("test@pid", gx, gy, factory, impl);
+    expect(bound.pidHash).toBe("0xd7824b7df5f3b280b67abf3ac397749789aa4b6bac508d9b0df69091cb3a0cfa");
+    expect(bound.salt).toBe("0x8a206329fc8eec6d5fb4e289640b278fea0f356ce47b31be5886745df25a0f2e");
+    expect(bound.address).toBe("0xD202C18363FcbF6f2D68B3247600c35574b98707");
+    // A different key diverges (squat lands elsewhere); same input is stable.
+    const other = deriveEvmSmartAccountAddressBound("test@pid", fromHex("00".repeat(31) + "02"), gy, factory, impl);
+    expect(other.address).not.toBe(bound.address);
+    expect(pidKeyToSalt32("TEST@PID ", gx, gy)).toEqual(fromHex(bound.salt.slice(2))); // pid normalization
   });
 
   it("exposes the four phase-1 chains", () => {

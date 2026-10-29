@@ -109,12 +109,15 @@ export {
 export type { PasskeyAssertion, PasskeySigner } from "./webauthn.js";
 export {
   pidToSalt32,
+  pidToPidHash,
+  pidKeyToSalt32,
   addressToBytes,
   buildEvmAuthorizationPayload,
   buildEvmAuthorizationPayloadV2,
   buildEvmAuthorizationPayloadV3,
   compressedToX,
   deriveEvmSmartAccountAddress,
+  deriveEvmSmartAccountAddressBound,
   DOMAIN_EVM,
   DOMAIN_EVM_V2,
   DOMAIN_EVM_V3,

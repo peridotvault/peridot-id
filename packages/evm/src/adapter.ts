@@ -1,9 +1,12 @@
 // EVM adapter — counterfactual smart accounts (mirrors SolanaAdapter surface).
-// Address = CREATE2(factory, salt=accountSeed, proxy-of-implementation); the
-// passkey (x,y) is set on initialize, so rotation never moves the address.
+// Address = CREATE2(factory, salt=keccak256(pidHash ‖ x ‖ y), proxy-of-implementation);
+// B1 binding (ANT-866): the salt commits to the CLAIMING passkey, so only the
+// bound address is a safe pre-funding target. Rotation never moves the address.
 
 import {
   pidToSalt32,
+  pidToPidHash,
+  pidKeyToSalt32,
   assertNonfinancialKind,
   buildEvmAuthorizationPayload,
   buildEvmAuthorizationPayloadV2,
@@ -11,6 +14,7 @@ import {
   buildEvmAuthorizationPayloadV4,
   buildEvmPermissionPayload,
   deriveEvmSmartAccountAddress,
+  deriveEvmSmartAccountAddressBound,
   fromAscii,
   fromHex,
   keccak256,
@@ -58,13 +62,31 @@ export class EvmAdapter {
     if (!factory || !implementation) throw new Error("evm factory + implementation required");
   }
 
-  /** Counterfactual address for a pidAccount.id (same on every chain sharing the factory). */
+  /** Counterfactual address for a pidAccount.id (same on every chain sharing the factory).
+   * @deprecated B1 (ANT-866): keyless derivation funds unclaimable addresses.
+   * Use `getAddressBound` — retained for indexer reference only. */
   getAddress(pid: string): string {
     return deriveEvmSmartAccountAddress(pid, this.factory, this.implementation).address;
   }
 
+  /** B1-bound counterfactual address for (pid, claiming key) — the only safe pre-funding target. */
+  getAddressBound(pid: string, x: Bytes, y: Bytes): string {
+    return deriveEvmSmartAccountAddressBound(pid, x, y, this.factory, this.implementation).address;
+  }
+
+  /** PID hash (`sha256(pid)`) — the first `deployAndInit` argument (the factory derives the salt). */
+  getPidHash(pid: string): string {
+    return "0x" + toHex(pidToPidHash(pid));
+  }
+
+  /** @deprecated B1 (ANT-866): returns the pid hash (formerly the raw salt). Use `getPidHash`. */
   getSalt(pid: string): string {
     return "0x" + toHex(pidToSalt32(pid));
+  }
+
+  /** B1-bound CREATE2 salt for (pid, claiming key) (for payload building / verification). */
+  getSaltBound(pid: string, x: Bytes, y: Bytes): string {
+    return "0x" + toHex(pidKeyToSalt32(pid, x, y));
   }
 
   /** True once the proxy is deployed (code present). */
@@ -247,12 +269,14 @@ export class EvmAdapter {
     ]);
   }
 
-  /** V3 `deployAndInit` calldata: passkey-bound activation (salt, authority,
+  /** V3 `deployAndInit` calldata: passkey-bound activation (pidHash, authority,
    *  policy, deadline, networkFee + assertion). Matches the V3 factory:
    *  `deployAndInit(bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)`.
+   *  B1 (ANT-866): the first field is the PID HASH, not a raw salt — the
+   *  factory derives `salt = keccak256(pidHash ‖ x ‖ y)` on-chain.
    *  Static tail follows parameter order: offsets first, then r/s. */
   buildDeployAndInitDataV3(args: {
-    salt: Bytes | string;
+    pidHash: Bytes | string;
     x: Bytes;
     y: Bytes;
     feePolicyVersion: number;
@@ -263,10 +287,10 @@ export class EvmAdapter {
     r: Bytes;
     s: Bytes;
   }): string {
-    const saltHex = typeof args.salt === "string" ? args.salt : "0x" + toHex(args.salt);
+    const pidHashHex = typeof args.pidHash === "string" ? args.pidHash : "0x" + toHex(args.pidHash);
     const sel = "0x" + toHex(selector("deployAndInit(bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)"));
     const head = [
-      pad32(saltHex),
+      pad32(pidHashHex),
       pad32("0x" + toHex(args.x)),
       pad32("0x" + toHex(args.y)),
       pad32("0x" + toHex(ube(args.feePolicyVersion, 2))),
@@ -377,7 +401,9 @@ export class EvmAdapter {
     ]);
   }
 
-  /** V3 activation authorization payload (no fee amounts — policy version only). */
+  /** V3 activation authorization payload (no fee amounts — policy version only).
+   * B1 (ANT-866): `salt` MUST be the bound salt (`pidKeyToSalt32` /
+   * `getSaltBound`) — the contract enforces the binding (`SaltNotBound`). */
   buildActivatePayloadV3(args: {
     salt: Bytes | string;
     x: Bytes;
@@ -563,9 +589,11 @@ export class EvmAdapter {
     ]);
   }
 
-  /** V4 `deployAndInitV4` calldata (fee-capped activation). */
+  /** V4 `deployAndInitV4` calldata (fee-capped activation).
+   * B1 (ANT-866): the first field is the PID HASH — the factory derives the
+   * bound salt on-chain. */
   buildDeployAndInitDataV4(args: {
-    salt: Bytes | string;
+    pidHash: Bytes | string;
     x: Bytes;
     y: Bytes;
     feePolicyVersion: number;
@@ -577,10 +605,10 @@ export class EvmAdapter {
     r: Bytes;
     s: Bytes;
   }): string {
-    const saltHex = typeof args.salt === "string" ? args.salt : "0x" + toHex(args.salt);
+    const pidHashHex = typeof args.pidHash === "string" ? args.pidHash : "0x" + toHex(args.pidHash);
     const sel = "0x" + toHex(selector("deployAndInitV4(bytes32,bytes32,bytes32,uint16,uint256,uint64,uint256,bytes,bytes,bytes32,bytes32)"));
     const head = [
-      pad32(saltHex),
+      pad32(pidHashHex),
       pad32("0x" + toHex(args.x)),
       pad32("0x" + toHex(args.y)),
       pad32("0x" + toHex(ube(args.feePolicyVersion, 2))),

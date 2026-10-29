@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { ChainAccountStatus } from "@prisma/client";
-import { deriveEvmSmartAccountAddress } from "@peridotvault/pid-evm";
+import { deriveEvmSmartAccountAddressBound } from "@peridotvault/pid-evm";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { deriveSmartAccountAddress } from "../common/smart-account";
+import { coseToRawXy } from "../credentials/cose";
 import { isP2002 } from "../prisma/prisma-error";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -56,16 +57,28 @@ export class AccountService {
   }
 
   /**
-   * EVM counterfactual rows: one CREATE2 address per deployable registry chain,
-   * each from its own factory/implementation contracts (same values everywhere
-   * today = one address everywhere). Skipped until a chain has both contracts.
+   * EVM counterfactual rows: one B1-bound CREATE2 address per deployable
+   * registry chain, each from its own factory/implementation contracts (same
+   * values everywhere today = one address everywhere). Skipped until a chain
+   * has both contracts.
+   *
+   * B1 (ANT-866): the address commits to the claiming passkey, so rows are
+   * deferred until an active authority exists — a keyless row would advertise
+   * an unclaimable funding target. The activation path heals any pre-binding
+   * row to the bound address before broadcasting.
    */
   private async ensureEvmRows(pid: string): Promise<void> {
+    const authority = await this.prisma.authority.findFirst({
+      where: { pid, status: "active" },
+      orderBy: { createdAt: "asc" },
+    });
+    if (!authority) return;
+    const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
     for (const chain of await this.chains.deployableEvmChains()) {
       const factory = chain.contracts.find((k) => k.type === "factory")?.address;
       const implementation = chain.contracts.find((k) => k.type === "account_implementation")?.address;
       if (!factory || !implementation) continue;
-      const evm = deriveEvmSmartAccountAddress(pid, factory, implementation);
+      const evm = deriveEvmSmartAccountAddressBound(pid, new Uint8Array(x), new Uint8Array(y), factory, implementation);
       const existing = await this.prisma.chainAccount.findFirst({
         where: { pid, chainId: chain.id, accountType: ACCOUNT_TYPE_SMART },
       });

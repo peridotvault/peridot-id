@@ -1,6 +1,7 @@
 import { NotFoundException } from "@nestjs/common";
 import { AccountService } from "./account.service";
-import { mockSecurity, minimalChainsStub } from "../../test/factories";
+import { mockSecurity, minimalChainsStub, coseKey } from "../../test/factories";
+import { coseToRawXy } from "../credentials/cose";
 
 const PROGRAM_ID = "9LCZEdXdmLeEyU8Fik2721R28K4xWXTrVd76r4tczNZY";
 const DERIVED = "2XSyY7tMgbwfsHx7pkqYjwcpyoFLtFwzSophsFFtuaHj"; // PDA of ifal@pid (see smart-account.spec.ts)
@@ -31,6 +32,9 @@ function setup() {
       findMany: jest.fn(async () => [] as any),
       create: jest.fn(async () => chainRow()),
       update: jest.fn(async () => chainRow()),
+    },
+    authority: {
+      findFirst: jest.fn(async () => ({ publicKey: coseKey() })),
     },
     securityEvent: { create: jest.fn(async () => ({})) },
   };
@@ -71,7 +75,9 @@ describe("AccountService", () => {
   });
 
   it("ensureAccount seeds one identical EVM address per chain when the factory is configured", async () => {
-    const { deriveEvmSmartAccountAddress } = jest.requireActual("@peridotvault/pid-evm") as typeof import("@peridotvault/pid-evm");
+    // B1 (ANT-866): the seeded address is PID-KEY BOUND (not keyless) — the
+    // only pre-funding target the registered key can claim.
+    const { deriveEvmSmartAccountAddressBound } = jest.requireActual("@peridotvault/pid-evm") as typeof import("@peridotvault/pid-evm");
     const factory = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
     const impl = "0x0000000000000000000000000000000000000001";
     const config = {
@@ -108,18 +114,39 @@ describe("AccountService", () => {
         create: jest.fn(async (args: { data: { address: string } }) => ({ id: "c", ...args.data })),
         update: jest.fn(async () => ({})),
       },
+      authority: {
+        findFirst: jest.fn(async () => ({ publicKey: coseKey() })),
+      },
       securityEvent: { create: jest.fn(async () => ({})) },
     };
     const service = new AccountService(prisma as never, security as never, chains as never);
 
     await service.ensureAccount("pid_01HASH");
 
-    const expected = deriveEvmSmartAccountAddress("pid_01HASH", factory, impl).address;
+    const { x, y } = coseToRawXy(coseKey());
+    const expected = deriveEvmSmartAccountAddressBound(
+      "pid_01HASH", new Uint8Array(x), new Uint8Array(y), factory, impl,
+    ).address;
     const creates = prisma.chainAccount.create.mock.calls.map((c) => (c[0] as { data: Record<string, unknown> }).data);
     const evmCreates = creates.filter((d) => d.chainId !== "chain-sol");
     // One row per phase-1 chain, all the same counterfactual address.
     expect(evmCreates.map((d) => d.chainId).sort()).toEqual(["chain-10143", "chain-421614", "chain-84532", "chain-97"]);
     for (const row of evmCreates) expect(row.address).toBe(expected);
+  });
+
+  it("ensureAccount defers EVM rows until a passkey is registered (B1)", async () => {
+    // No active authority → no address can be bound → no rows (fail closed:
+    // nothing advertises an unclaimable funding target).
+    const { service, prisma } = setup();
+    (prisma.authority.findFirst as jest.Mock).mockResolvedValue(null);
+    prisma.chainAccount.findMany.mockResolvedValue([chainRow()]);
+
+    await service.ensureAccount("pid_01HASH");
+
+    const creates = prisma.chainAccount.create.mock.calls.map(
+      (c) => ((c as unknown[])[0] as { data: Record<string, unknown> }).data,
+    );
+    expect(creates.filter((d) => d.chainId !== "chain-sol")).toEqual([]);
   });
 
   it("ensureAccount fails cleanly when the solana chain is not registered", async () => {

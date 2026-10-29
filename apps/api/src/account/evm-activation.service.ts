@@ -601,6 +601,18 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.chainAccount.update({ where: { id: row.id }, data: { status: "activating" } });
     try {
       const { x, y } = coseToRawXy(Buffer.from(authority.publicKey));
+      // B1 (ANT-866): the claim target is the PID-KEY BOUND address. Heal
+      // pre-binding rows (keyless derivation) so funding/verification land on
+      // the only address this key can claim.
+      const boundAddress = adapter.getAddressBound(user.pid, new Uint8Array(x), new Uint8Array(y));
+      if (row.address.toLowerCase() !== boundAddress.toLowerCase()) {
+        this.logger.warn(`evm address heal for ${user.pid}: ${row.address} → ${boundAddress} (B1 binding)`);
+        await this.prisma.chainAccount.update({
+          where: { id: row.id },
+          data: { address: boundAddress, activationBalance: null, activationRequired: null },
+        });
+        row.address = boundAddress;
+      }
       const authData = fromHexDto(dto.assertion.authenticatorData);
       const clientData = Buffer.from(dto.assertion.clientDataJSON, "base64url");
       const r = fromHexDto(dto.assertion.r);
@@ -608,7 +620,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       const data =
         version === 2
           ? adapter.buildDeployAndInitDataV4({
-              salt: adapter.getSalt(user.pid),
+              pidHash: adapter.getPidHash(user.pid),
               x: new Uint8Array(x),
               y: new Uint8Array(y),
               feePolicyVersion: version,
@@ -621,7 +633,7 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
               s,
             })
           : adapter.buildDeployAndInitDataV3({
-              salt: adapter.getSalt(user.pid),
+              pidHash: adapter.getPidHash(user.pid),
               x: new Uint8Array(x),
               y: new Uint8Array(y),
               feePolicyVersion: version,

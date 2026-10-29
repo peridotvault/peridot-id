@@ -63,6 +63,11 @@ describe("Account authorization & abuse cases (routes)", () => {
       chain: {
         findUnique: jest.fn(async () => ({ id: "chain-sol" })),
       },
+      // B1 (ANT-866): EVM rows defer until a passkey exists — no authority
+      // here, so only the Solana row is seeded.
+      authority: {
+        findFirst: jest.fn(async () => null),
+      },
       securityEvent: { create: jest.fn(async () => ({})) },
     };
 
