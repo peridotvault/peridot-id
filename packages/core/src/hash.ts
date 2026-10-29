@@ -533,8 +533,8 @@ export const IX_SESSION = {
   closeSession: 10,
 } as const;
 
-/** Session record length — match `state.rs::SESSION_STATE_LEN`. */
-export const SESSION_STATE_LEN = 205;
+/** Session record length — match `state.rs::SESSION_STATE_LEN` (v2, ANT-863 B3). */
+export const SESSION_STATE_LEN = 206;
 /** Maximum session lifetime, seconds (24h) — match `auth::SESSION_MAX_TTL_SECS`. */
 export const SESSION_MAX_TTL_SECS = 86_400;
 /** Session inactivity timeout, seconds (30min) — match `auth::SESSION_INACTIVITY_SECS`. */
