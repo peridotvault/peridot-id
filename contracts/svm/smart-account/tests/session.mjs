@@ -54,7 +54,7 @@ const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC63
 const SESSION_DISC = { register: 7, execute: 8, revoke: 9, close: 10 };
 const SESSION_STATE_LEN = 206;
 
-const conn = new Connection("http://127.0.0.1:8899", "confirmed");
+const conn = new Connection(process.env.PID_RPC_URL || "http://127.0.0.1:8899", "confirmed");
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest();
 const b64url = (b) => Buffer.from(b).toString("base64url");
 const pidToSeed32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8"));

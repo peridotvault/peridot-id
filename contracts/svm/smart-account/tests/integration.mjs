@@ -49,7 +49,7 @@ const POLICY_V1 = 1;
 // protocolFee = floor(networkFee * 5000 / 10000).
 const protocolFeeOf = (net) => (BigInt(net) * 5000n) / 10_000n;
 
-const conn = new Connection("http://127.0.0.1:8899", "confirmed");
+const conn = new Connection(process.env.PID_RPC_URL || "http://127.0.0.1:8899", "confirmed");
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest();
 const b64url = (b) => Buffer.from(b).toString("base64url");
 const pidToSeed32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8"));

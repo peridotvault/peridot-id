@@ -87,6 +87,13 @@ pub enum PeridotError {
     /// `SessionRevoked` (explicit per-session revoke) so UX/indexers can
     /// tell "rotated, re-register" apart. Additive-only (29).
     SessionStaleGeneration = 29,
+    /// ANT-870 P6.1: the token account (or mint) carries a Token-2022
+    /// extension the vault/session flows do not support (transfer-fee,
+    /// confidential, memo, CPI-guard, hooks, … — see the matrix in
+    /// `programdata.rs`). Fail-closed: balance/authority semantics the
+    /// program cannot see are never trusted. B3 claimed 29 on `paperclip`
+    /// first, so this takes the next free slot (additive-only, 30).
+    UnsupportedTokenExtension = 30,
 }
 
 impl From<PeridotError> for ProgramError {
