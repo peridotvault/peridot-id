@@ -136,11 +136,11 @@ mod did_consistency_tests {
     #[test]
     fn committed_did_matches_exported_service() {
         let exported = __export_service();
-        let committed = include_str!("peridot_mcp.did");
+        let committed = include_str!("peridot_id_mcp.did");
         assert_eq!(
             exported.trim(),
             committed.trim(),
-            "src/peridot_mcp.did drifted from the exported service; \
+            "src/peridot_id_mcp.did drifted from the exported service; \
              regenerate it from __export_service() output"
         );
     }

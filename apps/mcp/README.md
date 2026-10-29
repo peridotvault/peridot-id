@@ -23,7 +23,7 @@ no HTTPS outcalls, no timers on the request path (statically checked, see
 # from apps/mcp/
 ./scripts/sync-docs          # regenerate src/generated_docs.rs + src/generated_docs.meta.json
 ./scripts/sync-docs --check  # fail loudly on drift (CI runs this)
-cargo test -p peridot_mcp    # 55 tests, must be green
+cargo test -p peridot_id_mcp    # 55 tests, must be green
 ```
 
 Inputs: `apps/docs/*.mdx` (12 guides) + `apps/docs/api/overview.mdx` +
@@ -47,8 +47,8 @@ question 2: `docs.json` has no such slugs).
 
 ```text
 apps/mcp/
-├── Cargo.toml          # cdylib crate `peridot_mcp` (ic-cdk 0.20.3, ic-http-certification 4.0.1)
-├── dfx.json            # standalone canister `peridot_mcp` (see "dfx.json placement" below)
+├── Cargo.toml          # cdylib crate `peridot_id_mcp` (ic-cdk 0.20.3, ic-http-certification 4.0.1)
+├── dfx.json            # standalone canister `peridot_id_mcp` (see "dfx.json placement" below)
 ├── docs/
 │   ├── sync-notes.md   # baked-index contract + future sync-job rules
 │   └── topup-runbook.md# cycles monitor + top-up draft (no mainnet funding yet)
@@ -57,7 +57,7 @@ apps/mcp/
 │   ├── protocol.rs     # JSON-RPC + MCP types/dispatch (pure, unit-tested)
 │   ├── tools.rs        # 4 baked read-only datasets (pure, unit-tested)
 │   ├── http.rs         # candid HTTP types, routing, header contract, certification
-│   └── peridot_mcp.did # committed candid; CI-guarded by did_consistency_tests
+│   └── peridot_id_mcp.did # committed candid; CI-guarded by did_consistency_tests
 ├── tests/mcp_tests.rs  # handshake + 4-tool end-to-end dispatcher tests
 └── README.md
 ```
@@ -76,12 +76,12 @@ repo-wide `dfx.json` appears (Phase 3+).
 
 ```bash
 # from apps/mcp/
-cargo test -p peridot_mcp            # 49 tests, must be green
+cargo test -p peridot_id_mcp            # 49 tests, must be green
 
 dfx start --background               # local replica + HTTP gateway
 rustup target add wasm32-unknown-unknown
-dfx deploy                           # builds the wasm, installs peridot_mcp
-dfx canister id peridot_mcp          # <canister-id> for the URL below
+dfx deploy                           # builds the wasm, installs peridot_id_mcp
+dfx canister id peridot_id_mcp          # <canister-id> for the URL below
 
 # smoke test through the gateway (initialize -> notifications -> list -> call):
 GW=http://uxrrr-q7777-77774-qaaaq-cai.localhost:4943
@@ -128,7 +128,7 @@ curl -s -D - -o /dev/null $GW/mcp | grep -i '^IC-Certificate'
 }
 ```
 
-Replace `<canister-id>` with `dfx canister id peridot_mcp`. OpenCode must
+Replace `<canister-id>` with `dfx canister id peridot_id_mcp`. OpenCode must
 complete initialize → tools/list → tools/call against this URL.
 
 ## Certification design (ANT-841 recommended path)
@@ -181,9 +181,9 @@ HTTPS outcalls.
 
 ## Troubleshooting
 
-- `dfx deploy` fails with candid mismatch: run `cargo test -p peridot_mcp`
+- `dfx deploy` fails with candid mismatch: run `cargo test -p peridot_id_mcp`
   and read `did_consistency_tests` output; copy `__export_service()` output
-  into `src/peridot_mcp.did` verbatim.
+  into `src/peridot_id_mcp.did` verbatim.
 - Gateway returns upgrade loops: the query `http_request` must return
   `upgrade: true` with an empty body for `POST /mcp`; content is only served
   from `http_request_update`.

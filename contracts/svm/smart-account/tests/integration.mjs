@@ -8,7 +8,8 @@
 // Domain-free since ANT-197: no RP-ID hash is stored or verified on-chain.
 //
 // Creation is permissionless (ANT-610 spec §5, ANT-612): ANY signer may submit
-// `activate`/`activateV4` — anti-squat is the user’s passkey signature alone,
+// `activate`/`activateV4` — a signature proves possession of the supplied key,
+// but does not establish that the signer is entitled to the supplied PID,
 // and every claim still splits relayerFee → submitter + protocolFee → the
 // program-bound `[b"treasury"]` PDA vault (ANT-635). No treasury keypair, no
 // allowlist, no build-time recipient. Direct `initialize` (disc 0) is dead in
@@ -570,8 +571,8 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   }
 
   // ---- activate with a wrong-key signature fails (anti-squat, AC-S2) ----
-  // The claim binds (account_id, authority): a stranger's key cannot authorize
-  // the victim's id, so the funded deposit sits untouched and no account forms.
+  // A signature from a different key cannot authorize the supplied authority.
+  // This does not prevent a claimant from supplying their own authority.
   {
     const vicId = pidToSeed32("testvictim@pid");
     const [vicPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), vicId], PROGRAM);
@@ -586,6 +587,24 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     );
     assert.equal((await conn.getAccountInfo(vicPda)).lamports, vicBefore, "victim deposit untouched by wrong-key claim");
     assert.equal((await conn.getAccountInfo(vicPda)).owner.toBase58(), SystemProgram.programId.toBase58(), "wrong-key claim created nothing");
+  }
+
+  // Security characterization, not an anti-squat guarantee: an unclaimed PID
+  // can currently be activated with an independently chosen key. The test
+  // documents the present boundary until PID entitlement is enforced on-chain.
+  {
+    const victimId = pidToSeed32("test-unclaimed-victim@pid");
+    const [victimPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("peridot_id"), Buffer.from("account"), victimId], PROGRAM,
+    );
+    await expectOk(
+      activateIx(victimId, squatAuth, POLICY_V1, exp(), 0n, rentPayer.publicKey, victimPda, { privateKey: k2, publicKey: p2 }),
+      [rentPayer],
+      "characterization: claimant-selected authority can activate an unclaimed PID",
+    );
+    const claimed = await conn.getAccountInfo(victimPda);
+    assert.ok(claimed, "claimant created the account");
+    assert.deepEqual(claimed.data.subarray(12, 45), squatAuth, "claimant authority is stored");
   }
 
   // ---- activate an already-initialized account → rejected ----

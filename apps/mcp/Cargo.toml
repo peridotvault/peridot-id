@@ -1,5 +1,5 @@
 [package]
-name = "peridot_mcp"
+name = "peridot_id_mcp"
 version = "0.1.0"
 edition = "2021"
 description = "PeridotID Developer MCP Server (Phase 2): Rust ICP canister exposing four read-only MCP tools (search_docs, get_integration_guide, get_example, get_sdk_reference) over a Mintlify-sourced generated index, Streamable HTTP JSON response mode."

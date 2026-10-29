@@ -21,7 +21,7 @@ cargo check  # must be clean
 ```
 
 - Verified evidence this run: wasm
-  `apps/mcp/target/wasm32-unknown-unknown/release/peridot_mcp.wasm`,
+  `apps/mcp/target/wasm32-unknown-unknown/release/peridot_id_mcp.wasm`,
   1,232,468 B,
   sha256 `11585917ab40d7f2052af68740371da3996585e1ea5b000bc01170cb3cf4dfb7`;
   `cargo test` 45 + 11 green; `cargo check` clean.
@@ -44,10 +44,10 @@ cargo check  # must be clean
 
 ```bash
 # create on a low-cost app subnet (operator runs; names only, no secrets here)
-dfx canister --network ic create peridot_mcp --subnet-type application --with-cycles 3000000000000
-dfx canister --network ic status peridot_mcp   # record ID, subnet, balance, threshold
+dfx canister --network ic create peridot_id_mcp --subnet-type application --with-cycles 3000000000000
+dfx canister --network ic status peridot_id_mcp   # record ID, subnet, balance, threshold
 dfx deploy --network ic --no-wallet            # installs the paperclip-tip wasm
-dfx canister --network ic status peridot_mcp   # confirm module hash = built wasm
+dfx canister --network ic status peridot_id_mcp   # confirm module hash = built wasm
 ```
 
 Blast radius: a fresh canister — failure affects only this deploy, never
@@ -105,8 +105,8 @@ design". Address explicitly in the cutover comment.
 
 ```bash
 # from apps/mcp/, operator runs
-dfx canister --network ic install --mode reinstall peridot_mcp  # prior wasm, stateless-safe
-dfx canister --network ic status peridot_mcp
+dfx canister --network ic install --mode reinstall peridot_id_mcp  # prior wasm, stateless-safe
+dfx canister --network ic status peridot_id_mcp
 ```
 
 - DNS rollback: revert `mcp.peridot.id` records to the pre-flip values
@@ -120,7 +120,7 @@ dfx canister --network ic status peridot_mcp
 
 ```bash
 # from apps/mcp/
-dfx canister --network ic status peridot_mcp   # cycles balance, freezing threshold
+dfx canister --network ic status peridot_id_mcp   # cycles balance, freezing threshold
 ```
 
 - Track: cycles balance vs 3T start, burn/call vs Phase 3 baselines
@@ -138,8 +138,8 @@ dfx canister --network ic status peridot_mcp   # cycles balance, freezing thresh
 
 ```bash
 # operator runs with the cycles-wallet name on file (never paste secrets):
-dfx canister --network ic deposit-cycles <APPROVED-AMOUNT> peridot_mcp
-dfx canister --network ic status peridot_mcp
+dfx canister --network ic deposit-cycles <APPROVED-AMOUNT> peridot_id_mcp
+dfx canister --network ic status peridot_id_mcp
 ```
 
 ## 7. Discipline in code (unchanged, restated)

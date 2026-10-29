@@ -57,7 +57,7 @@ consensus + certification. Only `search_docs` rises materially above it
 - Idle burn (baseline, fresh deploy, no traffic): **24,951,596 cycles/day**,
   memory 2,441,635 B.
 - Storage: `src/generated_docs.rs` 98,728 B; wasm
-  `target/wasm32-unknown-unknown/release/peridot_mcp.wasm` **1,184,289 B**
+  `target/wasm32-unknown-unknown/release/peridot_id_mcp.wasm` **1,184,289 B**
   (+77,001 B vs Phase 1, per ticket baseline).
 
 ## 3. Optimization applied (one, measured — no churn)

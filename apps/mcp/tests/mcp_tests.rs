@@ -2,10 +2,10 @@
 //! (ANT-845: initialize -> notifications/initialized -> tools/list ->
 //! tools/call across all four tools, plus limits and routing guards).
 
-use peridot_mcp::protocol::{
+use peridot_id_mcp::protocol::{
     handle_post, TOOL_GET_EXAMPLE, TOOL_GET_GUIDE, TOOL_GET_SDK_REF, TOOL_NAME,
 };
-use peridot_mcp::http::{cors_preflight, route, validate_mcp_headers, FixedResponse, HeaderField, Route};
+use peridot_id_mcp::http::{cors_preflight, route, validate_mcp_headers, FixedResponse, HeaderField, Route};
 use serde_json::{json, Value};
 
 fn post(body: &[u8]) -> (u16, Value) {

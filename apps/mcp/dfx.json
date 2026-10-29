@@ -1,10 +1,10 @@
 {
   "version": 1,
   "canisters": {
-    "peridot_mcp": {
+    "peridot_id_mcp": {
       "type": "rust",
-      "package": "peridot_mcp",
-      "candid": "src/peridot_mcp.did"
+      "package": "peridot_id_mcp",
+      "candid": "src/peridot_id_mcp.did"
     }
   }
 }
