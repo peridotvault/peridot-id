@@ -22,6 +22,10 @@ export const DOMAIN_V2 = fromAscii("PID|SOLANA|SMART_ACCOUNT|v2");
 export const DOMAIN_V3 = fromAscii("PID|SOLANA|SMART_ACCOUNT|v3");
 /** V4 domain (ANT-544 B5, ANT-556): V3 semantics plus the user-approved `max_total_fee` bound. */
 export const DOMAIN_V4 = fromAscii("PID|SOLANA|SMART_ACCOUNT|v4");
+/** V5 domain (ANT-868 B4): V3 semantics plus the program/cluster binding
+ * (`program_id ‖ CLUSTER_ID` after the op-tag). V3/V4 payloads can never
+ * verify as V5. */
+export const DOMAIN_V5 = fromAscii("PID|SOLANA|SMART_ACCOUNT|v5");
 
 /** V2 operation tags — first payload byte after the domain (match program discriminators). */
 export const OP = {
@@ -51,6 +55,24 @@ export const IX_V4 = {
   withdrawToken: 12,
   execute: 13,
   activate: 14,
+} as const;
+
+/**
+ * V5 cluster-bound discriminators (ANT-868 B4 proving slice — must match
+ * `src/instructions/mod.rs` 20-21). Each mirrors its V3 counterpart's layout
+ * byte-for-byte; the signed payload additionally binds `program_id ‖
+ * CLUSTER_ID` after the op-tag. 22-29 (owner) and 30-32 (session) are
+ * RESERVED for the remaining-path migration.
+ */
+export const IX_V5 = {
+  updateAuthority: 20,
+  execute: 21,
+} as const;
+
+/** V5 operation tags — equal the V5 discriminators (domain/op-tag rule). */
+export const OP_V5 = {
+  updateAuthority: 20,
+  execute: 21,
 } as const;
 
 /**
@@ -507,6 +529,57 @@ export async function buildActivatePayloadV4(
   ]);
 }
 
+// ---------------------------------------------------------------------------
+// V5 payloads (ANT-868 B4 proving slice): same tail layouts as V3, with the
+// runtime `programId` (32 bytes) + baked `clusterId` (32 bytes, the cluster's
+// genesis hash) bound right after the op-tag. Layouts MUST match
+// `contracts/svm/smart-account/src/instructions/{update_authority_v5,execute_v5}.rs`
+// byte-for-byte: the SDK serializes once and the program verifies the same bytes.
+// ---------------------------------------------------------------------------
+
+/** V5 payload hash: `sha256(DOMAIN_V5 ‖ opTag ‖ programId ‖ clusterId ‖ parts…)`. */
+export async function buildAuthorizationPayloadV5(
+  opTag: number,
+  programId32: Uint8Array,
+  clusterId32: Uint8Array,
+  parts: Uint8Array[],
+): Promise<Uint8Array> {
+  if (programId32.length !== 32) throw new Error("programId32 must be 32 bytes");
+  if (clusterId32.length !== 32) throw new Error("clusterId32 must be 32 bytes");
+  return hashSha256(concat(DOMAIN_V5, new Uint8Array([opTag & 0xff]), programId32, clusterId32, ...parts));
+}
+
+/** V5 UPDATE_AUTHORITY payload: op-tag ‖ program ‖ cluster ‖ account ‖ nonce ‖ newAuthority ‖ expiry. */
+export async function buildUpdateAuthorityPayloadV5(
+  programId32: Uint8Array,
+  clusterId32: Uint8Array,
+  accountId32: Uint8Array,
+  nonce: bigint,
+  newAuthorityCompressed: Uint8Array,
+  expiry: number,
+): Promise<Uint8Array> {
+  if (newAuthorityCompressed.length !== 33) throw new Error("new authority must be the 33-byte compressed pubkey");
+  return buildAuthorizationPayloadV5(OP_V5.updateAuthority, programId32, clusterId32, [
+    accountId32, u64le(nonce), newAuthorityCompressed, i64le(expiry),
+  ]);
+}
+
+/** V5 EXECUTE payload: op-tag ‖ program ‖ cluster ‖ account ‖ nonce ‖ expiry ‖ policy ‖ callHash. */
+export async function buildExecutePayloadV5(
+  programId32: Uint8Array,
+  clusterId32: Uint8Array,
+  accountId32: Uint8Array,
+  nonce: bigint,
+  expiry: number,
+  feePolicyVersion: number,
+  callHash32: Uint8Array,
+): Promise<Uint8Array> {
+  if (callHash32.length !== 32) throw new Error("callHash32 must be 32 bytes");
+  return buildAuthorizationPayloadV5(OP_V5.execute, programId32, clusterId32, [
+    accountId32, u64le(nonce), i64le(expiry), u16le(feePolicyVersion), callHash32,
+  ]);
+}
+
 // ================= Session layer (WHITEPAPER.md §11; EVM counterpart: §10) =================
 //
 // Session keys are Ed25519: the P-256 passkey authorizes registration once via
@@ -516,6 +589,9 @@ export async function buildActivatePayloadV4(
 
 /** Session-grant domain (canonical). Disjoint from every SMART_ACCOUNT domain. */
 export const DOMAIN_SESSION = fromAscii("PID|SOLANA|SESSION|v1");
+/** V5 session-grant domain (ANT-868 B4, reserved): no instruction verifies
+ * under it yet — the session-path migration binds program/cluster here. */
+export const DOMAIN_SESSION_V2 = fromAscii("PID|SOLANA|SESSION|v2");
 
 /** Session operation tags (match program discriminators 7-10). */
 export const OP_SESSION = {
