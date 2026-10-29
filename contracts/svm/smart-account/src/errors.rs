@@ -81,6 +81,12 @@ pub enum PeridotError {
     /// ANT-635 revenue vault: `RemoveAdmin` targeting the last live admin
     /// (floor-1, EVM `PeridotFactory` parity). Additive-only (28).
     CannotRemoveLastAdmin = 28,
+    /// ANT-870 P6.1: the token account (or mint) carries a Token-2022
+    /// extension the vault/session flows do not support (transfer-fee,
+    /// confidential, memo, CPI-guard, hooks, … — see the matrix in
+    /// `programdata.rs`). Fail-closed: balance/authority semantics the
+    /// program cannot see are never trusted. Additive-only (29).
+    UnsupportedTokenExtension = 29,
 }
 
 impl From<PeridotError> for ProgramError {

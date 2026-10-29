@@ -292,6 +292,12 @@ pub fn process(
             let borrowed = view.try_borrow()?;
             let owner = programdata::owner_bytes(view);
             let token_auth = if programdata::is_token_program(&owner) {
+                // ANT-870 P6.1: extension matrix first — an extended token
+                // account with unsupported semantics (hidden balances, fee
+                // skims, hooks) must fail closed here, not just mismatch the
+                // post-CPI hash. Supported extended accounts still snapshot
+                // the base authority fields below.
+                programdata::check_token_account_supported(&borrowed)?;
                 Some(
                     programdata::snapshot_token_authorities(&borrowed)
                         .ok_or(PeridotError::SessionScopeViolation)?,
@@ -371,6 +377,9 @@ pub fn process(
                 .ok_or(PeridotError::SessionScopeViolation)?;
             let owner = programdata::owner_bytes(view);
             let borrowed = view.try_borrow()?;
+            // No extension re-check needed here: the pre-CPI gate admitted
+            // only supported extension sets, and any extension mutation lands
+            // in account data, which the data-hash equality below pins.
             let token_auth = if programdata::is_token_program(&owner) {
                 Some(
                     programdata::snapshot_token_authorities(&borrowed)

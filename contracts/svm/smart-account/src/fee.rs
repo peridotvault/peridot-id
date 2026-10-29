@@ -138,4 +138,87 @@ mod tests {
         assert_eq!(total_fee(10_000, 5_000), 15_000);
         assert_eq!(total_fee(u64::MAX, 1), u64::MAX); // saturates, never wraps
     }
+
+    // ---- ANT-870 P6.2: u64 fee-arithmetic overflow probes ----
+    //
+    // `split_attested_fee` multiplies in u128 precisely so no u64 input can
+    // overflow (`u64::MAX * u16::MAX` fits u128 with room); `total_fee`
+    // saturates. These probes pin that over the full input domain instead of
+    // trusting the type: boundary table plus a fixed-seed pseudorandom sweep
+    // (deterministic — no RNG dependency, same corpus every run).
+
+    /// Reference formula in u128 (what the code must equal, exactly).
+    fn ref_protocol_fee(network_fee: u64, bps: u16) -> u64 {
+        ((network_fee as u128 * bps as u128) / 10_000u128) as u64
+    }
+
+    #[test]
+    fn fee_split_matches_reference_on_boundaries() {
+        // Gas/overflow lens: u64 edges x bps edges, including bps > 100% —
+        // the helper takes any u16, so probe the whole u16 range shape.
+        for &fee in &[0u64, 1, 2, 9_999, 10_000, u64::MAX - 1, u64::MAX] {
+            for &bps in &[0u16, 1, 2, 4_999, 5_000, 5_001, 9_999, 10_000, 10_001, u16::MAX] {
+                let (r, p) = split_attested_fee(fee, bps);
+                assert_eq!(r, fee, "relayer leg is exact reimbursement");
+                assert_eq!(p, ref_protocol_fee(fee, bps), "fee={fee} bps={bps}");
+                // total_fee saturates; the u128 sum tells which side we are on.
+                let wide = fee as u128 + p as u128;
+                assert_eq!(
+                    total_fee(r, p),
+                    if wide > u64::MAX as u128 { u64::MAX } else { wide as u64 },
+                    "fee={fee} bps={bps}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fee_split_sweep_fixed_seed() {
+        // xorshift64*: deterministic, no dev-dependency, 8192 samples over
+        // the joint (fee, bps) domain incl. adversarial neighborhoods.
+        let mut x: u64 = 0x9E3779B97F4A7C15;
+        let mut next = || {
+            x ^= x >> 12;
+            x ^= x << 25;
+            x ^= x >> 27;
+            x = x.wrapping_mul(0x2545F4914F6CDD1D);
+            x
+        };
+        for _ in 0..8192 {
+            // Mix uniform u64 with edge-neighborhood values.
+            let fee = match next() % 4 {
+                0 => next(),
+                1 => u64::MAX - (next() % 16),
+                2 => next() % 20_001,
+                _ => (next() % 3).saturating_mul(u64::MAX / 2),
+            };
+            let bps = (next() % 65536) as u16;
+            let (r, p) = split_attested_fee(fee, bps);
+            assert_eq!(r, fee);
+            assert_eq!(p, ref_protocol_fee(fee, bps));
+            assert!(p <= fee || bps > 10_000, "protocol leg never exceeds fee at ≤100%");
+            let t = total_fee(r, p);
+            assert!(t >= r, "total never below the relayer leg");
+        }
+    }
+
+    #[test]
+    fn fee_invariants_hold() {
+        // Floor favors the user; relayer is always made whole exactly.
+        for fee in [0u64, 1, 3, 7, 999, 10_000, 4_294_967_295, u64::MAX] {
+            let (r, p) = split_attested_fee(fee, 5000);
+            assert_eq!(r, fee);
+            assert!(p <= fee / 2 + 1, "50% leg within one lamport of half");
+            // Monotone in fee at fixed policy.
+            let (_, p2) = split_attested_fee(fee.saturating_add(1), 5000);
+            assert!(p2 >= p);
+        }
+        // Monotone in bps at fixed fee (no wraparound kinks).
+        let mut prev = 0u64;
+        for bps in [0u16, 1, 100, 5_000, 10_000, 30_000, u16::MAX] {
+            let (_, p) = split_attested_fee(1_000_000, bps);
+            assert!(p >= prev, "bps={bps}");
+            prev = p;
+        }
+    }
 }
