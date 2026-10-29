@@ -308,6 +308,11 @@ contract PeridotAccount {
     /// (pid, key): pre-B1 keyless salts (`sha256(pid)`) have no pidHash
     /// preimage and are unclaimable. Fail-fast placement also saves the
     /// P-256 precompile on smuggled salts.
+    /// @dev `nonReentrant` for uniformity with `initializeV4` (ANT-879 audit
+    /// note): not exploitable without it (`initialized` is set before the two
+    /// value transfers so re-entry reverts `AlreadyInitialized`, `msg.sender`
+    /// is the factory, payouts go only to factory-trusted targets) — the lock
+    /// removes the posture asymmetry between the V3 and V4 init paths.
     function initialize(
         bytes32 salt,
         bytes32 x,
@@ -322,7 +327,7 @@ contract PeridotAccount {
         bytes calldata clientDataJSON,
         bytes32 r,
         bytes32 s
-    ) external {
+    ) external nonReentrant {
         if (initialized) revert AlreadyInitialized();
         if (x == 0 && y == 0) revert ZeroAuthority();
         if (msg.sender != _factory) revert Unauthorized();

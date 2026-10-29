@@ -89,14 +89,17 @@ export class EvmAdapter {
     return "0x" + toHex(pidKeyToSalt32(pid, x, y));
   }
 
-  /** True once the proxy is deployed (code present). */
-  async isDeployed(pid: string): Promise<boolean> {
-    const code = await this.rpc.getCode(this.getAddress(pid));
+  /** True once the proxy is deployed (code present).
+   * B1 (ANT-866/ANT-879): bound to (pid, claiming key) — the keyless address
+   * is unclaimable, so probing it would report a false inactive. */
+  async isDeployed(pid: string, x: Bytes, y: Bytes): Promise<boolean> {
+    const code = await this.rpc.getCode(this.getAddressBound(pid, x, y));
     return code !== "0x" && code !== "0x0" && code.length > 2;
   }
 
-  async getBalance(pid: string): Promise<bigint> {
-    return this.rpc.getBalance(this.getAddress(pid));
+  /** Balance of the B1-bound counterfactual (the only safe pre-funding target). */
+  async getBalance(pid: string, x: Bytes, y: Bytes): Promise<bigint> {
+    return this.rpc.getBalance(this.getAddressBound(pid, x, y));
   }
 
   /** `deployAndInit(bytes32,bytes32,bytes32,bytes32,uint256,address)` calldata for the relayer/forge script (V1, frozen). */
