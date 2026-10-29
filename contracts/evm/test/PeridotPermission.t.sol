@@ -81,7 +81,9 @@ contract PeridotPermissionTest is Test {
     bytes32 constant GY = 0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5;
     bytes32 constant SX = 0x7cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc47669978;
     bytes32 constant SY = 0x07775510db8ed040293d9ac69f7430dbba7dade63ce982299e04b79d227873d1;
-    bytes32 constant SALT = bytes32(uint256(7));
+    /// @dev B1 binding (ANT-866): `sha256("test@pid")`; bound on-chain as
+    /// `keccak256(PID_HASH ‖ GX ‖ GY)` via `_salt()`.
+    bytes32 constant PID_HASH = 0xd7824b7df5f3b280b67abf3ac397749789aa4b6bac508d9b0df69091cb3a0cfa;
 
     uint256 constant P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
 
@@ -95,9 +97,8 @@ contract PeridotPermissionTest is Test {
     uint16 constant POLICY_V2 = 2;
 
     // ANT-747: on-chain floors removed — v2 settles pure 50% on every chain.
-
-    bytes32 constant VEC_ACT_R = 0xe833d5ba603d6a180091a10e6cc56ae051abce1624970cbe8bf278d8e6858636;
-    bytes32 constant VEC_ACT_S = 0x6a961eb397aa853a23248b4af0d4d84c3d103a4451959793117939d73bf69a30;
+    // B1 (ANT-866): activation signatures are runtime (`_sigOwner` over the
+    // bound-salt payload) — the frozen VEC_ACT vector is retired.
 
     bytes4 constant MAGIC_1271 = 0x1626ba7e;
     bytes4 constant MAGIC_INVALID = 0xffffffff;
@@ -114,15 +115,15 @@ contract PeridotPermissionTest is Test {
         authPrefix = sha256("test-rp");
         address[] memory admins = new address[](1);
         admins[0] = address(this);
-        // Same deploy order as the V3 suite → same factory address → VEC_ACT reusable.
+        // Same deploy order as the V3 suite → same factory address.
         factory = new PeridotFactory(address(new PeridotAccount()), admins);
-        address predicted = factory.predict(SALT);
+        address predicted = factory.predictBound(PID_HASH, GX, GY);
         vm.deal(predicted, 0.01 ether);
+        (bytes memory actAuth, bytes memory actClient, bytes32 actR, bytes32 actS) = _sigOwner(_actPayload());
         account = PeridotAccount(
             payable(
                 factory.deployAndInit(
-                    SALT, GX, GY, POLICY_V1, DEADLINE, 0.002 ether, _authData(), _clientData(_actPayload()),
-                    VEC_ACT_R, VEC_ACT_S
+                    PID_HASH, GX, GY, POLICY_V1, DEADLINE, 0.002 ether, actAuth, actClient, actR, actS
                 )
             )
         );
@@ -174,8 +175,14 @@ contract PeridotPermissionTest is Test {
 
     function _actPayload() internal view returns (bytes32) {
         return keccak256(
-            abi.encodePacked(DOMAIN_V3, uint8(0x05), SALT, GX, GY, POLICY_V1, DEADLINE, block.chainid, address(factory))
+            abi.encodePacked(DOMAIN_V3, uint8(0x05), _salt(), GX, GY, POLICY_V1, DEADLINE, block.chainid, address(factory))
         );
+    }
+
+    /// @dev B1 (ANT-866): canonical test salt — what the factory derives from
+    /// `(PID_HASH, GX, GY)`.
+    function _salt() internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(PID_HASH, GX, GY));
     }
 
     function _pid(
@@ -706,7 +713,7 @@ contract PeridotPermissionTest is Test {
     // ---- rotation → address stability (G6 pin) ----
 
     function test_RotateKeepsAddressAndMovesAuthority() public {
-        address before = factory.predict(SALT);
+        address before = factory.predictBound(PID_HASH, GX, GY);
         assertEq(before, address(account), "counterfactual address mismatch");
         uint64 n = account.nonce();
         bytes32 payload = keccak256(
@@ -714,8 +721,8 @@ contract PeridotPermissionTest is Test {
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
         account.updateAuthority(SX, SY, DEADLINE, auth, client, r, s);
-        // Address derives from factory+impl+salt only — rotation cannot move it.
-        assertEq(factory.predict(SALT), before, "rotation moved the address");
+        // Address derives from factory+impl+bound salt only — rotation cannot move it.
+        assertEq(factory.predictBound(PID_HASH, GX, GY), before, "rotation moved the address");
         assertEq(account.authorityX(), SX);
         assertEq(account.authorityY(), SY);
         // New key executes (owner path, fresh nonce).
@@ -886,8 +893,10 @@ contract PeridotPermissionTest is Test {
     // ---- V4 activation (fee-capped, factory V4 path) ----
 
     function test_ActivateV4HappyPath() public {
-        bytes32 salt9 = bytes32(uint256(9));
-        address predicted = factory.predict(salt9);
+        // Distinct pid → distinct bound salt (the suite pid is already claimed in setUp).
+        bytes32 pid9 = keccak256("perm-v4-9");
+        bytes32 salt9 = keccak256(abi.encodePacked(pid9, GX, GY));
+        address predicted = factory.predictBound(pid9, GX, GY);
         vm.deal(predicted, 0.01 ether);
         uint256 maxTotalFee = 0.003 ether;
         uint256 netFee = 0.002 ether;
@@ -901,7 +910,7 @@ contract PeridotPermissionTest is Test {
         uint256 factoryBefore = address(factory).balance;
         PeridotAccount fresh = PeridotAccount(
             payable(
-                factory.deployAndInitV4(salt9, GX, GY, POLICY_V1, maxTotalFee, DEADLINE, netFee, auth, client, r, s)
+                factory.deployAndInitV4(pid9, GX, GY, POLICY_V1, maxTotalFee, DEADLINE, netFee, auth, client, r, s)
             )
         );
         assertTrue(fresh.initialized());
@@ -911,8 +920,9 @@ contract PeridotPermissionTest is Test {
     }
 
     function test_ActivateV4MaxTotalFeeReverts() public {
-        bytes32 salt10 = bytes32(uint256(10));
-        address predicted = factory.predict(salt10);
+        bytes32 pid10 = keccak256("perm-v4-10");
+        bytes32 salt10 = keccak256(abi.encodePacked(pid10, GX, GY));
+        address predicted = factory.predictBound(pid10, GX, GY);
         vm.deal(predicted, 0.01 ether);
         uint256 netFee = 0.002 ether;
         bytes32 payload = keccak256(
@@ -922,7 +932,7 @@ contract PeridotPermissionTest is Test {
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
         vm.expectRevert(PeridotFactory.InitFailed.selector);
-        factory.deployAndInitV4(salt10, GX, GY, POLICY_V1, netFee, DEADLINE, netFee, auth, client, r, s);
+        factory.deployAndInitV4(pid10, GX, GY, POLICY_V1, netFee, DEADLINE, netFee, auth, client, r, s);
     }
 
     // ---- executor + 7579 paths ----

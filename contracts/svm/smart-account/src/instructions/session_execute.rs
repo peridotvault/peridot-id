@@ -152,8 +152,16 @@ pub fn process(
     // ANT-863 B3 first: a session that predates the latest rotation is dead —
     // report the actionable error before signer/sequence details. Both PDAs
     // derive from the record's own account_id, so a spoofed vault cannot pass.
-    verify_session_pda(session, program_id, account_id, session_key)?;
-    verify_pda(vault, program_id, account_id)?;
+    // ANT-866 B1: the vault's STORED key hash (stable across rotations).
+    let key_hash = {
+        let borrowed = vault.try_borrow()?;
+        let vault_state = SmartAccount::try_from_bytes(&borrowed)?;
+        // ANT-866 B1: sessions do not execute inside the close grace window.
+        vault_state.require_active()?;
+        vault_state.key_hash()
+    };
+    verify_session_pda(session, program_id, account_id, key_hash, session_key)?;
+    verify_pda(vault, program_id, account_id, key_hash)?;
     {
         let borrowed = vault.try_borrow()?;
         let vault_state = SmartAccount::try_from_bytes(&borrowed)?;
@@ -192,7 +200,7 @@ pub fn process(
     #[cfg(any(target_os = "solana", target_arch = "bpf"))]
     {
         let (vault_addr, _) = Address::find_program_address(
-            &[b"peridot_id", b"account", &account_id],
+            &[b"peridot_id", b"account", &account_id, &key_hash],
             program_id,
         );
         debug_assert_eq!(vault.address(), &vault_addr);
@@ -360,12 +368,13 @@ pub fn process(
     }
 
     // Build the CPI: session PDA signs via seeds; nothing else gains signer.
-    let bump = verify_session_pda(session, program_id, account_id, session_key)?;
+    let bump = verify_session_pda(session, program_id, account_id, key_hash, session_key)?;
     let bump_seed = [bump];
     let seeds = [
         pinocchio::cpi::Seed::from(b"peridot_id".as_slice()),
         pinocchio::cpi::Seed::from(b"session".as_slice()),
         pinocchio::cpi::Seed::from(account_id.as_slice()),
+        pinocchio::cpi::Seed::from(key_hash.as_slice()),
         pinocchio::cpi::Seed::from(session_key.as_slice()),
         pinocchio::cpi::Seed::from(bump_seed.as_slice()),
     ];

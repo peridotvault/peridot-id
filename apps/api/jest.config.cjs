@@ -12,5 +12,8 @@ module.exports = {
     "^@peridotvault/pid-types$": "<rootDir>/../../packages/types/src",
     "^@peridotvault/pid-solana$": "<rootDir>/../../packages/solana/src",
     "^@peridotvault/pid-payments$": "<rootDir>/../../packages/payments/src",
+    "^@peridotvault/pid-evm$": "<rootDir>/../../packages/evm/src",
+    "^@peridotvault/pid-core$": "<rootDir>/../../packages/core/src",
+    "^@peridotvault/pid-core/dist/(.*)$": "<rootDir>/../../packages/core/src/$1",
   },
 };

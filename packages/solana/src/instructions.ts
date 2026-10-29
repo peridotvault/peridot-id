@@ -20,7 +20,7 @@ import {
 } from "@solana/spl-token";
 import { concat, u16le, u64le, i64le, fromAscii, serializeExecuteCall, serializeSessionMetas } from "@peridotvault/pid-core";
 import type { Bytes, ExecuteMeta, SessionMeta } from "@peridotvault/pid-core";
-import { IX, IX_SESSION, IX_V4, IX_V5, IX_VAULT, TREASURY_SEED, CONFIG_SEED, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
+import { IX, IX_CLOSE, IX_SESSION, IX_V4, IX_V5, IX_VAULT, TREASURY_SEED, CONFIG_SEED, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
 
 /**
  * Build the passkey-signed `initialize(account_id, authority, clientDataJSON)` instruction (disc 0).
@@ -133,6 +133,8 @@ export function buildActivateInstructionV2(
   treasury: PublicKey,
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
+  // ANT-866 B1: tombstone PDA (must be absent). Required — see V3 builder.
+  tombstone: PublicKey,
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
@@ -144,6 +146,7 @@ export function buildActivateInstructionV2(
       { pubkey: treasury, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+      { pubkey: tombstone, isSigner: false, isWritable: false },
     ],
     programId,
     data: concat([IX.activate], accountId32, authorityCompressed, u64le(maxFeeLamports), u16le(feePolicyVersion), i64le(expiry), u64le(feeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
@@ -167,18 +170,24 @@ export function buildActivateInstructionV3(
   treasury: PublicKey,
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
+  // ANT-866 B1: tombstone PDA (must be absent). Required — the program
+  // rejects tombstoneless claims, so the builder does too (build time,
+  // not on-chain).
+  tombstone: PublicKey,
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
     assertCanonicalTreasury(treasury, programId);
+  const keys = [
+    { pubkey: relayer, isSigner: true, isWritable: true },
+    { pubkey: smartAccount, isSigner: false, isWritable: true },
+    { pubkey: treasury, isSigner: false, isWritable: true },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+  ];
+  if (tombstone) keys.push({ pubkey: tombstone, isSigner: false, isWritable: false });
   return new TransactionInstruction({
-    keys: [
-      { pubkey: relayer, isSigner: true, isWritable: true },
-      { pubkey: smartAccount, isSigner: false, isWritable: true },
-      { pubkey: treasury, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
-    ],
+    keys,
     programId,
     data: concat([IX.activate], accountId32, authorityCompressed, u16le(feePolicyVersion), i64le(expiry), u64le(networkFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
@@ -438,18 +447,24 @@ export function buildActivateInstructionV4(
   treasury: PublicKey,
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
+  // ANT-866 B1: tombstone PDA (must be absent). Required — the program
+  // rejects tombstoneless claims, so the builder does too (build time,
+  // not on-chain).
+  tombstone: PublicKey,
 ): TransactionInstruction {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   if (authorityCompressed.length !== 33) throw new Error("authority must be the 33-byte compressed pubkey");
     assertCanonicalTreasury(treasury, programId);
+  const keys = [
+    { pubkey: relayer, isSigner: true, isWritable: true },
+    { pubkey: smartAccount, isSigner: false, isWritable: true },
+    { pubkey: treasury, isSigner: false, isWritable: true },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+  ];
+  if (tombstone) keys.push({ pubkey: tombstone, isSigner: false, isWritable: false });
   return new TransactionInstruction({
-    keys: [
-      { pubkey: relayer, isSigner: true, isWritable: true },
-      { pubkey: smartAccount, isSigner: false, isWritable: true },
-      { pubkey: treasury, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
-    ],
+    keys,
     programId,
     data: concat([IX_V4.activate], accountId32, authorityCompressed, u16le(feePolicyVersion), i64le(expiry), u64le(networkFeeLamports), u64le(maxTotalFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
@@ -632,6 +647,9 @@ export function buildCloseInstruction(
   clientDataJSON: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): TransactionInstruction {
+  // ANT-866 B1: immediate close (disc 4) is permanently disabled on-chain
+  // (`CloseDeprecated`) — kept building for decoder/indexer reference; use
+  // buildCloseRequestInstruction for teardown.
   return new TransactionInstruction({
     keys: [
       { pubkey: smartAccount, isSigner: false, isWritable: true },
@@ -640,6 +658,87 @@ export function buildCloseInstruction(
     ],
     programId,
     data: concat([IX.close], u64le(nonce), i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+  });
+}
+
+/**
+ * ANT-866 B1 `close_request` (disc 33): `nonce | destination | expiry |
+ * clientDataJSON`. Opens the unclaim grace window (vault → CLOSING, ticket
+ * created submitter-funded, nonce consumed). Layout MUST match
+ * `close_request.rs` byte-for-byte.
+ */
+export function buildCloseRequestInstruction(
+  submitter: PublicKey,
+  smartAccount: PublicKey,
+  ticket: PublicKey,
+  destination: PublicKey,
+  nonce: bigint,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: submitter, isSigner: true, isWritable: true },
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: ticket, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat([IX_CLOSE.request], u64le(nonce), destination.toBytes(), i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+  });
+}
+
+/**
+ * ANT-866 B1 `close_cancel` (disc 34): `nonce | expiry | clientDataJSON`.
+ * Revives a CLOSING vault (ticket rent refunds into the vault, nonce
+ * consumed). Layout MUST match `close_cancel.rs` byte-for-byte.
+ */
+export function buildCloseCancelInstruction(
+  smartAccount: PublicKey,
+  ticket: PublicKey,
+  nonce: bigint,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: ticket, isSigner: false, isWritable: true },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat([IX_CLOSE.cancel], u64le(nonce), i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+  });
+}
+
+/**
+ * ANT-866 B1 `close_finalize` (disc 35): no data. Permissionless after the
+ * ticket deadline — writes the tombstone, pays the full vault balance to the
+ * request-bound destination, deletes vault + ticket. Layout MUST match
+ * `close_finalize.rs` byte-for-byte.
+ */
+export function buildCloseFinalizeInstruction(
+  submitter: PublicKey,
+  smartAccount: PublicKey,
+  ticket: PublicKey,
+  tombstone: PublicKey,
+  destination: PublicKey,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: submitter, isSigner: true, isWritable: true },
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: ticket, isSigner: false, isWritable: true },
+      { pubkey: tombstone, isSigner: false, isWritable: true },
+      { pubkey: destination, isSigner: false, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat([IX_CLOSE.finalize]) as unknown as Buffer,
   });
 }
 

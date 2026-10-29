@@ -18,8 +18,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  assert, genKey, makeRpc, pidToSalt32, keccak,
-  actPayloadV4, deployAndInitV4Data, assertion,
+  assert, genKey, makeRpc, pidToSalt32, pidToBoundSalt, keccak,
+  actPayloadV4, deployAndInitV4Data, predictBoundData, assertion,
   opsHash, batchOwnerPayload, batchSessionPayload,
   batchOwnerInner, batchSessionInner,
   executeBatchV4Data, executeViaPermissionV2Data,
@@ -76,9 +76,10 @@ const B = (hex) => Buffer.from(hex, "hex");
 const hex = (u8) => "0x" + Buffer.from(u8).toString("hex");
 
 // --- V4 activation (deployAndInitV4; generous cap, estimate pattern) ---
-const salt = pidToSalt32("e2e-v4-batch@pid");
-const saltHex = hex(salt);
-const predicted = await rpc("eth_call", [{ to: factory, data: viewSel("predict(bytes32)") + saltHex.slice(2).padStart(64, "0") }, "latest"]);
+// B1 (ANT-866): salt is PID-KEY BOUND — only the owner key can claim.
+const pidHash = pidToSalt32("e2e-v4-batch@pid");
+const salt = pidToBoundSalt("e2e-v4-batch@pid", B(owner.x), B(owner.y));
+const predicted = await rpc("eth_call", [{ to: factory, data: predictBoundData({ pidHash, x: B(owner.x), y: B(owner.y) }) }, "latest"]);
 const account = "0x" + predicted.slice(-40);
 const deadline = Math.floor(Date.now() / 1000) + 300;
 const ACT_CAP = 50_000_000_000_000_000n; // 0.05 ETH activation cap (generous; payload-bound)
@@ -88,7 +89,7 @@ const actPayload = actPayloadV4({
 });
 const act = assertion(owner, actPayload);
 const draftAct = deployAndInitV4Data({
-  salt, x: B(owner.x), y: B(owner.y),
+  pidHash, x: B(owner.x), y: B(owner.y),
   feePolicyVersion: 1, maxTotalFee: ACT_CAP, deadline, networkFee: 0n,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
@@ -97,7 +98,7 @@ await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: weiHex((a
 const actRcpt = await sendTx({
   from: SUBMITTER, to: factory,
   data: deployAndInitV4Data({
-    salt, x: B(owner.x), y: B(owner.y),
+    pidHash, x: B(owner.x), y: B(owner.y),
     feePolicyVersion: 1, maxTotalFee: ACT_CAP, deadline, networkFee: actFee,
     authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
   }),

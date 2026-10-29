@@ -1,9 +1,12 @@
 // EVM counterfactual helpers — CREATE2 address derivation + payload binding.
 //
-// Mirrors `hash.ts` (Solana PDA) for `eip155` chains: the smart-account address is a
-// pure function of the pid (as the CREATE2 salt), NOT of Google or the
-// passkey. The passkey (x,y) is stored later on `initialize`, so rotation never
-// changes the address — same split as Solana (PDA vs authority).
+// B1 binding (ANT-866): the smart-account address is a pure function of
+// (pid, passkey), NOT of the pid alone: `salt = keccak256(pidHash ‖ x ‖ y)`
+// where `pidHash = sha256(pid)`. The factory derives the salt on-chain and the
+// account re-enforces it (`SaltNotBound`), so counterfactual funding at a bound
+// address is unclaimable by any non-owner. Rotation never changes the address:
+// binding is claim-time (the original claiming key), same split as Solana
+// (PDA vs authority).
 // Browser-safe: @noble/hashes only, no Buffer, no node:crypto.
 
 import { keccak_256 } from "@noble/hashes/sha3";
@@ -145,9 +148,28 @@ export function keccak256(data: Uint8Array): Uint8Array {
   return keccak_256(data);
 }
 
-/** CREATE2 salt for a pid: the same sha256(pid) seed Solana uses. */
+/** CREATE2 salt for a pid: the same sha256(pid) seed Solana uses.
+ * @deprecated B1 (ANT-866): keyless salts are unclaimable on-chain
+ * (`SaltNotBound`). Use `pidKeyToSalt32` — retained for indexer reference only.
+ */
 export function pidToSalt32(pid: string): Uint8Array {
   return pidToSeed32(pid);
+}
+
+/** PID hash: `sha256(normalized pid)` (pre-B1 salt semantics; now the binding input). */
+export function pidToPidHash(pid: string): Uint8Array {
+  return pidToSeed32(pid);
+}
+
+/**
+ * B1-bound CREATE2 salt: `keccak256(pidHash ‖ x ‖ y)`.
+ * Matches the factory's on-chain derivation exactly (`abi.encodePacked` =
+ * raw concatenation for fixed-size bytes). `x`/`y` are the 32-byte P-256
+ * coordinates of the CLAIMING key.
+ */
+export function pidKeyToSalt32(pid: string, x: Bytes, y: Bytes): Uint8Array {
+  if (x.length !== 32 || y.length !== 32) throw new Error("pid-key binding needs 32-byte x and y");
+  return keccak256(concat(pidToSeed32(pid), x, y));
 }
 
 /** Raw 20 address bytes from a `0x…`/bare hex string. Throws on bad input. */
@@ -191,6 +213,8 @@ export function getCreate2Address(factory: string, salt32: Uint8Array, initCodeH
  * Derive the counterfactual smart-account address: salt from the pid,
  * init code from the shared implementation. Same `(factory, implementation)`
  * on every chain → same address on every chain.
+ * @deprecated B1 (ANT-866): keyless derivation funds unclaimable addresses.
+ * Use `deriveEvmSmartAccountAddressBound` — retained for indexer reference only.
  */
 export function deriveEvmSmartAccountAddress(
   pid: string,
@@ -200,6 +224,27 @@ export function deriveEvmSmartAccountAddress(
   const salt = pidToSalt32(pid);
   const initCodeHash = keccak256(minimalProxyInitCode(implementation));
   return { address: getCreate2Address(factory, salt, initCodeHash), salt: "0x" + toHex(salt) };
+}
+
+/**
+ * B1-bound counterfactual address: salt from (pid, claiming key).
+ * This is the ONLY safe pre-funding target — the address no other key can claim.
+ */
+export function deriveEvmSmartAccountAddressBound(
+  pid: string,
+  x: Bytes,
+  y: Bytes,
+  factory: string,
+  implementation: string,
+): { address: string; salt: string; pidHash: string } {
+  const pidHash = pidToSeed32(pid);
+  const salt = pidKeyToSalt32(pid, x, y);
+  const initCodeHash = keccak256(minimalProxyInitCode(implementation));
+  return {
+    address: getCreate2Address(factory, salt, initCodeHash),
+    salt: "0x" + toHex(salt),
+    pidHash: "0x" + toHex(pidHash),
+  };
 }
 
 /** Domain-separated EVM authorization payload: `keccak256(DOMAIN_EVM ‖ parts…)`. */

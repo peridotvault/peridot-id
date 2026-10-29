@@ -61,14 +61,14 @@ pub fn process(
     let client_json_len = u16::from_le_bytes(data.read_array::<2>(CLIENT_JSON_LEN_OFFSET)?) as usize;
     let client_json = data.read_bytes(CLIENT_JSON_LEN_OFFSET + 2, client_json_len)?;
 
-    let (authority, account_id) = {
+    let (authority, account_id, key_hash) = {
         let borrowed = vault.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id())
+        (state.authority(), state.account_id(), state.key_hash())
     };
-    verify_pda(vault, program_id, account_id)?;
-    verify_session_pda(session, program_id, account_id, session_key)?;
+    verify_pda(vault, program_id, account_id, key_hash)?;
+    verify_session_pda(session, program_id, account_id, key_hash, session_key)?;
 
     // Only dead sessions close: revoked, or hard-expired on the chain clock.
     {

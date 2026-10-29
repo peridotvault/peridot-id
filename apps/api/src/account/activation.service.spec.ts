@@ -54,6 +54,9 @@ jest.mock("@peridotvault/pid-solana", () => ({
   SolanaRpc: jest.fn(() => ({})),
   fromHex: jest.fn((hex: string) => Uint8Array.from(Buffer.from(hex, "hex"))),
   b64urlToBytes: jest.fn((s: string) => Uint8Array.from(Buffer.from(s, "base64url"))),
+  // B1 (ANT-866): activation heals the row to the bound address. The mock
+  // returns the row address itself (already bound in these fixtures).
+  deriveSmartAccountAddress: jest.fn(() => ({ address: { toBase58: () => SMART_ADDR }, bump: 255 })),
 }));
 
 function chainRow(overrides: Partial<Record<string, unknown>> = {}) {

@@ -134,13 +134,14 @@ pub fn process(
         programdata::check_token_mint_supported(&borrowed)?;
     }
 
-    let (authority, account_id) = {
+    let (authority, account_id, key_hash) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
+        state.require_active()?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id())
+        (state.authority(), state.account_id(), state.key_hash())
     };
-    let bump = verify_pda(smart_account, program_id, account_id)?;
+    let bump = verify_pda(smart_account, program_id, account_id, key_hash)?;
 
     // Version gate before signature verification (safe pre-verify, mirrors V3).
     let bps = policy_protocol_bps_v4(policy_version)?;
@@ -174,6 +175,7 @@ pub fn process(
         Seed::from(b"peridot_id".as_slice()),
         Seed::from(b"account".as_slice()),
         Seed::from(account_id.as_slice()),
+        Seed::from(key_hash.as_slice()),
         Seed::from(signer_seeds.as_slice()),
     ];
     let signer = Signer::from(&seeds[..]);

@@ -16,9 +16,9 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  assert, genKey, makeRpc, pidToSalt32, keccak, AUTH_PREFIX,
+  assert, genKey, makeRpc, pidToSalt32, pidToBoundSalt, keccak, AUTH_PREFIX,
   actPayloadV3, exePayloadV3, assertion,
-  deployAndInitData, executeData, viewSel,
+  deployAndInitData, executeData, predictBoundData, viewSel,
 } from "./e2e-helpers.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -69,9 +69,10 @@ const x = Buffer.from(keyJson.x, "hex");
 const y = Buffer.from(keyJson.y, "hex");
 
 // --- predict the counterfactual (fund after attesting, below) ---
-const salt = pidToSalt32("e2e-v3@pid");
-const saltHex = "0x" + Buffer.from(salt).toString("hex");
-const predicted = await rpc("eth_call", [{ to: factory, data: viewSel("predict(bytes32)") + saltHex.slice(2).padStart(64, "0") }, "latest"]);
+// B1 (ANT-866): salt is PID-KEY BOUND — only this key can claim the address.
+const pidHash = pidToSalt32("e2e-v3@pid");
+const salt = pidToBoundSalt("e2e-v3@pid", x, y);
+const predicted = await rpc("eth_call", [{ to: factory, data: predictBoundData({ pidHash, x, y }) }, "latest"]);
 const account = "0x" + predicted.slice(-40);
 
 // --- activate via self-contained calldata ---
@@ -85,7 +86,7 @@ const actPayload = actPayloadV3({
 });
 const act = assertion(keyJson, actPayload);
 const draftData = deployAndInitData({
-  salt, x, y, feePolicyVersion: 1, deadline, networkFee: 0n,
+  pidHash, x, y, feePolicyVersion: 1, deadline, networkFee: 0n,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
 const estGas = BigInt(await rpc("eth_estimateGas", [{ from: SUBMITTER, to: factory, data: draftData }]));
@@ -94,7 +95,7 @@ const PROTOCOL_FEE = PROTOCOL_FEE_OF(NETWORK_FEE);
 await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: weiHex(NETWORK_FEE + PROTOCOL_FEE) }]);
 // AC-E1: the deploy is submitted by the independent SUBMITTER, not the admin.
 const data = deployAndInitData({
-  salt, x, y, feePolicyVersion: 1, deadline, networkFee: NETWORK_FEE,
+  pidHash, x, y, feePolicyVersion: 1, deadline, networkFee: NETWORK_FEE,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
 const submitterBefore = BigInt(await rpc("eth_getBalance", [SUBMITTER, "latest"]));

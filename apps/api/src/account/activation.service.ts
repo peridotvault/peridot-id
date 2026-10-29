@@ -397,6 +397,32 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       if (!asserting) {
         return this.reject(user.pid, "unauthorized", new BadRequestException("Unknown or inactive passkey"));
       }
+      // B1 (ANT-866): the claim target is the bound PDA of the ASSERTING key
+      // (claim-time binding). Heal pre-binding rows so funding/verification
+      // land on the only address this key can claim.
+      const assertingKey = coseToCompressedSecp256r1(Buffer.from(asserting.publicKey));
+      const programId = await this.chains.solanaProgramId(selection);
+      const boundAddress = this.pidSolana.deriveSmartAccountAddress(
+        user.pid,
+        new Uint8Array(assertingKey),
+        new this.pidSolana.PublicKey(programId),
+      ).address.toBase58();
+      if (chain.address !== boundAddress) {
+        this.logger.warn(`svm address heal for ${user.pid}: ${chain.address} → ${boundAddress} (B1 binding)`);
+        await this.prisma.chainAccount.update({
+          where: { id: chain.id },
+          data: {
+            address: boundAddress,
+            activationBalance: null,
+            activationRequired: null,
+            // ANT-866/F1: the asserting key IS the claiming key by definition
+            // (the claim about to be broadcast commits to it). All later
+            // derivation reads this recorded key — never oldest-active.
+            claimAuthority: Buffer.from(assertingKey),
+          },
+        });
+        chain.address = boundAddress;
+      }
       // Pre-check: Peridot's relayer floats the fee + rent. If it's out of SOL the tx would
       // be silently dropped (skipPreflight), so fail fast with a clear message instead.
       let relayerBalance = 0;

@@ -5,8 +5,16 @@ import {Clones} from "@openzeppelin/contracts/proxy/Clones.sol";
 import {PeridotAccount} from "./PeridotAccount.sol";
 
 /// @title PeridotFactory — CREATE2 factory for counterfactual smart accounts.
-/// @notice Salt = `bytes32(pidToSeed32(pid))` (same seed as Solana).
-/// Authority is set on `initialize`, so rotation never changes the address.
+/// @notice Salt is PID-KEY BOUND (ANT-866/B1): `salt = keccak256(pidHash ‖ x ‖ y)`
+/// where `pidHash = sha256(pid)` (same seed as Solana). The factory computes the
+/// salt itself from the caller's `(pidHash, x, y)` — no entrypoint accepts a raw
+/// salt, so counterfactual funding at a bound address is unclaimable by any
+/// non-owner: a different key derives a different address, and forging the
+/// victim's salt needs a keccak preimage. Pre-B1 salts (`sha256(pid)`, keyless)
+/// are unclaimable under the bound account gate (`SaltNotBound`); SDK/API must
+/// fund only bound addresses.
+/// Authority is set on `initialize`, so rotation never changes the address
+/// (binding is claim-time: rotation keeps the original claiming key's salt).
 /// Deploy THIS factory at one address on every chain (keyless CREATE2 deploy of
 /// the implementation first, then the factory with identical constructor args)
 /// and every account keeps one address on Monad / BSC / Arbitrum.
@@ -127,12 +135,16 @@ contract PeridotFactory {
     /// factory vault. Reverts unless the activation authorization (verified by
     /// the account itself) is valid: no front-run window on the authority,
     /// the policy, or the recipients.
+    /// @dev B1 binding (ANT-866): `salt = keccak256(pidHash ‖ x ‖ y)` is derived
+    /// HERE, never caller-supplied. The account re-enforces the same equation
+    /// (`SaltNotBound`) so even a foreign factory fronting the same
+    /// implementation cannot smuggle an unbound salt.
     /// @dev Gas sanity is enforced HERE (not in `initialize`): this frame observes
     /// the full activation cost (clone + init + payouts), while the account only
     /// sees its own sub-frame. `networkFee` beyond 2× measured cost reverts and
     /// rolls the whole atomic deployment back.
     function deployAndInit(
-        bytes32 salt,
+        bytes32 pidHash,
         bytes32 x,
         bytes32 y,
         uint16 feePolicyVersion,
@@ -145,6 +157,7 @@ contract PeridotFactory {
     ) external returns (address account) {
         uint256 startGas = gasleft();
         if (deploysPaused) revert Paused();
+        bytes32 salt = keccak256(abi.encodePacked(pidHash, x, y));
         account = Clones.cloneDeterministic(implementation, salt);
         (bool ok, ) = account.call(
             abi.encodeCall(
@@ -153,6 +166,7 @@ contract PeridotFactory {
                     salt,
                     x,
                     y,
+                    pidHash,
                     feePolicyVersion,
                     deadline,
                     networkFee,
@@ -174,9 +188,10 @@ contract PeridotFactory {
     /// V4 sibling of `deployAndInit` (frozen): forwards to the account's
     /// fee-capped `initializeV4`, so the activation authorization carries the
     /// user-approved `maxTotalFee`. Gas sanity is enforced on this frame exactly
-    /// as in `deployAndInit`.
+    /// as in `deployAndInit`. Salt derivation is identically PID-key bound
+    /// (ANT-866/B1): `salt = keccak256(pidHash ‖ x ‖ y)` derived here.
     function deployAndInitV4(
-        bytes32 salt,
+        bytes32 pidHash,
         bytes32 x,
         bytes32 y,
         uint16 feePolicyVersion,
@@ -190,6 +205,7 @@ contract PeridotFactory {
     ) external returns (address account) {
         uint256 startGas = gasleft();
         if (deploysPaused) revert Paused();
+        bytes32 salt = keccak256(abi.encodePacked(pidHash, x, y));
         account = Clones.cloneDeterministic(implementation, salt);
         (bool ok, ) = account.call(
             abi.encodeCall(
@@ -198,6 +214,7 @@ contract PeridotFactory {
                     salt,
                     x,
                     y,
+                    pidHash,
                     feePolicyVersion,
                     maxTotalFee,
                     deadline,
@@ -216,8 +233,16 @@ contract PeridotFactory {
         emit Deployed(account, salt);
     }
 
-    /// @notice Counterfactual address for `salt` (matches `deriveEvmSmartAccountAddress`).
+    /// @notice Counterfactual address for a raw `salt` (legacy pre-B1
+    /// derivation; kept as a pure view for indexers — new flows use
+    /// `predictBound`).
     function predict(bytes32 salt) external view returns (address) {
         return Clones.predictDeterministicAddress(implementation, salt);
+    }
+
+    /// @notice Counterfactual address for a PID-key bound claim
+    /// (matches `deriveEvmSmartAccountAddressBound` in the SDK).
+    function predictBound(bytes32 pidHash, bytes32 x, bytes32 y) external view returns (address) {
+        return Clones.predictDeterministicAddress(implementation, keccak256(abi.encodePacked(pidHash, x, y)));
     }
 }

@@ -94,6 +94,12 @@ pub const OP_ACTIVATE_V4: u8 = 14;
 /// owner-path migration (child issue) — do not assign them ad hoc.
 pub const OP_UPDATE_AUTHORITY_V5: u8 = 20;
 pub const OP_EXECUTE_V5: u8 = 21;
+/// ANT-866 B1 close-grace flow (V3 domain): owner-signed request/cancel.
+/// Op-tags equal the discriminants (33/34) so signatures cannot cross
+/// authorize other operations. `close_finalize` (35) is permissionless and
+/// carries no signature, so it has no op-tag.
+pub const OP_CLOSE_REQUEST: u8 = 33;
+pub const OP_CLOSE_CANCEL: u8 = 34;
 
 /// Maximum authorization lifetime in seconds, enforced on-chain alongside expiry.
 /// Bounds cross-cluster replay: the same PDA exists on every cluster by design,
