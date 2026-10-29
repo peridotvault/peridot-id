@@ -6,6 +6,9 @@ pub mod activate;
 pub mod activate_v4;
 pub mod add_admin;
 pub mod close;
+pub mod close_cancel;
+pub mod close_finalize;
+pub mod close_request;
 pub mod close_session;
 pub mod execute;
 /// V5 cluster-bound sibling of `execute` (ANT-868 B4 proving slice):
@@ -68,6 +71,13 @@ pub enum Instruction {
     /// RESERVED for the remaining-path migration — do not assign ad hoc.
     UpdateAuthorityV5 = 20,
     ExecuteV5 = 21,
+    /// ANT-866 B1 close-grace flow (additive-only): teardown is a two-phase
+    /// owner-authorized flow with an unclaim grace window plus a permanent
+    /// tombstone. Discriminants 33-35 sit beyond the V5 reservations (19 free,
+    /// 22-32 reserved) so no pin moves: 19 stays unassigned.
+    CloseRequest = 33,
+    CloseCancel = 34,
+    CloseFinalize = 35,
 }
 
 impl TryFrom<u8> for Instruction {
@@ -96,6 +106,9 @@ impl TryFrom<u8> for Instruction {
             18 => Ok(Self::RemoveAdmin),
             20 => Ok(Self::UpdateAuthorityV5),
             21 => Ok(Self::ExecuteV5),
+            33 => Ok(Self::CloseRequest),
+            34 => Ok(Self::CloseCancel),
+            35 => Ok(Self::CloseFinalize),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
@@ -139,6 +152,10 @@ impl TryFrom<u8> for Instruction {
 /// under `DOMAIN_V5` with `program_id ‖ CLUSTER_ID` bound after the op-tag):
 /// - UpdateAuthorityV5 (20): same bytes as V3 UpdateAuthority
 /// - ExecuteV5 (21):          same bytes as V3 Execute
+/// ANT-866 B1 close-grace layouts (discriminators 33-35, V3 domain):
+/// - CloseRequest (33):  `nonce u64 | destination [u8; 32] | expiry i64 | len u16 | clientDataJSON`
+/// - CloseCancel (34):   `nonce u64 | expiry i64 | len u16 | clientDataJSON`
+/// - CloseFinalize (35): no data (permissionless; ticket + chain clock authorize)
 pub struct InstructionData<'a> {
     data: &'a [u8],
 }

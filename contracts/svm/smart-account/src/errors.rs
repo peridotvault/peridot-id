@@ -87,6 +87,36 @@ pub enum PeridotError {
     /// `SessionRevoked` (explicit per-session revoke) so UX/indexers can
     /// tell "rotated, re-register" apart. Additive-only (29).
     SessionStaleGeneration = 29,
+    /// ANT-870 P6.1: the token account (or mint) carries a Token-2022
+    /// extension the vault/session flows do not support (transfer-fee,
+    /// confidential, memo, CPI-guard, hooks, … — see the matrix in
+    /// `programdata.rs`). Fail-closed: balance/authority semantics the
+    /// program cannot see are never trusted. B3 claimed 29 on `paperclip`
+    /// first, so this takes the next free slot (additive-only, 30).
+    UnsupportedTokenExtension = 30,
+    /// ANT-866 B1 tombstone: this `account_id` was closed — a program-owned
+    /// tombstone PDA exists, so re-claim (by any key) is rejected. The pid is
+    /// never reused or reassigned. P6 claimed 30 on `paperclip` first, so the
+    /// B1 family takes 31-36 (additive-only).
+    Tombstoned = 31,
+    /// ANT-866 B1 grace: the vault is `STATUS_CLOSING` — spend, rotate,
+    /// withdraw, and session operations are frozen until `close_cancel`
+    /// (revive) or `close_finalize` (payout + tombstone). Additive-only (32).
+    AccountClosing = 32,
+    /// ANT-866 B1 grace: `close_cancel`/`close_finalize` with no live ticket
+    /// for this (account_id, authority). Additive-only (33).
+    CloseTicketNotFound = 33,
+    /// ANT-866 B1 grace: `close_finalize` before `deadline` (chain clock).
+    /// Additive-only (34).
+    GraceNotElapsed = 34,
+    /// ANT-866 B1: immediate `Close` (discriminant 4) is permanently
+    /// disabled — teardown must route through the `close_request` grace flow
+    /// (which writes the tombstone). Same shape as `InitializeDeprecated`:
+    /// discriminant 4 still decodes, then rejects. Additive-only (35).
+    CloseDeprecated = 35,
+    /// ANT-866 B1 grace: `close_request` while a ticket is already live for
+    /// this (account_id, authority). Cancel or finalize first. Additive-only (36).
+    CloseAlreadyRequested = 36,
     /// ANT-863 B2: V3 fee paths (discs 1, 2, 5, 6) are hard-closed on-chain.
     /// V3 `network_fee` is attested-but-unsigned — the payload binds policy,
     /// NOT fee — so a relayer could settle any fee. Every V3 fee entrypoint

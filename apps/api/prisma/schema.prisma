@@ -199,6 +199,12 @@ model ChainAccount {
   status             ChainAccountStatus @default(inactivated)
   activationBalance  BigInt? // lamports detected at last poll (null = unpolled)
   activationRequired BigInt? // lamports needed to activate (rent+fee+margin)
+  // ANT-866 B1: claiming passkey (33B compressed secp256r1) the vault PDA is
+  // bound to. Written at activation-heal time from the asserting credential;
+  // derivation MUST use this key (not oldest-active: rotation revokes the
+  // oldest row and multi-key activation may claim with a newer key). Null =
+  // pre-B1 rows, healed on next activation.
+  claimAuthority     Bytes?
   createdAt          DateTime @db.Timestamptz(3)           @default(now())
   updatedAt          DateTime @db.Timestamptz(3)           @updatedAt
 

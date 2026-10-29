@@ -14,7 +14,7 @@
 use crate::{
     auth,
     errors::PeridotError,
-    state::{verify_pda, SmartAccountMut, STATE_LEN_V2},
+    state::{verify_pda, vault_key_hash, SmartAccountMut, STATE_LEN_V2},
 };
 use pinocchio::{
     account::AccountView,
@@ -95,7 +95,7 @@ pub fn process(
     let authority = data.read_array::<33>(AUTHORITY_OFFSET)?;
     let client_json_len = u16::from_le_bytes(data.read_array::<2>(CLIENT_JSON_LEN_OFFSET)?) as usize;
     let client_json = data.read_bytes(CLIENT_JSON_LEN_OFFSET + 2, client_json_len)?;
-    let bump = verify_pda(smart_account, program_id, account_id)?;
+    let bump = verify_pda(smart_account, program_id, account_id, vault_key_hash(&authority))?;
 
     // Only the new authority itself can claim this PDA.
     let payload = auth::payload_hash_v3(&[
@@ -106,10 +106,12 @@ pub fn process(
     auth::verify_secp256r1_v2(instructions, &authority, client_json, &payload)?;
 
     let signer_seeds = [bump];
+    let key_hash = vault_key_hash(&authority);
     let seeds = [
         Seed::from(b"peridot_id".as_slice()),
         Seed::from(b"account".as_slice()),
         Seed::from(account_id.as_slice()),
+        Seed::from(key_hash.as_slice()),
         Seed::from(signer_seeds.as_slice()),
     ];
     let signer = pinocchio::cpi::Signer::from(&seeds[..]);

@@ -22,9 +22,9 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  assert, genKey, makeRpc, pidToSalt32, keccak, AUTH_PREFIX,
+  assert, genKey, makeRpc, pidToSalt32, pidToBoundSalt, keccak, AUTH_PREFIX,
   actPayloadV4, exePayloadV4, exePayloadV3, assertion,
-  deployAndInitV4Data, executeV4Data, executeData, deployAndInitData, viewSel,
+  deployAndInitV4Data, executeV4Data, executeData, deployAndInitData, predictBoundData, viewSel,
 } from "./e2e-helpers.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -81,9 +81,10 @@ const x = Buffer.from(keyJson.x, "hex");
 const y = Buffer.from(keyJson.y, "hex");
 
 // --- predict the counterfactual (fund after attesting, below) ---
-const salt = pidToSalt32("e2e-v4@pid");
-const saltHex = "0x" + Buffer.from(salt).toString("hex");
-const predicted = await rpc("eth_call", [{ to: factory, data: viewSel("predict(bytes32)") + saltHex.slice(2).padStart(64, "0") }, "latest"]);
+// B1 (ANT-866): salt is PID-KEY BOUND — only this key can claim the address.
+const pidHash = pidToSalt32("e2e-v4@pid");
+const salt = pidToBoundSalt("e2e-v4@pid", x, y);
+const predicted = await rpc("eth_call", [{ to: factory, data: predictBoundData({ pidHash, x, y }) }, "latest"]);
 const account = "0x" + predicted.slice(-40);
 
 // --- activate via self-contained V4 calldata ---
@@ -98,7 +99,7 @@ const actPayload = actPayloadV4({
 });
 const act = assertion(keyJson, actPayload);
 const draftData = deployAndInitV4Data({
-  salt, x, y, feePolicyVersion: 1, maxTotalFee: MAX_TOTAL_FEE, deadline, networkFee: 0n,
+  pidHash, x, y, feePolicyVersion: 1, maxTotalFee: MAX_TOTAL_FEE, deadline, networkFee: 0n,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
 const estGas = BigInt(await rpc("eth_estimateGas", [{ from: SUBMITTER, to: factory, data: draftData }]));
@@ -108,7 +109,7 @@ assert.ok(NETWORK_FEE + PROTOCOL_FEE <= MAX_TOTAL_FEE, "attested total within th
 await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: weiHex(NETWORK_FEE + PROTOCOL_FEE) }]);
 // AC-E1: the deploy is submitted by the independent SUBMITTER, not the admin.
 const data = deployAndInitV4Data({
-  salt, x, y, feePolicyVersion: 1, maxTotalFee: MAX_TOTAL_FEE, deadline, networkFee: NETWORK_FEE,
+  pidHash, x, y, feePolicyVersion: 1, maxTotalFee: MAX_TOTAL_FEE, deadline, networkFee: NETWORK_FEE,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
 const submitterBefore = BigInt(await rpc("eth_getBalance", [SUBMITTER, "latest"]));
@@ -195,12 +196,12 @@ console.log("maxTotalFee rejected OK");
 // A V3 factory call must not settle. The assertion content is irrelevant —
 // the V3Deprecated gate fires before any signature validation — so the V4
 // assertion above is reused as opaque bytes.
-const v3Salt = pidToSalt32("e2e-v3-dead@pid");
+const v3pidHash = pidToSalt32("e2e-v3-dead@pid");
 const v3act = act;
 // NOTE: deployAndInitData encodes the V3 factory selector (verified below to
 // revert) — the payload shape is irrelevant because the gate fires first.
 const v3deployData = deployAndInitData({
-  salt: v3Salt, x, y, feePolicyVersion: 1, deadline, networkFee: NETWORK_FEE,
+  pidHash: v3pidHash, x, y, feePolicyVersion: 1, deadline, networkFee: NETWORK_FEE,
   authData: v3act.authData, clientDataJSON: v3act.clientDataJSON, r: v3act.r, s: v3act.s,
 });
 const v3deployRcpt = await sendTx({ from: SUBMITTER, to: factory, data: v3deployData });

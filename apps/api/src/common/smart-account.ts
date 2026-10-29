@@ -135,9 +135,42 @@ export function findProgramAddress(seeds: Buffer[], programId: string): { addres
   return null;
 }
 
-/** Derive the smart-account PDA address for a PID (1 identity = 1 wallet). */
-export function deriveSmartAccountAddress(pid: string, programId: string): SmartAccountAddress {
-  const found = findProgramAddress([Buffer.from("peridot_id"), Buffer.from("account"), pidToSeed32(pid)], programId);
+/**
+ * Derive the smart-account PDA address for a PID (1 identity = 1 wallet).
+ *
+ * B1 (ANT-866): PID-KEY BOUND — seeds are
+ * `["peridot_id", "account", sha256(pid), sha256(authority)]`, so the PDA
+ * commits to the claiming passkey. `authority` is the 33-byte compressed
+ * secp256r1 key (the claiming key — oldest active credential in supported
+ * flows). Keyless derivation no longer exists on-chain: every caller must
+ * pass the authority, and rows must not be seeded without one.
+ */
+export function deriveSmartAccountAddress(pid: string, programId: string, authority: Buffer): SmartAccountAddress {
+  if (authority.length !== 33) throw new Error("vault authority must be 33 bytes");
+  const keyHash = createHash("sha256").update(authority).digest();
+  const found = findProgramAddress(
+    [Buffer.from("peridot_id"), Buffer.from("account"), pidToSeed32(pid), keyHash],
+    programId,
+  );
+  if (!found) throw new Error("failed to derive an off-curve PDA address");
+  return { address: base58Encode(found.address), bump: found.bump };
+}
+
+/** Derive the tombstone PDA address: `["peridot_id", "tombstone", sha256(pid)]` (pid-only). */
+export function deriveTombstoneAddress(pid: string, programId: string): SmartAccountAddress {
+  const found = findProgramAddress([Buffer.from("peridot_id"), Buffer.from("tombstone"), pidToSeed32(pid)], programId);
+  if (!found) throw new Error("failed to derive an off-curve PDA address");
+  return { address: base58Encode(found.address), bump: found.bump };
+}
+
+/** Derive the close-ticket PDA: `["peridot_id", "close", sha256(pid), sha256(authority)]`. */
+export function deriveTicketAddress(pid: string, programId: string, authority: Buffer): SmartAccountAddress {
+  if (authority.length !== 33) throw new Error("vault authority must be 33 bytes");
+  const keyHash = createHash("sha256").update(authority).digest();
+  const found = findProgramAddress(
+    [Buffer.from("peridot_id"), Buffer.from("close"), pidToSeed32(pid), keyHash],
+    programId,
+  );
   if (!found) throw new Error("failed to derive an off-curve PDA address");
   return { address: base58Encode(found.address), bump: found.bump };
 }

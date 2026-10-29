@@ -166,13 +166,14 @@ pub fn process(
     let client_json_len = u16::from_le_bytes(data.read_array::<2>(cursor)?) as usize;
     let client_json = data.read_bytes(cursor + 2, client_json_len)?;
 
-    let (authority, account_id) = {
+    let (authority, account_id, key_hash) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
+        state.require_active()?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id())
+        (state.authority(), state.account_id(), state.key_hash())
     };
-    let bump = verify_pda(smart_account, program_id, account_id)?;
+    let bump = verify_pda(smart_account, program_id, account_id, key_hash)?;
 
     let call_hash = auth::sha256(call_bytes);
     let payload = auth::payload_hash_v3(&[
@@ -210,6 +211,7 @@ pub fn process(
         pinocchio::cpi::Seed::from(b"peridot_id".as_slice()),
         pinocchio::cpi::Seed::from(b"account".as_slice()),
         pinocchio::cpi::Seed::from(account_id.as_slice()),
+        pinocchio::cpi::Seed::from(key_hash.as_slice()),
         pinocchio::cpi::Seed::from(signer_seeds.as_slice()),
     ];
     let signer = pinocchio::cpi::Signer::from(&seeds[..]);

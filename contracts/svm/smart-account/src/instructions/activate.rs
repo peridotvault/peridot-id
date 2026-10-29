@@ -32,7 +32,7 @@ use crate::{
     auth,
     errors::PeridotError,
     fee::{policy_protocol_bps, split_attested_fee, total_fee},
-    state::{verify_pda, SmartAccountMut, STATE_LEN_V2},
+    state::{verify_pda, SmartAccountMut, STATE_LEN_V3},
     treasury::verify_treasury_pda,
 };
 use pinocchio::{
@@ -62,6 +62,9 @@ const CLIENT_JSON_LEN_OFFSET: usize = 83;
 ///   2. `[WRITE]` canonical revenue vault (receives the protocol fee; must be the `[b"treasury"]` PDA vault (ANT-635))
 ///   3. `[]` system program
 ///   4. `[]` instructions sysvar (for secp256r1 introspection)
+///   5. `[]` tombstone PDA (must be absent — a closed pid never re-claims;
+///      ANT-866 B1. Pass the `["peridot_id", "tombstone", account_id]`
+///      address even though it holds no data yet.)
 pub fn process(
     program_id: &Address,
     accounts: &[AccountView],
@@ -71,7 +74,7 @@ pub fn process(
     // other validation; unreachable code below is retained for shape stability.
     crate::errors::check_v3_fee_path_closed()?;
 
-    if accounts.len() < 5 {
+    if accounts.len() < 6 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
@@ -79,6 +82,7 @@ pub fn process(
     let smart_account = &accounts[1];
     let treasury = &accounts[2];
     let instructions = &accounts[4];
+    let tombstone = &accounts[5];
 
     if !relayer.is_signer() {
         return Err(PeridotError::NotSigner.into());
@@ -108,7 +112,10 @@ pub fn process(
     let client_json_len = u16::from_le_bytes(data.read_array::<2>(CLIENT_JSON_LEN_OFFSET)?) as usize;
     let client_json = data.read_bytes(CLIENT_JSON_LEN_OFFSET + 2, client_json_len)?;
 
-    let bump = verify_pda(smart_account, program_id, account_id)?;
+    let bump = verify_pda(smart_account, program_id, account_id, crate::state::vault_key_hash(&authority))?;
+    // ANT-866 B1 tombstone: a closed pid never re-claims (checked pre-verify,
+    // fail-fast like every other cheap gate).
+    let _ = crate::state::verify_tombstone_absent(tombstone, program_id, account_id)?;
 
     // Only the new authority authorizes the claim and the fee policy.
     let payload = auth::payload_hash_v3(&[
@@ -124,10 +131,12 @@ pub fn process(
     let bps = policy_protocol_bps(policy_version)?;
 
     let signer_seeds = [bump];
+    let key_hash = crate::state::vault_key_hash(&authority);
     let seeds = [
         pinocchio::cpi::Seed::from(b"peridot_id".as_slice()),
         pinocchio::cpi::Seed::from(b"account".as_slice()),
         pinocchio::cpi::Seed::from(account_id.as_slice()),
+        pinocchio::cpi::Seed::from(key_hash.as_slice()),
         pinocchio::cpi::Seed::from(signer_seeds.as_slice()),
     ];
     let signer = pinocchio::cpi::Signer::from(&seeds[..]);
@@ -138,7 +147,7 @@ pub fn process(
     // no second source of truth).
     create_account_with_minimum_balance_signed(
         smart_account,
-        STATE_LEN_V2,
+        STATE_LEN_V3,
         program_id,
         relayer,
         None,
@@ -149,7 +158,7 @@ pub fn process(
     let total = total_fee(relayer_fee, protocol_fee);
 
     // Rent floor: after claiming, the account must keep at least the rent-exempt amount.
-    let rent = Rent::get()?.try_minimum_balance(STATE_LEN_V2)?;
+    let rent = Rent::get()?.try_minimum_balance(STATE_LEN_V3)?;
     if smart_account.lamports() < rent.saturating_add(total) || total < network_fee {
         return Err(PeridotError::InsufficientFunds.into());
     }

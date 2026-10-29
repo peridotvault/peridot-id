@@ -337,9 +337,11 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Activate a READY wallet (idempotent once ACTIVE). The claim is passkey-signed
-   *  by the client (V3 payload binds op-tag, account, authority,
-   *  policy, expiry — no amounts) — the relayer only submits, so a stranger can
-   *  neither squat the PDA nor divert funds or change the fee policy. */
+   *  by the client (V4 payload binds op-tag, account, authority, policy,
+   *  maxTotalFee, expiry) — the relayer only submits, so a stranger can
+   *  neither squat the PDA nor divert funds or change the fee policy. V3
+   *  broadcasts are closed (ANT-895/B2: the program rejects them with
+   *  V3Deprecated) — this path only broadcasts activateV4. */
   async activate(
     user: { pid: string },
     dto: {
@@ -394,6 +396,32 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
       });
       if (!asserting) {
         return this.reject(user.pid, "unauthorized", new BadRequestException("Unknown or inactive passkey"));
+      }
+      // B1 (ANT-866): the claim target is the bound PDA of the ASSERTING key
+      // (claim-time binding). Heal pre-binding rows so funding/verification
+      // land on the only address this key can claim.
+      const assertingKey = coseToCompressedSecp256r1(Buffer.from(asserting.publicKey));
+      const programId = await this.chains.solanaProgramId(selection);
+      const boundAddress = this.pidSolana.deriveSmartAccountAddress(
+        user.pid,
+        new Uint8Array(assertingKey),
+        new this.pidSolana.PublicKey(programId),
+      ).address.toBase58();
+      if (chain.address !== boundAddress) {
+        this.logger.warn(`svm address heal for ${user.pid}: ${chain.address} → ${boundAddress} (B1 binding)`);
+        await this.prisma.chainAccount.update({
+          where: { id: chain.id },
+          data: {
+            address: boundAddress,
+            activationBalance: null,
+            activationRequired: null,
+            // ANT-866/F1: the asserting key IS the claiming key by definition
+            // (the claim about to be broadcast commits to it). All later
+            // derivation reads this recorded key — never oldest-active.
+            claimAuthority: Buffer.from(assertingKey),
+          },
+        });
+        chain.address = boundAddress;
       }
       // Pre-check: Peridot's relayer floats the fee + rent. If it's out of SOL the tx would
       // be silently dropped (skipPreflight), so fail fast with a clear message instead.
@@ -502,11 +530,12 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         entryPoint: "activate",
         broadcast: () =>
           adapter
-            .activateV3(
+            .activateV4(
               user.pid,
               coseToCompressedSecp256r1(Buffer.from(asserting.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
               version,
               networkFee,
+              BigInt(dto.maxTotalFeeLamports),
               dto.expiry,
               this.relayer(),
               undefined,

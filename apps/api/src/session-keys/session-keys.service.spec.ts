@@ -19,8 +19,9 @@ class MockPublicKey {
 
 jest.mock("@peridotvault/pid-solana", () => ({
   PublicKey: MockPublicKey,
-  deriveSessionAddress: jest.fn((accountId32: Uint8Array, sessionKey: unknown) => {
-    seen.push({ method: "deriveSessionAddress", args: [accountId32.length, sessionKey] });
+  deriveSessionAddress: jest.fn((accountId32: Uint8Array, vaultAuthority: Uint8Array, sessionKey: unknown) => {
+    seen.push({ method: "deriveSessionAddress", args: [accountId32.length, vaultAuthority.length, sessionKey] });
+    if (vaultAuthority.length !== 33) throw new Error("vault authority must be 33 bytes");
     return { address: new MockPublicKey("SessionPDA111111111111111111111111111111"), bump: 255 };
   }),
   buildRegisterSessionPayload: jest.fn(async (args: Record<string, unknown>) => {
@@ -38,6 +39,7 @@ function baseDto(): RegisterSessionDto {
   const d = new RegisterSessionDto();
   d.vault = "VaultPDA1111111111111111111111111111111111";
   d.accountId = "0x" + "22".repeat(32);
+  d.vaultAuthority = "0x" + "02" + "11".repeat(32);
   d.sessionPubkey = SESSION;
   d.allowedProgram = GAME;
   d.expiresAt = NOW + 3600;

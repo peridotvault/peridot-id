@@ -26,6 +26,7 @@ use crate::{
     auth,
     errors::PeridotError,
     fee::{policy_protocol_bps, split_attested_fee, total_fee},
+    programdata,
     state::{verify_nonce, verify_pda, SmartAccount, SmartAccountMut},
     treasury::verify_treasury_pda,
 };
@@ -120,6 +121,9 @@ pub fn process(
     // Explicit token-account checks (not just emergent CPI failure): the source
     // must be a token account owned by the PDA for this mint, and the destination
     // must be a token account for this mint.
+    // ANT-870 P6.1: Token-2022 extension matrix — extended accounts carrying
+    // anything beyond ImmutableOwner fail closed here (a transfer-fee or
+    // confidential balance would make the signed `amount` a lie).
     {
         let borrowed = source_ata.try_borrow()?;
         if borrowed.len() < TOKEN_ACCOUNT_MIN_LEN {
@@ -131,6 +135,7 @@ pub fn process(
         if borrowed[TOKEN_OWNER_OFFSET..TOKEN_OWNER_OFFSET + 32] != smart_account.address().as_array()[..] {
             return Err(PeridotError::InvalidDestination.into());
         }
+        programdata::check_token_account_supported(&borrowed)?;
     }
     {
         let borrowed = destination_ata.try_borrow()?;
@@ -140,15 +145,24 @@ pub fn process(
         if borrowed[TOKEN_MINT_OFFSET..TOKEN_MINT_OFFSET + 32] != mint.address().as_array()[..] {
             return Err(PeridotError::InvalidDestination.into());
         }
+        programdata::check_token_account_supported(&borrowed)?;
+    }
+    // The mint itself must not carry amount-changing extensions (transfer-fee
+    // config, confidential, hooks, …): only base mints and pure
+    // metadata/group-pointer mints are supported.
+    {
+        let borrowed = mint.try_borrow()?;
+        programdata::check_token_mint_supported(&borrowed)?;
     }
 
-    let (authority, account_id) = {
+    let (authority, account_id, key_hash) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
+        state.require_active()?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id())
+        (state.authority(), state.account_id(), state.key_hash())
     };
-    let bump = verify_pda(smart_account, program_id, account_id)?;
+    let bump = verify_pda(smart_account, program_id, account_id, key_hash)?;
 
     let bps = policy_protocol_bps(policy_version)?;
     let payload = auth::payload_hash_v3(&[
@@ -175,6 +189,7 @@ pub fn process(
         Seed::from(b"peridot_id".as_slice()),
         Seed::from(b"account".as_slice()),
         Seed::from(account_id.as_slice()),
+        Seed::from(key_hash.as_slice()),
         Seed::from(signer_seeds.as_slice()),
     ];
     let signer = Signer::from(&seeds[..]);

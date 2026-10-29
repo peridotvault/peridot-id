@@ -63,6 +63,17 @@ describe("Account authorization & abuse cases (routes)", () => {
       chain: {
         findUnique: jest.fn(async () => ({ id: "chain-sol" })),
       },
+      // B1 (ANT-866): rows bind the claiming key — a registered passkey
+      // seeds the Solana row; without one the wallet defers (404 until
+      // a credential exists).
+      authority: {
+        findFirst: jest.fn(async () => ({
+          publicKey: Buffer.from(
+            "a5010203262001215820c728cac553ac9c7e6741694959adfbc1b5466df7071c8ea40fa05782c9628b8422582074d2fa89ce2b706497759bb98da015280bb379675f3476a378a6ce8a220ba639",
+            "hex",
+          ),
+        })),
+      },
       securityEvent: { create: jest.fn(async () => ({})) },
     };
 

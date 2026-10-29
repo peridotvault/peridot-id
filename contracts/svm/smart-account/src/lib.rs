@@ -13,8 +13,9 @@
 //! payload starts with `DOMAIN_V2 ‖ op-tag ‖ account_id`, the user authorizes an
 //! absolute `max_fee` (never an exact fee), and reimbursement splits base →
 //! relayer (fee payer) and markup → canonical treasury per the signed
-//! fee-policy version. State is a single 80-byte layout (ANT-197 domain-free:
-//! no `rp_id_hash` stored or verified on any path); rotation never moves the PDA.
+//! fee-policy version. State is a single 112-byte layout (V3 since ANT-866 B1:
+//! 80-byte prefix plus the claim-time key hash; pre-B1 80-byte states are
+//! rejected); rotation never moves the PDA.
 
 #![no_std]
 #![allow(unexpected_cfgs)]
@@ -113,6 +114,9 @@ pub fn process_instruction(
             Instruction::RemoveAdmin => instructions::remove_admin::process(program_id, accounts, &instruction_data),
             Instruction::UpdateAuthorityV5 => instructions::update_authority_v5::process(program_id, accounts, &instruction_data),
             Instruction::ExecuteV5 => instructions::execute_v5::process(program_id, accounts, &instruction_data),
+            Instruction::CloseRequest => instructions::close_request::process(program_id, accounts, &instruction_data),
+            Instruction::CloseCancel => instructions::close_cancel::process(program_id, accounts, &instruction_data),
+            Instruction::CloseFinalize => instructions::close_finalize::process(program_id, accounts, &instruction_data),
         }
 }
 
@@ -907,5 +911,136 @@ mod ant868_v5_pins {
         // the default — a probe across same-default validators still verifies,
         // which is why the replay probe builds with distinct ids.
         assert_eq!(crate::CLUSTER_ID, [0u8; 32]);
+    }
+}
+
+/// ANT-866 B1 close-grace + tombstone regression: additive-only pins. The
+/// two-phase teardown (33-35) and its errors (30-35) are new discriminants
+/// that never shift pre-existing values; immediate `Close` (4) still decodes
+/// but rejects uniformly via `check_close_allowed`.
+#[cfg(test)]
+mod ant866_close_pins {
+    use super::assert_effect_before_interaction;
+    use crate::errors::PeridotError;
+    use crate::instructions::Instruction;
+
+    #[test]
+    fn close_flow_discriminants_pinned() {
+        assert_eq!(Instruction::CloseRequest as u8, 33);
+        assert_eq!(Instruction::CloseCancel as u8, 34);
+        assert_eq!(Instruction::CloseFinalize as u8, 35);
+        assert_eq!(crate::auth::OP_CLOSE_REQUEST, 33);
+        assert_eq!(crate::auth::OP_CLOSE_CANCEL, 34);
+        assert_eq!(Instruction::try_from(33u8).unwrap(), Instruction::CloseRequest);
+        assert_eq!(Instruction::try_from(34u8).unwrap(), Instruction::CloseCancel);
+        assert_eq!(Instruction::try_from(35u8).unwrap(), Instruction::CloseFinalize);
+        // 19 stays unassigned (V5 reservation untouched); pre-existing frozen.
+        assert!(Instruction::try_from(19u8).is_err());
+        assert_eq!(Instruction::Close as u8, 4);
+    }
+
+    #[test]
+    fn close_flow_errors_pinned_additive() {
+        assert_eq!(PeridotError::Tombstoned as u32, 31);
+        assert_eq!(PeridotError::AccountClosing as u32, 32);
+        assert_eq!(PeridotError::CloseTicketNotFound as u32, 33);
+        assert_eq!(PeridotError::GraceNotElapsed as u32, 34);
+        assert_eq!(PeridotError::CloseDeprecated as u32, 35);
+        assert_eq!(PeridotError::CloseAlreadyRequested as u32, 36);
+        // Pre-existing errors frozen.
+        assert_eq!(PeridotError::SessionStaleGeneration as u32, 29);
+        assert_eq!(PeridotError::AlreadyInitialized as u32, 0);
+    }
+
+    #[test]
+    fn close_gate_runs_before_any_effect() {
+        // Immediate close must reject before touching accounts: the gate
+        // precedes every state read, PDA check, and lamport movement.
+        assert_effect_before_interaction(
+            "close.rs",
+            include_str!("instructions/close.rs"),
+            "check_close_allowed()",
+            "smart_account.try_borrow()",
+        );
+        assert!(
+            crate::instructions::close::DEPRECATE_DIRECT_CLOSE,
+            "immediate close must be deprecated on all builds"
+        );
+        assert!(crate::instructions::close::check_close_allowed().is_err());
+    }
+
+    #[test]
+    fn close_request_burns_nonce_before_ticket_cpi() {
+        // ANT-16 discipline on the new flow: nonce burn + freeze precede the
+        // ticket creation CPI.
+        assert_effect_before_interaction(
+            "close_request.rs",
+            include_str!("instructions/close_request.rs"),
+            "state.increment_nonce()",
+            "create_account_with_minimum_balance_signed(",
+        );
+    }
+
+    #[test]
+    fn close_finalize_writes_tombstone_before_payout() {
+        // Tombstone creation precedes the vault payout in source order, so a
+        // half-applied finalize can never pay without tombstoning (the whole
+        // instruction is atomic either way — this pins the audit story).
+        assert_effect_before_interaction(
+            "close_finalize.rs",
+            include_str!("instructions/close_finalize.rs"),
+            "record.initialize(account_id, authority, clock.slot)",
+            "to.set_lamports(to.lamports() + vault_lamports + ticket_lamports)",
+        );
+    }
+}
+
+#[cfg(test)]
+mod ant866_cpi_seeds_pins {
+    /// Every PDA-signer CPI must sign with the BOUND seeds (account_id +
+    /// key_hash + bump). A missing key_hash compiles but fails at invoke time
+    /// with a signer-privilege error — this pin caught exactly that in review.
+    #[test]
+    fn cpi_signer_seeds_carry_key_hash() {
+        for (file, src) in [
+            ("activate.rs", include_str!("instructions/activate.rs")),
+            ("activate_v4.rs", include_str!("instructions/activate_v4.rs")),
+            ("execute.rs", include_str!("instructions/execute.rs")),
+            ("execute_v4.rs", include_str!("instructions/execute_v4.rs")),
+            ("execute_v5.rs", include_str!("instructions/execute_v5.rs")),
+            ("withdraw_token.rs", include_str!("instructions/withdraw_token.rs")),
+            (
+                "withdraw_token_v4.rs",
+                include_str!("instructions/withdraw_token_v4.rs"),
+            ),
+            (
+                "register_session.rs",
+                include_str!("instructions/register_session.rs"),
+            ),
+            (
+                "session_execute.rs",
+                include_str!("instructions/session_execute.rs"),
+            ),
+            (
+                "close_request.rs",
+                include_str!("instructions/close_request.rs"),
+            ),
+        ] {
+            assert!(
+                src.contains("key_hash.as_slice())"),
+                "{file}: PDA-signer CPI seeds must include the key hash"
+            );
+        }
+        // The tombstone CPI seeds are intentionally pid-ONLY (the tombstone
+        // blocks re-claim by any key): assert the design, not the hash.
+        let fin = include_str!("instructions/close_finalize.rs");
+        assert!(
+            fin.contains("Seed::from(b\"tombstone\".as_slice())"),
+            "close_finalize.rs: tombstone CPI must use the pid-only seeds"
+        );
+        assert!(
+            !fin.contains("key_hash.as_slice())"),
+            "close_finalize.rs: tombstone CPI must NOT bind a key"
+        );
     }
 }

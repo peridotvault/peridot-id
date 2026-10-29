@@ -2,6 +2,7 @@ import { IsBoolean, IsInt, IsOptional, IsString, Matches, Min } from "class-vali
 
 const PUBKEY = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const HEX32 = /^0x[0-9a-fA-F]{64}$/;
+const HEX33 = /^0x[0-9a-fA-F]{66}$/;
 const UINT = /^\d+$/;
 
 /** Owner-approved gameplay session grant (mirrors `register_session`; see WHITEPAPER.md §11). */
@@ -13,6 +14,11 @@ export class RegisterSessionDto {
   /** `sha256(pid)` account id (hex, 32 bytes) — binds the session to the identity. */
   @Matches(HEX32, { message: "accountId must be 0x + 64 hex chars" })
   accountId!: string;
+
+  /** Vault claiming authority, 33-byte compressed secp256r1 (hex) — binds the
+   * session PDA to its vault's key namespace (ANT-866 B1). */
+  @Matches(HEX33, { message: "vaultAuthority must be 0x + 66 hex chars" })
+  vaultAuthority!: string;
 
   /** Ed25519 session keypair pubkey (base58) — signs gameplay envelopes. */
   @Matches(PUBKEY, { message: "sessionPubkey must be a base58 pubkey" })

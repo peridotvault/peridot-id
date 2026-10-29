@@ -24,7 +24,9 @@ const word = (i: number, data: string) => "0x" + data.slice(2 + i * 64, 2 + (i +
 describe("V3 EVM deployAndInit calldata", () => {
   it("encodes the canonical selector and round-trips every field", () => {
     const a = adapter();
-    const salt = "0x" + "07".padStart(64, "0");
+    // B1 (ANT-866): first field is the PID HASH — the factory derives the
+    // bound salt on-chain. (Value arbitrary here; encoding shape is pinned.)
+    const pidHash = "0x" + "07".padStart(64, "0");
     const x = new Uint8Array(32).fill(1);
     const y = new Uint8Array(32).fill(2);
     const authData = new Uint8Array(37).fill(4);
@@ -32,7 +34,7 @@ describe("V3 EVM deployAndInit calldata", () => {
     const r = new Uint8Array(32).fill(6);
     const s = new Uint8Array(32).fill(7);
     const data = a.buildDeployAndInitDataV3({
-      salt, x, y, feePolicyVersion: 1,
+      pidHash, x, y, feePolicyVersion: 1,
       deadline: 1_000_300, networkFee: 500_000n, authenticatorData: authData,
       clientDataJSON: clientData, r, s,
     });
@@ -42,7 +44,7 @@ describe("V3 EVM deployAndInit calldata", () => {
     );
     expect(data.slice(0, 10)).toBe(expectedSel);
     const body = data.slice(10);
-    expect(word(0, "0x" + body)).toBe(salt.toLowerCase());
+    expect(word(0, "0x" + body)).toBe(pidHash.toLowerCase());
     expect(u256(word(1, "0x" + body))).toBe(BigInt("0x" + "01".repeat(32))); // x = 0x01…01
     expect(u256(word(2, "0x" + body))).toBe(BigInt("0x" + "02".repeat(32))); // y = 0x02…02
     expect(u256(word(3, "0x" + body))).toBe(1n); // policy

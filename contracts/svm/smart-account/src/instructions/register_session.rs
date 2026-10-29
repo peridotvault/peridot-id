@@ -108,14 +108,15 @@ pub fn process(
     // (Length is checked at entry: only an unallocated account reaches here.)
     // The vault epoch is stamped into the record (ANT-863 B3): a later
     // rotation bumps the vault epoch and this session goes stale.
-    let (authority, account_id, generation) = {
+    let (authority, account_id, key_hash, generation) = {
         let borrowed = vault.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
+        state.require_active()?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id(), state.session_generation())
+        (state.authority(), state.account_id(), state.key_hash(), state.session_generation())
     };
-    verify_pda(vault, program_id, account_id)?;
-    let bump = verify_session_pda(session, program_id, account_id, session_key)?;
+    verify_pda(vault, program_id, account_id, key_hash)?;
+    let bump = verify_session_pda(session, program_id, account_id, key_hash, session_key)?;
 
     // Session lifetime: future-bound, at most 24h (Clock sysvar, not device time).
     let now = Clock::get()?.unix_timestamp;
@@ -194,6 +195,7 @@ pub fn process(
             pinocchio::cpi::Seed::from(b"peridot_id".as_slice()),
             pinocchio::cpi::Seed::from(b"session".as_slice()),
             pinocchio::cpi::Seed::from(account_id.as_slice()),
+            pinocchio::cpi::Seed::from(key_hash.as_slice()),
             pinocchio::cpi::Seed::from(session_key.as_slice()),
             pinocchio::cpi::Seed::from(bump_seed.as_slice()),
         ];

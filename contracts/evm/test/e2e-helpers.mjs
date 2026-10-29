@@ -33,7 +33,11 @@ export function signDigest(privHex, hHex) {
 
 export const sha256 = (b) => crypto.createHash("sha256").update(b).digest();
 export const b64url = (b) => Buffer.from(b).toString("base64url");
-export const pidToSalt32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8"));
+// B1 (ANT-866): `pidToSalt32` is now the PID HASH (first factory arg); the
+// claim salt is PID-KEY BOUND via `pidToBoundSalt` (matches the factory's
+// `keccak256(pidHash ‖ x ‖ y)`).
+export const pidToSalt32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8")); // == pidHash
+export const pidToBoundSalt = (pid, x, y) => keccak(Buffer.concat([pidToSalt32(pid), Buffer.from(x), Buffer.from(y)]));
 
 // keccak256 via cast (single binary, no JS dep).
 export function keccak(buf) {
@@ -137,10 +141,10 @@ export function exePayloadV4({ chainId, account, nonce, to, value, dataHash, dea
 
 const hx = (b) => "0x" + Buffer.from(b).toString("hex");
 
-export function deployAndInitData({ salt, x, y, feePolicyVersion, deadline, networkFee, authData, clientDataJSON, r, s }) {
+export function deployAndInitData({ pidHash, x, y, feePolicyVersion, deadline, networkFee, authData, clientDataJSON, r, s }) {
   return execSync(
     `${CAST} calldata "deployAndInit(bytes32,bytes32,bytes32,uint16,uint64,uint256,bytes,bytes,bytes32,bytes32)" ` +
-    `${hx(salt)} ${hx(x)} ${hx(y)} ${feePolicyVersion} ${deadline} ${networkFee} ${hx(authData)} ${hx(clientDataJSON)} ${hx(r)} ${hx(s)}`,
+    `${hx(pidHash)} ${hx(x)} ${hx(y)} ${feePolicyVersion} ${deadline} ${networkFee} ${hx(authData)} ${hx(clientDataJSON)} ${hx(r)} ${hx(s)}`,
     { encoding: "utf8" },
   ).trim();
 }
@@ -251,10 +255,18 @@ export function actPayloadV4({ salt, x, y, feePolicyVersion, maxTotalFee, deadli
   ]));
 }
 
-export function deployAndInitV4Data({ salt, x, y, feePolicyVersion, maxTotalFee, deadline, networkFee, authData, clientDataJSON, r, s }) {
+export function deployAndInitV4Data({ pidHash, x, y, feePolicyVersion, maxTotalFee, deadline, networkFee, authData, clientDataJSON, r, s }) {
   return execSync(
     `${CAST} calldata "deployAndInitV4(bytes32,bytes32,bytes32,uint16,uint256,uint64,uint256,bytes,bytes,bytes32,bytes32)" ` +
-    `${hx(salt)} ${hx(x)} ${hx(y)} ${feePolicyVersion} ${maxTotalFee} ${deadline} ${networkFee} ${hx(authData)} ${hx(clientDataJSON)} ${hx(r)} ${hx(s)}`,
+    `${hx(pidHash)} ${hx(x)} ${hx(y)} ${feePolicyVersion} ${maxTotalFee} ${deadline} ${networkFee} ${hx(authData)} ${hx(clientDataJSON)} ${hx(r)} ${hx(s)}`,
+    { encoding: "utf8" },
+  ).trim();
+}
+
+// B1-bound counterfactual prediction (replaces raw `predict(bytes32)` for new flows).
+export function predictBoundData({ pidHash, x, y }) {
+  return execSync(
+    `${CAST} calldata "predictBound(bytes32,bytes32,bytes32)" ${hx(pidHash)} ${hx(x)} ${hx(y)}`,
     { encoding: "utf8" },
   ).trim();
 }

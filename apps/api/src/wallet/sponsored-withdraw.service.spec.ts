@@ -29,6 +29,8 @@ const adapterMock = {
   estimateWithdrawFee: jest.fn(async () => 5000n),
   chainTime: jest.fn(async () => 1_000_000),
   getNonce: jest.fn(async () => 7n),
+  getNonceOf: jest.fn(async () => 7n),
+  getAuthorityOf: jest.fn(async () => new Uint8Array(33).fill(9)),
   getBalanceOf: jest.fn(async (addr: { toBase58: () => string } | string) => {
     const s = typeof addr === "string" ? addr : addr.toBase58();
     return s === RELAYER ? relayerBalance : 100_000_000;
@@ -87,7 +89,7 @@ function setup(fees?: unknown) {
   const idempotency = mockIdempotency();
   const breaker = mockBreaker();
   const service = new SponsoredWithdrawService(prisma as never, config as never, security as never, chains as never, idempotency as never, breaker as never, fees as never);
-  return { service, security, idempotency };
+  return { service, security, idempotency, prisma };
 }
 
 const assertion = {
@@ -114,6 +116,7 @@ beforeEach(() => {
   relayerBalance = 1_000_000_000;
   adapterMock.isActivated.mockResolvedValue(true);
   adapterMock.getNonce.mockResolvedValue(7n);
+  adapterMock.getNonceOf.mockResolvedValue(7n);
   adapterMock.getBalanceOf.mockImplementation(async (addr: { toBase58: () => string } | string) => {
     const s = typeof addr === "string" ? addr : addr.toBase58();
     return s === RELAYER ? relayerBalance : 100_000_000;
@@ -686,12 +689,12 @@ describe("SponsoredWithdrawService", () => {
     expect(adapterMock.sponsoredWithdrawSolV4).toHaveBeenCalledTimes(1);
   });
 
-  it("resolves a duplicate claim without submission via chain state (H-AC7)", async () => {
-    const { service, idempotency } = setup();
+  it("resolves a duplicate claim without submission via chain state (H-AC7)", async () => {    const { service, idempotency } = setup();
     idempotency.claimSlot.mockResolvedValue({ decision: "duplicate", signature: null });
     // Validation reads nonce 7; the crashed attempt consumed it (now 8) and the
     // history confirms ⇒ proven landed, no rebroadcast.
     adapterMock.getNonce.mockResolvedValueOnce(7n).mockResolvedValue(8n);
+    adapterMock.getNonceOf.mockResolvedValueOnce(8n);
     adapterMock.getHistory.mockResolvedValue([{ signature: "sig-h", err: null }]);
     const landed = await service.withdraw(IDENTITY_ID, base);
     expect(landed).toMatchObject({ signature: "sig-h", status: "confirmed" });
@@ -704,6 +707,28 @@ describe("SponsoredWithdrawService", () => {
     const fresh = await service.withdraw(IDENTITY_ID, base);
     expect(fresh.signature).toBe("sig-sponsor-sol");
     expect(adapterMock.sponsoredWithdrawSolV4).toHaveBeenCalledTimes(1);
+  });
+
+  it("derives the vault from the RECORDED claiming key after rotation (ANT-866/F1)", async () => {
+    // Post-rotation state: K0 revoked, K1 oldest-active AND asserting — but
+    // the vault binds K0 (recorded at activation-heal). Derivation must use
+    // K0 or every op targets an unclaimable PDA (fail-closed on-chain,
+    // availability outage off-chain).
+    const { service, prisma } = setup();
+    const CLAIM = Buffer.from("02" + "11".repeat(32), "hex");
+    (prisma.chainAccount.findFirst as jest.Mock).mockResolvedValue({
+      id: "chain-1",
+      pid: IDENTITY_ID,
+      chainId: "chain-sol",
+      accountType: "smart_account",
+      address: SMART_ADDR,
+      status: "active",
+      claimAuthority: CLAIM,
+    });
+    const res = await service.withdraw(IDENTITY_ID, base);
+    expect(res.status).toBe("confirmed");
+    const call = (adapterMock.sponsoredWithdrawSolV4 as jest.Mock).mock.calls[0];
+    expect(Buffer.from(call[call.length - 1] as Uint8Array)).toEqual(CLAIM);
   });
 });
 

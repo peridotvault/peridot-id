@@ -15,8 +15,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  assert, genKey, makeRpc, pidToSalt32, keccak,
-  actPayloadV4, assertion, deployAndInitV4Data,
+  assert, genKey, makeRpc, pidToSalt32, pidToBoundSalt, keccak,
+  actPayloadV4, assertion, deployAndInitV4Data, predictBoundData,
   permissionId, grantPayload, permExecPayload, revokePayload,
   grantPermissionData, executeWithPermissionData, revokePermissionData, viewSel,
 } from "./e2e-helpers.mjs";
@@ -71,9 +71,10 @@ const U8 = (b) => b;
 const hex = (u8) => "0x" + Buffer.from(u8).toString("hex");
 
 // --- activate (domain-free: no rpIdHash anywhere) ---
-const salt = pidToSalt32("e2e-v4-perm@pid");
-const saltHex = hex(salt);
-const predicted = await rpc("eth_call", [{ to: factory, data: viewSel("predict(bytes32)") + saltHex.slice(2).padStart(64, "0") }, "latest"]);
+// B1 (ANT-866): salt is PID-KEY BOUND — only the owner key can claim.
+const pidHash = pidToSalt32("e2e-v4-perm@pid");
+const salt = pidToBoundSalt("e2e-v4-perm@pid", B(owner.x), B(owner.y));
+const predicted = await rpc("eth_call", [{ to: factory, data: predictBoundData({ pidHash, x: B(owner.x), y: B(owner.y) }) }, "latest"]);
 const account = "0x" + predicted.slice(-40);
 const deadline = Math.floor(Date.now() / 1000) + 300;
 // ANT-863 B2: activation drives the fee-capped V4 factory path (V3 is
@@ -86,7 +87,7 @@ const actPayload = actPayloadV4({
 });
 const act = assertion(owner, actPayload);
 const draftAct = deployAndInitV4Data({
-  salt, x: B(owner.x), y: B(owner.y),
+  pidHash, x: B(owner.x), y: B(owner.y),
   feePolicyVersion: 1, maxTotalFee: MAX_ACT, deadline, networkFee: 0n,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
@@ -96,7 +97,7 @@ await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: weiHex((a
 const actRcpt = await sendTx({
   from: SUBMITTER, to: factory,
   data: deployAndInitV4Data({
-    salt, x: B(owner.x), y: B(owner.y),
+    pidHash, x: B(owner.x), y: B(owner.y),
     feePolicyVersion: 1, maxTotalFee: MAX_ACT, deadline, networkFee: actFee,
     authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
   }),

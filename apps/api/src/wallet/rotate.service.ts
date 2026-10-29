@@ -19,7 +19,7 @@ import { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
 import type { Keypair, PasskeyAssertion, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
-import { ACCOUNT_TYPE_SMART, SolanaSelection } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { MAX_TTL_SECS, relayerKeypair, solanaAdapter } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
@@ -55,6 +55,27 @@ export class RotateService {
 
   private relayer(): Keypair {
     return relayerKeypair(this.pidSolana, this.config);
+  }
+
+  /**
+   * Claiming key for PDA derivation (ANT-866 B1 + F1 fix, R3 scoped): the key
+   * recorded on the chain row at activation-heal time, falling back to
+   * oldest-active only for pre-B1 rows that never healed. Scoped to
+   * Solana-namespace rows (see sponsored-withdraw's `derivationAuthority`).
+   */
+  private async derivationAuthority(pid: string): Promise<Uint8Array> {
+    const row = await this.prisma.chainAccount.findFirst({
+      where: { pid, accountType: "smart_account", chain: { namespace: SOLANA_NAMESPACE } },
+      orderBy: { createdAt: "asc" },
+    });
+    const claimKey = (row as { claimAuthority?: Buffer | Uint8Array | null } | null)?.claimAuthority;
+    if (claimKey) return new Uint8Array(claimKey);
+    const oldest = await this.prisma.authority.findFirst({
+      where: { pid, status: "active" },
+      orderBy: { createdAt: "asc" },
+    });
+    if (!oldest) throw new BadRequestException("No passkey registered — register one first");
+    return coseToCompressedSecp256r1(Buffer.from(oldest.publicKey)) as unknown as Uint8Array;
   }
 
   private async adapter(selection?: SolanaSelection): Promise<SolanaAdapter> {
@@ -123,7 +144,7 @@ export class RotateService {
       return this.reject(pid, dto.nonce, "unauthorized", new BadRequestException("Replacement credential is not registered and active"));
     }
 
-    const chainNonce = BigInt(await adapter.getNonce(pid));
+    const chainNonce = BigInt(await adapter.getNonce(pid, await this.derivationAuthority(pid)));
     if (BigInt(dto.nonce) !== chainNonce) {
       return this.reject(
         pid,
@@ -209,12 +230,16 @@ export class RotateService {
     oldCredId: string,
     slotSignature: string | null,
   ): Promise<RotateAuthorityResult> {
+    const row = await this.prisma.chainAccount.findFirst({
+      where: { pid, accountType: "smart_account" },
+    });
+    const rowAddress = row?.address;
     const out = await this.idempotency.broadcastWithResolveThenAct({
       pid,
       nonce: dto.nonce,
       chain: BROADCAST_CHAIN_SOLANA,
       entryPoint: "rotate",
-      broadcast: () =>
+      broadcast: async () =>
         adapter
           .submitRotateAuthorityTx(
             pid,
@@ -224,14 +249,16 @@ export class RotateService {
             dto.expiry,
             assertion,
             this.relayer(),
+            await this.derivationAuthority(pid),
           )
           .then((sig) => ({ signature: sig, result: null })),
       resolveState: async () => {
-        const onChain = await adapter.getAuthority(pid).catch(() => null);
+        if (!rowAddress) return { unreadable: true as const };
+        const onChain = await adapter.getAuthorityOf(rowAddress).catch(() => null);
         if (onChain && Buffer.from(onChain).toString("hex") === Buffer.from(newKey).toString("hex")) {
           return { landed: true as const, signature: slotSignature };
         }
-        const nonceNow = await adapter.getNonce(pid).catch(() => null);
+        const nonceNow = await adapter.getNonceOf(rowAddress).catch(() => null);
         if (nonceNow == null) return { unreadable: true as const };
         if (nonceNow !== chainNonce) return { landed: true as const, signature: slotSignature };
         return { landed: false as const };
@@ -258,7 +285,7 @@ export class RotateService {
     });
     // H1.vi: rotation confirm latency (chain + signature + latencyMs).
     const started = Date.now();
-    const confirmed = await this.confirmRotation(adapter, pid, Buffer.from(newKey).toString("hex"));
+    const confirmed = await this.confirmRotation(adapter, rowAddress ?? "", Buffer.from(newKey).toString("hex"));
     await this.security.log(pid, RelayerH1Events.rotationConfirmed, {
       chain: BROADCAST_CHAIN_SOLANA,
       entryPoint: "rotate",
@@ -310,9 +337,12 @@ export class RotateService {
     newKey: Uint8Array,
     signature: string | null,
   ): Promise<RotateAuthorityResult | null> {
-    const confirmed = await this.confirmRotation(adapter, pid, Buffer.from(newKey).toString("hex")).catch(
-      () => false,
-    );
+    const row = await this.prisma.chainAccount.findFirst({
+      where: { pid, accountType: "smart_account" },
+    });
+    const confirmed = row
+      ? await this.confirmRotation(adapter, row.address, Buffer.from(newKey).toString("hex")).catch(() => false)
+      : false;
     if (!confirmed) return null;
     await this.prisma.authority.update({ where: { id: oldCredId }, data: { status: "revoked" } });
     await this.revocations.recordRevocation(pid, BROADCAST_CHAIN_SOLANA).catch((err) =>
@@ -353,10 +383,10 @@ export class RotateService {
     );
   }
 
-  private async confirmRotation(adapter: SolanaAdapter, pid: string, newKeyHex: string): Promise<boolean> {
+  private async confirmRotation(adapter: SolanaAdapter, address: string, newKeyHex: string): Promise<boolean> {
     for (let i = 0; i < 15; i++) {
       try {
-        const onChain = Buffer.from(await adapter.getAuthority(pid)).toString("hex");
+        const onChain = Buffer.from(await adapter.getAuthorityOf(address)).toString("hex");
         if (onChain === newKeyHex) return true;
       } catch {
         // transient RPC error — keep polling

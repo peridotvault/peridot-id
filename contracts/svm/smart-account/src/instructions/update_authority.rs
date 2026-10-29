@@ -60,13 +60,14 @@ pub fn process(
         return Err(PeridotError::Unauthorized.into());
     }
 
-    let (current_authority, account_id) = {
+    let (current_authority, account_id, key_hash) = {
         let borrowed = smart_account.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
+        state.require_active()?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id())
+        (state.authority(), state.account_id(), state.key_hash())
     };
-    verify_pda(smart_account, program_id, account_id)?;
+    verify_pda(smart_account, program_id, account_id, key_hash)?;
 
     let payload = auth::payload_hash_v3(&[
         &[auth::OP_UPDATE_AUTHORITY],

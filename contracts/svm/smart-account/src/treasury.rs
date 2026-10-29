@@ -278,6 +278,7 @@ impl<'data> RevenueConfigMut<'data> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::SESSION_STATE_LEN;
 
     fn fresh_config() -> ([u8; CONFIG_LEN], [u8; 32]) {
         let admin = [7u8; 32];
@@ -415,5 +416,18 @@ mod tests {
     fn config_len_is_264() {
         assert_eq!(CONFIG_LEN, 264);
         assert_eq!(OFF_ADMINS + MAX_ADMINS * ADMIN_LEN, CONFIG_LEN);
+    }
+
+    #[test]
+    fn treasury_rent_boundaries() {
+        // ANT-870 P6.2: rent-exempt minimums for every program-owned record
+        // size. Same protocol formula as state.rs (`(128 + len) * 3480 * 2`).
+        let minimum = |len: usize| ((128 + len) as u64) * 3_480 * 2;
+        assert_eq!(minimum(0), 890_880);
+        assert_eq!(minimum(CONFIG_LEN), 2_728_320);
+        // Cross-check against the vault/session sizes pinned in state.rs so
+        // the three record classes stay mutually consistent.
+        assert_eq!(minimum(SESSION_STATE_LEN), 2_324_640);
+        assert_eq!(minimum(crate::state::STATE_LEN_V2), 1_447_680);
     }
 }

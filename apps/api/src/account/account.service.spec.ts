@@ -1,6 +1,7 @@
 import { NotFoundException } from "@nestjs/common";
 import { AccountService } from "./account.service";
-import { mockSecurity, minimalChainsStub } from "../../test/factories";
+import { mockSecurity, minimalChainsStub, coseKey } from "../../test/factories";
+import { coseToRawXy } from "../credentials/cose";
 
 const PROGRAM_ID = "9LCZEdXdmLeEyU8Fik2721R28K4xWXTrVd76r4tczNZY";
 const DERIVED = "2XSyY7tMgbwfsHx7pkqYjwcpyoFLtFwzSophsFFtuaHj"; // PDA of ifal@pid (see smart-account.spec.ts)
@@ -32,6 +33,9 @@ function setup() {
       create: jest.fn(async () => chainRow()),
       update: jest.fn(async () => chainRow()),
     },
+    authority: {
+      findFirst: jest.fn(async () => ({ publicKey: coseKey() })),
+    },
     securityEvent: { create: jest.fn(async () => ({})) },
   };
   const chains = minimalChainsStub();
@@ -41,10 +45,16 @@ function setup() {
 }
 
 describe("AccountService", () => {
-  it("ensureAccount seeds the smart_account with the derived PDA address", async () => {
+  it("ensureAccount seeds the smart_account with the bound PDA address", async () => {
+    // B1 (ANT-866): the Solana row binds the registered (oldest active) key —
+    // the only address that key can claim.
+    const { deriveSmartAccountAddress } = jest.requireActual("../common/smart-account") as typeof import("../common/smart-account");
+    const { coseKey } = jest.requireActual("../../test/factories") as typeof import("../../test/factories");
+    const { coseToCompressedSecp256r1 } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
     const { service, prisma, security } = setup();
     prisma.chainAccount.findFirst.mockResolvedValueOnce(null); // smart row missing
-    prisma.chainAccount.findMany.mockResolvedValue([chainRow()]);
+    const expected = deriveSmartAccountAddress("ifal@pid", PROGRAM_ID, coseToCompressedSecp256r1(coseKey())).address;
+    prisma.chainAccount.findMany.mockResolvedValue([{ ...chainRow(), address: expected }]);
 
     const views = await service.ensureAccount("ifal@pid");
 
@@ -52,12 +62,19 @@ describe("AccountService", () => {
       data: {
         pid: "ifal@pid",
         chainId: "chain-sol",
-        address: DERIVED,
+        address: expected,
         accountType: SMART,
+        claimAuthority: expect.anything(),
       },
     });
+    // F1: the claiming key is recorded (oldest-active at setup; activation
+    // overwrites with the asserting key).
+    const { coseToCompressedSecp256r1: compress } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
+    expect((prisma.chainAccount.create as jest.Mock).mock.calls[0][0].data.claimAuthority).toEqual(
+      compress(coseKey()),
+    );
     expect(security.log).toHaveBeenCalledWith("ifal@pid", "account.created", {});
-    expect(views[0].address).toBe(DERIVED);
+    expect(views[0].address).not.toBe(DERIVED); // stale keyless PDA, never seeded
   });
 
   it("ensureAccount does not reseed the smart row when it already exists", async () => {
@@ -70,8 +87,37 @@ describe("AccountService", () => {
     expect(prisma.chainAccount.create).not.toHaveBeenCalled();
   });
 
+  it("re-POST after rotation keeps the recorded binding (ANT-866/R1)", async () => {
+    // Healed row binds K0 and is ACTIVE; oldest-active flipped to K1 (K0
+    // revoked). Re-deriving from oldest would clobber the row to a K1-bound
+    // address no signature can claim (availability outage; on-chain
+    // fail-closed). The recorded key must win; active rows are not demoted.
+    const { deriveSmartAccountAddress } = jest.requireActual("../common/smart-account") as typeof import("../common/smart-account");
+    const { coseKey } = jest.requireActual("../../test/factories") as typeof import("../../test/factories");
+    const { coseToCompressedSecp256r1 } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
+    const K0 = coseToCompressedSecp256r1(coseKey());
+    const K1_COSE = Buffer.from("a5010203262001215820" + "33".repeat(32) + "225820" + "44".repeat(32), "hex");
+    const K1 = coseToCompressedSecp256r1(K1_COSE);
+    expect(K1.equals(K0)).toBe(false);
+    const boundK0 = deriveSmartAccountAddress("pid_01HASH", PROGRAM_ID, K0).address;
+    const { service, prisma } = setup();
+    (prisma.chainAccount.findFirst as jest.Mock).mockResolvedValue({
+      ...chainRow(),
+      address: boundK0,
+      status: "active",
+      claimAuthority: K0,
+    });
+    prisma.chainAccount.findMany.mockResolvedValue([{ ...chainRow(), address: boundK0, status: "active" }]);
+    (prisma.authority.findFirst as jest.Mock).mockResolvedValue({ publicKey: K1_COSE });
+    await service.ensureAccount("pid_01HASH");
+    expect(prisma.chainAccount.update).not.toHaveBeenCalled();
+    expect(prisma.chainAccount.create).not.toHaveBeenCalled();
+  });
+
   it("ensureAccount seeds one identical EVM address per chain when the factory is configured", async () => {
-    const { deriveEvmSmartAccountAddress } = jest.requireActual("@peridotvault/pid-evm") as typeof import("@peridotvault/pid-evm");
+    // B1 (ANT-866): the seeded address is PID-KEY BOUND (not keyless) — the
+    // only pre-funding target the registered key can claim.
+    const { deriveEvmSmartAccountAddressBound } = jest.requireActual("@peridotvault/pid-evm") as typeof import("@peridotvault/pid-evm");
     const factory = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
     const impl = "0x0000000000000000000000000000000000000001";
     const config = {
@@ -108,18 +154,109 @@ describe("AccountService", () => {
         create: jest.fn(async (args: { data: { address: string } }) => ({ id: "c", ...args.data })),
         update: jest.fn(async () => ({})),
       },
+      authority: {
+        findFirst: jest.fn(async () => ({ publicKey: coseKey() })),
+      },
       securityEvent: { create: jest.fn(async () => ({})) },
     };
     const service = new AccountService(prisma as never, security as never, chains as never);
 
     await service.ensureAccount("pid_01HASH");
 
-    const expected = deriveEvmSmartAccountAddress("pid_01HASH", factory, impl).address;
+    const { x, y } = coseToRawXy(coseKey());
+    const expected = deriveEvmSmartAccountAddressBound(
+      "pid_01HASH", new Uint8Array(x), new Uint8Array(y), factory, impl,
+    ).address;
     const creates = prisma.chainAccount.create.mock.calls.map((c) => (c[0] as { data: Record<string, unknown> }).data);
     const evmCreates = creates.filter((d) => d.chainId !== "chain-sol");
     // One row per phase-1 chain, all the same counterfactual address.
     expect(evmCreates.map((d) => d.chainId).sort()).toEqual(["chain-10143", "chain-421614", "chain-84532", "chain-97"]);
     for (const row of evmCreates) expect(row.address).toBe(expected);
+  });
+
+  it("EVM re-point after rotation keeps the recorded key (ANT-866/R2)", async () => {
+    // EVM row healed to K0; oldest-active flipped to K1. Re-pointing from
+    // oldest would write an (address=K1-bound, key=K0) skew pair pointing
+    // funding at an unclaimable address. The recorded key must win.
+    const { deriveEvmSmartAccountAddressBound } = jest.requireActual("@peridotvault/pid-evm") as typeof import("@peridotvault/pid-evm");
+    const { coseKey } = jest.requireActual("../../test/factories") as typeof import("../../test/factories");
+    const { coseToCompressedSecp256r1 } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
+    const { coseToRawXy } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
+    const factory = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
+    const impl = "0x0000000000000000000000000000000000000001";
+    const K0 = coseToCompressedSecp256r1(coseKey());
+    const K1_COSE = Buffer.from("a5010203262001215820" + "33".repeat(32) + "225820" + "44".repeat(32), "hex");
+    const { x, y } = coseToRawXy(coseKey());
+    const K0evm = deriveEvmSmartAccountAddressBound(
+      "pid_01HASH", new Uint8Array(x), new Uint8Array(y), factory, impl,
+    ).address;
+    const chains = {
+      solanaChainIdOrThrow: jest.fn(async () => "chain-sol"),
+      solanaProgramId: jest.fn(async () => PROGRAM_ID),
+      deployableEvmChains: jest.fn(async () =>
+        ["97"].map((reference) => ({
+          id: `chain-${reference}`,
+          namespace: "eip155",
+          reference,
+          name: `chain-${reference}`,
+          nativeSymbol: "T",
+          decimals: 18,
+          rpcUrls: [],
+          explorerUrl: null,
+          logoUrl: null,
+          isTestnet: true,
+          contracts: [
+            { type: "factory", address: factory, versionLabel: "v1" },
+            { type: "account_implementation", address: impl, versionLabel: "v1" },
+          ],
+        })),
+      ),
+    };
+    const security = mockSecurity();
+    const prisma = {
+      chainAccount: {
+        findFirst: jest.fn(async (args: { where: { chainId?: string } }) =>
+          args.where.chainId
+            ? {
+                id: "c-evm",
+                pid: "pid_01HASH",
+                chainId: args.where.chainId,
+                address: K0evm,
+                accountType: SMART,
+                status: "active",
+                claimAuthority: K0,
+              }
+            : null,
+        ),
+        findMany: jest.fn(async () => [chainRow()] as any),
+        create: jest.fn(async (args: { data: { address: string } }) => ({ id: "c", ...args.data })),
+        update: jest.fn(async () => ({})),
+      },
+      authority: {
+        findFirst: jest.fn(async () => ({ publicKey: K1_COSE })),
+        findMany: jest.fn(async () => [{ publicKey: coseKey() }, { publicKey: K1_COSE }]),
+      },
+      securityEvent: { create: jest.fn(async () => ({})) },
+    };
+    const service = new AccountService(prisma as never, security as never, chains as never);
+
+    await service.ensureAccount("pid_01HASH");
+
+    expect(prisma.chainAccount.update).not.toHaveBeenCalled();
+  });
+
+  it("ensureAccount defers EVM rows until a passkey is registered (B1)", async () => {    // No active authority → no address can be bound → no rows (fail closed:
+    // nothing advertises an unclaimable funding target).
+    const { service, prisma } = setup();
+    (prisma.authority.findFirst as jest.Mock).mockResolvedValue(null);
+    prisma.chainAccount.findMany.mockResolvedValue([chainRow()]);
+
+    await service.ensureAccount("pid_01HASH");
+
+    const creates = prisma.chainAccount.create.mock.calls.map(
+      (c) => ((c as unknown[])[0] as { data: Record<string, unknown> }).data,
+    );
+    expect(creates.filter((d) => d.chainId !== "chain-sol")).toEqual([]);
   });
 
   it("ensureAccount fails cleanly when the solana chain is not registered", async () => {

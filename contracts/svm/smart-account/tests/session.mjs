@@ -58,7 +58,7 @@ const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC63
 const SESSION_DISC = { register: 7, execute: 8, revoke: 9, close: 10 };
 const SESSION_STATE_LEN = 206;
 
-const conn = new Connection("http://127.0.0.1:8899", "confirmed");
+const conn = new Connection(process.env.PID_RPC_URL || "http://127.0.0.1:8899", "confirmed");
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest();
 const b64url = (b) => Buffer.from(b).toString("base64url");
 const pidToSeed32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8"));
@@ -127,8 +127,12 @@ const revokePayload = (accountId32, sessionKey, nonce, expiry) =>
 const closePayload = (accountId32, sessionKey, dest, nonce, expiry) =>
   sha256(Buffer.concat([DOMAIN_SESSION, Buffer.from([10]), accountId32, sessionKey, dest, u64(nonce), i64(expiry)]));
 
-const sessionPdaOf = (accountId32, sessionKey) =>
-  PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("session"), accountId32, sessionKey.toBuffer()], PROGRAM)[0];
+// ANT-866 B1: session PDAs are namespaced per vault key (sha256(authority) seed).
+const keyHash = (authComp) => sha256(Buffer.from(authComp));
+const sessionPdaOf = (accountId32, authComp, sessionKey) =>
+  PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("session"), accountId32, keyHash(authComp), sessionKey.toBuffer()], PROGRAM)[0];
+const tombstonePda = (accountId32) => PublicKey.findProgramAddressSync(
+  [Buffer.from("peridot_id"), Buffer.from("tombstone"), accountId32], PROGRAM)[0];
 const programDataOf = (programId) =>
   PublicKey.findProgramAddressSync([programId.toBuffer()], LOADER)[0];
 // Upgrade evidence per loader class: verified ProgramData (upgradeable games)
@@ -225,29 +229,32 @@ async function main() {
   const exp = (delta = 300) => chainNow + delta;
   const liveNow = async () => conn.getBlockTime(await conn.getSlot());
   const accountId32 = pidToSeed32(`testsession${Date.now()}@pid`);
-  const [pda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), accountId32], PROGRAM);
-  const sessionPda = sessionPdaOf(accountId32, sessionKp.publicKey);
-  const sessionPda3 = sessionPdaOf(accountId32, session3.publicKey);
+  const [pda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), accountId32, keyHash(authorityComp)], PROGRAM);
+  const sessionPda = sessionPdaOf(accountId32, authorityComp, sessionKp.publicKey);
+  const sessionPda3 = sessionPdaOf(accountId32, authorityComp, session3.publicKey);
   console.log(`program ${PROGRAM.toBase58()} vault ${pda.toBase58()}`);
 
   // ---- revenue vault init (ANT-635, disc 15, first-writer-wins) ----
   // The PDA vault must exist and be program-owned before `activate` can
   // credit it (`verify_treasury_pda` checks derivation + owner). `payer`
   // is just a funded signer here; production uses the deployer key.
-  await expectOk(
-    new Transaction().add(new TransactionInstruction({
-      keys: [
-        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
-        { pubkey: CONFIG_PDA, isSigner: false, isWritable: true },
-        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      ],
-      programId: PROGRAM,
-      data: Buffer.concat([Buffer.from([15]), payer.publicKey.toBuffer()]),
-    })),
-    [payer],
-    "vault init treasury (program-bound PDA)",
-  );
+  // Idempotent across reruns on one ledger (covers suite chaining).
+  if (!(await conn.getAccountInfo(CONFIG_PDA))) {
+    await expectOk(
+      new Transaction().add(new TransactionInstruction({
+        keys: [
+          { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+          { pubkey: CONFIG_PDA, isSigner: false, isWritable: true },
+          { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        ],
+        programId: PROGRAM,
+        data: Buffer.concat([Buffer.from([15]), payer.publicKey.toBuffer()]),
+      })),
+      [payer],
+      "vault init treasury (program-bound PDA)",
+    );
+  }
   // ---- vault setup (fund + permissionless activate V4 + SPL position) ----
   // ANT-612: direct initialize is dead, so the vault is claimed through the
   // fee-bearing activate path with `payer` (a random keypair) as submitter —
@@ -266,6 +273,7 @@ async function main() {
         { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+        { pubkey: tombstonePda(accountId32), isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
       data: Buffer.concat([Buffer.from([14]), accountId32, authorityComp, u16(POLICY_V1), i64(actExpiry), u64(ACTIVATE_NETWORK_FEE), u64(ACTIVATE_MAX_TOTAL_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
@@ -368,7 +376,7 @@ async function main() {
   // ---- register with a lied upgrade snapshot → rejected (0x15) ----
   {
     const evilKp = Keypair.generate();
-    const evilPda = sessionPdaOf(accountId32, evilKp.publicKey);
+    const evilPda = sessionPdaOf(accountId32, authorityComp, evilKp.publicKey);
     const nonce = await vaultNonce();
     const liedSlot = fwdRec.slot + 1000n;
     const payload = registerPayload(accountId32, nonce, evilKp.publicKey.toBuffer(), FORWARDER.toBuffer(), expiresAt, fwdRec.hasAuth, Buffer.from(fwdRec.auth), liedSlot, exp());
@@ -689,7 +697,7 @@ async function main() {
   {
     const shortKp = Keypair.generate();
     await conn.confirmTransaction(await conn.requestAirdrop(shortKp.publicKey, LAMPORTS_PER_SOL), "confirmed");
-    const shortPda = sessionPdaOf(accountId32, shortKp.publicKey);
+    const shortPda = sessionPdaOf(accountId32, authorityComp, shortKp.publicKey);
     const now = await liveNow();
     const nonce = await vaultNonce();
     const payload = registerPayload(accountId32, nonce, shortKp.publicKey.toBuffer(), FORWARDER.toBuffer(), now + 2, fwdRec.hasAuth, Buffer.from(fwdRec.auth), fwdRec.slot, exp());
@@ -754,7 +762,7 @@ async function main() {
     // the post-registration gameplay lands within one blockhash lifetime.
     const freshKp = Keypair.generate();
     await conn.confirmTransaction(await conn.requestAirdrop(freshKp.publicKey, LAMPORTS_PER_SOL), "confirmed");
-    const freshPda = sessionPdaOf(accountId32, freshKp.publicKey);
+    const freshPda = sessionPdaOf(accountId32, authorityComp, freshKp.publicKey);
     const freshAta = await getOrCreateAssociatedTokenAccount(conn, payer, mint, freshPda, true);
     await mintTo(conn, payer, mint, freshAta.address, mintAuthority, 500_000n);
     const nonce2 = await vaultNonce();

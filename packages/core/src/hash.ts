@@ -5,7 +5,7 @@
 // Browser-safe: no Buffer, no node:crypto (WebCrypto for SHA-256).
 
 import { PublicKey } from "@solana/web3.js";
-import { concat, fromAscii, pidToSeed32, sha256 as hashSha256, u16le, u64le, i64le } from "./bytes.js";
+import { concat, fromAscii, pidToSeed32, sha256 as hashSha256, sha256Sync, u16le, u64le, i64le } from "./bytes.js";
 import type { Bytes } from "./bytes.js";
 
 export { pidToSeed32 };
@@ -75,6 +75,25 @@ export const OP_V5 = {
   execute: 21,
 } as const;
 
+/** ANT-866 B1 close-grace discriminators (must match `src/instructions/mod.rs`
+ * 33-35). Teardown is a two-phase owner-authorized flow with an unclaim grace
+ * window plus a permanent tombstone; immediate `Close` (4) is deprecated.
+ */
+export const IX_CLOSE = {
+  request: 33,
+  cancel: 34,
+  finalize: 35,
+} as const;
+
+/** ANT-866 B1 close-grace op-tags (request/cancel are V3-domain owner-signed). */
+export const OP_CLOSE = {
+  request: 33,
+  cancel: 34,
+} as const;
+
+/** Unclaim grace window in seconds (must match `state::CLOSE_GRACE_SECS`). */
+export const CLOSE_GRACE_SECS = 604_800;
+
 /**
  * ANT-635 revenue-vault discriminators (must match `src/instructions/mod.rs`
  * 15-18). Spec ANT-637 reserved 11-14, but those were already taken by the V4
@@ -138,16 +157,54 @@ export async function base64url(data: Uint8Array): Promise<string> {
   return b64url(data);
 }
 
-/** Derive the smart-account PDA: seeds ["peridot_id", "account", sha256(pid)]. */
-export function deriveSmartAccountAddress(pid: string, programId: PublicKey = PID_PROGRAM_ID): {
+/** Derive the smart-account PDA: seeds ["peridot_id", "account", sha256(pid)].
+ *
+ * B1 (ANT-866): PID-KEY BOUND — seeds are
+ * `["peridot_id", "account", account_id, sha256(authority)]`, so the PDA
+ * commits to the claiming passkey and pre-funded PDAs are unclaimable by any
+ * other key. `authority` is the 33-byte compressed secp256r1 key.
+ * @deprecated Keyless derivation yields addresses that no longer exist
+ * on-chain. Use the `authority` form — retained for indexers only.
+ */
+export function deriveSmartAccountAddress(pid: string, programId?: PublicKey): {
+  address: PublicKey;
+  bump: number;
+};
+export function deriveSmartAccountAddress(
+  pid: string,
+  authority: Uint8Array,
+  programId?: PublicKey,
+): {
+  address: PublicKey;
+  bump: number;
+};
+export function deriveSmartAccountAddress(
+  pid: string,
+  authorityOrProgram?: Uint8Array | PublicKey,
+  programId: PublicKey = PID_PROGRAM_ID,
+): {
   address: PublicKey;
   bump: number;
 } {
-  const [address, bump] = PublicKey.findProgramAddressSync(
-    [Buffer.from("peridot_id"), Buffer.from("account"), pidToSeed32(pid) as unknown as Buffer],
-    programId,
-  );
+  let authority: Uint8Array | undefined;
+  if (authorityOrProgram instanceof PublicKey) {
+    programId = authorityOrProgram;
+  } else {
+    authority = authorityOrProgram;
+  }
+  const seeds: Uint8Array[] = [Buffer.from("peridot_id"), Buffer.from("account"), pidToSeed32(pid) as unknown as Buffer];
+  if (authority) {
+    if (authority.length !== 33) throw new Error("vault authority must be 33 bytes");
+    seeds.push(vaultKeyHash(authority) as unknown as Buffer);
+  }
+  const [address, bump] = PublicKey.findProgramAddressSync(seeds, programId);
   return { address, bump };
+}
+
+/** PID-key binding hash: `sha256(33-byte compressed authority)` (matches `state::vault_key_hash`). */
+export function vaultKeyHash(authority: Uint8Array): Uint8Array {
+  if (authority.length !== 33) throw new Error("vault authority must be 33 bytes");
+  return sha256Sync(authority);
 }
 
 /**
@@ -379,7 +436,11 @@ export async function buildUpdateAuthorityPayloadV3(
   ]);
 }
 
-/** V3 CLOSE payload. */
+/** V3 CLOSE payload.
+ * @deprecated ANT-866 B1: immediate close (disc 4) is permanently disabled
+ * (`CloseDeprecated`) — teardown routes through the close-grace builders
+ * below. Retained for decoder/indexer reference only.
+ */
 export async function buildClosePayloadV3(
   accountId32: Uint8Array,
   nonce: bigint,
@@ -388,6 +449,29 @@ export async function buildClosePayloadV3(
 ): Promise<Uint8Array> {
   return buildAuthorizationPayloadV3(OP.close, [
     accountId32, u64le(nonce), destination.toBytes(), i64le(expiry),
+  ]);
+}
+
+/** ANT-866 B1 close-request payload: `op 33 ‖ account_id ‖ nonce ‖ destination ‖ expiry` (V3 domain). */
+export async function buildCloseRequestPayload(
+  accountId32: Uint8Array,
+  nonce: bigint,
+  destination: PublicKey,
+  expiry: number,
+): Promise<Uint8Array> {
+  return buildAuthorizationPayloadV3(OP_CLOSE.request, [
+    accountId32, u64le(nonce), destination.toBytes(), i64le(expiry),
+  ]);
+}
+
+/** ANT-866 B1 close-cancel payload: `op 34 ‖ account_id ‖ nonce ‖ expiry` (V3 domain). */
+export async function buildCloseCancelPayload(
+  accountId32: Uint8Array,
+  nonce: bigint,
+  expiry: number,
+): Promise<Uint8Array> {
+  return buildAuthorizationPayloadV3(OP_CLOSE.cancel, [
+    accountId32, u64le(nonce), i64le(expiry),
   ]);
 }
 
@@ -627,15 +711,75 @@ export const MAX_PROTECTED = 8;
 /** BPF upgradeable loader (ProgramData derivation + owner check). */
 export const BPF_LOADER_UPGRADEABLE = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 
-/** Derive the session PDA: seeds ["peridot_id", "session", account_id, session_pubkey]. */
+/** Derive the session PDA.
+ *
+ * B1 (ANT-866): seeds are `["peridot_id", "session", account_id,
+ * sha256(authority), session_pubkey]` — sessions are namespaced per vault so
+ * a session granted under one key is unusable from another vault.
+ * @deprecated Keyless form yields addresses that no longer exist. Pass the
+ * 33-byte vault authority — retained for indexers only.
+ */
 export function deriveSessionAddress(
   accountId32: Uint8Array,
   sessionPubkey: PublicKey,
+  programId?: PublicKey,
+): { address: PublicKey; bump: number };
+export function deriveSessionAddress(
+  accountId32: Uint8Array,
+  authority: Uint8Array,
+  sessionPubkey: PublicKey,
+  programId?: PublicKey,
+): { address: PublicKey; bump: number };
+export function deriveSessionAddress(
+  accountId32: Uint8Array,
+  authorityOrSession: Uint8Array | PublicKey,
+  sessionOrProgram?: PublicKey,
+  programId: PublicKey = PID_PROGRAM_ID,
+): { address: PublicKey; bump: number } {
+  if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
+  let authority: Uint8Array | undefined;
+  let sessionPubkey: PublicKey;
+  if (authorityOrSession instanceof PublicKey) {
+    sessionPubkey = authorityOrSession;
+    if (sessionOrProgram) programId = sessionOrProgram;
+  } else {
+    authority = authorityOrSession;
+    if (!sessionOrProgram) throw new Error("bound session derivation needs the session pubkey");
+    sessionPubkey = sessionOrProgram;
+  }
+  const seeds: Uint8Array[] = [Buffer.from("peridot_id"), Buffer.from("session"), accountId32 as unknown as Buffer];
+  if (authority) {
+    if (authority.length !== 33) throw new Error("vault authority must be 33 bytes");
+    seeds.push(vaultKeyHash(authority) as unknown as Buffer);
+  }
+  seeds.push(sessionPubkey.toBytes() as unknown as Buffer);
+  const [address, bump] = PublicKey.findProgramAddressSync(seeds, programId);
+  return { address, bump };
+}
+
+/** Derive the close-ticket PDA: `["peridot_id", "close", account_id, sha256(authority)]`. */
+export function deriveTicketAddress(
+  accountId32: Uint8Array,
+  authority: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): { address: PublicKey; bump: number } {
+  if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
+  if (authority.length !== 33) throw new Error("vault authority must be 33 bytes");
+  const [address, bump] = PublicKey.findProgramAddressSync(
+    [Buffer.from("peridot_id"), Buffer.from("close"), accountId32 as unknown as Buffer, vaultKeyHash(authority) as unknown as Buffer],
+    programId,
+  );
+  return { address, bump };
+}
+
+/** Derive the tombstone PDA: `["peridot_id", "tombstone", account_id]` (keyed by pid only). */
+export function deriveTombstoneAddress(
+  accountId32: Uint8Array,
   programId: PublicKey = PID_PROGRAM_ID,
 ): { address: PublicKey; bump: number } {
   if (accountId32.length !== 32) throw new Error("accountId32 must be 32 bytes");
   const [address, bump] = PublicKey.findProgramAddressSync(
-    [Buffer.from("peridot_id"), Buffer.from("session"), accountId32 as unknown as Buffer, sessionPubkey.toBytes() as unknown as Buffer],
+    [Buffer.from("peridot_id"), Buffer.from("tombstone"), accountId32 as unknown as Buffer],
     programId,
   );
   return { address, bump };

@@ -40,7 +40,9 @@ contract PeridotBatchTest is Test {
     bytes32 constant GY = 0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5;
     bytes32 constant SX = 0x7cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc47669978;
     bytes32 constant SY = 0x07775510db8ed040293d9ac69f7430dbba7dade63ce982299e04b79d227873d1;
-    bytes32 constant SALT = bytes32(uint256(0xBA7C4));
+    /// @dev B1 binding (ANT-866): `sha256("test-batch@pid")`, bound on-chain as
+    /// `keccak256(PID_HASH ‖ GX ‖ GY)`.
+    bytes32 constant PID_HASH = 0x30a308cc52faabba9ef64028eaf37bb94e5418b50a9e3e5338362e7cdb7cfca7;
 
     uint256 constant P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
 
@@ -65,18 +67,19 @@ contract PeridotBatchTest is Test {
         admins[0] = address(this);
         factory = new PeridotFactory(address(new PeridotAccountBatch()), admins);
         game = new MockGame();
-        address predicted = factory.predict(SALT);
+        bytes32 salt = keccak256(abi.encodePacked(PID_HASH, GX, GY));
+        address predicted = factory.predict(salt);
         vm.deal(predicted, 0.01 ether);
         uint256 netFee = 0.002 ether;
         uint256 maxTotalFee = 0.003 ether;
         bytes32 payload = keccak256(
             abi.encodePacked(
-                DOMAIN_V4, uint8(0x05), SALT, GX, GY, POLICY_V1, maxTotalFee, DEADLINE, block.chainid, address(factory)
+                DOMAIN_V4, uint8(0x05), salt, GX, GY, POLICY_V1, maxTotalFee, DEADLINE, block.chainid, address(factory)
             )
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigOwner(payload);
         account = PeridotAccountBatch(
-            payable(factory.deployAndInitV4(SALT, GX, GY, POLICY_V1, maxTotalFee, DEADLINE, netFee, auth, client, r, s))
+            payable(factory.deployAndInitV4(PID_HASH, GX, GY, POLICY_V1, maxTotalFee, DEADLINE, netFee, auth, client, r, s))
         );
         assertEq(address(account), predicted, "counterfactual address");
         vm.deal(address(account), 10 ether);

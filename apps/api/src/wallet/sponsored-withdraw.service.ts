@@ -21,7 +21,8 @@ import { ChainAccount } from "@prisma/client";
 import { createHash } from "node:crypto";
 import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
-import { ACCOUNT_TYPE_SMART, SolanaSelection, solanaReferenceFor } from "../common/chains";
+import { requireActiveAuthority } from "../common/activation";
+import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
   exceedsDriftBound,
@@ -228,7 +229,7 @@ export class SponsoredWithdrawService {
     // landed (attribute the newest confirmed account tx; null when history is
     // unreadable — still landed). Unconsumed nonce ⇒ proven non-landing.
     // Throwing readers ⇒ unreadable (bounded by the caller's resolve budget).
-    const nonceNow = await adapter.getNonce(pid);
+    const nonceNow = await adapter.getNonceOf(accountAddress);
     if (nonceNow !== expectedNonce) {
       const history = await adapter.getHistory(accountAddress, 5);
       const hit = history.find((tx) => !tx.err);
@@ -241,6 +242,27 @@ export class SponsoredWithdrawService {
   private get pidSolana() {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require("@peridotvault/pid-solana") as typeof import("@peridotvault/pid-solana");
+  }
+
+  /**
+   * Claiming key for PDA derivation (ANT-866 B1 + F1 fix): the key recorded
+   * on the chain row at activation-heal time. Falls back to oldest-active
+   * only for pre-B1 rows that have never healed (best-effort legacy path).
+   * NEVER oldest-active unconditionally: rotation revokes the oldest row and
+   * multi-key activation may claim with a newer key — both flip oldest away
+   * from the claiming key and would derive an unclaimable PDA (fail-closed
+   * on-chain, availability outage off-chain). The claiming key is per-pid
+   * (all rows of one identity bind the same key), so any Solana-namespace
+   * smart row serves (R3: EVM rows may bind a different key).
+   */
+  private async derivationAuthority(pid: string): Promise<Uint8Array> {
+    const row = await this.prisma.chainAccount.findFirst({
+      where: { pid, accountType: ACCOUNT_TYPE_SMART, chain: { namespace: SOLANA_NAMESPACE } },
+      orderBy: { createdAt: "asc" },
+    });
+    if (row?.claimAuthority) return new Uint8Array(row.claimAuthority);
+    const oldest = await requireActiveAuthority(this.prisma, pid);
+    return coseToCompressedSecp256r1(Buffer.from(oldest.publicKey)) as unknown as Uint8Array;
   }
 
   private relayer(): Keypair {
@@ -561,7 +583,7 @@ export class SponsoredWithdrawService {
     const leg = await this.solanaFeeLeg(selection, version);
 
     // Nonce starts at 0 for an uninitialized PDA; any other value is stale.
-    const chainNonce = await adapter.getNonce(pid).catch(() => 0n);
+    const chainNonce = await adapter.getNonce(pid, await this.derivationAuthority(pid)).catch(() => 0n);
     if (BigInt(dto.nonce) !== chainNonce) {
       return this.reject(
         pid,
@@ -728,7 +750,7 @@ export class SponsoredWithdrawService {
       }
       const mint = this.pubkeyOr400(PublicKey, dto.asset, "Asset mint");
       return adapter
-        .tokenAta(pid, mint)
+        .tokenAta(pid, authorityCompressed, mint)
         .then((ata) =>
           adapter.sponsoredActivatePlusWithdrawTokenV4(
             pid,
@@ -769,13 +791,14 @@ export class SponsoredWithdrawService {
       await this.security.log(pid, "withdraw.first_action_fallback", { reason: "tx-too-large", mode });
       const relayer = this.relayer();
       await adapter.activateV4(pid, authorityCompressed, version, networkFee, activateLeg.maxTotalFeeLamports, first.expiry, relayer, undefined, activateAssertion);
-      const fallbackSpend = (): Promise<{ signature: string; result: null }> => {
+      const fallbackSpend = async (): Promise<{ signature: string; result: null }> => {
         if (dto.asset === "SOL") {
           return adapter
             .sponsoredWithdrawSolV4(
               pid, authorityCompressed,
               this.pubkeyOr400(PublicKey, dto.to, "Destination"),
               amount, version, networkFee, maxTotalFee, chainNonce, dto.expiry, spendAssertion, relayer, undefined,
+              await this.derivationAuthority(pid),
             )
             .then((sig) => ({ signature: sig, result: null }));
         }
@@ -904,7 +927,7 @@ export class SponsoredWithdrawService {
     const leg = await this.solanaFeeLeg(selection, version);
 
     // Stale-nonce / expired / over-TTL rejections happen before broadcast.
-    const chainNonce = BigInt(await adapter.getNonce(pid));
+    const chainNonce = BigInt(await adapter.getNonce(pid, await this.derivationAuthority(pid)));
     if (BigInt(dto.nonce) !== chainNonce) {
       return this.reject(
         pid,
@@ -987,7 +1010,7 @@ export class SponsoredWithdrawService {
     } else {
       const { PublicKey } = this.pidSolana;
       const mint = this.pubkeyOr400(PublicKey, dto.asset, "Asset mint");
-      const sourceAta = await adapter.tokenAta(pid, mint);
+      const sourceAta = await adapter.tokenAta(pid, await this.derivationAuthority(pid), mint);
       const balances = await adapter.getTokenBalancesOf(sourceAta.toBase58()).catch(() => []);
       const row = balances.find((b) => b.mint === mint.toBase58());
       if (!row || BigInt(row.amount) < amount) {
@@ -1082,7 +1105,7 @@ export class SponsoredWithdrawService {
         nonce: dto.nonce,
         chain: BROADCAST_CHAIN_SOLANA,
         entryPoint: "withdraw",
-        broadcast: () =>
+        broadcast: async () =>
           adapter
             .sponsoredWithdrawSolV4(
               pid,
@@ -1097,6 +1120,7 @@ export class SponsoredWithdrawService {
               assertion,
               this.relayer(),
               undefined,
+              await this.derivationAuthority(pid),
             )
             .then((sig) => ({ signature: sig, result: null })),
         resolveState: () => this.resolveSvmState(adapter, pid, chain.address, chainNonce),
@@ -1104,7 +1128,7 @@ export class SponsoredWithdrawService {
       signature = out.signature;
     } else {
       const mint = this.pubkeyOr400(PublicKey, dto.asset, "Asset mint");
-      const sourceAta = await adapter.tokenAta(pid, mint);
+      const sourceAta = await adapter.tokenAta(pid, await this.derivationAuthority(pid), mint);
       if (!(await adapter.hasAccount(sourceAta.toBase58()))) {
         return this.reject(
           pid,
@@ -1423,7 +1447,7 @@ export class SponsoredWithdrawService {
     }
     const leg = await this.solanaFeeLeg(selection, version);
 
-    const chainNonce = await adapter.getNonce(pid).catch(() => 0n);
+    const chainNonce = await adapter.getNonce(pid, await this.derivationAuthority(pid)).catch(() => 0n);
     if (BigInt(dto.nonce) !== chainNonce) {
       return this.reject(
         pid,
@@ -1580,12 +1604,13 @@ export class SponsoredWithdrawService {
         nonce: dto.nonce,
         chain: BROADCAST_CHAIN_SOLANA,
         entryPoint: "execute",
-        broadcast: () =>
+        broadcast: async () =>
           adapter
             .sponsoredExecuteV4(
               pid, authorityCompressed,
               decoded.target, decoded.metas, decoded.data,
               version, networkFee, maxTotalFee, chainNonce, dto.expiry, spendAssertion, relayer, undefined,
+              await this.derivationAuthority(pid),
             )
             .then((sig) => ({ signature: sig, result: null })),
         resolveState: () => this.resolveSvmState(adapter, pid, accountAddress, chainNonce),
@@ -1688,7 +1713,7 @@ export class SponsoredWithdrawService {
     const leg = await this.solanaFeeLeg(selection, version);
 
     // Stale-nonce / expired / over-TTL rejections happen before broadcast.
-    const chainNonce = BigInt(await adapter.getNonce(pid));
+    const chainNonce = BigInt(await adapter.getNonce(pid, await this.derivationAuthority(pid)));
     if (BigInt(dto.nonce) !== chainNonce) {
       return this.reject(
         pid,
@@ -1821,7 +1846,7 @@ export class SponsoredWithdrawService {
       nonce: dto.nonce,
       chain: BROADCAST_CHAIN_SOLANA,
       entryPoint: "execute",
-      broadcast: () =>
+      broadcast: async () =>
         adapter
           .sponsoredExecuteV4(
             pid,
@@ -1837,6 +1862,7 @@ export class SponsoredWithdrawService {
             assertion,
             this.relayer(),
             undefined,
+            await this.derivationAuthority(pid),
           )
           .then((sig) => ({ signature: sig, result: null })),
       resolveState: () => this.resolveSvmState(adapter, pid, chain.address, chainNonce),
