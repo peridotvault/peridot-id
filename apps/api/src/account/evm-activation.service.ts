@@ -462,9 +462,9 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Deploy the counterfactual via the Peridot relayer (V4 `deployAndInitV4` when
-   * policy 2, frozen V3 `deployAndInit` when policy 1 sunset). The user's
-   * assertion binds salt, authority, policy, maxTotalFee (V4 only), deadline,
+   * Deploy the counterfactual via the Peridot relayer (V4 `deployAndInitV4`
+   * only — ANT-895/B2 closes V3 broadcasts). The user's
+   * assertion binds salt, authority, policy, maxTotalFee, deadline,
    * chainId and factory (no amounts) — the relayer submits but authorizes
    * nothing. Idempotent once ACTIVE.
    */
@@ -546,6 +546,18 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     } else if (version !== 1 && version !== 2) {
       return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("Unsupported fee policy — re-quote and try again"));
     }
+    // ANT-895/B2: V3 fee paths are disabled on-chain (V3Deprecated) — the
+    // relayer never broadcasts V3 calldata. Policy 1 (V3 sunset) is rejected
+    // fail-closed even when the fee-service gate would accept it; clients
+    // must re-quote under policy 2 (V4).
+    if (version !== 2) {
+      return this.reject(
+        user.pid,
+        feeChain,
+        "policy-unknown",
+        new BadRequestException("Fee policy 1 is sunset — re-quote and try again"),
+      );
+    }
     const rpc = await this.rpcFor(chainReference);
     const now = await rpc.blockTimestamp().catch(() => Math.floor(Date.now() / 1000));
     if (dto.deadline <= now) {
@@ -574,22 +586,20 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     } = await this.serviceFeeFor(networkFee, version, chainReference);
     const totalFee = networkFee + protocolFee;
     // V4 B6: VERIFY the user-approved bound. total > max reverts on-chain
-    // (FeeExceedsMax) — fail closed here before broadcast.
-    let maxTotalFee = totalFee;
-    if (version === 2) {
-      if (dto.maxTotalFeeWei == null) {
-        return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("maxTotalFeeWei is required for fee policy 2 — re-quote and try again"));
-      }
-      maxTotalFee = BigInt(dto.maxTotalFeeWei);
-      if (totalFee > maxTotalFee) {
-        await this.security.log(user.pid, RelayerH1Events.driftRejected, {
-          chain: feeChain,
-          entryPoint: "activate",
-          quoted: fmtBaseUnits(maxTotalFee),
-          attested: fmtBaseUnits(totalFee),
-        });
-        return this.reject(user.pid, feeChain, "drift", new ConflictException("Network fee exceeds maxTotalFee — re-quote and try again"));
-      }
+    // (FeeExceedsMax) — fail closed here before broadcast. The bound is
+    // required on every submit (V3 sunset has no bound to verify).
+    if (dto.maxTotalFeeWei == null) {
+      return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("maxTotalFeeWei is required — re-quote and try again"));
+    }
+    const maxTotalFee = BigInt(dto.maxTotalFeeWei);
+    if (totalFee > maxTotalFee) {
+      await this.security.log(user.pid, RelayerH1Events.driftRejected, {
+        chain: feeChain,
+        entryPoint: "activate",
+        quoted: fmtBaseUnits(maxTotalFee),
+        attested: fmtBaseUnits(totalFee),
+      });
+      return this.reject(user.pid, feeChain, "drift", new ConflictException("Network fee exceeds maxTotalFee — re-quote and try again"));
     }
     const asserting = await this.prisma.authority.findFirst({
       where: { pid: user.pid, credentialId: dto.assertion.id, status: "active" },
@@ -605,33 +615,19 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
       const clientData = Buffer.from(dto.assertion.clientDataJSON, "base64url");
       const r = fromHexDto(dto.assertion.r);
       const s = fromHexDto(dto.assertion.s);
-      const data =
-        version === 2
-          ? adapter.buildDeployAndInitDataV4({
-              salt: adapter.getSalt(user.pid),
-              x: new Uint8Array(x),
-              y: new Uint8Array(y),
-              feePolicyVersion: version,
-              maxTotalFee,
-              deadline: dto.deadline,
-              networkFee,
-              authenticatorData: authData,
-              clientDataJSON: clientData,
-              r,
-              s,
-            })
-          : adapter.buildDeployAndInitDataV3({
-              salt: adapter.getSalt(user.pid),
-              x: new Uint8Array(x),
-              y: new Uint8Array(y),
-              feePolicyVersion: version,
-              deadline: dto.deadline,
-              networkFee,
-              authenticatorData: authData,
-              clientDataJSON: clientData,
-              r,
-              s,
-            });
+      const data = adapter.buildDeployAndInitDataV4({
+        salt: adapter.getSalt(user.pid),
+        x: new Uint8Array(x),
+        y: new Uint8Array(y),
+        feePolicyVersion: version,
+        maxTotalFee,
+        deadline: dto.deadline,
+        networkFee,
+        authenticatorData: authData,
+        clientDataJSON: clientData,
+        r,
+        s,
+      });
       const deploy = await this.broadcastDeploy(chainReference, user.pid, row.address, dto, secret, data);
       if (deploy.resolved) {
         // Resolve-then-act proved OUR deployment without an attributable
@@ -815,8 +811,11 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     await this.breaker.requireClosed(chainReference, "execute");
 
     const version = dto.feePolicyVersion;
-    if (version !== 1 && version !== 2) {
-      return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("Unsupported fee policy — re-quote and try again"), "execute");
+    // ANT-895/B2: V3 `execute` is disabled on-chain (V3Deprecated) — the
+    // relayer never broadcasts V3 calldata. Policy 1 is rejected fail-closed;
+    // clients must re-quote under policy 2 (V4).
+    if (version !== 2) {
+      return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("Fee policy 1 is sunset — re-quote and try again"), "execute");
     }
     if (!/^0x[0-9a-fA-F]{40}$/.test(dto.to)) {
       return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("Invalid execute target"), "execute");
@@ -857,16 +856,10 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     const clientData = Buffer.from(dto.assertion.clientDataJSON, "base64url");
     const r = fromHexDto(dto.assertion.r);
     const s = fromHexDto(dto.assertion.s);
-    const draftData =
-      version === 2
-        ? adapter.buildExecuteDataV4({
-            to: dto.to, value, data, deadline: dto.deadline, feePolicyVersion: version,
-            maxTotalFee: 0n, networkFee: 0n, authenticatorData: authData, clientDataJSON: clientData, r, s,
-          })
-        : adapter.buildExecuteDataV3({
-            to: dto.to, value, data, deadline: dto.deadline, feePolicyVersion: version,
-            networkFee: 0n, authenticatorData: authData, clientDataJSON: clientData, r, s,
-          });
+    const draftData = adapter.buildExecuteDataV4({
+      to: dto.to, value, data, deadline: dto.deadline, feePolicyVersion: version,
+      maxTotalFee: 0n, networkFee: 0n, authenticatorData: authData, clientDataJSON: clientData, r, s,
+    });
     const gasPrice = await rpc.gasPrice().catch(() => 1_000_000_000n);
     const estGas = await this.estimateTxGas(chainReference, accountAddress, draftData);
     const networkFee = estGas * gasPrice;
@@ -882,45 +875,37 @@ export class EvmActivationService implements OnModuleInit, OnModuleDestroy {
     }
     const { serviceFee: protocolFee } = await this.serviceFeeFor(networkFee, version, chainReference);
     const totalFee = networkFee + protocolFee;
-    let maxTotalFee = totalFee;
-    if (version === 2) {
-      if (dto.maxTotalFeeWei == null) {
-        return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("maxTotalFeeWei is required for fee policy 2 — re-quote and try again"), "execute");
-      }
-      maxTotalFee = BigInt(dto.maxTotalFeeWei);
-      if (totalFee > maxTotalFee) {
-        await this.security.log(user.pid, RelayerH1Events.driftRejected, {
-          chain: feeChain,
-          entryPoint: "execute",
-          quoted: fmtBaseUnits(maxTotalFee),
-          attested: fmtBaseUnits(totalFee),
-        });
-        return this.reject(user.pid, feeChain, "drift", new ConflictException("Network fee exceeds maxTotalFee — re-quote and try again"), "execute");
-      }
+    // V4 B6: the user-approved bound is required on every execute submit.
+    if (dto.maxTotalFeeWei == null) {
+      return this.reject(user.pid, feeChain, "policy-unknown", new BadRequestException("maxTotalFeeWei is required — re-quote and try again"), "execute");
     }
-    // ANT-800: V4-only execute calldata for fee policy v2 (H2). The v2
-    // assertion is passkey-signed over the V4 payload (binds maxTotalFee);
-    // broadcasting it through V3 calldata would drop the user-approved bound.
-    // v1 stays on frozen V3 calldata (sunset) — new quotes are v2 canonical.
-    const execData =
-      version === 2
-        ? adapter.buildExecuteDataV4({
-            to: dto.to,
-            value,
-            data,
-            deadline: dto.deadline,
-            feePolicyVersion: version,
-            maxTotalFee,
-            networkFee,
-            authenticatorData: authData,
-            clientDataJSON: clientData,
-            r,
-            s,
-          })
-        : adapter.buildExecuteDataV3({
-            to: dto.to, value, data, deadline: dto.deadline, feePolicyVersion: version,
-            networkFee, authenticatorData: authData, clientDataJSON: clientData, r, s,
-          });
+    const maxTotalFee = BigInt(dto.maxTotalFeeWei);
+    if (totalFee > maxTotalFee) {
+      await this.security.log(user.pid, RelayerH1Events.driftRejected, {
+        chain: feeChain,
+        entryPoint: "execute",
+        quoted: fmtBaseUnits(maxTotalFee),
+        attested: fmtBaseUnits(totalFee),
+      });
+      return this.reject(user.pid, feeChain, "drift", new ConflictException("Network fee exceeds maxTotalFee — re-quote and try again"), "execute");
+    }
+    // ANT-800/ANT-895: V4-only execute calldata. The assertion is
+    // passkey-signed over the V4 payload (binds maxTotalFee); broadcasting
+    // it through V3 calldata would drop the user-approved bound (and V3 is
+    // disabled on-chain post-B2).
+    const execData = adapter.buildExecuteDataV4({
+      to: dto.to,
+      value,
+      data,
+      deadline: dto.deadline,
+      feePolicyVersion: version,
+      maxTotalFee,
+      networkFee,
+      authenticatorData: authData,
+      clientDataJSON: clientData,
+      r,
+      s,
+    });
     const exec = await this.broadcastExecute(chainReference, user.pid, accountAddress, dto, secret, execData);
     if (exec.resolved) {
       if (!exec.signature) {

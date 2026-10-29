@@ -337,9 +337,11 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Activate a READY wallet (idempotent once ACTIVE). The claim is passkey-signed
-   *  by the client (V3 payload binds op-tag, account, authority,
-   *  policy, expiry — no amounts) — the relayer only submits, so a stranger can
-   *  neither squat the PDA nor divert funds or change the fee policy. */
+   *  by the client (V4 payload binds op-tag, account, authority, policy,
+   *  maxTotalFee, expiry) — the relayer only submits, so a stranger can
+   *  neither squat the PDA nor divert funds or change the fee policy. V3
+   *  broadcasts are closed (ANT-895/B2: the program rejects them with
+   *  V3Deprecated) — this path only broadcasts activateV4. */
   async activate(
     user: { pid: string },
     dto: {
@@ -502,11 +504,12 @@ export class ActivationService implements OnModuleInit, OnModuleDestroy {
         entryPoint: "activate",
         broadcast: () =>
           adapter
-            .activateV3(
+            .activateV4(
               user.pid,
               coseToCompressedSecp256r1(Buffer.from(asserting.publicKey)) as unknown as Uint8Array<ArrayBufferLike>,
               version,
               networkFee,
+              BigInt(dto.maxTotalFeeLamports),
               dto.expiry,
               this.relayer(),
               undefined,

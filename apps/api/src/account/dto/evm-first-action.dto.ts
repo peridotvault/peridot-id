@@ -5,7 +5,7 @@ import { EvmActivateAssertionDto } from "./evm-activate.dto";
 /**
  * WS1 §3.1 lazy first-action (EVM): one user intent carrying BOTH the
  * passkey-bound activation authorization AND the first `execute`
- * authorization. The relayer runs `deployAndInit` → `execute` back-to-back
+ * authorization. The relayer runs `deployAndInitV4` → `executeV4` back-to-back
  * (two txs, one approval, no separate activate step).
  */
 class EvmFirstActionActivationDto {
@@ -13,13 +13,13 @@ class EvmFirstActionActivationDto {
   @Matches(/^\d+$/, { message: "Quoted network fee must be wei (positive integer)" })
   quotedNetworkFeeWei!: string;
 
-  /** Signed fee-policy version (1 sunset, 2 V4 canonical). */
+  /** Signed fee-policy version (2 = V4 only; policy 1 sunset is rejected). */
   @IsInt()
-  @Min(1)
+  @Min(2)
   @Max(2)
   feePolicyVersion!: number;
 
-  /** User-approved bound on the deploy-leg total (REQUIRED for policy 2). */
+  /** User-approved bound on the deploy-leg total (REQUIRED). */
   @IsOptional()
   @Matches(/^\d+$/, { message: "maxTotalFee must be wei (positive integer)" })
   maxTotalFeeWei?: string;
@@ -53,13 +53,13 @@ class EvmFirstActionExecuteDto {
   @Min(0)
   deadline!: number;
 
-  /** Signed fee-policy version for the execute leg. */
+  /** Signed fee-policy version for the execute leg (2 = V4 only). */
   @IsInt()
-  @Min(1)
+  @Min(2)
   @Max(2)
   feePolicyVersion!: number;
 
-  /** User-approved bound on the execute-leg total (REQUIRED for policy 2). */
+  /** User-approved bound on the execute-leg total (REQUIRED). */
   @IsOptional()
   @Matches(/^\d+$/, { message: "maxTotalFee must be wei (positive integer)" })
   maxTotalFeeWei?: string;
