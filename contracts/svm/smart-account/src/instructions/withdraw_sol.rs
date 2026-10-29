@@ -1,5 +1,12 @@
 //! Sponsored SOL withdrawal, V3 authorization (authorized by a secp256r1 passkey).
 //!
+//! HARD CLOSED (ANT-863 B2): this entrypoint rejects every call with
+//! `V3Deprecated` before any other validation. V3 carries no user-approved
+//! `max_total_fee` — an unbounded attested fee could settle. Use V4 only
+//! (`withdraw_sol_v4.rs`, fee-capped). The code below the gate is retained
+//! for shape/decoder stability only (discriminant 1 still decodes, then
+//! rejects — never shifted).
+//!
 //! ANT-800: CLOSED for new intents (H1). V3 carries no user-approved
 //! `max_total_fee` — an unbounded attested fee could settle. Backend + SDK +
 //! relayer paths now broadcast V4 only (`withdraw_sol_v4.rs`, fee-capped);
@@ -53,6 +60,10 @@ pub fn process(
     accounts: &[AccountView],
     data: &InstructionData,
 ) -> ProgramResult {
+    // ANT-863 B2: V3 fee paths are hard-closed on-chain. Rejects before any
+    // other validation; unreachable code below is retained for shape stability.
+    crate::errors::check_v3_fee_path_closed()?;
+
     if accounts.len() < 5 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }

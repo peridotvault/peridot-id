@@ -117,10 +117,39 @@ pub enum PeridotError {
     /// ANT-866 B1 grace: `close_request` while a ticket is already live for
     /// this (account_id, authority). Cancel or finalize first. Additive-only (36).
     CloseAlreadyRequested = 36,
+    /// ANT-863 B2: V3 fee paths (discs 1, 2, 5, 6) are hard-closed on-chain.
+    /// V3 `network_fee` is attested-but-unsigned — the payload binds policy,
+    /// NOT fee — so a relayer could settle any fee. Every V3 fee entrypoint
+    /// rejects with this error before any other validation; V4 siblings
+    /// (discs 11-14, `max_total_fee`-capped) are the only fee paths.
+    /// Additive-only (new discriminant 37: P6 claimed 30 and B1 claimed
+    /// 31-36 on `paperclip` first; error-code namespace is disjoint
+    /// from B4's reserved instruction discriminants 22-29/30-32).
+    V3Deprecated = 37,
 }
 
 impl From<PeridotError> for ProgramError {
     fn from(e: PeridotError) -> Self {
         ProgramError::Custom(e as u32)
     }
+}
+
+/// ANT-863 B2 hard close of the V3 fee paths (discs 1, 2, 5, 6), mirroring
+/// the ANT-16(e) `DEPRECATE_DIRECT_INITIALIZE` pattern. V3 `network_fee` is
+/// attested-but-unsigned (the payload binds policy, NOT fee), so every V3
+/// fee entrypoint rejects with `V3Deprecated` as its first statement — before
+/// any account, PDA, or signature validation. There is no toggle back: the
+/// const below is `true` unconditionally. A `const` cannot be flipped at
+/// runtime by a caller — there is no new signer, money path, or trust root.
+/// V4 siblings (discs 11-14) are the only fee paths.
+pub const DEPRECATE_V3_FEE_PATHS: bool = true;
+
+/// Reject V3 fee-path settlement on all builds. Pure (no account access), so
+/// it is host-testable: the `true` arm is pinned by source-ordering tests
+/// plus the discriminant pin in `errors.rs`.
+pub fn check_v3_fee_path_closed() -> Result<(), ProgramError> {
+    if DEPRECATE_V3_FEE_PATHS {
+        return Err(PeridotError::V3Deprecated.into());
+    }
+    Ok(())
 }

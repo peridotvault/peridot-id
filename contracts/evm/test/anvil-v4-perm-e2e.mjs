@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assert, genKey, makeRpc, pidToSalt32, pidToBoundSalt, keccak,
-  actPayloadV3, assertion, deployAndInitData, predictBoundData,
+  actPayloadV4, assertion, deployAndInitV4Data, predictBoundData,
   permissionId, grantPayload, permExecPayload, revokePayload,
   grantPermissionData, executeWithPermissionData, revokePermissionData, viewSel,
 } from "./e2e-helpers.mjs";
@@ -77,14 +77,18 @@ const salt = pidToBoundSalt("e2e-v4-perm@pid", B(owner.x), B(owner.y));
 const predicted = await rpc("eth_call", [{ to: factory, data: predictBoundData({ pidHash, x: B(owner.x), y: B(owner.y) }) }, "latest"]);
 const account = "0x" + predicted.slice(-40);
 const deadline = Math.floor(Date.now() / 1000) + 300;
-const actPayload = actPayloadV3({
+// ANT-863 B2: activation drives the fee-capped V4 factory path (V3 is
+// hard-closed). The payload binds the cap, not the fee: sign once with a
+// generous cap, estimate, rebuild with the attested fee — no re-signing.
+const MAX_ACT = 50_000_000_000_000_000n; // 0.05 ether cap
+const actPayload = actPayloadV4({
   salt, x: B(owner.x), y: B(owner.y),
-  feePolicyVersion: 1, deadline, chainId: CHAINID, factory,
+  feePolicyVersion: 1, maxTotalFee: MAX_ACT, deadline, chainId: CHAINID, factory,
 });
 const act = assertion(owner, actPayload);
-const draftAct = deployAndInitData({
+const draftAct = deployAndInitV4Data({
   pidHash, x: B(owner.x), y: B(owner.y),
-  feePolicyVersion: 1, deadline, networkFee: 0n,
+  feePolicyVersion: 1, maxTotalFee: MAX_ACT, deadline, networkFee: 0n,
   authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
 });
 const actFee = BigInt(await rpc("eth_estimateGas", [{ from: SUBMITTER, to: factory, data: draftAct }])) * GAS_PRICE;
@@ -92,9 +96,9 @@ await rpc("eth_sendTransaction", [{ from: RELAYER, to: account, value: weiHex((a
 // AC-E1: activation submitted by the independent SUBMITTER.
 const actRcpt = await sendTx({
   from: SUBMITTER, to: factory,
-  data: deployAndInitData({
+  data: deployAndInitV4Data({
     pidHash, x: B(owner.x), y: B(owner.y),
-    feePolicyVersion: 1, deadline, networkFee: actFee,
+    feePolicyVersion: 1, maxTotalFee: MAX_ACT, deadline, networkFee: actFee,
     authData: act.authData, clientDataJSON: act.clientDataJSON, r: act.r, s: act.s,
   }),
 });
@@ -150,7 +154,7 @@ const execP = permExecPayload({
 const e = assertion(session, execP);
 // Post-ANT-206 the on-chain GasAnomaly bound measures the full execute
 // frame, so honest estimate x price attestation passes (same pattern as
-// anvil-v3-e2e.mjs). Draft with zero fee, estimate, rebuild — the PERM
+// anvil-v4-e2e.mjs). Draft with zero fee, estimate, rebuild — the PERM
 // payload binds policy + cap only, so no re-signing is needed.
 const draftExec = executeWithPermissionData({
   permissionId: pid, target: scope.target, value: 0n, data: callData, deadline, seq: 0,

@@ -701,10 +701,152 @@ mod ant635_vault_pins {
     }
 }
 
+/// ANT-863 B2 regression: on-chain hard close of the V3 fee paths (discs 1,
+/// 2, 5, 6). V3 `network_fee` is attested-but-unsigned (the payload binds
+/// policy, NOT fee), so every V3 fee entrypoint must reject with
+/// `V3Deprecated` before any other validation. V4 siblings (11-14) stay live.
+#[cfg(test)]
+mod ant863_b2_deprecation_tests {
+    use super::assert_effect_before_interaction;
+    use crate::errors::{check_v3_fee_path_closed, PeridotError, DEPRECATE_V3_FEE_PATHS};
+    use crate::instructions::Instruction;
+    use pinocchio::error::ProgramError;
+
+    #[test]
+    fn v3_deprecated_discriminant_is_additive() {
+        // New error takes the next free slot (29 was taken by B3's
+        // `SessionStaleGeneration`); pre-existing errors are untouched.
+        assert_eq!(PeridotError::V3Deprecated as u32, 37);
+        assert_eq!(PeridotError::CannotRemoveLastAdmin as u32, 28);
+        assert_eq!(PeridotError::InitializeDeprecated as u32, 23);
+    }
+
+    #[test]
+    fn v3_gate_is_closed_permanently() {
+        // No toggle back: the const is `true` unconditionally and the check
+        // rejects on every build.
+        assert!(DEPRECATE_V3_FEE_PATHS);
+        let err = check_v3_fee_path_closed().unwrap_err();
+        assert_eq!(err, ProgramError::Custom(37));
+    }
+
+    #[test]
+    fn v3_discriminants_still_decode_then_reject() {
+        // Frozen-discriminant rule: discs 1/2/5/6 still decode (old SDK
+        // decoders keep working) — the rejection happens inside `process`,
+        // never by shifting discriminants.
+        assert_eq!(Instruction::try_from(1u8).unwrap(), Instruction::WithdrawSol);
+        assert_eq!(Instruction::try_from(2u8).unwrap(), Instruction::WithdrawToken);
+        assert_eq!(Instruction::try_from(5u8).unwrap(), Instruction::Activate);
+        assert_eq!(Instruction::try_from(6u8).unwrap(), Instruction::Execute);
+    }
+
+    #[test]
+    fn v3_gate_runs_before_any_validation() {
+        // The gate must be the first statement of every V3 fee `process` —
+        // ahead of the account-count check, so even malformed calls report
+        // `V3Deprecated` (never a shape error that could be mistaken for a
+        // live path).
+        for (file, src) in [
+            ("withdraw_sol.rs", include_str!("instructions/withdraw_sol.rs")),
+            (
+                "withdraw_token.rs",
+                include_str!("instructions/withdraw_token.rs"),
+            ),
+            ("activate.rs", include_str!("instructions/activate.rs")),
+            ("execute.rs", include_str!("instructions/execute.rs")),
+        ] {
+            assert_effect_before_interaction(
+                file,
+                src,
+                "check_v3_fee_path_closed()",
+                "NotEnoughAccountKeys",
+            );
+        }
+    }
+
+    #[test]
+    fn live_paths_are_not_gated() {
+        // Keep-alive pin (ticket item 2): discs 0, 3, 4, 7-10, V4 11-14,
+        // V5 20-21 and vault 15-18 must NOT reference the V3 gate. Disc 0
+        // keeps its own `check_initialize_allowed` gate.
+        for (file, src) in [
+            ("initialize.rs", include_str!("instructions/initialize.rs")),
+            (
+                "update_authority.rs",
+                include_str!("instructions/update_authority.rs"),
+            ),
+            ("close.rs", include_str!("instructions/close.rs")),
+            (
+                "register_session.rs",
+                include_str!("instructions/register_session.rs"),
+            ),
+            (
+                "session_execute.rs",
+                include_str!("instructions/session_execute.rs"),
+            ),
+            (
+                "revoke_session.rs",
+                include_str!("instructions/revoke_session.rs"),
+            ),
+            (
+                "close_session.rs",
+                include_str!("instructions/close_session.rs"),
+            ),
+            (
+                "withdraw_sol_v4.rs",
+                include_str!("instructions/withdraw_sol_v4.rs"),
+            ),
+            (
+                "withdraw_token_v4.rs",
+                include_str!("instructions/withdraw_token_v4.rs"),
+            ),
+            ("execute_v4.rs", include_str!("instructions/execute_v4.rs")),
+            ("activate_v4.rs", include_str!("instructions/activate_v4.rs")),
+            (
+                "update_authority_v5.rs",
+                include_str!("instructions/update_authority_v5.rs"),
+            ),
+            (
+                "execute_v5.rs",
+                include_str!("instructions/execute_v5.rs"),
+            ),
+            (
+                "init_treasury.rs",
+                include_str!("instructions/init_treasury.rs"),
+            ),
+            (
+                "withdraw_revenue.rs",
+                include_str!("instructions/withdraw_revenue.rs"),
+            ),
+            ("add_admin.rs", include_str!("instructions/add_admin.rs")),
+            (
+                "remove_admin.rs",
+                include_str!("instructions/remove_admin.rs"),
+            ),
+        ] {
+            assert!(
+                !src.contains("check_v3_fee_path_closed"),
+                "{file}: live path must not reference the V3 gate"
+            );
+        }
+    }
+
+    #[test]
+    fn inflight_v3_ttl_is_600s() {
+        // Monitor assertion (ticket item 5): V3 signatures carry a 600s TTL,
+        // so anything older is dead by expiry even before the hard-close
+        // gate. Pin the bound so the in-flight window can never be extended
+        // silently — off-chain monitors may GC V3 intents past this age.
+        assert_eq!(crate::auth::MAX_TTL_SECS, 600);
+    }
+}
+
 /// ANT-868 B4 V5 domain-binding regression: additive-only pins. V5 is new
 /// discriminants + new domain separators (never in-place rebinding): every
 /// pre-existing discriminant/error keeps its value so old SDK decoders and
-/// in-flight V3/V4 signatures keep working through the TTL sunset.
+/// in-flight V4 signatures keep working through the TTL sunset (V3 is
+/// hard-closed by B2 and rejects regardless of TTL).
 #[cfg(test)]
 mod ant868_v5_pins {
     use crate::auth;

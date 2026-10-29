@@ -102,10 +102,10 @@ to the tunnel URL — localhost values never reach DOKU.
 ## Verification
 
 - API: `pnpm --filter @peridotvault/pid-api exec jest` (318 tests).
-- EVM: `forge test --root contracts/evm` (65: 32 V3 + 33 V4 permission/adversarial);
-  anvil loops `test/anvil-v3-e2e.mjs` + `test/anvil-v4-perm-e2e.mjs`.
-- Program: `PID_TREASURY=<key> cargo test` (52, incl. ANT-612 no-allowlist pins) +
-  `tests/integration.mjs` (44 cases: permissionless-creation proofs) +
+- EVM: `forge test --root contracts/evm` (95: V4 owner/permission/adversarial + V3 hard-close pins);
+  anvil loops `test/anvil-v4-e2e.mjs` + `test/anvil-v4-perm-e2e.mjs` + `test/anvil-v4-batch-e2e.mjs`.
+- Program: `PID_TREASURY=<key> cargo test` (76, incl. ANT-612 no-allowlist + ANT-863 B2 hard-close pins) +
+  `tests/integration.mjs` (~67 cases: V4 + V3 hard-close pins) +
   `tests/session.mjs <program-id> <forwarder-id>` (24 session cases; deploy
   `contracts/svm/mock-forwarder` first) against the local
   validator; devnet E2E `packages/sdk-js/test/devnet.e2e.mjs`.

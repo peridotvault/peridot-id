@@ -43,9 +43,13 @@ const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 const INSTRUCTIONS = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 const LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 const DOMAIN_SESSION = Buffer.from("PID|SOLANA|SESSION|v1");
+// DOMAIN_V3 is fee-less keep-alive only (ANT-863 B2): rotation (disc 3)
+// still verifies under it (no fee path). V3 fee discs 1/2/5/6 never appear.
 const DOMAIN_V3 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3");
+const DOMAIN_V4 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v4");
 const POLICY_V1 = 1;
 const ACTIVATE_NETWORK_FEE = 100_000;
+const ACTIVATE_MAX_TOTAL_FEE = 150_000; // network + 50% protocol (V4 cap)
 // Authenticator-data prefix for fixtures. The program never compares these
 // bytes (ANT-197 domain-free); any 32-byte prefix verifies if key/message/
 // challenge/UV pass. Neutral value — never a real RP hash.
@@ -167,7 +171,7 @@ async function expectOk(tx, signers, label) {
     await sendAndConfirmTransaction(conn, tx, signers, { commitment: "confirmed", skipPreflight: true });
     results.push(`PASS ${label}`); passed++;
   } catch (e) {
-    const logs = await e.getLogs?.().catch(() => null);
+    const logs = await e.getLogs?.(conn).catch(() => null);
     console.error(`LOGS ${label}:`, logs ? logs.join(" | ") : "(no logs)");
     console.error(`ERRMSG ${label}:`, String(e.message).split("\n").slice(0, 3).join(" / ").slice(0, 400));
     results.push(`FAIL ${label}: ${String(e.message).split("\n")[0]}`); failed++;
@@ -251,7 +255,7 @@ async function main() {
       "vault init treasury (program-bound PDA)",
     );
   }
-  // ---- vault setup (fund + permissionless activate + SPL position) ----
+  // ---- vault setup (fund + permissionless activate V4 + SPL position) ----
   // ANT-612: direct initialize is dead, so the vault is claimed through the
   // fee-bearing activate path with `payer` (a random keypair) as submitter —
   // the same permissionless flow any user or volunteer relayer uses.
@@ -260,7 +264,7 @@ async function main() {
   ), [payer], { commitment: "confirmed" }), "confirmed");
   {
     const actExpiry = exp();
-    const payload = sha256(Buffer.concat([DOMAIN_V3, Buffer.from([5]), accountId32, authorityComp, u16(POLICY_V1), i64(actExpiry)]));
+    const payload = sha256(Buffer.concat([DOMAIN_V4, Buffer.from([14]), accountId32, authorityComp, u16(POLICY_V1), u64(ACTIVATE_MAX_TOTAL_FEE), i64(actExpiry)]));
     const s = signPayload(owner, payload);
     const tx = new Transaction().add(new TransactionInstruction({
       keys: [
@@ -272,7 +276,7 @@ async function main() {
         { pubkey: tombstonePda(accountId32), isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
-      data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, u16(POLICY_V1), i64(actExpiry), u64(ACTIVATE_NETWORK_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
+      data: Buffer.concat([Buffer.from([14]), accountId32, authorityComp, u16(POLICY_V1), i64(actExpiry), u64(ACTIVATE_NETWORK_FEE), u64(ACTIVATE_MAX_TOTAL_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
     }), buildSecpIx(s.comp, s.sig, s.messageData));
     await expectOk(tx, [payer], "vault activate (permissionless submitter)");
   }

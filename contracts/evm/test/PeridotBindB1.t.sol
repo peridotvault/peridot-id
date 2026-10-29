@@ -91,6 +91,12 @@ contract PeridotBindB1Test is Test {
         );
     }
 
+    function _actPayloadV4(bytes32 salt, bytes32 x, bytes32 y, uint256 maxFee) internal view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(DOMAIN_V4, uint8(0x05), salt, x, y, POLICY, maxFee, DEADLINE, block.chainid, address(factory))
+        );
+    }
+
     function _sigFor(uint256 privKey, bytes32 payload) internal returns (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) {
         auth = _authData();
         client = _clientData(payload);
@@ -139,10 +145,11 @@ contract PeridotBindB1Test is Test {
         assertEq(victimAddr.balance, 1 ether);
 
         // Attacker self-signs a claim for the victim's pid with the ATTACKER key.
+        // ANT-863 B2: activation rides the fee-capped V4 path (V3 hard-closed).
         bytes32 saltA = _boundSalt(PID_HASH, AX, AY);
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigFor(2, _actPayload(saltA, AX, AY));
-        address deployed = factory.deployAndInit(
-            PID_HASH, AX, AY, POLICY, DEADLINE, 0, auth, client, r, s
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigFor(2, _actPayloadV4(saltA, AX, AY, 0));
+        address deployed = factory.deployAndInitV4(
+            PID_HASH, AX, AY, POLICY, 0, DEADLINE, 0, auth, client, r, s
         );
         assertEq(deployed, attackerAddr);
         assertEq(PeridotAccount(payable(deployed)).authorityX(), AX);
@@ -159,26 +166,26 @@ contract PeridotBindB1Test is Test {
         address victimAddr = factory.predictBound(PID_HASH, GX, GY);
         vm.deal(victimAddr, NETWORK_FEE + _protocolFee(NETWORK_FEE));
         bytes32 saltV = _boundSalt(PID_HASH, GX, GY);
-        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigFor(1, _actPayload(saltV, GX, GY));
+        uint256 maxTotalFee = NETWORK_FEE + _protocolFee(NETWORK_FEE);
+        (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigFor(1, _actPayloadV4(saltV, GX, GY, maxTotalFee));
         vm.expectRevert(PeridotFactory.InitFailed.selector);
-        factory.deployAndInit(PID_HASH, AX, AY, POLICY, DEADLINE, NETWORK_FEE, auth, client, r, s);
+        factory.deployAndInitV4(PID_HASH, AX, AY, POLICY, maxTotalFee, DEADLINE, NETWORK_FEE, auth, client, r, s);
         assertEq(victimAddr.code.length, 0);
     }
 
-    /// @dev Victim happy path still works: bound claim with the owner key.
+    /// @dev V3 bound claim now reverts (ANT-863 B2 hard-close): the victim
+    /// happy path lives on V4 (`test_BoundClaimHappyPathV4`). The victim
+    /// address stays unclaimed — no code, pre-fund intact.
     function test_BoundClaimHappyPath() public {
         address victimAddr = factory.predictBound(PID_HASH, GX, GY);
         vm.deal(victimAddr, NETWORK_FEE + _protocolFee(NETWORK_FEE));
         bytes32 saltV = _boundSalt(PID_HASH, GX, GY);
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigFor(1, _actPayload(saltV, GX, GY));
-        address deployed = factory.deployAndInit(
+        vm.expectRevert(PeridotFactory.V3Deprecated.selector);
+        factory.deployAndInit(
             PID_HASH, GX, GY, POLICY, DEADLINE, NETWORK_FEE, auth, client, r, s
         );
-        assertEq(deployed, victimAddr);
-        PeridotAccount account = PeridotAccount(payable(deployed));
-        assertTrue(account.initialized());
-        assertEq(account.authorityX(), GX);
-        assertEq(account.authorityY(), GY);
+        assertEq(victimAddr.code.length, 0);
     }
 
     // ---- account-level gate: SaltNotBound ----

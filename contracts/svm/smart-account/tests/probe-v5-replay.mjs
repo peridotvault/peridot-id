@@ -1,7 +1,11 @@
 // ANT-868 B4 probe: V5 cluster binding across two isolated validators.
+// (ANT-863 B2 addendum: V3 is hard-closed on-chain, so the baseline below is
+// V4 — setup activates via V4, Part 1 shows V3 rejected on both clusters while
+// the identical V4 assertion settles on both.)
 //
-// Part 1 (B4 baseline): one V3 withdraw assertion settles on BOTH clusters
-//   (TTL-only bound — the sunset rationale for V5, NOT a regression).
+// Part 1 (B2 baseline): one V3 withdraw assertion is REJECTED on both clusters
+//   (V3Deprecated — hard close, NOT a regression); the identical V4 withdraw
+//   settles on both (TTL-only bound — the sunset rationale for V5).
 // Part 2 (V5 fix): one V5 rotate assertion (disc 20) settles on cluster A;
 //   the IDENTICAL bytes submitted to cluster B MUST fail (InvalidChallenge:
 //   B recomputes program‖clusterB != signed program‖clusterA). A fresh V5
@@ -25,6 +29,7 @@ const CLUSTER_B = Buffer.from(new PublicKey(process.env.PID_CLUSTER_B ?? "f164nc
 const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 const INSTRUCTIONS = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 const DOMAIN_V3 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3");
+const DOMAIN_V4 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v4");
 const DOMAIN_V5 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v5");
 const AUTH_PREFIX = crypto.createHash("sha256").update("test-rp").digest();
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
@@ -66,10 +71,12 @@ async function setup(conn) {
     await sendAndConfirmTransaction(conn, new Transaction().add(new TransactionInstruction({ keys: [{ pubkey: admin.publicKey, isSigner: true, isWritable: true }, { pubkey: CONFIG_PDA, isSigner: false, isWritable: true }, { pubkey: TREASURY_PDA, isSigner: false, isWritable: true }, { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }], programId: PROGRAM, data: Buffer.concat([Buffer.from([15]), admin.publicKey.toBuffer()]) })), [admin], { commitment: "confirmed", skipPreflight: true });
   } catch {}
   await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: pda, lamports: 2 * LAMPORTS_PER_SOL })), [payer], { commitment: "confirmed" }), "confirmed");
+  // ANT-863 B2: setup activates via the fee-capped V4 sibling (V3 activate is
+  // hard-closed). maxTotalFee 0 covers the zero attested fee.
   const tA = await conn.getBlockTime(await conn.getSlot());
-  const h = sha256(Buffer.concat([DOMAIN_V3, Buffer.from([5]), pid, authV, u16(POLICY_V1), i64(tA + 300)]));
+  const h = sha256(Buffer.concat([DOMAIN_V4, Buffer.from([14]), pid, authV, u16(POLICY_V1), u64(0n), i64(tA + 300)]));
   const s = signPayload(kV, h);
-  await sendAndConfirmTransaction(conn, new Transaction().add(new TransactionInstruction({ keys: [{ pubkey: payer.publicKey, isSigner: true, isWritable: true }, { pubkey: pda, isSigner: false, isWritable: true }, { pubkey: TREASURY_PDA, isSigner: false, isWritable: true }, { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false }, { pubkey: tombstone, isSigner: false, isWritable: false }], programId: PROGRAM, data: Buffer.concat([Buffer.from([5]), pid, authV, u16(POLICY_V1), i64(tA + 300), u64(0n), u16(s.clientDataJSON.length), s.clientDataJSON]) }), buildSecpIx(s.comp, s.sig, s.messageData)), [payer], { commitment: "confirmed", skipPreflight: true });
+  await sendAndConfirmTransaction(conn, new Transaction().add(new TransactionInstruction({ keys: [{ pubkey: payer.publicKey, isSigner: true, isWritable: true }, { pubkey: pda, isSigner: false, isWritable: true }, { pubkey: TREASURY_PDA, isSigner: false, isWritable: true }, { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false }, { pubkey: tombstone, isSigner: false, isWritable: false }], programId: PROGRAM, data: Buffer.concat([Buffer.from([14]), pid, authV, u16(POLICY_V1), i64(tA + 300), u64(0n), u64(0n), u16(s.clientDataJSON.length), s.clientDataJSON]) }), buildSecpIx(s.comp, s.sig, s.messageData)), [payer], { commitment: "confirmed", skipPreflight: true });
   await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: pda, lamports: 2 * LAMPORTS_PER_SOL })), [payer], { commitment: "confirmed" }), "confirmed");
   return { payer, dest };
 }
@@ -77,19 +84,34 @@ async function setup(conn) {
 const a = await setup(A); const b = await setup(B);
 console.log("setup: same PDA activated under same key on both clusters");
 
-// ---- Part 1: V3 assertion replays on both (sunset rationale, expected) ----
+// ---- Part 1: V3 withdraw rejected on both (B2 hard close); V4 settles both ----
 {
   const t0 = await A.getBlockTime(await A.getSlot());
   const exp = t0 + 300;
   const destBytes = a.dest.publicKey.toBuffer();
   const AMOUNT = BigInt(0.2 * LAMPORTS_PER_SOL);
-  const payload = sha256(Buffer.concat([DOMAIN_V3, Buffer.from([1]), pid, u64(0n), u64(AMOUNT), destBytes, i64(exp), u16(POLICY_V1)]));
+  // V3 shape (must reject with V3Deprecated on both clusters).
+  const v3payload = sha256(Buffer.concat([DOMAIN_V3, Buffer.from([1]), pid, u64(0n), u64(AMOUNT), destBytes, i64(exp), u16(POLICY_V1)]));
+  const v3s = signPayload(kV, v3payload);
+  async function submitV3(conn, relayer) {
+    return sendAndConfirmTransaction(conn, new Transaction().add(new TransactionInstruction({ keys: [{ pubkey: pda, isSigner: false, isWritable: true }, { pubkey: new PublicKey(destBytes), isSigner: false, isWritable: true }, { pubkey: TREASURY_PDA, isSigner: false, isWritable: true }, { pubkey: relayer.publicKey, isSigner: true, isWritable: true }, { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false }], programId: PROGRAM, data: Buffer.concat([Buffer.from([1]), u64(0n), u64(AMOUNT), destBytes, i64(exp), u16(POLICY_V1), u64(100_000n), u16(v3s.clientDataJSON.length), v3s.clientDataJSON]) }), buildSecpIx(v3s.comp, v3s.sig, v3s.messageData)), [relayer], { commitment: "confirmed", skipPreflight: true });
+  }
+  for (const [conn, relayer, tag] of [[A, a.payer, "PART1-A"], [B, b.payer, "PART1-B"]]) {
+    let rejected = false;
+    try { await submitV3(conn, relayer); } catch { rejected = true; }
+    assert(rejected, `PROBE FAILED: V3 withdraw settled on ${tag} — hard close is broken`);
+    console.log(`${tag}: V3 withdraw nonce0 REJECTED (hard close holds)`);
+  }
+  // V4 shape (TTL-only bound — the new cross-cluster baseline): the identical
+  // assertion settles on both clusters (V4 binds no cluster).
+  const NET = 100_000n, MAX = 150_000n;
+  const payload = sha256(Buffer.concat([DOMAIN_V4, Buffer.from([11]), pid, u64(0n), u64(AMOUNT), destBytes, i64(exp), u16(POLICY_V1), u64(MAX)]));
   const s = signPayload(kV, payload);
   async function submitSame(conn, relayer) {
-    return sendAndConfirmTransaction(conn, new Transaction().add(new TransactionInstruction({ keys: [{ pubkey: pda, isSigner: false, isWritable: true }, { pubkey: new PublicKey(destBytes), isSigner: false, isWritable: true }, { pubkey: TREASURY_PDA, isSigner: false, isWritable: true }, { pubkey: relayer.publicKey, isSigner: true, isWritable: true }, { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false }], programId: PROGRAM, data: Buffer.concat([Buffer.from([1]), u64(0n), u64(AMOUNT), destBytes, i64(exp), u16(POLICY_V1), u64(100_000n), u16(s.clientDataJSON.length), s.clientDataJSON]) }), buildSecpIx(s.comp, s.sig, s.messageData)), [relayer], { commitment: "confirmed", skipPreflight: true });
+    return sendAndConfirmTransaction(conn, new Transaction().add(new TransactionInstruction({ keys: [{ pubkey: pda, isSigner: false, isWritable: true }, { pubkey: new PublicKey(destBytes), isSigner: false, isWritable: true }, { pubkey: TREASURY_PDA, isSigner: false, isWritable: true }, { pubkey: relayer.publicKey, isSigner: true, isWritable: true }, { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false }], programId: PROGRAM, data: Buffer.concat([Buffer.from([11]), u64(0n), u64(AMOUNT), destBytes, i64(exp), u16(POLICY_V1), u64(NET), u64(MAX), u16(s.clientDataJSON.length), s.clientDataJSON]) }), buildSecpIx(s.comp, s.sig, s.messageData)), [relayer], { commitment: "confirmed", skipPreflight: true });
   }
-  await submitSame(A, a.payer); console.log("PART1-A: V3 withdraw nonce0 settled on A");
-  await submitSame(B, b.payer); console.log("PART1-B: V3 withdraw nonce0 settled on B (same assertion — B4 baseline, TTL sunset rationale)");
+  await submitSame(A, a.payer); console.log("PART1-A: V4 withdraw nonce0 settled on A");
+  await submitSame(B, b.payer); console.log("PART1-B: V4 withdraw nonce0 settled on B (same assertion — TTL-only baseline)");
 }
 
 // ---- Part 2: V5 rotate settles on A, MUST fail on B ----
