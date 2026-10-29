@@ -1,6 +1,7 @@
-// PeridotID smart-account program — V3 integration suite (ANT-612 permissionless).
+// PeridotID smart-account program — V4 integration suite (ANT-612 permissionless,
+// ANT-863 B2 V3 hard close).
 //
-// Runs against a local `solana-test-validator`. Covers the V3 authorization + fee
+// Runs against a local `solana-test-validator`. Covers the V4 authorization + fee
 // schema (contracts/WHITEPAPER.md §2, canonical): op-tagged + account-bound
 // payloads with policy-only fee binding, attested networkFee + fixed protocol %,
 // canonical revenue vault, UV enforcement, TTL caps, plus the adversarial
@@ -36,6 +37,7 @@ const PROGRAM = new PublicKey(process.argv[2] || "CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4
 const SECP = new PublicKey("Secp256r1SigVerify1111111111111111111111111");
 const INSTRUCTIONS = new PublicKey("Sysvar1nstructions1111111111111111111111111");
 const DOMAIN_V3 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v3");
+const DOMAIN_V4 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v4");
 const DOMAIN_V2 = Buffer.from("PID|SOLANA|SMART_ACCOUNT|v2");
 // Authenticator-data prefix for fixtures. The program never compares these
 // bytes (ANT-197 domain-free); any 32-byte prefix verifies if key/message/
@@ -44,6 +46,12 @@ const AUTH_PREFIX = crypto.createHash("sha256").update("test-rp").digest();
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");
 
 const OP = { initialize: 0, withdrawSol: 1, withdrawToken: 2, updateAuthority: 3, close: 4, activate: 5, execute: 6 };
+// V4 fee-capped siblings (ANT-863 B2: the only live fee paths).
+const OP_V4 = { withdrawSol: 11, withdrawToken: 12, execute: 13, activate: 14 };
+// V3Deprecated custom error (PeridotError::V3Deprecated = 30 = 0x1e).
+const V3_DEPRECATED_HEX = "0x1e";
+// FeeExceedsMax custom error (PeridotError::FeeExceedsMax = 12 = 0xc).
+const FEE_EXCEEDS_MAX_HEX = "0xc";
 const POLICY_V1 = 1;
 // Canonical V3 split (mirrors fee::split_attested_fee): relayerFee = networkFee,
 // protocolFee = floor(networkFee * 5000 / 10000).
@@ -109,6 +117,8 @@ const i64 = (v) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(v)); re
 const u16 = (v) => { const b = Buffer.alloc(2); b.writeUInt16LE(v); return b; };
 
 // ---- V3 payload builders (mirror contracts/WHITEPAPER.md §§2, 6) ----
+// Retained ONLY for the hard-close regression cases (ANT-863 B2): well-formed
+// V3 signatures must reject with V3Deprecated (0x1e), never settle.
 const initPayloadV3 = (accountId32, authorityComp) =>
   sha256(Buffer.concat([DOMAIN_V3, Buffer.from([OP.initialize]), accountId32, authorityComp]));
 const activatePayloadV3 = (accountId32, authorityComp, policy, expiry) =>
@@ -119,12 +129,24 @@ const withdrawPayloadV3 = (accountId32, nonce, amount, destBytes, expiry, policy
   if (sourceBytes) parts.push(sourceBytes);
   return sha256(Buffer.concat(parts));
 };
+// ---- V4 payload builders (ANT-544 B5, ANT-556): as V3 plus the user-approved
+// max_total_fee bound, verified under DOMAIN_V4. Field order mirrors the
+// on-chain `payload_hash_v4` call sites exactly. ----
+const activatePayloadV4 = (accountId32, authorityComp, policy, maxTotalFee, expiry) =>
+  sha256(Buffer.concat([DOMAIN_V4, Buffer.from([OP_V4.activate]), accountId32, authorityComp, u16(policy), u64(maxTotalFee), i64(expiry)]));
+const withdrawPayloadV4 = (accountId32, nonce, amount, destBytes, expiry, policy, maxTotalFee, sourceBytes = null) => {
+  const op = sourceBytes ? OP_V4.withdrawToken : OP_V4.withdrawSol;
+  const parts = [DOMAIN_V4, Buffer.from([op]), accountId32, u64(nonce), u64(amount), destBytes, i64(expiry), u16(policy), u64(maxTotalFee)];
+  if (sourceBytes) parts.push(sourceBytes);
+  return sha256(Buffer.concat(parts));
+};
 const rotatePayloadV3 = (accountId32, nonce, newAuth, expiry) =>
   sha256(Buffer.concat([DOMAIN_V3, Buffer.from([OP.updateAuthority]), accountId32, u64(nonce), newAuth, i64(expiry)]));
 const closePayloadV3 = (accountId32, nonce, destBytes, expiry) =>
   sha256(Buffer.concat([DOMAIN_V3, Buffer.from([OP.close]), accountId32, u64(nonce), destBytes, i64(expiry)]));
 // disc=6 execute V3: op-tag ‖ account ‖ nonce ‖ expiry ‖ policy ‖ call_hash,
 // where call_hash = sha256(target ‖ count ‖ metas(addr ‖ flags) ‖ data_len ‖ data).
+// Retained ONLY for the hard-close regression case (must reject 0x1e).
 const FLAG_W = 1, FLAG_S = 2;
 function execCall(target, metas, data) {
   return Buffer.concat([
@@ -135,11 +157,14 @@ function execCall(target, metas, data) {
 }
 const executePayloadV3 = (accountId32, nonce, expiry, policy, callHash) =>
   sha256(Buffer.concat([DOMAIN_V3, Buffer.from([OP.execute]), accountId32, u64(nonce), i64(expiry), u16(policy), callHash]));
-// disc=6 layout: nonce|target|count|metas|data_len|data|expiry|policy|network_fee|len|json.
+// disc=13 execute V4: op-tag ‖ account ‖ nonce ‖ expiry ‖ policy ‖ max_total_fee ‖ call_hash.
+const executePayloadV4 = (accountId32, nonce, expiry, policy, maxTotalFee, callHash) =>
+  sha256(Buffer.concat([DOMAIN_V4, Buffer.from([OP_V4.execute]), accountId32, u64(nonce), i64(expiry), u16(policy), u64(maxTotalFee), callHash]));
+// disc=13 layout: nonce|target|count|metas|data_len|data|expiry|policy|network_fee|max_total_fee|len|json.
 // Remaining keys cover each non-PDA meta in order (the PDA maps to account 0).
-function executeIx(pda, relayerPub, nonce, target, metas, data, policy, networkFee, expiry, keypair, accountId32, assertionOpts) {
+function executeIx(pda, relayerPub, nonce, target, metas, data, policy, networkFee, maxTotalFee, expiry, keypair, accountId32, assertionOpts) {
   const call = execCall(target, metas, data);
-  const s = signPayload(keypair, executePayloadV3(accountId32, nonce, expiry, policy, sha256(call)), assertionOpts);
+  const s = signPayload(keypair, executePayloadV4(accountId32, nonce, expiry, policy, maxTotalFee, sha256(call)), assertionOpts);
   const metaBytes = Buffer.concat(metas.flatMap(([a, f]) => [a, Buffer.from([f])]));
   const programIx = new TransactionInstruction({
     keys: [
@@ -153,7 +178,7 @@ function executeIx(pda, relayerPub, nonce, target, metas, data, policy, networkF
       })),
     ],
     programId: PROGRAM,
-    data: wdData(6, [u64(nonce), target, Buffer.from([metas.length]), metaBytes, u16(data.length), data, i64(expiry), u16(policy), u64(networkFee)], s.clientDataJSON),
+    data: wdData(13, [u64(nonce), target, Buffer.from([metas.length]), metaBytes, u16(data.length), data, i64(expiry), u16(policy), u64(networkFee), u64(maxTotalFee)], s.clientDataJSON),
   });
   return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
 }
@@ -174,9 +199,9 @@ function wdData(disc, fields, clientDataJSON) {
   return Buffer.concat([Buffer.from([disc]), ...fields, lenB, clientDataJSON]);
 }
 
-// disc=1 withdraw_sol V3: nonce|amount|dest|expiry|policy|network_fee|len|json
-function withdrawIx(pda, destPub, relayerPub, nonce, amount, destBytes, policy, networkFee, expiry, keypair, accountId32, assertionOpts) {
-  const s = signPayload(keypair, withdrawPayloadV3(accountId32, nonce, amount, destBytes, expiry, policy), assertionOpts);
+// disc=11 withdraw_sol V4: nonce|amount|dest|expiry|policy|network_fee|max_total_fee|len|json
+function withdrawIx(pda, destPub, relayerPub, nonce, amount, destBytes, policy, networkFee, maxTotalFee, expiry, keypair, accountId32, assertionOpts) {
+  const s = signPayload(keypair, withdrawPayloadV4(accountId32, nonce, amount, destBytes, expiry, policy, maxTotalFee), assertionOpts);
   const programIx = new TransactionInstruction({
     keys: [
       { pubkey: pda, isSigner: false, isWritable: true },
@@ -186,12 +211,12 @@ function withdrawIx(pda, destPub, relayerPub, nonce, amount, destBytes, policy, 
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
     ],
     programId: PROGRAM,
-    data: wdData(1, [u64(nonce), u64(amount), destBytes, i64(expiry), u16(policy), u64(networkFee)], s.clientDataJSON),
+    data: wdData(11, [u64(nonce), u64(amount), destBytes, i64(expiry), u16(policy), u64(networkFee), u64(maxTotalFee)], s.clientDataJSON),
   });
   return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
 }
 
-// disc=3 update_authority V3: nonce|new_authority|expiry|len|json
+// disc=3 update_authority (no fee path — keep-alive, unchanged)
 function updateAuthIx(pda, accountId32, nonce, newAuth, expiry, keypair, assertionOpts) {
   const s = signPayload(keypair, rotatePayloadV3(accountId32, nonce, newAuth, expiry), assertionOpts);
   const programIx = new TransactionInstruction({
@@ -221,9 +246,9 @@ function initTx(accountId32, authorityComp, payerPub, pda, keypair, assertionOpt
   return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
 }
 
-// disc=5 activate V3: account_id|authority|policy|expiry|network_fee|len|json
-function activateIx(accountId32, authorityComp, policy, expiry, networkFee, relayerPub, pda, keypair, assertionOpts) {
-  const s = signPayload(keypair, activatePayloadV3(accountId32, authorityComp, policy, expiry), assertionOpts);
+// disc=14 activate V4: account_id|authority|policy|expiry|network_fee|max_total_fee|len|json
+function activateIx(accountId32, authorityComp, policy, expiry, networkFee, maxTotalFee, relayerPub, pda, keypair, assertionOpts) {
+  const s = signPayload(keypair, activatePayloadV4(accountId32, authorityComp, policy, maxTotalFee, expiry), assertionOpts);
   const programIx = new TransactionInstruction({
     keys: [
       { pubkey: relayerPub, isSigner: true, isWritable: true },
@@ -233,7 +258,7 @@ function activateIx(accountId32, authorityComp, policy, expiry, networkFee, rela
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
     ],
     programId: PROGRAM,
-    data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, u16(policy), i64(expiry), u64(networkFee), u16(s.clientDataJSON.length), s.clientDataJSON]),
+    data: Buffer.concat([Buffer.from([14]), accountId32, authorityComp, u16(policy), i64(expiry), u64(networkFee), u64(maxTotalFee), u16(s.clientDataJSON.length), s.clientDataJSON]),
   });
   return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
 }
@@ -275,6 +300,25 @@ async function expectErr(tx, signers, label) {
     results.push(`FAIL ${label} (expected rejection, tx succeeded)`); failed++;
   } catch {
     results.push(`PASS ${label}`); passed++;
+  }
+}
+
+// Rejection with an exact custom program error (hex, e.g. "0x1e" = 30).
+// Used for the hard-close pins: the tx must fail with precisely this code,
+// never with a shape/expiry error that could be mistaken for a live path.
+async function expectCustom(tx, signers, label, hexCode) {
+  try {
+    await sendAndConfirmTransaction(conn, tx, signers, { commitment: "confirmed", skipPreflight: true });
+    results.push(`FAIL ${label} (expected rejection, tx succeeded)`); failed++;
+  } catch (e) {
+    const logs = await e.getLogs?.().catch(() => null);
+    const needle = `custom program error: ${hexCode}`;
+    if (logs && logs.join(" ").includes(needle)) {
+      results.push(`PASS ${label}`); passed++;
+    } else {
+      console.error(`LOGS ${label}:`, logs ? logs.join(" | ") : "(no logs)");
+      results.push(`FAIL ${label} (expected ${needle})`); failed++;
+    }
   }
 }
 
@@ -494,7 +538,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   const beforePayer1 = (await conn.getAccountInfo(rentPayer.publicKey)).lamports;
   const beforeTreasury1 = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
 await expectOk(
-    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
+    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, TOTAL_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
     [rentPayer],
     "permissionless activate claims PDA (payer 1)",
   );
@@ -513,7 +557,7 @@ const acct = await conn.getAccountInfo(pda);
 
   // ---- activate again → AlreadyInitialized (no replay, no double fee) ----
   await expectErr(
-    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
+    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, TOTAL_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
     [rentPayer],
     "re-activate rejected (AlreadyInitialized)",
   );
@@ -528,7 +572,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       SystemProgram.transfer({ fromPubkey: volunteer.publicKey, toPubkey: freePda, lamports: 150_000_000 })
     ), [volunteer], { commitment: "confirmed" }), "confirmed");
     await expectOk(
-      activateIx(freeId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, volunteer.publicKey, freePda, { privateKey, publicKey },
+      activateIx(freeId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, TOTAL_FEE, volunteer.publicKey, freePda, { privateKey, publicKey },
         { prefix: sha256("other-rp") }),
       [volunteer],
       "foreign-prefix assertion accepted (domain-free, payer 2)",
@@ -552,7 +596,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     const beforeTreasury = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     const actExpiry = exp();
     await expectOk(
-      activateIx(actId, authorityComp, POLICY_V1, actExpiry, NETWORK_FEE, volunteer.publicKey, actPda, { privateKey, publicKey }),
+      activateIx(actId, authorityComp, POLICY_V1, actExpiry, NETWORK_FEE, TOTAL_FEE, volunteer.publicKey, actPda, { privateKey, publicKey }),
       [volunteer],
       "volunteer-submitted activate claims PDA and splits relayer/protocol",
     );
@@ -581,7 +625,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     const vicBefore = (await conn.getAccountInfo(vicPda)).lamports;
     await expectErr(
-      activateIx(vicId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, vicPda, { privateKey: k2, publicKey: p2 }),
+      activateIx(vicId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, TOTAL_FEE, rentPayer.publicKey, vicPda, { privateKey: k2, publicKey: p2 }),
       [rentPayer],
       "wrong-key activate rejected (Unauthorized)",
     );
@@ -598,7 +642,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       [Buffer.from("peridot_id"), Buffer.from("account"), victimId], PROGRAM,
     );
     await expectOk(
-      activateIx(victimId, squatAuth, POLICY_V1, exp(), 0n, rentPayer.publicKey, victimPda, { privateKey: k2, publicKey: p2 }),
+      activateIx(victimId, squatAuth, POLICY_V1, exp(), 0n, 0n, rentPayer.publicKey, victimPda, { privateKey: k2, publicKey: p2 }),
       [rentPayer],
       "characterization: claimant-selected authority can activate an unclaimed PID",
     );
@@ -609,7 +653,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
 
   // ---- activate an already-initialized account → rejected ----
   await expectErr(
-    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
+    activateIx(accountId32, authorityComp, POLICY_V1, exp(), NETWORK_FEE, TOTAL_FEE, rentPayer.publicKey, pda, { privateKey, publicKey }),
     [rentPayer],
     "activate on initialized account rejected",
   );
@@ -621,9 +665,9 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: swapPda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
-    // V3 has no per-call treasury: tamper the account list instead.
+    // No per-call treasury: tamper the account list instead.
     const s = signPayload({ privateKey, publicKey },
-      activatePayloadV3(swapId, authorityComp, POLICY_V1, exp()));
+      activatePayloadV4(swapId, authorityComp, POLICY_V1, TOTAL_FEE, exp()));
     const evilTreasury = Keypair.generate();
     const swapIx = new TransactionInstruction({
       keys: [
@@ -634,7 +678,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
-      data: Buffer.concat([Buffer.from([5]), swapId, authorityComp, u16(POLICY_V1), i64(exp()), u64(NETWORK_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
+      data: Buffer.concat([Buffer.from([14]), swapId, authorityComp, u16(POLICY_V1), i64(exp()), u64(NETWORK_FEE), u64(TOTAL_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
     });
     await expectErr(
       new Transaction().add(swapIx, buildSecpIx(s.comp, s.sig, s.messageData)),
@@ -652,7 +696,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: polPda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     await expectErr(
-      activateIx(polId, authorityComp, 2, exp(), NETWORK_FEE, rentPayer.publicKey, polPda, { privateKey, publicKey }),
+      activateIx(polId, authorityComp, 99, exp(), NETWORK_FEE, TOTAL_FEE, rentPayer.publicKey, polPda, { privateKey, publicKey }),
       [rentPayer],
       "unknown policy rejected (UnknownFeePolicy)",
     );
@@ -669,14 +713,16 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   const treasury0 = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
   const dest0 = (await conn.getAccountInfo(dest.publicKey)).lamports;
   // Save the valid nonce-0 assertion for the cross-account replay case below.
+  // V4-signed: the sibling replay must still fail on account binding (InvalidChallenge),
+  // proving the V3 hard close did not weaken cross-account isolation.
   const replayAssertion = signPayload({ privateKey, publicKey },
-    withdrawPayloadV3(accountId32, 0, 5_000_000, destBytes, expiry, POLICY_V1));
+    withdrawPayloadV4(accountId32, 0, 5_000_000, destBytes, expiry, POLICY_V1, TOTAL_FEE));
   const replaySig = replayAssertion.sig;
   const replayComp = replayAssertion.comp;
   const replayClientData = replayAssertion.clientDataJSON;
   const replayMessage = replayAssertion.messageData;
   await expectOk(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 0, 5_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32),
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 0, 5_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, expiry, { privateKey, publicKey }, accountId32),
     [rentPayer],
     "withdraw valid",
   );
@@ -684,39 +730,19 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   assert.equal((await conn.getAccountInfo(TREASURY_PDA)).lamports - treasury0, Number(PROTOCOL_FEE), "protocol fee to canonical vault");
   results.push("PASS attested fee split"); passed++;
 
-  // ---- unauthorized transfer (wrong passkey) ----
-  await expectErr(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey: k2, publicKey: p2 }, accountId32),
+  // ---- V4 cap enforced: attested total above max_total_fee reverts ----
+  await expectCustom(
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32),
     [rentPayer],
-    "unauthorized passkey rejected",
+    "over-cap V4 withdraw rejected (FeeExceedsMax)",
+    FEE_EXCEEDS_MAX_HEX,
   );
 
-  // ---- invalid nonce / replay ----
-  await expectErr(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 0, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32),
-    [rentPayer],
-    "replay (nonce 0) rejected",
-  );
-  await expectErr(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 99, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32),
-    [rentPayer],
-    "invalid nonce rejected",
-  );
-
-  // ---- expired expiry + over-TTL expiry ----
-  await expectErr(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, chainNow - 60, { privateKey, publicKey }, accountId32),
-    [rentPayer],
-    "expired expiry rejected",
-  );
-  await expectErr(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, (await liveNow()) + 660, { privateKey, publicKey }, accountId32),
-    [rentPayer],
-    "over-TTL expiry rejected",
-  );
-
-  // ---- transaction substitution (challenge binds amount X, executes Y) ----
-  await expectErr((() => {
+  // ---- ANT-863 B2: V3 fee paths hard-closed (discs 1/2/5/6 -> V3Deprecated) ----
+  // Well-formed V3 signatures with FRESH expiries: rejection proves the
+  // on-chain gate, never expiry confusion. Nonces are irrelevant (the gate
+  // fires before nonce validation) and no state moves.
+  await expectCustom((() => {
     const s = signPayload({ privateKey, publicKey },
       withdrawPayloadV3(accountId32, 1, 1_000_000, destBytes, expiry, POLICY_V1));
     const programIx = new TransactionInstruction({
@@ -728,12 +754,104 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
-      data: wdData(1, [u64(1), u64(9_000_000), destBytes, i64(expiry), u16(POLICY_V1), u64(NETWORK_FEE)], s.clientDataJSON),
+      data: wdData(1, [u64(1), u64(1_000_000), destBytes, i64(expiry), u16(POLICY_V1), u64(NETWORK_FEE)], s.clientDataJSON),
+    });
+    return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
+  })(), [rentPayer], "V3 withdraw_sol rejected (V3Deprecated)", V3_DEPRECATED_HEX);
+  {
+    // V3 activate on an unclaimed PDA: no funding needed — the gate fires
+    // before any balance or PDA validation.
+    const depId = pidToSeed32("testv3deprecated@pid");
+    const [depPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), depId], PROGRAM);
+    const s = signPayload({ privateKey, publicKey },
+      activatePayloadV3(depId, authorityComp, POLICY_V1, expiry));
+    await expectCustom(
+      new Transaction().add(new TransactionInstruction({
+        keys: [
+          { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
+          { pubkey: depPda, isSigner: false, isWritable: true },
+          { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+          { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+          { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+        ],
+        programId: PROGRAM,
+        data: Buffer.concat([Buffer.from([5]), depId, authorityComp, u16(POLICY_V1), i64(expiry), u64(NETWORK_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
+      }), buildSecpIx(s.comp, s.sig, s.messageData)),
+      [rentPayer],
+      "V3 activate rejected (V3Deprecated)",
+      V3_DEPRECATED_HEX,
+    );
+    assert.equal(await conn.getAccountInfo(depPda), null, "V3 activate created nothing");
+  }
+  // In-flight V3 with an EXPIRED signature: dead by the gate (which runs
+  // before expiry validation) — and independently dead by the 600s TTL.
+  await expectCustom((() => {
+    const s = signPayload({ privateKey, publicKey },
+      withdrawPayloadV3(accountId32, 1, 1_000_000, destBytes, chainNow - 60, POLICY_V1));
+    const programIx = new TransactionInstruction({
+      keys: [
+        { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: dest.publicKey, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+        { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+      ],
+      programId: PROGRAM,
+      data: wdData(1, [u64(1), u64(1_000_000), destBytes, i64(chainNow - 60), u16(POLICY_V1), u64(NETWORK_FEE)], s.clientDataJSON),
+    });
+    return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
+  })(), [rentPayer], "expired in-flight V3 rejected (V3Deprecated)", V3_DEPRECATED_HEX);
+
+  // ---- unauthorized transfer (wrong passkey) ----
+  await expectErr(
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, expiry, { privateKey: k2, publicKey: p2 }, accountId32),
+    [rentPayer],
+    "unauthorized passkey rejected",
+  );
+
+  // ---- invalid nonce / replay ----
+  await expectErr(
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 0, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, expiry, { privateKey, publicKey }, accountId32),
+    [rentPayer],
+    "replay (nonce 0) rejected",
+  );
+  await expectErr(
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 99, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, expiry, { privateKey, publicKey }, accountId32),
+    [rentPayer],
+    "invalid nonce rejected",
+  );
+
+  // ---- expired expiry + over-TTL expiry ----
+  await expectErr(
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, chainNow - 60, { privateKey, publicKey }, accountId32),
+    [rentPayer],
+    "expired expiry rejected",
+  );
+  await expectErr(
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, (await liveNow()) + 660, { privateKey, publicKey }, accountId32),
+    [rentPayer],
+    "over-TTL expiry rejected",
+  );
+
+  // ---- transaction substitution (challenge binds amount X, executes Y) ----
+  await expectErr((() => {
+    const s = signPayload({ privateKey, publicKey },
+      withdrawPayloadV4(accountId32, 1, 1_000_000, destBytes, expiry, POLICY_V1, TOTAL_FEE));
+    const programIx = new TransactionInstruction({
+      keys: [
+        { pubkey: pda, isSigner: false, isWritable: true },
+        { pubkey: dest.publicKey, isSigner: false, isWritable: true },
+        { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+        { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+      ],
+      programId: PROGRAM,
+      data: wdData(11, [u64(1), u64(9_000_000), destBytes, i64(expiry), u16(POLICY_V1), u64(NETWORK_FEE), u64(TOTAL_FEE)], s.clientDataJSON),
     });
     return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
   })(), [rentPayer], "challenge/args mismatch rejected");
 
-  // ---- V2-shaped payload must not verify as V3 ----
+  // ---- V2-shaped payload must not verify as V4 (frozen domain separation) ----
   await expectErr((() => {
     const v2 = sha256(Buffer.concat([Buffer.from("PID|SOLANA|SMART_ACCOUNT|v2"),
       Buffer.from([OP.withdrawSol]), accountId32, u64(1), u64(1_000_000), destBytes, i64(expiry), u64(NETWORK_FEE), u16(POLICY_V1)]));
@@ -747,10 +865,10 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
-      data: wdData(1, [u64(1), u64(1_000_000), destBytes, i64(expiry), u16(POLICY_V1), u64(NETWORK_FEE)], s.clientDataJSON),
+      data: wdData(11, [u64(1), u64(1_000_000), destBytes, i64(expiry), u16(POLICY_V1), u64(NETWORK_FEE), u64(TOTAL_FEE)], s.clientDataJSON),
     });
     return new Transaction().add(programIx, buildSecpIx(s.comp, s.sig, s.messageData));
-  })(), [rentPayer], "V2 payload rejected as V3");
+  })(), [rentPayer], "V2 payload rejected as V4");
 
   // ---- cross-account replay: A's nonce-0 assertion replayed on sibling B ----
   {
@@ -760,7 +878,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: sibPda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     await expectOk(
-      activateIx(sibId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, sibPda, { privateKey, publicKey }),
+      activateIx(sibId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, TOTAL_FEE, rentPayer.publicKey, sibPda, { privateKey, publicKey }),
       [rentPayer],
       "sibling claimed via permissionless activate",
     );
@@ -777,7 +895,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
-      data: wdData(1, [u64(0), u64(5_000_000), destBytes, i64(expiry), u16(POLICY_V1), u64(NETWORK_FEE)], replayClientData),
+      data: wdData(11, [u64(0), u64(5_000_000), destBytes, i64(expiry), u16(POLICY_V1), u64(NETWORK_FEE), u64(TOTAL_FEE)], replayClientData),
     });
     const sibBefore = (await conn.getAccountInfo(sibPda)).lamports;
     await expectErr(
@@ -789,7 +907,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     // Domain-free (ANT-197): a foreign-prefix assertion verifies on the sibling
     // (same key, nonce 0) — no RP comparison remains on-chain.
     await expectOk(
-      withdrawIx(sibPda, dest.publicKey, rentPayer.publicKey, 0, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, sibId, { prefix: sha256("other-rp") }),
+      withdrawIx(sibPda, dest.publicKey, rentPayer.publicKey, 0, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, expiry, { privateKey, publicKey }, sibId, { prefix: sha256("other-rp") }),
       [rentPayer],
       "foreign-prefix assertion accepted (domain-free)",
     );
@@ -797,7 +915,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
 
   // ---- missing-UV assertion still rejected (UV is not domain pinning) ----
   await expectErr(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32, { flags: 0x01 }),
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, expiry, { privateKey, publicKey }, accountId32, { flags: 0x01 }),
     [rentPayer],
     "missing-UV assertion rejected (Unauthorized)",
   );
@@ -806,7 +924,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   const otherId = pidToSeed32("testother@pid");
   const [otherPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), otherId], PROGRAM);
   await expectErr(
-    withdrawIx(otherPda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32),
+    withdrawIx(otherPda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, expiry, { privateKey, publicKey }, accountId32),
     [rentPayer],
     "account (PDA) mismatch rejected",
   );
@@ -819,7 +937,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
     ],
     programId: PROGRAM,
-    data: Buffer.from([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), // too short
+    data: Buffer.from([11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), // too short
   });
   await expectErr(new Transaction().add(malformed), [rentPayer], "malformed instruction rejected");
 
@@ -844,19 +962,19 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
 
   // Now the OLD key must be rejected, the NEW key accepted.
   await expectErr(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 2, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32),
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 2, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, expiry, { privateKey, publicKey }, accountId32),
     [rentPayer],
     "old authority rejected after rotation",
   );
   await expectOk(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 2, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey: k2, publicKey: p2 }, accountId32),
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 2, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, TOTAL_FEE, expiry, { privateKey: k2, publicKey: p2 }, accountId32),
     [rentPayer],
     "new authority accepted after rotation",
   );
 
   // ---- rounding boundary: 1-lamport network fee → protocol 0, relayer made whole ----
   await expectOk(
-    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 3, 1_000, destBytes, POLICY_V1, 1, expiry, { privateKey: k2, publicKey: p2 }, accountId32),
+    withdrawIx(pda, dest.publicKey, rentPayer.publicKey, 3, 1_000, destBytes, POLICY_V1, 1, 1, expiry, { privateKey: k2, publicKey: p2 }, accountId32),
     [rentPayer],
     "dust rounding withdraw valid",
   );
@@ -869,7 +987,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: closePda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     await expectOk(
-      activateIx(closeId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, closePda, { privateKey, publicKey }),
+      activateIx(closeId, authorityComp, POLICY_V1, exp(), NETWORK_FEE, TOTAL_FEE, rentPayer.publicKey, closePda, { privateKey, publicKey }),
       [rentPayer],
       "close-test account claimed via permissionless activate",
     );
@@ -901,10 +1019,11 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     results.push("PASS token ATA + mint"); passed++;
     // nonce is 4 (withdraw 0, rotate 1, withdraw 2, dust withdraw 3; close used a throwaway).
     const ttNet = 100_000n;
+    const ttMax = ttNet + protocolFeeOf(ttNet);
     const ttAmount = 2_000_000n;
     const tokenAtaBytes = destToken.address.toBuffer();
     const ttExpiry = exp();
-    const ttPayload = withdrawPayloadV3(accountId32, 4, ttAmount, tokenAtaBytes, ttExpiry, POLICY_V1, smartToken.address.toBuffer());
+    const ttPayload = withdrawPayloadV4(accountId32, 4, ttAmount, tokenAtaBytes, ttExpiry, POLICY_V1, ttMax, smartToken.address.toBuffer());
     const ttAssertion = makeAssertion(ttPayload);
     const ttSig = lowS(crypto.sign("sha256", ttAssertion.messageData, { key: k2, dsaEncoding: "ieee-p1363" }));
     const ttComp = compressedPub(p2);
@@ -920,7 +1039,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
         { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
       ],
       programId: PROGRAM,
-      data: wdData(2, [u64(4), u64(ttAmount), tokenAtaBytes, i64(ttExpiry), u16(POLICY_V1), u64(ttNet)], ttAssertion.clientDataJSON),
+      data: wdData(12, [u64(4), u64(ttAmount), tokenAtaBytes, i64(ttExpiry), u16(POLICY_V1), u64(ttNet), u64(ttMax)], ttAssertion.clientDataJSON),
     });
     const treasuryBefore = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     await expectOk(new Transaction().add(tokenIx, buildSecpIx(ttComp, ttSig, ttAssertion.messageData)), [rentPayer], "sponsored withdraw token valid");
@@ -931,9 +1050,30 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     const treasuryAfter = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
     assert.equal(treasuryAfter - treasuryBefore, Number(protocolFeeOf(ttNet)), "token withdraw protocol fee exact");
     results.push("PASS token withdraw state + protocol fee"); passed++;
+    // ANT-863 B2: well-formed V3 withdraw_token (disc 2, fresh signature over
+    // the identical accounts) must reject with V3Deprecated, never settle.
+    {
+      const v3Payload = withdrawPayloadV3(accountId32, 5, ttAmount, tokenAtaBytes, ttExpiry, POLICY_V1, smartToken.address.toBuffer());
+      const v3A = makeAssertion(v3Payload);
+      const v3Sig = lowS(crypto.sign("sha256", v3A.messageData, { key: k2, dsaEncoding: "ieee-p1363" }));
+      await expectCustom(new Transaction().add(new TransactionInstruction({
+        keys: [
+          { pubkey: pda, isSigner: false, isWritable: true },
+          { pubkey: smartToken.address, isSigner: false, isWritable: true },
+          { pubkey: mint, isSigner: false, isWritable: false },
+          { pubkey: destToken.address, isSigner: false, isWritable: true },
+          { pubkey: TOKEN_PROG, isSigner: false, isWritable: false },
+          { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+          { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+          { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
+        ],
+        programId: PROGRAM,
+        data: wdData(2, [u64(5), u64(ttAmount), tokenAtaBytes, i64(ttExpiry), u16(POLICY_V1), u64(ttNet)], v3A.clientDataJSON),
+      }), buildSecpIx(compressedPub(p2), v3Sig, v3A.messageData)), [rentPayer], "V3 withdraw_token rejected (V3Deprecated)", V3_DEPRECATED_HEX);
+    }
   }
 
-  // ---- generic execute (disc 6) — SPL transfer via CPI with the PDA as authority ----
+  // ---- generic execute (disc 13 V4) — SPL transfer via CPI with the PDA as authority ----
   // Nonce is 5 (withdraw 0, rotate 1, withdraw 2, dust 3, token 4); authority is k2.
   {
     const TOKEN_PROG = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -953,14 +1093,14 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     ];
     const exExpiry = exp();
     // Shape-faithful fee estimate (same 2-ix layout, same signer count).
-    const exProbe = executeIx(pda, rentPayer.publicKey, 5, TOKEN_PROG.toBuffer(), exMetas, exData, POLICY_V1, 0n, exExpiry, { privateKey: k2, publicKey: p2 }, accountId32);
+    const exProbe = executeIx(pda, rentPayer.publicKey, 5, TOKEN_PROG.toBuffer(), exMetas, exData, POLICY_V1, 0n, 0n, exExpiry, { privateKey: k2, publicKey: p2 }, accountId32);
     exProbe.feePayer = rentPayer.publicKey;
     exProbe.recentBlockhash = (await conn.getLatestBlockhash()).blockhash;
     const exEst = BigInt((await conn.getFeeForMessage(exProbe.compileMessage(), "confirmed")).value ?? 0);
     assert.ok(exEst > 0n, "estimate is nonzero");
     // Attest the estimate exactly (proves quotes land); nonce 5.
     const exTreasuryBefore = (await conn.getAccountInfo(TREASURY_PDA)).lamports;
-    const exTx = executeIx(pda, rentPayer.publicKey, 5, TOKEN_PROG.toBuffer(), exMetas, exData, POLICY_V1, exEst, exExpiry, { privateKey: k2, publicKey: p2 }, accountId32);
+    const exTx = executeIx(pda, rentPayer.publicKey, 5, TOKEN_PROG.toBuffer(), exMetas, exData, POLICY_V1, exEst, exEst * 2n, exExpiry, { privateKey: k2, publicKey: p2 }, accountId32);
     let exSig = null;
     try {
       exSig = await sendAndConfirmTransaction(conn, exTx, [rentPayer], { commitment: "confirmed", skipPreflight: true });
@@ -987,16 +1127,36 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       assert.ok(driftPct <= 10, `fee accuracy within 10% (est=${exEst} actual=${actual})`);
       results.push(`PASS execute fee accuracy (est=${exEst} actual=${actual})`);
     }
+    // ANT-863 B2: well-formed V3 execute (disc 6, fresh signature over the
+    // identical call) must reject with V3Deprecated, never settle.
+    {
+      const call = execCall(TOKEN_PROG.toBuffer(), exMetas, exData);
+      const s = signPayload({ privateKey: k2, publicKey: p2 }, executePayloadV3(accountId32, 6, exExpiry, POLICY_V1, sha256(call)));
+      const metaBytes = Buffer.concat(exMetas.flatMap(([a, f]) => [a, Buffer.from([f])]));
+      await expectCustom(new Transaction().add(new TransactionInstruction({
+        keys: [
+          { pubkey: pda, isSigner: false, isWritable: true },
+          { pubkey: rentPayer.publicKey, isSigner: true, isWritable: true },
+          { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
+          { pubkey: TOKEN_PROG, isSigner: false, isWritable: false },
+          { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+          { pubkey: smartToken.address, isSigner: false, isWritable: true },
+          { pubkey: destToken.address, isSigner: false, isWritable: true },
+        ],
+        programId: PROGRAM,
+        data: wdData(6, [u64(6), TOKEN_PROG.toBuffer(), Buffer.from([exMetas.length]), metaBytes, u16(exData.length), exData, i64(exExpiry), u16(POLICY_V1), u64(100_000n)], s.clientDataJSON),
+      }), buildSecpIx(s.comp, s.sig, s.messageData)), [rentPayer], "V3 execute rejected (V3Deprecated)", V3_DEPRECATED_HEX);
+    }
     // Self-call denies even with a correctly signed payload (nonce 6 never burns).
     const selfMetas = [[pda.toBuffer(), FLAG_S]];
     await expectErr(
-      executeIx(pda, rentPayer.publicKey, 6, PROGRAM.toBuffer(), selfMetas, Buffer.alloc(0), POLICY_V1, 100_000n, exp(), { privateKey: k2, publicKey: p2 }, accountId32),
+      executeIx(pda, rentPayer.publicKey, 6, PROGRAM.toBuffer(), selfMetas, Buffer.alloc(0), POLICY_V1, 100_000n, 150_000n, exp(), { privateKey: k2, publicKey: p2 }, accountId32),
       [rentPayer],
       "execute self-target rejected (InvalidTarget)",
     );
     // No PDA delegation denies (correctly signed, but the call cannot act as the user).
     await expectErr(
-      executeIx(pda, rentPayer.publicKey, 6, TOKEN_PROG.toBuffer(), [[smartToken.address.toBuffer(), FLAG_W]], exData, POLICY_V1, 100_000n, exp(), { privateKey: k2, publicKey: p2 }, accountId32),
+      executeIx(pda, rentPayer.publicKey, 6, TOKEN_PROG.toBuffer(), [[smartToken.address.toBuffer(), FLAG_W]], exData, POLICY_V1, 100_000n, 150_000n, exp(), { privateKey: k2, publicKey: p2 }, accountId32),
       [rentPayer],
       "execute without PDA delegation rejected (Unauthorized)",
     );
@@ -1004,7 +1164,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     {
       const otherData = Buffer.concat([Buffer.from([3]), u64(2_000_000n)]);
       const call = execCall(TOKEN_PROG.toBuffer(), exMetas, exData);
-      const s = signPayload({ privateKey: k2, publicKey: p2 }, executePayloadV3(accountId32, 6, exExpiry, POLICY_V1, sha256(call)));
+      const s = signPayload({ privateKey: k2, publicKey: p2 }, executePayloadV4(accountId32, 6, exExpiry, POLICY_V1, 150_000n, sha256(call)));
       const metaBytes = Buffer.concat(exMetas.flatMap(([a, f]) => [a, Buffer.from([f])]));
       const subIx = new TransactionInstruction({
         keys: [
@@ -1017,7 +1177,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
           { pubkey: destToken.address, isSigner: false, isWritable: true },
         ],
         programId: PROGRAM,
-        data: wdData(6, [u64(6), TOKEN_PROG.toBuffer(), Buffer.from([exMetas.length]), metaBytes, u16(otherData.length), otherData, i64(exExpiry), u16(POLICY_V1), u64(100_000n)], s.clientDataJSON),
+        data: wdData(13, [u64(6), TOKEN_PROG.toBuffer(), Buffer.from([exMetas.length]), metaBytes, u16(otherData.length), otherData, i64(exExpiry), u16(POLICY_V1), u64(100_000n), u64(150_000n)], s.clientDataJSON),
       });
       await expectErr(new Transaction().add(subIx, buildSecpIx(s.comp, s.sig, s.messageData)), [rentPayer], "execute call substitution rejected (InvalidChallenge)");
     }
