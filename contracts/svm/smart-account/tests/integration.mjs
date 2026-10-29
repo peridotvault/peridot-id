@@ -287,7 +287,7 @@ async function expectOk(tx, signers, label) {
     await sendAndConfirmTransaction(conn, tx, signers, { commitment: "confirmed", skipPreflight: true });
     results.push(`PASS ${label}`); passed++;
   } catch (e) {
-    const logs = await e.getLogs?.().catch(() => null);
+    const logs = await e.getLogs?.(conn).catch(() => null);
     const errLine = logs?.find(l => l.includes("failed:") || l.includes("custom program error"));
     console.error(`LOGS ${label}:`, logs ? logs.join(" | ") : "(no logs)");
     results.push(`FAIL ${label}: ${errLine || String(e.message).split("\n")[0]}`); failed++;
@@ -311,12 +311,25 @@ async function expectCustom(tx, signers, label, hexCode) {
     await sendAndConfirmTransaction(conn, tx, signers, { commitment: "confirmed", skipPreflight: true });
     results.push(`FAIL ${label} (expected rejection, tx succeeded)`); failed++;
   } catch (e) {
-    const logs = await e.getLogs?.().catch(() => null);
+    // NOTE: SendTransactionError.getLogs() needs the connection — and the
+    // failed tx may take a moment to index, so poll like session.mjs does.
     const needle = `custom program error: ${hexCode}`;
-    if (logs && logs.join(" ").includes(needle)) {
+    let hit = false;
+    let lastLogs = null;
+    const sig = e.signature;
+    if (sig) {
+      for (let i = 0; i < 15 && !hit; i++) {
+        const t = await conn.getTransaction(sig, { commitment: "confirmed", maxSupportedTransactionVersion: 0 }).catch(() => null);
+        const logs = t?.meta?.logMessages || [];
+        if (logs.length) lastLogs = logs;
+        if (logs.join(" ").includes(needle)) hit = true;
+        else await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+    if (hit) {
       results.push(`PASS ${label}`); passed++;
     } else {
-      console.error(`LOGS ${label}:`, logs ? logs.join(" | ") : "(no logs)");
+      console.error(`LOGS ${label}:`, lastLogs ? lastLogs.join(" | ") : "(no logs)");
       results.push(`FAIL ${label} (expected ${needle})`); failed++;
     }
   }
@@ -1106,7 +1119,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       exSig = await sendAndConfirmTransaction(conn, exTx, [rentPayer], { commitment: "confirmed", skipPreflight: true });
       results.push("PASS execute SPL transfer via generic CPI"); passed++;
     } catch (e) {
-      const logs = await e.getLogs?.().catch(() => null);
+      const logs = await e.getLogs?.(conn).catch(() => null);
       console.error("LOGS execute:", logs ? logs.join(" | ") : "(no logs)");
       results.push(`FAIL execute SPL transfer via generic CPI: ${String(e.message).split("\n")[0]}`); failed++;
     }
