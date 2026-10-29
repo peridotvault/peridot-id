@@ -16,6 +16,10 @@
         "environment": {
           "DATABASE_URL": "{env:DATABASE_URL}"
         }
+      },
+      "peridot-id": {
+        "type": "remote",
+        "url": "http://uxrrr-q7777-77774-qaaaq-cai.localhost:4943/mcp"
       }
     }
   }
