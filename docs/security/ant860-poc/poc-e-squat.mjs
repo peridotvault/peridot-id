@@ -2,9 +2,9 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { genKey, makeRpc, pidToSalt32, actPayloadV3, assertion, deployAndInitData, viewSel } from "./e2e-helpers.mjs";
+import { genKey, makeRpc, pidToSalt32, actPayloadV3, assertion, deployAndInitData, viewSel } from "../../../contracts/evm/test/e2e-helpers.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
-const EVM_ROOT = join(HERE, "..");
+const EVM_ROOT = join(HERE, "..", "..", "..", "contracts", "evm");
 const ANVIL = "http://127.0.0.1:8546";
 const RELAYER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const GAS_PRICE = 10_000_000_000n;
