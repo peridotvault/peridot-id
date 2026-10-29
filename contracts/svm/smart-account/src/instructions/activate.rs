@@ -1,6 +1,13 @@
 //! Activate a user's smart account, V3 authorization (permissionless submission
 //! with attested network reimbursement + fixed protocol percentage).
 //!
+//! HARD CLOSED (ANT-863 B2): this entrypoint rejects every call with
+//! `V3Deprecated` before any other validation. V3 carries no user-approved
+//! `max_total_fee` — an unbounded attested fee could settle. Use V4 only
+//! (`activate_v4.rs`, fee-capped). The code below the gate is retained for
+//! shape/decoder stability only (discriminant 5 still decodes, then rejects
+//! — never shifted).
+//!
 //! The user deposits SOL directly to their deterministic (uninitialized) PDA address. When
 //! sufficiently funded, ANY submitter (the user themselves, the official relayer,
 //! or a volunteer third party — creation is permissionless since ANT-612) may relay activation:
@@ -60,6 +67,10 @@ pub fn process(
     accounts: &[AccountView],
     data: &InstructionData,
 ) -> ProgramResult {
+    // ANT-863 B2: V3 fee paths are hard-closed on-chain. Rejects before any
+    // other validation; unreachable code below is retained for shape stability.
+    crate::errors::check_v3_fee_path_closed()?;
+
     if accounts.len() < 5 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
