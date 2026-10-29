@@ -87,6 +87,6 @@ describe("SessionKeysService", () => {
   });
 
   it("exposes the on-chain session bounds", () => {
-    expect(svc.constants()).toEqual({ maxTtlSecs: 86_400, inactivitySecs: 1_800, stateLen: 205 });
+    expect(svc.constants()).toEqual({ maxTtlSecs: 86_400, inactivitySecs: 1_800, stateLen: 206 });
   });
 });

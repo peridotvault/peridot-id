@@ -217,11 +217,11 @@ distinction, enforced on-chain and proven by the adversarial suite.
 - `initialize` (disc 0 — DEAD in all builds since ANT-612): rejects with `InitializeDeprecated` before any other check; the historical shape (payer SIGNER, PDA WRITE, passkey auth over `sha256(DOMAIN_V3 ‖ 0x00 ‖ account_id ‖ authority)`, state write, `AccountInitialized` log) is retained for decoder/indexer stability only. **ANT-16(e) (board fee decision d4ebecff) + ANT-612 (ANT-610 spec §5.1): direct `initialize` bypassed the 50% sponsored-creation fee, so it is permanently disabled — `activate`/`activateV4` are the sole creation paths in every build.**
 - `withdraw_sol` (PDA, dest, revenue vault, relayer SIGNER, instructions sysvar; recipients canonical): relayer signer (any submitter — payload fully bound), owner/init/dest≠self checks, dest addr == arg check, nonce+PDA verify, canonical payload `sha256(DOMAIN_V3 ‖ 0x01 ‖ account_id ‖ nonce ‖ amount ‖ dest[32] ‖ expiry ‖ feePolicyVersion)` (no amounts — costs float), `check_expiry` (TTL ≤ 600), `verify_secp256r1_v2` (signer + RP-ID + UV + challenge), recompute split, `lamports ≥ amount+totalFee`, moves (relayerFee→relayer, protocolFee→vault; no System CPI), `increment_nonce`, log `TransactionExecuted`.
 - `withdraw_token` (+source ATA, mint, dest ATA, token program): as `withdraw_sol` plus `sourceAta[32]` in the payload; program asserts source ATA owned by PDA for mint; SPL `Transfer` CPI signed by PDA seeds for `amount`; SOL split `lamports ≥ totalFee` only (token balance enforced by token program).
-- `update_authority` (PDA, sysvar): canonical payload `sha256(DOMAIN_V3 ‖ 0x03 ‖ account_id ‖ nonce ‖ new_key[33] ‖ expiry)`, verified by **current** key, zero-key rejected, then `set_authority` + `increment_nonce`, log `AuthorityUpdated`. No fee fields.
+- `update_authority` (PDA, sysvar): canonical payload `sha256(DOMAIN_V3 ‖ 0x03 ‖ account_id ‖ nonce ‖ new_key[33] ‖ expiry)`, verified by **current** key, zero-key rejected, then `set_authority` + session-generation bump (ANT-863 B3: rotation implicitly revokes all live sessions) + `increment_nonce`, log `AuthorityUpdated`. No fee fields.
 - `close` (PDA, dest, sysvar): canonical payload `sha256(DOMAIN_V3 ‖ 0x04 ‖ account_id ‖ nonce ‖ dest[32] ‖ expiry)`; `dest != PDA` required; drains all lamports to dest, `account.close()`, log `AccountClosed`. Teardown only — no V1 API.
 - `activate` (submitter SIGNER — ANY payer, ANT-612 permissionless — PDA, vault, system, sysvar): fee-bearing claim + passkey auth over canonical `sha256(DOMAIN_V3 ‖ 0x05 ‖ account_id ‖ authority[33] ‖ rpIdHash[32] ‖ feePolicyVersion ‖ expiry)`. Anti-squat is the user passkey alone (only the new authority's key authorizes the claim). Rejects already-program-owned/non-empty; `create_account…_signed` creates (empty) or tops-up→assigns (pre-funded deposit); requires `lamports ≥ rent + totalFee`; splits relayerFee→submitter, protocolFee→canonical vault; writes v2 state; log `AccountActivated`. First-claimer-wins is inherent to deterministic addresses — see the residual-risk note in §12 (pid secrecy + fast activation mitigate).
 - `execute` (disc 6; PDA, relayer SIGNER, vault, target program, sysvar, + non-PDA metas): generic CPI, wallet parity with EVM `execute`. Deny-list of one (target ≠ program, `InvalidTarget`); passkey signs canonical `sha256(DOMAIN_V3 ‖ 0x06 ‖ account_id ‖ nonce ‖ expiry ‖ feePolicyVersion ‖ call_hash)` where `call_hash = sha256` over the exact target‖metas‖data bytes; instruction data `nonce ‖ target[32] ‖ meta_count u8 ‖ metas meta_count×(addr[32] ‖ flags u8: bit0 writable, bit1 signer) ‖ data_len u16 ‖ data ‖ expiry ‖ policy ‖ network_fee ‖ len ‖ clientDataJSON` (caps: 64 metas, 10_240B data; the tx size limit binds first). The program additionally requires the PDA among the metas with the signer bit (bound PDA metas map to account 0 — outer transactions deduplicate it), enforces address match per meta at CPI time, and settles the standard fee split (`lamports ≥ totalFee`; the call itself moves no SOL — inner programs debit their own accounts). Token-2022 needs no special case (target is opaque bytes).
-- Sessions (discs 7–10; §11, canonical): the vault PDA above never enters game CPIs. `register_session` (owner P-256, consumes owner nonce) binds an Ed25519 session key + one allowlisted game (+ verified upgrade snapshot) into a fresh 205B session PDA (`["peridot_id","session",account_id,session_key]`, program-created for exact rent); `session_execute` (session envelope signer + strict per-session `seq`, 24h hard expiry + 30min inactivity on the chain clock) runs one game CPI signed solely by the session PDA, with exact account count (no `remaining_accounts`), bounded protected accounts hash-pinned pre/post (owner/lamports/data, incl. delegate/close_authority), and per-execution upgrade-visibility refresh (record-and-log, no enforcement); `revoke_session` (owner P-256, immediate) and `close_session` (revoked-or-expired, rent reclaimed) consume the owner nonce. Gameplay pays its own fees (no relayer split).
+- Sessions (discs 7–10; §11, canonical): the vault PDA above enters `session_execute` READ-ONLY at index 0 solely as the ANT-863 B3 epoch source and never enters game CPIs. `register_session` (owner P-256, consumes owner nonce) binds an Ed25519 session key + one allowlisted game (+ verified upgrade snapshot) into a fresh 206B session PDA (`["peridot_id","session",account_id,session_key]`, program-created for exact rent), stamped with the current vault session-generation epoch; `session_execute` (session envelope signer + strict per-session `seq`, 24h hard expiry + 30min inactivity on the chain clock, plus epoch equality) runs one game CPI signed solely by the session PDA, with exact account count (no `remaining_accounts`), bounded protected accounts hash-pinned pre/post (owner/lamports/data, incl. delegate/close_authority), and per-execution upgrade-visibility refresh (record-and-log, no enforcement); `update_authority` (disc 3) bumps the vault epoch, so rotation implicitly revokes every live session (`SessionStaleGeneration`; re-register after rotating); `revoke_session` (owner P-256, immediate) and `close_session` (revoked-or-expired, rent reclaimed) consume the owner nonce and accept legacy 205B records for graceful migration. Gameplay pays its own fees (no relayer split).
 - Attested-fee model (explicit): the program enforces the rate, recipients, and formula over the backend-attested `networkFee` but MUST NOT pretend to determine the complete transaction fee from inside the program — the runtime deducts base fee + prioritization fees + rent from the fee payer, none of which is reliably introspectable on-chain. Attestation is quoted live, drift-bounded (≤120% of quote, fail-closed re-quote), TTL-bounded; reconciliation verifies attested ≈ actual (`meta.fee` + priority data) with alerts. The relayer absorbs spike underpayment between attest and mining.
 
 ## 7. SVM — auth plumbing
@@ -345,13 +345,15 @@ keypair per session (envelope signatures are Ed25519-only; the precompile is
 instruction-data-only, 0-CU, one 5,000-lamport fee per use — so P-256
 authorizes registration once, never per gameplay action).
 
-Accounts: vault PDA `["peridot_id","account",sha256(pid)]` (existing, 112B);
+Accounts: vault PDA `["peridot_id","account",sha256(pid)]` (existing, 80B
+since ANT-197);
 session PDA `["peridot_id","session",account_id,session_pubkey]`, program-owned,
-fixed 205B record (`version u8 ‖ status u8 ‖ session_pubkey[32] ‖ account_id[32] ‖
+fixed 206B v2 record (`version u8 ‖ status u8 ‖ session_pubkey[32] ‖ account_id[32] ‖
 expires_at i64LE ‖ last_used i64LE ‖ seq u64LE ‖ allowed_program[32] ‖
 recorded_authority[32] ‖ recorded_has_authority u8 ‖ recorded_slot u64LE ‖
 last_seen_authority[32] ‖ last_seen_has_authority u8 ‖ last_seen_slot u64LE ‖
-bump u8`). One session pubkey ⇒ one PDA.
+bump u8 ‖ generation u8`, ANT-863 B3; legacy 205B v1 records read generation 0).
+One session pubkey ⇒ one PDA.
 Rent-exempt minimum exactly, program-created (PDAs cannot sign client-side
 creates), owner-reclaimed.
 
@@ -364,8 +366,10 @@ Instructions (domain `PID|SOLANA|SESSION|v1`):
   system program.
 - `session_execute` (8), session Ed25519 (`is_signer` + key match): strict
   `seq`, hard expiry (24h) + inactivity (30min) on the chain `Clock`,
+  generation-epoch equality against the vault (ANT-863 B3 — rotation revokes),
   allowlist match, self-call block, vault-absence enforcement (derived
-  on-chain), ≥1 session-signer meta naming the session PDA, exact account
+  on-chain; the vault is allowed exactly once, READ-ONLY at index 0, never
+  forwarded), ≥1 session-signer meta naming the session PDA, exact account
   count (**`remaining_accounts` rejected**), protected-account pre/post
   invariant checks, upgrade-visibility refresh. No fee split: the session
   holder pays their own transaction fee.
@@ -390,12 +394,13 @@ the program itself); unknown loaders fail closed. No enforcement on
 post-registration change by owner choice.
 
 Adversarial guarantees (all against live validator): vault drain impossible
-(vault derived on-chain, rejected in metas and accounts); forwarded signer
+(vault derived on-chain, rejected in metas and accounts except its own
+read-only epoch slot); forwarded signer
 moves session-owned tokens only (vault absent/unsigned); session SOL
 structurally immobile (system debits only data-less accounts); protected
 delegate/close_authority edits caught with balances unchanged; vault token
 movement fails (no vault signature); replay/stale-seq, expired/inactive/
-revoked use rejected; substitution via extra accounts rejected; lied upgrade
+revoked/stale-generation use rejected; substitution via extra accounts rejected; lied upgrade
 snapshots rejected at registration; close reclaims only dead sessions to
 owner-bound destinations.
 
