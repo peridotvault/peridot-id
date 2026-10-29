@@ -493,18 +493,21 @@ mod session_time_tests {
     fn record_sizes_are_pinned() {
         // ANT-870 P6.2: any layout growth moves these AND the rent pins
         // below — rent-exemption boundaries must be re-derived deliberately.
+        // (ANT-863 B3 grew the session record 205 → 206 with the stamped
+        // generation byte; v1 205-byte records stay readable.)
         assert_eq!(STATE_LEN_V1, 80);
         assert_eq!(STATE_LEN_V2, 80);
-        assert_eq!(SESSION_STATE_LEN, 205);
+        assert_eq!(SESSION_STATE_LEN, 206);
+        assert_eq!(super::SESSION_STATE_LEN_V1, 205);
     }
 
     #[test]
     fn rent_exemption_boundaries() {
         // Sanity against the well-known 0-byte figure first.
         assert_eq!(rent_exempt_minimum(0), 890_880);
-        // Vault record (80B) and session record (205B) minimums.
+        // Vault record (80B) and session record (206B) minimums.
         assert_eq!(rent_exempt_minimum(STATE_LEN_V2), 1_447_680);
-        assert_eq!(rent_exempt_minimum(SESSION_STATE_LEN), 2_317_680);
+        assert_eq!(rent_exempt_minimum(SESSION_STATE_LEN), 2_324_640);
     }
 
     #[test]
@@ -512,7 +515,7 @@ mod session_time_tests {
         // Future growth stays exactly computable: +32B on the vault and +64B
         // on the session record (e.g. new authority fields) cost this much.
         assert_eq!(rent_exempt_minimum(STATE_LEN_V2 + 32), 1_670_400);
-        assert_eq!(rent_exempt_minimum(SESSION_STATE_LEN + 64), 2_763_120);
+        assert_eq!(rent_exempt_minimum(SESSION_STATE_LEN + 64), 2_770_080);
         // Close/drain edge: reclaiming a record returns its FULL rent minimum
         // — close paths must move `lamports()` whole, never a cached figure.
         assert!(rent_exempt_minimum(SESSION_STATE_LEN) > rent_exempt_minimum(0));

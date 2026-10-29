@@ -640,8 +640,10 @@ mod tests {
 
     #[test]
     fn unsupported_extension_uses_fresh_discriminant() {
-        // Additive-only error table: the new variant is 29, 0-28 untouched.
-        assert_eq!(PeridotError::UnsupportedTokenExtension as u32, 29);
+        // Additive-only error table: B3 claimed 29 on `paperclip` first, so
+        // the P6.1 variant takes 30; 0-29 are untouched.
+        assert_eq!(PeridotError::SessionStaleGeneration as u32, 29);
+        assert_eq!(PeridotError::UnsupportedTokenExtension as u32, 30);
         assert_eq!(PeridotError::CannotRemoveLastAdmin as u32, 28);
     }
 }

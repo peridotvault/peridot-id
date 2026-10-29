@@ -427,7 +427,7 @@ mod tests {
         assert_eq!(minimum(CONFIG_LEN), 2_728_320);
         // Cross-check against the vault/session sizes pinned in state.rs so
         // the three record classes stay mutually consistent.
-        assert_eq!(minimum(SESSION_STATE_LEN), 2_317_680);
+        assert_eq!(minimum(SESSION_STATE_LEN), 2_324_640);
         assert_eq!(minimum(crate::state::STATE_LEN_V2), 1_447_680);
     }
 }

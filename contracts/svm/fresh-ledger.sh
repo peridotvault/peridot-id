@@ -9,6 +9,9 @@
 #
 # Usage:
 #   ./fresh-ledger.sh [ledger-dir] [rpc-port]   # starts validator in background
+#
+# RPC ports of parallel instances must differ by 2+ (the validator also
+# binds rpc+1 for pubsub), e.g. 8899 + 8931 — never adjacent ports.
 #   PID_RPC_URL=http://127.0.0.1:8900 node tests/integration.mjs <program-id>
 #   kill "$(cat <ledger-dir>.pid)"
 #
@@ -20,13 +23,16 @@ LEDGER="${1:-$(mktemp -d /tmp/peridot-ledger-XXXXXX)}"
 PORT="${2:-${PID_RPC_PORT:-8899}}"
 mkdir -p "$LEDGER"
 
-# Gossip/dynamic ports derive from the RPC port so parallel isolated
-# validators (e.g. a concurrent heartbeat's suite) never collide on the
-# defaults (gossip :8000, faucet :9900).
-GOSSIP_PORT="$((PORT + 10000))"
-DYN_LO="$((PORT + 10001))"
-DYN_HI="$((PORT + 10020))"
-FAUCET_PORT="$((PORT + 9000))"
+# Gossip/faucet/dynamic ports derive from the RPC port in non-overlapping
+# strides of 64 so parallel isolated validators (e.g. a concurrent
+# heartbeat's suite) never collide on the defaults (gossip :8000, faucet
+# :9900) — or with each other (a naive +10000 scheme lets instance A's
+# dynamic range grab instance B's gossip port).
+STRIDE="$(( (PORT - 8900) * 64 ))"
+GOSSIP_PORT="$((20000 + STRIDE))"
+DYN_LO="$((20001 + STRIDE))"
+DYN_HI="$((20020 + STRIDE))"
+FAUCET_PORT="$((21000 + STRIDE))"
 
 export PATH="$HOME/.local/share/solana/install/releases/2.3.13/solana-release/bin:$PATH"
 

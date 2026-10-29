@@ -68,9 +68,9 @@ against the same ledger.** Start one isolated validator per suite:
 ```sh
 cd contracts/svm
 ./fresh-ledger.sh /tmp/ledger-int 8899  # prints PID_RPC_URL=http://127.0.0.1:8899
-./fresh-ledger.sh /tmp/ledger-ses 8900  # prints PID_RPC_URL=http://127.0.0.1:8900
+./fresh-ledger.sh /tmp/ledger-ses 8931  # prints PID_RPC_URL=http://127.0.0.1:8931
 solana config set --url http://127.0.0.1:8899 && solana airdrop 5
-solana config set --url http://127.0.0.1:8900 && solana airdrop 5
+solana config set --url http://127.0.0.1:8931 && solana airdrop 5
 cd smart-account
 solana program deploy target/deploy/peridot_smart_account.so \
   --program-id target/deploy/peridot_smart_account-keypair.json --url http://127.0.0.1:8899
@@ -78,12 +78,15 @@ PID_RPC_URL=http://127.0.0.1:8899 node tests/integration.mjs <program-id>   # 44
 # Session suite (needs the mock forwarder deployed on ITS ledger; forwarder id passed as argv[3]):
 solana-keygen new -o /tmp/forwarder-keypair.json --no-bip39-passphrase
 solana program deploy ../mock-forwarder/target/deploy/peridot_mock_forwarder.so \
-  --program-id /tmp/forwarder-keypair.json --url http://127.0.0.1:8900
-PID_RPC_URL=http://127.0.0.1:8900 node tests/session.mjs <program-id> <forwarder-id>   # 24 session cases (WHITEPAPER.md §11)
+  --program-id /tmp/forwarder-keypair.json --url http://127.0.0.1:8931
+PID_RPC_URL=http://127.0.0.1:8931 node tests/session.mjs <program-id> <forwarder-id>   # 24 session cases (WHITEPAPER.md §11)
 kill "$(cat /tmp/ledger-int.pid)" "$(cat /tmp/ledger-ses.pid)"
 ```
 
 Both suites honor `PID_RPC_URL` (default `http://127.0.0.1:8899` when unset).
+Parallel instances must use RPC ports differing by 2+ (the validator also
+binds `rpc+1` for pubsub — adjacent ports collide); the helper derives
+gossip/faucet/dynamic ports in non-overlapping strides automatically.
 A single suite rerun from scratch also needs a fresh ledger (restart the
 validator with `--reset`, or start a new `./fresh-ledger.sh` dir): re-init on
 a used ledger fails `ConfigAlreadyInitialized` by design. `test-ledger/`
