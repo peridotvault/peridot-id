@@ -87,6 +87,28 @@ pub enum PeridotError {
     /// `SessionRevoked` (explicit per-session revoke) so UX/indexers can
     /// tell "rotated, re-register" apart. Additive-only (29).
     SessionStaleGeneration = 29,
+    /// ANT-866 B1 tombstone: this `account_id` was closed — a program-owned
+    /// tombstone PDA exists, so re-claim (by any key) is rejected. The pid is
+    /// never reused or reassigned. Additive-only (30).
+    Tombstoned = 30,
+    /// ANT-866 B1 grace: the vault is `STATUS_CLOSING` — spend, rotate,
+    /// withdraw, and session operations are frozen until `close_cancel`
+    /// (revive) or `close_finalize` (payout + tombstone). Additive-only (31).
+    AccountClosing = 31,
+    /// ANT-866 B1 grace: `close_cancel`/`close_finalize` with no live ticket
+    /// for this (account_id, authority). Additive-only (32).
+    CloseTicketNotFound = 32,
+    /// ANT-866 B1 grace: `close_finalize` before `deadline` (chain clock).
+    /// Additive-only (33).
+    GraceNotElapsed = 33,
+    /// ANT-866 B1: immediate `Close` (discriminant 4) is permanently
+    /// disabled — teardown must route through the `close_request` grace flow
+    /// (which writes the tombstone). Same shape as `InitializeDeprecated`:
+    /// discriminant 4 still decodes, then rejects. Additive-only (34).
+    CloseDeprecated = 34,
+    /// ANT-866 B1 grace: `close_request` while a ticket is already live for
+    /// this (account_id, authority). Cancel or finalize first. Additive-only (35).
+    CloseAlreadyRequested = 35,
 }
 
 impl From<PeridotError> for ProgramError {
