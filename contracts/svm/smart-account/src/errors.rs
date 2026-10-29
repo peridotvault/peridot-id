@@ -92,9 +92,10 @@ pub enum PeridotError {
     /// NOT fee — so a relayer could settle any fee. Every V3 fee entrypoint
     /// rejects with this error before any other validation; V4 siblings
     /// (discs 11-14, `max_total_fee`-capped) are the only fee paths.
-    /// Additive-only (new discriminant 30; error-code namespace is disjoint
+    /// Additive-only (new discriminant 37: P6 claimed 30 and B1 claimed
+    /// 31-36 on `paperclip` first; error-code namespace is disjoint
     /// from B4's reserved instruction discriminants 22-29/30-32).
-    V3Deprecated = 30,
+    V3Deprecated = 37,
 }
 
 impl From<PeridotError> for ProgramError {

@@ -712,7 +712,7 @@ mod ant863_b2_deprecation_tests {
     fn v3_deprecated_discriminant_is_additive() {
         // New error takes the next free slot (29 was taken by B3's
         // `SessionStaleGeneration`); pre-existing errors are untouched.
-        assert_eq!(PeridotError::V3Deprecated as u32, 30);
+        assert_eq!(PeridotError::V3Deprecated as u32, 37);
         assert_eq!(PeridotError::CannotRemoveLastAdmin as u32, 28);
         assert_eq!(PeridotError::InitializeDeprecated as u32, 23);
     }
@@ -723,7 +723,7 @@ mod ant863_b2_deprecation_tests {
         // rejects on every build.
         assert!(DEPRECATE_V3_FEE_PATHS);
         let err = check_v3_fee_path_closed().unwrap_err();
-        assert_eq!(err, ProgramError::Custom(30));
+        assert_eq!(err, ProgramError::Custom(37));
     }
 
     #[test]
