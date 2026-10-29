@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
 import type { Keypair, PasskeyAssertion, PublicKey, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
 import { requireActiveAuthority } from "../common/activation";
-import { ACCOUNT_TYPE_SMART, SolanaSelection, solanaReferenceFor } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import {
   exceedsDriftBound,
@@ -252,11 +252,12 @@ export class SponsoredWithdrawService {
    * multi-key activation may claim with a newer key — both flip oldest away
    * from the claiming key and would derive an unclaimable PDA (fail-closed
    * on-chain, availability outage off-chain). The claiming key is per-pid
-   * (all rows of one identity bind the same key), so any smart row serves.
+   * (all rows of one identity bind the same key), so any Solana-namespace
+   * smart row serves (R3: EVM rows may bind a different key).
    */
   private async derivationAuthority(pid: string): Promise<Uint8Array> {
     const row = await this.prisma.chainAccount.findFirst({
-      where: { pid, accountType: "smart_account" },
+      where: { pid, accountType: ACCOUNT_TYPE_SMART, chain: { namespace: SOLANA_NAMESPACE } },
       orderBy: { createdAt: "asc" },
     });
     if (row?.claimAuthority) return new Uint8Array(row.claimAuthority);

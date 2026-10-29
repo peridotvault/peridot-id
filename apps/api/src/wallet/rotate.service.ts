@@ -19,7 +19,7 @@ import { ConfigService } from "@nestjs/config";
 import { createHash } from "node:crypto";
 import type { Keypair, PasskeyAssertion, SolanaAdapter } from "@peridotvault/pid-solana";
 import { coseToCompressedSecp256r1 } from "../credentials/cose";
-import { ACCOUNT_TYPE_SMART, SolanaSelection } from "../common/chains";
+import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection } from "../common/chains";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { MAX_TTL_SECS, relayerKeypair, solanaAdapter } from "../common/solana-relay";
 import { PrismaService } from "../prisma/prisma.service";
@@ -58,14 +58,14 @@ export class RotateService {
   }
 
   /**
-   * Claiming key for PDA derivation (ANT-866 B1 + F1 fix): the key recorded
-   * on the chain row at activation-heal time, falling back to oldest-active
-   * only for pre-B1 rows that never healed. See sponsored-withdraw's
-   * `derivationAuthority` for why oldest-active alone is wrong.
+   * Claiming key for PDA derivation (ANT-866 B1 + F1 fix, R3 scoped): the key
+   * recorded on the chain row at activation-heal time, falling back to
+   * oldest-active only for pre-B1 rows that never healed. Scoped to
+   * Solana-namespace rows (see sponsored-withdraw's `derivationAuthority`).
    */
   private async derivationAuthority(pid: string): Promise<Uint8Array> {
     const row = await this.prisma.chainAccount.findFirst({
-      where: { pid, accountType: "smart_account" },
+      where: { pid, accountType: "smart_account", chain: { namespace: SOLANA_NAMESPACE } },
       orderBy: { createdAt: "asc" },
     });
     const claimKey = (row as { claimAuthority?: Buffer | Uint8Array | null } | null)?.claimAuthority;

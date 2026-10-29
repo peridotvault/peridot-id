@@ -67,6 +67,18 @@ export class AccountService {
    * an unclaimable funding target. The activation path heals any pre-binding
    * row to the bound address before broadcasting.
    */
+  /**
+   * Raw (x, y) coords for a recorded 33B compressed claiming key (ANT-866/R2).
+   * Resolves through the authority table (any status — the claiming row may
+   * be revoked post-rotation) instead of hand-rolled EC decompression.
+   * Returns null when no credential row matches (key material gone).
+   */
+  private async claimKeyXy(pid: string, claimAuthority: Buffer): Promise<{ x: Buffer; y: Buffer } | null> {
+    const rows = await this.prisma.authority.findMany({ where: { pid } });
+    const hit = rows.find((r) => coseToCompressedSecp256r1(Buffer.from(r.publicKey)).equals(claimAuthority));
+    return hit ? coseToRawXy(Buffer.from(hit.publicKey)) : null;
+  }
+
   private async ensureEvmRows(pid: string): Promise<void> {
     const authority = await this.prisma.authority.findFirst({
       where: { pid, status: "active" },
@@ -78,10 +90,29 @@ export class AccountService {
       const factory = chain.contracts.find((k) => k.type === "factory")?.address;
       const implementation = chain.contracts.find((k) => k.type === "account_implementation")?.address;
       if (!factory || !implementation) continue;
-      const evm = deriveEvmSmartAccountAddressBound(pid, new Uint8Array(x), new Uint8Array(y), factory, implementation);
       const existing = await this.prisma.chainAccount.findFirst({
         where: { pid, chainId: chain.id, accountType: ACCOUNT_TYPE_SMART },
       });
+      // ANT-866/R2: derive under the RECORDED claiming key when the row has
+      // one — re-pointing from oldest-active after a rotation writes an
+      // address/claimAuthority skew pair (address=K-new, key=K-old) pointing
+      // funding at an unclaimable address.
+      const recorded = existing?.claimAuthority ? Buffer.from(existing.claimAuthority) : null;
+      const recordedXy = recorded ? await this.claimKeyXy(pid, recorded) : null;
+      if (recorded && !recordedXy) {
+        // Claiming key material is gone (credential row deleted): never
+        // clobber — log and leave the row for operator reconciliation.
+        await this.security.log(pid, "account.evm_repoint_skipped", { chain: chain.id }).catch(() => undefined);
+        continue;
+      }
+      const key = recordedXy ?? { x, y };
+      const evm = deriveEvmSmartAccountAddressBound(
+        pid,
+        new Uint8Array(key.x),
+        new Uint8Array(key.y),
+        factory,
+        implementation,
+      );
       if (!existing) {
         try {
           await this.prisma.chainAccount.create({
@@ -101,7 +132,12 @@ export class AccountService {
       } else if (existing.address !== evm.address) {
         await this.prisma.chainAccount.update({
           where: { id: existing.id },
-          data: { address: evm.address, status: "inactivated", activationBalance: null, activationRequired: null },
+          data: {
+            address: evm.address,
+            activationBalance: null,
+            activationRequired: null,
+            ...(existing.status === "active" ? {} : { status: "inactivated" as const }),
+          },
         });
       }
     }
@@ -126,11 +162,6 @@ export class AccountService {
       where: { pid, status: "active" },
       orderBy: { createdAt: "asc" },
     });
-    // ANT-866/F1: the claiming key recorded here is provisional (oldest
-    // active at setup); activation-heal overwrites it with the ASSERTING key,
-    // which is by definition the key the claim commits to.
-    const claimKey = authority ? coseToCompressedSecp256r1(Buffer.from(authority.publicKey)) : null;
-    const derived = claimKey ? deriveSmartAccountAddress(pid, programId, claimKey).address : null;
     const existingChain = await this.prisma.chainAccount.findFirst({
       where: {
         pid,
@@ -138,8 +169,20 @@ export class AccountService {
         ...(selection ? { chain: { namespace: SOLANA_NAMESPACE, reference: solanaReferenceFor(selection) } } : {}),
       },
     });
+    // ANT-866/F1+R1: derivation key is the RECORDED claiming key when the row
+    // has one — never oldest-active unconditionally. Oldest flips on rotation
+    // (revoke) and may differ at multi-key activation; re-deriving from it
+    // would clobber a healed row back to an unclaimable address (availability
+    // outage; on-chain stays fail-closed). Provisional oldest applies only to
+    // rows without a recorded key (setup / legacy).
+    const recordKey = existingChain?.claimAuthority
+      ? Buffer.from(existingChain.claimAuthority)
+      : authority
+        ? coseToCompressedSecp256r1(Buffer.from(authority.publicKey))
+        : null;
+    const derived = recordKey ? deriveSmartAccountAddress(pid, programId, recordKey).address : null;
     if (!existingChain) {
-      if (claimKey === null || derived === null) {
+      if (recordKey === null || derived === null) {
         // No passkey yet: defer the Solana row too (see above). EVM rows
         // defer the same way; getChains throws NotFound until any row lands.
       } else {
@@ -151,7 +194,7 @@ export class AccountService {
               chainId,
               address: derived,
               accountType: ACCOUNT_TYPE_SMART,
-              claimAuthority: Buffer.from(claimKey),
+              claimAuthority: Buffer.from(recordKey),
             },
           });
           await this.security.log(pid, "account.created", {});
@@ -163,15 +206,17 @@ export class AccountService {
     } else if (derived !== null && existingChain.address !== derived) {
       // Re-point the stored address to the current program id's PDA (e.g. after an on-chain
       // program redeploy changed the program id). Without this, balance reads and activation
-      // would target a stale address that holds no funds.
+      // would target a stale address that holds no funds. The recorded
+      // claiming key is NEVER overwritten here (R1); the `inactivated` reset
+      // stays off rows that are already `active` (a live vault keeps serving
+      // while its address re-points).
       await this.prisma.chainAccount.update({
         where: { id: existingChain.id },
         data: {
           address: derived,
-          status: "inactivated",
           activationBalance: null,
           activationRequired: null,
-          ...(claimKey ? { claimAuthority: Buffer.from(claimKey) } : {}),
+          ...(existingChain.status === "active" ? {} : { status: "inactivated" as const }),
         },
       });
     }

@@ -971,6 +971,13 @@ export class SolanaAdapter {
    * `close` (disc 4, permanently disabled on-chain): owner-signed request to
    * `destination`, vault freezes, ticket created submitter-funded, nonce
    * consumed. Funds do NOT move here — see `cancelClose` / `finalizeClose`.
+   *
+   * // SECURITY (ANT-866/R4): there is NO server-side close endpoint yet. When
+   * // one lands, it MUST pass the RECORDED claiming key as
+   * // `derivationAuthority` (chain row `claimAuthority`) — the
+   * // `?? currentAuthorityCompressed` default derives from the SIGNING key,
+   * // which is wrong post-rotation and targets an unclaimable PDA
+   * // (fail-closed on-chain, availability outage off-chain).
    */
   async close(
     pid: string,

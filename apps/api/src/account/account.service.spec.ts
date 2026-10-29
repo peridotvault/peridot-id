@@ -87,6 +87,33 @@ describe("AccountService", () => {
     expect(prisma.chainAccount.create).not.toHaveBeenCalled();
   });
 
+  it("re-POST after rotation keeps the recorded binding (ANT-866/R1)", async () => {
+    // Healed row binds K0 and is ACTIVE; oldest-active flipped to K1 (K0
+    // revoked). Re-deriving from oldest would clobber the row to a K1-bound
+    // address no signature can claim (availability outage; on-chain
+    // fail-closed). The recorded key must win; active rows are not demoted.
+    const { deriveSmartAccountAddress } = jest.requireActual("../common/smart-account") as typeof import("../common/smart-account");
+    const { coseKey } = jest.requireActual("../../test/factories") as typeof import("../../test/factories");
+    const { coseToCompressedSecp256r1 } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
+    const K0 = coseToCompressedSecp256r1(coseKey());
+    const K1_COSE = Buffer.from("a5010203262001215820" + "33".repeat(32) + "225820" + "44".repeat(32), "hex");
+    const K1 = coseToCompressedSecp256r1(K1_COSE);
+    expect(K1.equals(K0)).toBe(false);
+    const boundK0 = deriveSmartAccountAddress("pid_01HASH", PROGRAM_ID, K0).address;
+    const { service, prisma } = setup();
+    (prisma.chainAccount.findFirst as jest.Mock).mockResolvedValue({
+      ...chainRow(),
+      address: boundK0,
+      status: "active",
+      claimAuthority: K0,
+    });
+    prisma.chainAccount.findMany.mockResolvedValue([{ ...chainRow(), address: boundK0, status: "active" }]);
+    (prisma.authority.findFirst as jest.Mock).mockResolvedValue({ publicKey: K1_COSE });
+    await service.ensureAccount("pid_01HASH");
+    expect(prisma.chainAccount.update).not.toHaveBeenCalled();
+    expect(prisma.chainAccount.create).not.toHaveBeenCalled();
+  });
+
   it("ensureAccount seeds one identical EVM address per chain when the factory is configured", async () => {
     // B1 (ANT-866): the seeded address is PID-KEY BOUND (not keyless) — the
     // only pre-funding target the registered key can claim.
@@ -147,8 +174,78 @@ describe("AccountService", () => {
     for (const row of evmCreates) expect(row.address).toBe(expected);
   });
 
-  it("ensureAccount defers EVM rows until a passkey is registered (B1)", async () => {
-    // No active authority → no address can be bound → no rows (fail closed:
+  it("EVM re-point after rotation keeps the recorded key (ANT-866/R2)", async () => {
+    // EVM row healed to K0; oldest-active flipped to K1. Re-pointing from
+    // oldest would write an (address=K1-bound, key=K0) skew pair pointing
+    // funding at an unclaimable address. The recorded key must win.
+    const { deriveEvmSmartAccountAddressBound } = jest.requireActual("@peridotvault/pid-evm") as typeof import("@peridotvault/pid-evm");
+    const { coseKey } = jest.requireActual("../../test/factories") as typeof import("../../test/factories");
+    const { coseToCompressedSecp256r1 } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
+    const { coseToRawXy } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
+    const factory = "0x4e59b44847b379578588920cA78FbF26c0B4956C";
+    const impl = "0x0000000000000000000000000000000000000001";
+    const K0 = coseToCompressedSecp256r1(coseKey());
+    const K1_COSE = Buffer.from("a5010203262001215820" + "33".repeat(32) + "225820" + "44".repeat(32), "hex");
+    const { x, y } = coseToRawXy(coseKey());
+    const K0evm = deriveEvmSmartAccountAddressBound(
+      "pid_01HASH", new Uint8Array(x), new Uint8Array(y), factory, impl,
+    ).address;
+    const chains = {
+      solanaChainIdOrThrow: jest.fn(async () => "chain-sol"),
+      solanaProgramId: jest.fn(async () => PROGRAM_ID),
+      deployableEvmChains: jest.fn(async () =>
+        ["97"].map((reference) => ({
+          id: `chain-${reference}`,
+          namespace: "eip155",
+          reference,
+          name: `chain-${reference}`,
+          nativeSymbol: "T",
+          decimals: 18,
+          rpcUrls: [],
+          explorerUrl: null,
+          logoUrl: null,
+          isTestnet: true,
+          contracts: [
+            { type: "factory", address: factory, versionLabel: "v1" },
+            { type: "account_implementation", address: impl, versionLabel: "v1" },
+          ],
+        })),
+      ),
+    };
+    const security = mockSecurity();
+    const prisma = {
+      chainAccount: {
+        findFirst: jest.fn(async (args: { where: { chainId?: string } }) =>
+          args.where.chainId
+            ? {
+                id: "c-evm",
+                pid: "pid_01HASH",
+                chainId: args.where.chainId,
+                address: K0evm,
+                accountType: SMART,
+                status: "active",
+                claimAuthority: K0,
+              }
+            : null,
+        ),
+        findMany: jest.fn(async () => [chainRow()] as any),
+        create: jest.fn(async (args: { data: { address: string } }) => ({ id: "c", ...args.data })),
+        update: jest.fn(async () => ({})),
+      },
+      authority: {
+        findFirst: jest.fn(async () => ({ publicKey: K1_COSE })),
+        findMany: jest.fn(async () => [{ publicKey: coseKey() }, { publicKey: K1_COSE }]),
+      },
+      securityEvent: { create: jest.fn(async () => ({})) },
+    };
+    const service = new AccountService(prisma as never, security as never, chains as never);
+
+    await service.ensureAccount("pid_01HASH");
+
+    expect(prisma.chainAccount.update).not.toHaveBeenCalled();
+  });
+
+  it("ensureAccount defers EVM rows until a passkey is registered (B1)", async () => {    // No active authority → no address can be bound → no rows (fail closed:
     // nothing advertises an unclaimable funding target).
     const { service, prisma } = setup();
     (prisma.authority.findFirst as jest.Mock).mockResolvedValue(null);
