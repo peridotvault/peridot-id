@@ -58,6 +58,16 @@ pub mod program_id {
 }
 pub use program_id::{check_id, id, ID};
 
+/// Cluster id, baked at build time by `build.rs` from `PID_CLUSTER_ID`
+/// (ANT-868 B4: V5 payloads bind it alongside the runtime `program_id`, so a
+/// passkey assertion verifies on exactly one (program, cluster) pair).
+/// Local default is all zeros; named-cluster deploys must set the cluster's
+/// `solana genesis-hash` (build-time hard error otherwise).
+pub mod cluster_id {
+    include!(concat!(env!("OUT_DIR"), "/cluster_id.rs"));
+}
+pub use cluster_id::CLUSTER_ID;
+
 program_entrypoint!(process_instruction);
 pinocchio::default_allocator!();
 pinocchio::nostd_panic_handler!();
@@ -101,6 +111,8 @@ pub fn process_instruction(
             Instruction::WithdrawRevenue => instructions::withdraw_revenue::process(program_id, accounts, &instruction_data),
             Instruction::AddAdmin => instructions::add_admin::process(program_id, accounts, &instruction_data),
             Instruction::RemoveAdmin => instructions::remove_admin::process(program_id, accounts, &instruction_data),
+            Instruction::UpdateAuthorityV5 => instructions::update_authority_v5::process(program_id, accounts, &instruction_data),
+            Instruction::ExecuteV5 => instructions::execute_v5::process(program_id, accounts, &instruction_data),
         }
 }
 
@@ -133,6 +145,16 @@ mod ant16_ordering_tests {
         assert_effect_before_interaction(
             "execute.rs",
             include_str!("instructions/execute.rs"),
+            "increment_nonce()",
+            "invoke_signed_with_slice",
+        );
+    }
+
+    #[test]
+    fn execute_v5_burns_nonce_before_cpi() {
+        assert_effect_before_interaction(
+            "execute_v5.rs",
+            include_str!("instructions/execute_v5.rs"),
             "increment_nonce()",
             "invoke_signed_with_slice",
         );
@@ -425,6 +447,9 @@ mod ant612_permissionless_tests {
                     "PID_PROGRAM_ID",
                     "PID_PROGRAM_ID_REQUIRED",
                     "SOLANA_CLUSTER",
+                    // ANT-868 B4: baked V5 cluster binding (domain const, same
+                    // class as PID_PROGRAM_ID — never a creation gate).
+                    "PID_CLUSTER_ID",
                 ]
                 .contains(&var.as_str())
                     || var == backend_var,
@@ -563,6 +588,7 @@ mod ant635_vault_pins {
             ),
             ("execute.rs", include_str!("instructions/execute.rs")),
             ("execute_v4.rs", include_str!("instructions/execute_v4.rs")),
+            ("execute_v5.rs", include_str!("instructions/execute_v5.rs")),
         ] {
             assert!(
                 src.contains("verify_treasury_pda(treasury, program_id)?"),
@@ -668,5 +694,76 @@ mod ant635_vault_pins {
                 );
             }
         }
+    }
+}
+
+/// ANT-868 B4 V5 domain-binding regression: additive-only pins. V5 is new
+/// discriminants + new domain separators (never in-place rebinding): every
+/// pre-existing discriminant/error keeps its value so old SDK decoders and
+/// in-flight V3/V4 signatures keep working through the TTL sunset.
+#[cfg(test)]
+mod ant868_v5_pins {
+    use crate::auth;
+    use crate::instructions::Instruction;
+
+    #[test]
+    fn v5_instruction_discriminants_pinned() {
+        assert_eq!(Instruction::UpdateAuthorityV5 as u8, 20);
+        assert_eq!(Instruction::ExecuteV5 as u8, 21);
+        assert_eq!(auth::OP_UPDATE_AUTHORITY_V5, 20);
+        assert_eq!(auth::OP_EXECUTE_V5, 21);
+        assert_eq!(Instruction::try_from(20u8).unwrap(), Instruction::UpdateAuthorityV5);
+        assert_eq!(Instruction::try_from(21u8).unwrap(), Instruction::ExecuteV5);
+        // 19 stays unassigned; 22-29 (owner) and 30-32 (session) are RESERVED
+        // for the remaining-path migration — still unassigned in this slice.
+        for d in [19u8, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] {
+            assert!(Instruction::try_from(d).is_err(), "discriminant {d} must stay unassigned");
+        }
+    }
+
+    #[test]
+    fn v5_sources_bind_program_and_cluster() {
+        // Both V5 paths must recompute the binding from on-chain sources
+        // (runtime program_id arg + baked CLUSTER_ID) — never from
+        // instruction bytes a relayer could substitute.
+        for (file, src) in [
+            (
+                "update_authority_v5.rs",
+                include_str!("instructions/update_authority_v5.rs"),
+            ),
+            (
+                "execute_v5.rs",
+                include_str!("instructions/execute_v5.rs"),
+            ),
+        ] {
+            assert!(
+                src.contains("payload_hash_v5(&["),
+                "{file}: must verify under the V5 domain"
+            );
+            assert!(
+                src.contains("program_id.as_array()"),
+                "{file}: must bind the runtime program id"
+            );
+            assert!(
+                src.contains("&CLUSTER_ID"),
+                "{file}: must bind the baked cluster id"
+            );
+            // No V3 verification outside the test module (the tests compare
+            // V5-vs-V3 vectors; the process body must never touch V3).
+            let head = src.split("#[cfg(test)]").next().unwrap_or(src);
+            assert!(
+                !head.contains("payload_hash_v3"),
+                "{file}: process body must not verify under the V3 domain"
+            );
+        }
+    }
+
+    #[test]
+    fn v5_cluster_id_default_is_zero_local() {
+        // Local/dev builds bake zeros (warning at build time); named clusters
+        // must set PID_CLUSTER_ID (build-time hard error). The pin documents
+        // the default — a probe across same-default validators still verifies,
+        // which is why the replay probe builds with distinct ids.
+        assert_eq!(crate::CLUSTER_ID, [0u8; 32]);
     }
 }

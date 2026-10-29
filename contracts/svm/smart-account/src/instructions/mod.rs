@@ -8,6 +8,9 @@ pub mod add_admin;
 pub mod close;
 pub mod close_session;
 pub mod execute;
+/// V5 cluster-bound sibling of `execute` (ANT-868 B4 proving slice):
+/// identical layout, V5 domain + program/cluster binding. Additive-only.
+pub mod execute_v5;
 pub mod execute_v4;
 pub mod initialize;
 pub mod init_treasury;
@@ -16,6 +19,9 @@ pub mod remove_admin;
 pub mod revoke_session;
 pub mod session_execute;
 pub mod update_authority;
+/// V5 cluster-bound sibling of `update_authority` (ANT-868 B4 proving slice):
+/// identical layout, V5 domain + program/cluster binding. Additive-only.
+pub mod update_authority_v5;
 pub mod withdraw_revenue;
 pub mod withdraw_sol;
 pub mod withdraw_sol_v4;
@@ -55,6 +61,13 @@ pub enum Instruction {
     AddAdmin = 17,
     /// ANT-635: remove a live admin (floor-1 enforced).
     RemoveAdmin = 18,
+    /// ANT-868 B4 V5 cluster-bound proving slice (additive-only): each mirrors
+    /// its V3 counterpart's layout byte-for-byte and verifies under
+    /// `DOMAIN_V5` with the runtime program id + baked `CLUSTER_ID` bound
+    /// after the op-tag. Discriminants 22-29 (owner) and 30-32 (session) are
+    /// RESERVED for the remaining-path migration — do not assign ad hoc.
+    UpdateAuthorityV5 = 20,
+    ExecuteV5 = 21,
 }
 
 impl TryFrom<u8> for Instruction {
@@ -81,6 +94,8 @@ impl TryFrom<u8> for Instruction {
             16 => Ok(Self::WithdrawRevenue),
             17 => Ok(Self::AddAdmin),
             18 => Ok(Self::RemoveAdmin),
+            20 => Ok(Self::UpdateAuthorityV5),
+            21 => Ok(Self::ExecuteV5),
             _ => Err(ProgramError::InvalidInstructionData),
         }
     }
@@ -120,6 +135,10 @@ impl TryFrom<u8> for Instruction {
 /// - RemoveAdmin (18): `admin [u8; 32]`
 /// Withdraws/activations are relayer-sponsored: `protocol_fee` is recomputed as
 /// `floor(network_fee × bps / 10_000)` per the signed fee-policy version.
+/// V5 cluster-bound layouts (ANT-868 B4 — discriminators 20-21, verified
+/// under `DOMAIN_V5` with `program_id ‖ CLUSTER_ID` bound after the op-tag):
+/// - UpdateAuthorityV5 (20): same bytes as V3 UpdateAuthority
+/// - ExecuteV5 (21):          same bytes as V3 Execute
 pub struct InstructionData<'a> {
     data: &'a [u8],
 }

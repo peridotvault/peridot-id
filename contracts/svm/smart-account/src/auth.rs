@@ -45,10 +45,23 @@ pub const DOMAIN_V3: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v3";
 /// domain differs AND every V4 payload carries the extra `max_total_fee`
 /// field); V3 verifiers are untouched and never enforce the cap.
 pub const DOMAIN_V4: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v4";
+/// Domain separator for the V5 signed authorization payload (ANT-868 B4):
+/// V3 semantics plus the cluster binding — every V5 payload carries the
+/// runtime `program_id` and the baked [`crate::CLUSTER_ID`] after the op-tag,
+/// so an assertion verifies on exactly one (program, cluster) pair. V3/V4
+/// payloads can never verify as V5 (domain differs AND the bound parts are
+/// absent); V3/V4 verifiers are untouched and keep settling in-flight
+/// signatures through the TTL sunset.
+pub const DOMAIN_V5: &[u8] = b"PID|SOLANA|SMART_ACCOUNT|v5";
 /// Domain separator for session-grant payloads (WHITEPAPER.md §11). Disjoint from every
 /// `SMART_ACCOUNT` domain so an owner signature can never verify as a session
 /// grant and vice versa — the same separation the EVM `DOMAIN_PERM` provides.
 pub const DOMAIN_SESSION: &[u8] = b"PID|SOLANA|SESSION|v1";
+/// Domain separator for the V5 session-grant payload (ANT-868 B4): same shape
+/// as [`DOMAIN_SESSION`] plus the program/cluster binding. Reserved for the
+/// session-path migration (child issue); no V5 session instruction verifies
+/// under it yet.
+pub const DOMAIN_SESSION_V2: &[u8] = b"PID|SOLANA|SESSION|v2";
 
 /// V2 operation tags (match the instruction discriminators in `instructions`).
 pub const OP_INITIALIZE: u8 = 0;
@@ -72,6 +85,15 @@ pub const OP_WITHDRAW_SOL_V4: u8 = 11;
 pub const OP_WITHDRAW_TOKEN_V4: u8 = 12;
 pub const OP_EXECUTE_V4: u8 = 13;
 pub const OP_ACTIVATE_V4: u8 = 14;
+/// V5 cluster-bound owner paths (ANT-868 B4) under [`DOMAIN_V5`]. Each mirrors
+/// its V3 counterpart's instruction layout byte-for-byte; the signed payload
+/// additionally binds the runtime `program_id` and baked `CLUSTER_ID` right
+/// after the op-tag. Op-tags equal the V5 discriminators (20+), so a V3/V4
+/// signature can never authorize a V5 instruction and vice versa. Only the
+/// proving slice is implemented (20-21); 22-29 are RESERVED for the remaining
+/// owner-path migration (child issue) — do not assign them ad hoc.
+pub const OP_UPDATE_AUTHORITY_V5: u8 = 20;
+pub const OP_EXECUTE_V5: u8 = 21;
 
 /// Maximum authorization lifetime in seconds, enforced on-chain alongside expiry.
 /// Bounds cross-cluster replay: the same PDA exists on every cluster by design,
@@ -119,11 +141,30 @@ pub fn payload_hash_v4(parts: &[&[u8]]) -> [u8; 32] {
     hash_with_domain(DOMAIN_V4, parts)
 }
 
+/// Domain-separated V5 authorization payload hash: `sha256(DOMAIN_V5 ‖ parts...)`.
+/// This is the value the client puts in the WebAuthn challenge (base64url).
+/// The first part MUST be the one-byte V5 operation tag (`OP_*_V5`, equal to
+/// the V5 instruction discriminator), followed by the runtime `program_id`
+/// (32 bytes) and the baked `CLUSTER_ID` (32 bytes) — the B4 cluster binding.
+/// All remaining parts mirror the V3 counterpart's layout, so SDK builders
+/// share every serializer with V3 and only prefix the two bound parts.
+pub fn payload_hash_v5(parts: &[&[u8]]) -> [u8; 32] {
+    hash_with_domain(DOMAIN_V5, parts)
+}
+
 /// Domain-separated session-grant payload hash: `sha256(DOMAIN_SESSION ‖ parts...)`.
 /// Used for owner-signed session lifecycle ops (register/revoke/close). The
 /// first part MUST be the one-byte operation tag (`OP_*_SESSION`).
 pub fn payload_hash_session(parts: &[&[u8]]) -> [u8; 32] {
     hash_with_domain(DOMAIN_SESSION, parts)
+}
+
+/// Domain-separated V5 session-grant payload hash:
+/// `sha256(DOMAIN_SESSION_V2 ‖ parts...)`. Reserved for the session-path
+/// migration (child issue): same shape as v1 plus the program/cluster
+/// binding after the op-tag. No instruction verifies under it yet.
+pub fn payload_hash_session_v2(parts: &[&[u8]]) -> [u8; 32] {
+    hash_with_domain(DOMAIN_SESSION_V2, parts)
 }
 
 fn hash_with_domain(domain: &[u8], parts: &[&[u8]]) -> [u8; 32] {
@@ -401,6 +442,54 @@ mod tests {
         buf.extend_from_slice(&nonce);
         buf.extend_from_slice(&cap);
         assert_eq!(h_v4, sha256(&buf));
+    }
+
+    #[test]
+    fn payload_hash_v5_binds_program_and_cluster_and_separates() {
+        // V5 op-tags equal the new discriminators (20-21 proving slice).
+        assert_eq!(OP_UPDATE_AUTHORITY_V5, 20);
+        assert_eq!(OP_EXECUTE_V5, 21);
+        let program = [0x77u8; 32];
+        let cluster = [0x5au8; 32];
+        let account_id = [0x22u8; 32];
+        let nonce = 7u64.to_le_bytes();
+        let h_v5 = payload_hash_v5(&[&[OP_UPDATE_AUTHORITY_V5], &program, &cluster, &account_id, &nonce]);
+        // Same tail under V3 must differ (domain separation).
+        let h_v3 = payload_hash_v3(&[&[OP_UPDATE_AUTHORITY], &account_id, &nonce]);
+        assert_ne!(h_v5, h_v3);
+        // Same V5 fields with a different cluster must differ (binding).
+        let other_cluster =
+            payload_hash_v5(&[&[OP_UPDATE_AUTHORITY_V5], &program, &[0x5bu8; 32], &account_id, &nonce]);
+        assert_ne!(h_v5, other_cluster);
+        // Same V5 fields with a different program must differ (binding).
+        let other_program =
+            payload_hash_v5(&[&[OP_UPDATE_AUTHORITY_V5], &[0x78u8; 32], &cluster, &account_id, &nonce]);
+        assert_ne!(h_v5, other_program);
+        // Cross-op separation within V5.
+        let other_op = payload_hash_v5(&[&[OP_EXECUTE_V5], &program, &cluster, &account_id, &nonce]);
+        assert_ne!(h_v5, other_op);
+        // Reference computation: sha256(DOMAIN_V5 ‖ parts).
+        let mut buf = Vec::new();
+        buf.extend_from_slice(DOMAIN_V5);
+        buf.extend_from_slice(&[OP_UPDATE_AUTHORITY_V5]);
+        buf.extend_from_slice(&program);
+        buf.extend_from_slice(&cluster);
+        buf.extend_from_slice(&account_id);
+        buf.extend_from_slice(&nonce);
+        assert_eq!(h_v5, sha256(&buf));
+    }
+
+    #[test]
+    fn payload_hash_session_v2_separates_from_v1() {
+        let account_id = [0x22u8; 32];
+        let h_v2 = payload_hash_session_v2(&[&[OP_REGISTER_SESSION], &account_id]);
+        let h_v1 = payload_hash_session(&[&[OP_REGISTER_SESSION], &account_id]);
+        assert_ne!(h_v2, h_v1);
+        let mut buf = Vec::new();
+        buf.extend_from_slice(DOMAIN_SESSION_V2);
+        buf.extend_from_slice(&[OP_REGISTER_SESSION]);
+        buf.extend_from_slice(&account_id);
+        assert_eq!(h_v2, sha256(&buf));
     }
 
     #[test]
