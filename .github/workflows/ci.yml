@@ -90,6 +90,14 @@ jobs:
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
+      - name: Deploy scripts syntax guard
+        run: |
+          # ANT-869: the SVM atomic deploy+init flow must never break silently.
+          # node --check is syntax-only (no deps, no keypairs, no network).
+          node --check deploy/svm-init-treasury-atomic.mjs
+          node --check deploy/svm-verify-treasury.mjs
+          bash -n deploy/svm-deploy-init-atomic.sh
+
       - name: Prisma generate
         run: pnpm --filter @peridotvault/pid-api db:generate
 
