@@ -90,10 +90,20 @@ fi
 # The operator keypair becomes upgrade authority on fresh deploys.
 if [ "$UPGRADE" = "1" ]; then
   echo "--- step 1/2: solana program upgrade (authority = operator) ---"
-  solana program upgrade "$SO_PATH" \
-    --program-id "$PROGRAM_KEYPAIR" \
+  # NOTE: `solana program upgrade` takes a WRITTEN BUFFER + program id
+  # positionally (no --program-id flag, CLI 2.3.13). The buffer keypair is
+  # ephemeral: generated here, deleted right after the upgrade lands.
+  BUFFER_KEYPAIR="$(mktemp -u /tmp/program-buffer-XXXXXX.json)"
+  solana-keygen new --no-bip39-passphrase --silent --outfile "$BUFFER_KEYPAIR" >/dev/null
+  BUFFER_ADDR="$(solana-keygen pubkey "$BUFFER_KEYPAIR")"
+  solana program write-buffer "$SO_PATH" \
+    --buffer "$BUFFER_KEYPAIR" \
     --keypair "$OPERATOR_KEYPAIR" \
     --url "$RPC_URL"
+  solana program upgrade "$BUFFER_ADDR" "$PROGRAM_ID" \
+    --keypair "$OPERATOR_KEYPAIR" \
+    --url "$RPC_URL"
+  rm -f "$BUFFER_KEYPAIR"
 else
   echo "--- step 1/2: solana program deploy (authority = operator) ---"
   solana program deploy "$SO_PATH" \
