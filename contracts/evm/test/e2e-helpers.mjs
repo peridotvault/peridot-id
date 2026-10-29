@@ -109,6 +109,8 @@ export function actPayloadV3({ salt, x, y, feePolicyVersion, deadline, chainId, 
 }
 
 // --- V3 execute payload (unchanged by ANT-197; kept here for hermeticity) ---
+// Retained ONLY for the hard-close regression: V3 calls must revert with
+// V3Deprecated (ANT-863 B2). Live loops use the V4 builders below.
 
 export function exePayloadV3({ chainId, account, nonce, to, value, dataHash, deadline, feePolicyVersion }) {
   return keccak(Buffer.concat([
@@ -116,6 +118,18 @@ export function exePayloadV3({ chainId, account, nonce, to, value, dataHash, dea
     u8(chainId, 32), addrBuf(account), u8(nonce, 8),
     addrBuf(to), u8(value, 32), b32(dataHash),
     u8(deadline, 8), u8(feePolicyVersion, 2),
+  ]));
+}
+
+// --- V4 owner-execute payload: as V3 plus the user-approved maxTotalFee,
+// verified under DOMAIN_V4 with total ≤ maxTotalFee (FeeExceedsMax) ---
+
+export function exePayloadV4({ chainId, account, nonce, to, value, dataHash, deadline, feePolicyVersion, maxTotalFee }) {
+  return keccak(Buffer.concat([
+    DOMAIN_V4, Buffer.from([0x01]),
+    u8(chainId, 32), addrBuf(account), u8(nonce, 8),
+    addrBuf(to), u8(value, 32), b32(dataHash),
+    u8(deadline, 8), u8(feePolicyVersion, 2), u8(maxTotalFee, 32),
   ]));
 }
 
@@ -135,6 +149,14 @@ export function executeData({ to, value, data, deadline, feePolicyVersion, netwo
   return execSync(
     `${CAST} calldata "execute(address,uint256,bytes,uint64,uint16,uint256,bytes,bytes,bytes32,bytes32)" ` +
     `${to} ${value} ${hx(data)} ${deadline} ${feePolicyVersion} ${networkFee} ${hx(authData)} ${hx(clientDataJSON)} ${hx(r)} ${hx(s)}`,
+    { encoding: "utf8" },
+  ).trim();
+}
+
+export function executeV4Data({ to, value, data, deadline, feePolicyVersion, maxTotalFee, networkFee, authData, clientDataJSON, r, s }) {
+  return execSync(
+    `${CAST} calldata "executeV4(address,uint256,bytes,uint64,uint16,uint256,uint256,bytes,bytes,bytes32,bytes32)" ` +
+    `${to} ${value} ${hx(data)} ${deadline} ${feePolicyVersion} ${maxTotalFee} ${networkFee} ${hx(authData)} ${hx(clientDataJSON)} ${hx(r)} ${hx(s)}`,
     { encoding: "utf8" },
   ).trim();
 }

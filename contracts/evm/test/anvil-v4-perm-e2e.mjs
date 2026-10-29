@@ -149,7 +149,7 @@ const execP = permExecPayload({
 const e = assertion(session, execP);
 // Post-ANT-206 the on-chain GasAnomaly bound measures the full execute
 // frame, so honest estimate x price attestation passes (same pattern as
-// anvil-v3-e2e.mjs). Draft with zero fee, estimate, rebuild — the PERM
+// anvil-v4-e2e.mjs). Draft with zero fee, estimate, rebuild — the PERM
 // payload binds policy + cap only, so no re-signing is needed.
 const draftExec = executeWithPermissionData({
   permissionId: pid, target: scope.target, value: 0n, data: callData, deadline, seq: 0,

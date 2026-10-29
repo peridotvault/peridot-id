@@ -253,12 +253,12 @@ distinction, enforced on-chain and proven by the adversarial suite.
 - `sol_sha256` crash → pure-Rust SHA-256; expiries use chain clocks, not device time. Signature TTLs stay short (600s max, ~300s client) — the primary bound on cross-cluster validity (see §1).
 - Sponsored model is canonical: Peridot sponsors submission, the user authorizes the operation plus a fixed fee policy with a passkey, the backend attests realtime network cost, contracts enforce rate/recipients/formula, revenue lands in the factory vault (EVM) / build-time vault (SVM). No revert to amount-capped or client-pays models.
 - Reconciliation (both chains, all sponsored flows): backend verifies `protocolFee == formula(networkFee)` and `attested ≈ actual` from confirmed transaction metadata (EVM receipts + L2 oracle data; Solana `meta.fee` + priority-fee data), with alerts on divergence. Spike underpayment between attest and mining is absorbed by the relayer.
-- Verify: `cd contracts/evm && forge test` (65: V3 passkey-bound `deployAndInit`,
-  squat-attempt, policy/sanity/admin/revenue cases + 33 V4 permission/adversarial
+- Verify: `cd contracts/evm && forge test` (95: V4 `deployAndInitV4`/`executeV4`
+  (cap, policy/sanity/admin/revenue, V3 hard-close pins) + permission/adversarial
   cases: unauthorized finance, escalation, reentry, 1271 misuse, replay, revocation,
-  delegatecall-absence) + `node test/anvil-v3-e2e.mjs` (TS→contract loop) +
+  delegatecall-absence) + `node test/anvil-v4-e2e.mjs` (TS→contract V4 loop + V3 hard-close pins) +
   `node test/anvil-v4-perm-e2e.mjs` (SDK grant→session-exec→revoke loop) ·
-  `cd contracts/svm/smart-account && PID_TREASURY=<key> cargo build-sbf && PID_TREASURY=<key> cargo test` (52) + `node tests/integration.mjs <id>` (44: permissionless-creation/anti-squat/policy/attested-fee/rounding/execute cases) + `node tests/session.mjs <id> <forwarder-id>` (24 session cases: isolation, forwarding bounds, protected invariants, replay, lifecycle) + `node ../../packages/solana/test/adapter.e2e.mjs` · `pnpm typecheck` · `pnpm --filter @peridotvault/pid-api exec jest` (259).
+  `cd contracts/svm/smart-account && PID_TREASURY=<key> cargo build-sbf && PID_TREASURY=<key> cargo test` (76) + `node tests/integration.mjs <id>` (~67: V4 permissionless-creation/anti-squat/policy/capped-fee/rounding/execute cases + V3 hard-close pins) + `node tests/session.mjs <id> <forwarder-id>` (24 session cases: isolation, forwarding bounds, protected invariants, replay, lifecycle) + `node ../../packages/solana/test/adapter.e2e.mjs` · `pnpm typecheck` · `pnpm --filter @peridotvault/pid-api exec jest` (259).
 - Security model: creation = passkey-authorized (permissionless + fee-bearing on SVM `activate`/`activateV4` since ANT-612, `initialize` dead; no submitter allowlist on EVM `deployAndInit` since ANT-611 — any caller with a valid user authorization deploys; admin `deploysPaused` only halts new creation); spends = passkey-signed intents with fully-bound semantics (account, op, nonce, dest, value, calldata, chain, deadline, policy); EVM V4 adds owner-authorized permission grants plus session-signed executions inside owner-set scope (permission id, seq, target/data, caps, expiry, revocation); SVM sessions add owner-registered Ed25519 gameplay sessions inside PDA-isolated scope (session seq, allowlisted game, protected invariants, 24h/inactivity bounds, revocation); submission is permissionless by design. A compromised relayer may waste its own gas or submit valid user-signed intents (bounded by balance/TTL/drift/reconciliation) but MUST NOT forge authority, alter bound fields, change the fee policy, redirect funds or revenue, or settle anything but `networkFee + formula(networkFee)`.
 
 ## 10. EVM permission layer (canonical)
@@ -401,12 +401,13 @@ owner-bound destinations.
 
 ## 12. Proven vs architectural claim (pre-audit)
 
-Proven — EVM (65 forge tests incl. 33 permission/adversarial, anvil V3+V4 E2E,
+Proven — EVM (95 forge tests incl. permission/adversarial, anvil V4 E2E + V3
+hard-close pins,
 byte-exact SDK vectors, 9 backend specs): §10 table for single-call scope,
 OWNER/PERMISSION disjointness, revocation immediacy, fee parity, no-delegatecall
-bytecode, SDK↔contract interop. Proven — SVM (52 host unit incl. ANT-612
-no-allowlist pins, 24 validator session cases incl. malicious-forwarder
-forwarding bounds, 44 integration cases incl. permissionless-creation proofs,
+bytecode, SDK↔contract interop. Proven — SVM (76 host unit incl. ANT-612
+no-allowlist pins + ANT-863 B2 hard-close pins, 24 validator session cases incl. malicious-forwarder
+forwarding bounds, ~67 integration cases incl. permissionless-creation proofs and V3 hard-close pins,
 SDK/backend specs): §11 table for single-CPI scope, domain
 disjointness, revocation immediacy, rent-exact lifecycle, loader classes,
 SDK↔program byte parity via independent reimplementation.

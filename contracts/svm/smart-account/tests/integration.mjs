@@ -2,10 +2,10 @@
 // ANT-863 B2 V3 hard close).
 //
 // Runs against a local `solana-test-validator`. Covers the V4 authorization + fee
-// schema (contracts/WHITEPAPER.md §2, canonical): op-tagged + account-bound
-// payloads with policy-only fee binding, attested networkFee + fixed protocol %,
-// canonical revenue vault, UV enforcement, TTL caps, plus the adversarial
-// list (squat, replay, substitution, rotation, close, tokens, rounding).
+// split (`max_total_fee`-capped discs 11-14), domain separation, replay/expiry/TTL,
+// rotation, close, token + generic-CPI execution, the ANT-635 revenue vault,
+// and the ANT-863 B2 V3 hard-close pins (discs 1/2/5/6 → V3Deprecated 0x1e,
+// over-cap → FeeExceedsMax 0xc). Keep-alive discs 0 (dead), 3 + 4 (live) covered.
 // Domain-free since ANT-197: no RP-ID hash is stored or verified on-chain.
 //
 // Creation is permissionless (ANT-610 spec §5, ANT-612): ANY signer may submit
@@ -24,7 +24,7 @@
 //   solana-test-validator --reset > /tmp/validator.log 2>&1 &
 //   solana program deploy target/deploy/peridot_smart_account.so \
 //     --program-id target/deploy/peridot_smart_account-keypair.json
-//   node tests/integration.mjs <program-id>   # ~59 cases incl. vault admin/withdraw (count printed at end)
+//   node tests/integration.mjs <program-id>   # ~67 cases incl. vault admin/withdraw + V3 hard-close pins (count printed at end)
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import {

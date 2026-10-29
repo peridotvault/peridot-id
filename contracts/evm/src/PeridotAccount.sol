@@ -164,6 +164,13 @@ contract PeridotAccount {
     error NotModule();
     error AlreadyInstalled();
     error Reentrancy();
+    /// @notice ANT-863 B2: the V3 fee paths are hard-closed on-chain. V3
+    /// `networkFee` is attested-but-unsigned (the payload binds policy, NOT
+    /// fee). The V3 `execute` overload and the factory V3 `deployAndInit`
+    /// path revert with this error before any other validation. V4
+    /// (`executeV4` / `deployAndInitV4`, `maxTotalFee`-capped) is the only
+    /// fee path. Additive-only: existing selectors/errors are untouched.
+    error V3Deprecated();
 
     event Initialized(bytes32 x, bytes32 y, uint256 networkFee, uint256 protocolFee);
     event Executed(address indexed to, uint256 value, uint256 networkFee, uint256 protocolFee, uint64 nonce);
@@ -415,12 +422,15 @@ contract PeridotAccount {
     receive() external payable {}
 
     /// @notice Execute a call authorized by the passkey.
-    /// @dev ANT-800: CLOSED for new intents (H2 — no `maxTotalFee` bound).
-    /// New code MUST use `executeV4`. Frozen here solely to settle in-flight
-    /// V3 signatures. The relayer submits the tx and floats gas, then attests `networkFee`;
-    /// the contract sanity-checks it against measured gas, recomputes
-    /// `protocolFee` from policy, and splits relayerFee → `msg.sender`,
-    /// protocolFee → factory vault — atomically, in this same transaction.
+    /// @dev ANT-863 B2: HARD CLOSED — reverts with `V3Deprecated` before any
+    /// other validation (V3 `networkFee` is attested-but-unsigned: no
+    /// `maxTotalFee` bound; in-flight V3 signatures can no longer settle and
+    /// die by the 600s TTL regardless). New code MUST use `executeV4`.
+    /// Retained for selector stability only (the selector still decodes, then
+    /// rejects — never shifted). The frozen body below documents the retired
+    /// settlement flow (relayer attests `networkFee`, contract recomputes
+    /// `protocolFee` from policy, splits relayerFee → `msg.sender` +
+    /// protocolFee → factory vault atomically).
     function execute(
         address to,
         uint256 value,
@@ -433,6 +443,10 @@ contract PeridotAccount {
         bytes32 r,
         bytes32 s
     ) external nonReentrant {
+        // ANT-863 B2: V3 fee paths are hard-closed on-chain. Reverts before
+        // any other validation; unreachable code below is retained for
+        // selector stability only.
+        revert V3Deprecated();
         uint256 startGas = gasleft();
         if (!initialized) revert NotInitialized();
         if (to == address(this)) revert InvalidTarget();
@@ -468,7 +482,7 @@ contract PeridotAccount {
     /// the contract recomputes `protocolFee` with the pure-percentage formula
     /// (ANT-747: floor leg removed) and enforces `totalFee ≤ maxTotalFee`
     /// (FeeExceedsMax) before any value moves.
-    /// The frozen V3 `execute` above is untouched (ANT-544 B-AC9).
+    /// The V3 `execute` above is hard-closed (ANT-863 B2 `V3Deprecated`).
     function executeV4(
         address to,
         uint256 value,

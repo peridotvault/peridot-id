@@ -51,6 +51,12 @@ contract PeridotFactory {
     error RevenueTransferFailed();
     error GasAnomaly();
     error Paused();
+    /// @notice ANT-863 B2: the V3 factory path is hard-closed on-chain. V3
+    /// `networkFee` is attested-but-unsigned (the payload binds policy, NOT
+    /// fee). `deployAndInit` reverts with this error before any other
+    /// validation. V4 (`deployAndInitV4`, `maxTotalFee`-capped) is the only
+    /// creation path. Additive-only: existing selectors/errors are untouched.
+    error V3Deprecated();
 
     modifier onlyAdmin() {
         if (!admins[msg.sender]) revert NotAdmin();
@@ -120,6 +126,9 @@ contract PeridotFactory {
     /// (ANT-610): ANY submitter may call — the account itself verifies the
     /// activation authorization, so no front-run window exists on the authority,
     /// the policy, or the recipients.
+    /// @dev ANT-863 B2: HARD CLOSED — reverts with `V3Deprecated` before any
+    /// other validation. Use `deployAndInitV4`. Retained for selector
+    /// stability only.
     /// Mirrors SVM `activate`: the account is pre-funded at its counterfactual address;
     /// the submitter attests `networkFee`, the account recomputes `protocolFee`
     /// from policy — relayerFee → the submitting caller (`msg.sender` here;
@@ -143,6 +152,10 @@ contract PeridotFactory {
         bytes32 r,
         bytes32 s
     ) external returns (address account) {
+        // ANT-863 B2: V3 factory path is hard-closed on-chain. Reverts before
+        // any other validation; unreachable code below is retained for
+        // selector stability only.
+        revert V3Deprecated();
         uint256 startGas = gasleft();
         if (deploysPaused) revert Paused();
         account = Clones.cloneDeterministic(implementation, salt);

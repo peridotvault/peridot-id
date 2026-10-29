@@ -96,9 +96,6 @@ contract PeridotPermissionTest is Test {
 
     // ANT-747: on-chain floors removed — v2 settles pure 50% on every chain.
 
-    bytes32 constant VEC_ACT_R = 0xe833d5ba603d6a180091a10e6cc56ae051abce1624970cbe8bf278d8e6858636;
-    bytes32 constant VEC_ACT_S = 0x6a961eb397aa853a23248b4af0d4d84c3d103a4451959793117939d73bf69a30;
-
     bytes4 constant MAGIC_1271 = 0x1626ba7e;
     bytes4 constant MAGIC_INVALID = 0xffffffff;
 
@@ -114,15 +111,18 @@ contract PeridotPermissionTest is Test {
         authPrefix = sha256("test-rp");
         address[] memory admins = new address[](1);
         admins[0] = address(this);
-        // Same deploy order as the V3 suite → same factory address → VEC_ACT reusable.
+        // Same deploy order as the account suite → same factory address.
         factory = new PeridotFactory(address(new PeridotAccount()), admins);
         address predicted = factory.predict(SALT);
         vm.deal(predicted, 0.01 ether);
+        bytes32 actPayload = keccak256(
+            abi.encodePacked(DOMAIN_V4, uint8(0x05), SALT, GX, GY, POLICY_V1, uint256(0.003 ether), DEADLINE, block.chainid, address(factory))
+        );
+        (bytes memory actAuth, bytes memory actClient, bytes32 actR, bytes32 actS) = _sigOwner(actPayload);
         account = PeridotAccount(
             payable(
-                factory.deployAndInit(
-                    SALT, GX, GY, POLICY_V1, DEADLINE, 0.002 ether, _authData(), _clientData(_actPayload()),
-                    VEC_ACT_R, VEC_ACT_S
+                factory.deployAndInitV4(
+                    SALT, GX, GY, POLICY_V1, 0.003 ether, DEADLINE, 0.002 ether, actAuth, actClient, actR, actS
                 )
             )
         );
@@ -165,12 +165,6 @@ contract PeridotPermissionTest is Test {
     }
 
     // ---- payload builders (mirror the contract field-for-field) ----
-
-    function _actPayload() internal view returns (bytes32) {
-        return keccak256(
-            abi.encodePacked(DOMAIN_V3, uint8(0x05), SALT, GX, GY, POLICY_V1, DEADLINE, block.chainid, address(factory))
-        );
-    }
 
     function _pid(
         bytes32 sx,
@@ -667,26 +661,26 @@ contract PeridotPermissionTest is Test {
         assertEq(factory.predict(SALT), before, "rotation moved the address");
         assertEq(account.authorityX(), SX);
         assertEq(account.authorityY(), SY);
-        // New key executes (owner path, fresh nonce).
+        // New key executes (V4 owner path, fresh nonce).
         bytes32 execPayload = keccak256(
             abi.encodePacked(
-                DOMAIN_V3, uint8(0x01), block.chainid, address(account), n + 1, address(0x1234), uint256(0),
-                keccak256(""), DEADLINE, POLICY_V1
+                DOMAIN_V4, uint8(0x01), block.chainid, address(account), n + 1, address(0x1234), uint256(0),
+                keccak256(""), DEADLINE, POLICY_V1, uint256(0)
             )
         );
         (bytes memory a2, bytes memory c2, bytes32 r2, bytes32 s2) = _sigSession(execPayload);
-        account.execute(address(0x1234), 0, "", DEADLINE, POLICY_V1, 0, a2, c2, r2, s2);
+        account.executeV4(address(0x1234), 0, "", DEADLINE, POLICY_V1, 0, 0, a2, c2, r2, s2);
         // Old-key replay over FRESH bytes (current nonce) fails on the key, not
         // the nonce: the old key no longer verifies.
         bytes32 execPayload2 = keccak256(
             abi.encodePacked(
-                DOMAIN_V3, uint8(0x01), block.chainid, address(account), n + 2, address(0x1234), uint256(0),
-                keccak256(""), DEADLINE, POLICY_V1
+                DOMAIN_V4, uint8(0x01), block.chainid, address(account), n + 2, address(0x1234), uint256(0),
+                keccak256(""), DEADLINE, POLICY_V1, uint256(0)
             )
         );
         (bytes memory a3, bytes memory c3, bytes32 r3, bytes32 s3) = _sigOwner(execPayload2);
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
-        account.execute(address(0x1234), 0, "", DEADLINE, POLICY_V1, 0, a3, c3, r3, s3);
+        account.executeV4(address(0x1234), 0, "", DEADLINE, POLICY_V1, 0, 0, a3, c3, r3, s3);
     }
 
     // ---- V4 activation (fee-capped, factory V4 path) ----
@@ -1100,17 +1094,17 @@ contract PeridotPermissionTest is Test {
     }
 
     function test_AdvSessionSigInvalidOnOwnerPaths() public {
-        // Session signs a V3 owner payload shape; the owner verifier must reject it.
+        // Session signs a V4 owner payload shape; the owner verifier must reject it.
         address to = address(0x1234);
         bytes32 payload = keccak256(
             abi.encodePacked(
-                DOMAIN_V3, uint8(0x01), block.chainid, address(account), account.nonce(), to, uint256(0),
-                keccak256(""), DEADLINE, POLICY_V1
+                DOMAIN_V4, uint8(0x01), block.chainid, address(account), account.nonce(), to, uint256(0),
+                keccak256(""), DEADLINE, POLICY_V1, uint256(0)
             )
         );
         (bytes memory auth, bytes memory client, bytes32 r, bytes32 s) = _sigSession(payload);
         vm.expectRevert(PeridotAccount.Unauthorized.selector);
-        account.execute(to, 0, "", DEADLINE, POLICY_V1, 0, auth, client, r, s);
+        account.executeV4(to, 0, "", DEADLINE, POLICY_V1, 0, 0, auth, client, r, s);
     }
 
     function test_AdvGrantNeedsOwnerSig() public {
