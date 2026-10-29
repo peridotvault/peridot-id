@@ -38,7 +38,7 @@ const adapterMock = {
     feeLamports: BigInt(20000),
     marginLamports: BigInt(0),
   })),
-  activateV3: jest.fn(async () => "sig1"),
+  activateV4: jest.fn(async () => "sig1"),
   treasuryAddress: jest.fn(() => new MockPublicKey(TREASURY_PDA)),
   parseTransaction: jest.fn(async () => ({ signature: "sig1", fee: NETWORK })),
   chainTime: jest.fn(async () => 1000000000),
@@ -98,7 +98,7 @@ beforeEach(() => {
   userBalance = 100_000_000;
   adapterMock.isActivated.mockResolvedValue(false);
   adapterMock.getStatus.mockResolvedValue({ confirmed: true, error: undefined, signature: "sig1" });
-  adapterMock.activateV3.mockResolvedValue("sig1");
+  adapterMock.activateV4.mockResolvedValue("sig1");
 });
 
 describe("ActivationService", () => {
@@ -106,11 +106,15 @@ describe("ActivationService", () => {
     const { service, prisma, security } = setup();
     // Pre-check (before sending): not yet program-owned. After `adapter.activate` runs, the
     // PDA becomes program-owned — flip the response so viewOf reports active.
-    adapterMock.isActivated.mockImplementation(async () => adapterMock.activateV3.mock.calls.length > 0);
+    adapterMock.isActivated.mockImplementation(async () => adapterMock.activateV4.mock.calls.length > 0);
 
     const view = await service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(NETWORK), maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } });
 
     expect(view.status).toBe("active");
+    // ANT-895: the relayer broadcasts activateV4 (never V3) carrying the
+    // user-approved maxTotalFee bound.
+    expect(adapterMock.activateV4).toHaveBeenCalledTimes(1);
+    expect((adapterMock.activateV4.mock.calls[0] as unknown[])[4]).toBe(BigInt(NETWORK + PROTOCOL));
     expect(prisma.transaction.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -156,7 +160,7 @@ describe("ActivationService", () => {
     await expect(
       service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(NETWORK), maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "nope", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } }),
     ).rejects.toThrow(BadRequestException);
-    expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    expect(adapterMock.activateV4).not.toHaveBeenCalled();
   });
 
   it("returns 503 and creates no rows when the relayer is unfunded", async () => {    const { service, prisma, security } = setup();
@@ -164,7 +168,7 @@ describe("ActivationService", () => {
 
     await expect(service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(NETWORK), maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } })).rejects.toThrow(ServiceUnavailableException);
 
-    expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    expect(adapterMock.activateV4).not.toHaveBeenCalled();
     expect(prisma.transaction.create).not.toHaveBeenCalled();
     expect(prisma.chainAccount.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "ready" }) }),
@@ -180,7 +184,7 @@ describe("ActivationService", () => {
 
       await expect(service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(NETWORK), maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } })).rejects.toThrow(ServiceUnavailableException);
 
-      expect(adapterMock.activateV3).toHaveBeenCalled();
+      expect(adapterMock.activateV4).toHaveBeenCalled();
       expect(prisma.transaction.create).not.toHaveBeenCalled();
       expect(prisma.chainAccount.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: "ready" }) }),
@@ -207,7 +211,7 @@ describe("ActivationService", () => {
     userBalance = 0; // user address not funded → inactivated
 
     await expect(service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(NETWORK), maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } })).rejects.toThrow(ConflictException);
-    expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    expect(adapterMock.activateV4).not.toHaveBeenCalled();
   });
 
   it("heals a stale active row in the poll when the account is not actually activated", async () => {
@@ -293,7 +297,7 @@ describe("ActivationService", () => {
     await expect(
       service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(QUOTED_TOO_SMALL), maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } }),
     ).rejects.toThrow(ConflictException);
-    expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    expect(adapterMock.activateV4).not.toHaveBeenCalled();
     // H1.v + H1.ii: drift pair with the exact contract keys.
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
@@ -315,10 +319,10 @@ describe("ActivationService", () => {
   it("accepts attestation at exactly 120% of the quote", async () => {
     // attested 820880 vs quoted 684067: 820880×100 == 82088000 < 684067×120 == 82088040.
     const { service } = setup();
-    adapterMock.isActivated.mockImplementation(async () => adapterMock.activateV3.mock.calls.length > 0);
+    adapterMock.isActivated.mockImplementation(async () => adapterMock.activateV4.mock.calls.length > 0);
     const view = await service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: "684067", maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } });
     expect(view.status).toBe("active");
-    expect(adapterMock.activateV3).toHaveBeenCalledTimes(1);
+    expect(adapterMock.activateV4).toHaveBeenCalledTimes(1);
   });
 
   it("rejects attestation one unit above the 120% boundary", async () => {
@@ -327,7 +331,7 @@ describe("ActivationService", () => {
     await expect(
       service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: "684066", maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } }),
     ).rejects.toThrow(ConflictException);
-    expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    expect(adapterMock.activateV4).not.toHaveBeenCalled();
   });
 
   it("rejects an authorization lifetime beyond 600 seconds", async () => {
@@ -335,7 +339,7 @@ describe("ActivationService", () => {
     await expect(
       service.activate({ pid: IDENTITY_ID }, { expiry: 1000000901, quotedNetworkFeeLamports: String(NETWORK), maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } }),
     ).rejects.toThrow(BadRequestException);
-    expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    expect(adapterMock.activateV4).not.toHaveBeenCalled();
   });
 
   it("rejects an unsupported fee policy version", async () => {
@@ -343,7 +347,7 @@ describe("ActivationService", () => {
     await expect(
       service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(NETWORK), maxTotalFeeLamports: String(NETWORK + PROTOCOL), feePolicyVersion: 99, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } }),
     ).rejects.toThrow(BadRequestException);
-    expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    expect(adapterMock.activateV4).not.toHaveBeenCalled();
   });
 
   it("exposes the fee policy version without any domain binding in the activation view", async () => {
@@ -397,7 +401,7 @@ describe("ActivationService", () => {
     await expect(
       service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(NETWORK), maxTotalFeeLamports: String(NETWORK + PROTOCOL - 1), feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } }),
     ).rejects.toThrow(ConflictException);
-    expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    expect(adapterMock.activateV4).not.toHaveBeenCalled();
     expect(security.log).toHaveBeenCalledWith(
       IDENTITY_ID,
       "account.activation.max_total_exceeded",
@@ -410,6 +414,6 @@ describe("ActivationService", () => {
     await expect(
       service.activate({ pid: IDENTITY_ID }, { expiry: 1000000300, quotedNetworkFeeLamports: String(NETWORK), maxTotalFeeLamports: "lots", feePolicyVersion: 2, assertion: { id: "cred-1", signature: "c2ln", authenticatorData: "YXV0aA", clientDataJSON: "e30" } }),
     ).rejects.toThrow(BadRequestException);
-    expect(adapterMock.activateV3).not.toHaveBeenCalled();
+    expect(adapterMock.activateV4).not.toHaveBeenCalled();
   });
 });

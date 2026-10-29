@@ -5,7 +5,7 @@ export class EvmActivateAssertionDto {
   @IsString()
   id!: string;
 
-  /** hex 32-byte r of the secp256r1 signature over the V3 activation payload */
+  /** hex 32-byte r of the secp256r1 signature over the V4 activation payload */
   @Matches(/^0x[0-9a-fA-F]{64}$/, { message: "r must be 0x + 64 hex chars" })
   r!: string;
 
@@ -17,7 +17,7 @@ export class EvmActivateAssertionDto {
   @IsString()
   authenticatorData!: string;
 
-  /** base64url clientDataJSON (challenge must equal the V3 activation payload) */
+  /** base64url clientDataJSON (challenge must equal the V4 activation payload) */
   @IsString()
   clientDataJSON!: string;
 }
@@ -27,15 +27,15 @@ export class EvmActivateDto {
   @Matches(/^\d+$/, { message: "Quoted network fee must be wei (positive integer)" })
   quotedNetworkFeeWei!: string;
 
-  /** Signed fee-policy version (1 = legacy 50% sunset; 2 = V4 pure 50%). */
+  /** Signed fee-policy version (2 = V4 only; policy 1 sunset is rejected — re-quote). */
   @IsInt()
-  @Min(1)
+  @Min(2)
   @Max(2)
   feePolicyVersion!: number;
 
   /** User-approved bound on `networkFee + protocolFee` for THIS activation (wei, V4 B5/B6).
-   * REQUIRED when feePolicyVersion == 2; the contract reverts FeeExceedsMax when
-   * the attested total exceeds it. Ignored (must be absent or zero) for policy 1. */
+   * REQUIRED; the contract reverts FeeExceedsMax when
+   * the attested total exceeds it. */
   @IsOptional()
   @Matches(/^\d+$/, { message: "maxTotalFee must be wei (positive integer)" })
   maxTotalFeeWei?: string;

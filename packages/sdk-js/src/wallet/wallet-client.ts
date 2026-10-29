@@ -1,7 +1,7 @@
 // Peridot wallet client (task 009) — the PRD_v5 §9 surface over the Solana adapter.
 
 import { PublicKey } from "@peridotvault/pid-core";
-import { b64url, b64urlToBytes, buildActivatePayload, buildActivatePayloadV2, buildActivatePayloadV3, buildExecutePayloadV4, buildUpdateAuthorityPayloadV2, buildUpdateAuthorityPayloadV3, buildWithdrawPayload, buildWithdrawPayloadV2, buildWithdrawSolPayloadV4, buildWithdrawTokenPayload, buildWithdrawTokenPayloadV2, buildWithdrawTokenPayloadV4, executeCallHash, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
+import { b64url, b64urlToBytes, buildActivatePayload, buildActivatePayloadV2, buildActivatePayloadV3, buildActivatePayloadV4, buildExecutePayloadV4, buildUpdateAuthorityPayloadV2, buildUpdateAuthorityPayloadV3, buildWithdrawPayload, buildWithdrawPayloadV2, buildWithdrawSolPayloadV4, buildWithdrawTokenPayload, buildWithdrawTokenPayloadV2, buildWithdrawTokenPayloadV4, executeCallHash, pidToSeed32, SolanaAdapter, SolanaRpc } from "@peridotvault/pid-solana";
 import type { NftItem, ParsedTx, PasskeySigner, TokenBalance, TokenInfo, TransactionStatus } from "@peridotvault/pid-solana";
 import type { ApiError, Authority, Chain, ChainAccount, RegistryToken, WalletTransaction } from "@peridotvault/pid-types";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
@@ -748,10 +748,11 @@ export class PeridotWallet {
   }
 
   /**
-   * Activate the smart account (V3). The claim is passkey-signed (payload binds op-tag,
-   * account, authority, policy, expiry — no amounts) so nobody else can
+   * Activate the smart account (V4). The claim is passkey-signed (payload binds op-tag,
+   * account, authority, policy, maxTotalFee, expiry) so nobody else can
    * squat the PDA or change the fee policy; the server's relayer only submits.
-   * Reads the live view first for policy + chain time.
+   * Reads the live view first for policy + chain time. ANT-895/B2: V3
+   * broadcasts are closed on-chain — the client only signs V4.
    */
   async activate(opts?: { expectedPid?: string }): Promise<ActivationView | ApiError> {
     if (!this.passkeySigner) return this.viaPopup("activate", undefined, opts);
@@ -763,10 +764,15 @@ export class PeridotWallet {
     assertChainEcho(viewRes.chain, await this.selectedSolanaReference());
     const authority = await this.authorityCompressed();
     const expiry = Math.floor(viewRes.chainTime) + 300;
-    const payload = await buildActivatePayloadV3(
+    // V4 user bound (spec B5, backend ANT-555): required — missing → 400.
+    // v2 views carry the offered `maxTotalFee` (defaults to totalFee);
+    // legacy v1 views fall back to the network fee (v1 backends ignore it).
+    const maxTotalFee = BigInt(viewRes.maxTotalFee ?? viewRes.totalFee ?? viewRes.networkFeeLamports.toString());
+    const payload = await buildActivatePayloadV4(
       pidToSeed32(pid),
       authority,
       viewRes.feePolicyVersion,
+      maxTotalFee,
       expiry,
     );
     const a = await this.signer().sign(payload, {});
@@ -775,9 +781,8 @@ export class PeridotWallet {
       feePolicyVersion: viewRes.feePolicyVersion,
       quotedNetworkFeeLamports: viewRes.networkFeeLamports.toString(),
       // V4 user bound (spec B5, backend ANT-555): required — missing → 400.
-      // v2 views carry the offered `maxTotalFee` (defaults to totalFee);
-      // legacy v1 views fall back to the network fee (v1 backends ignore it).
-      maxTotalFeeLamports: viewRes.maxTotalFee ?? viewRes.totalFee ?? viewRes.networkFeeLamports.toString(),
+      // Signed above into the V4 payload; the backend enforces totalFee ≤ max.
+      maxTotalFeeLamports: maxTotalFee.toString(),
       assertion: {
         id: a.credentialId,
         signature: b64url(a.signature),
