@@ -69,6 +69,6 @@ export class SessionKeysService {
   }
 
   constants(): { maxTtlSecs: number; inactivitySecs: number; stateLen: number } {
-    return { maxTtlSecs: SESSION_MAX_TTL, inactivitySecs: SESSION_INACTIVITY_TIMEOUT, stateLen: 205 };
+    return { maxTtlSecs: SESSION_MAX_TTL, inactivitySecs: SESSION_INACTIVITY_TIMEOUT, stateLen: 206 };
   }
 }

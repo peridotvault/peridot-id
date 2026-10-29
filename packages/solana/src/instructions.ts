@@ -20,7 +20,7 @@ import {
 } from "@solana/spl-token";
 import { concat, u16le, u64le, i64le, fromAscii, serializeExecuteCall, serializeSessionMetas } from "@peridotvault/pid-core";
 import type { Bytes, ExecuteMeta, SessionMeta } from "@peridotvault/pid-core";
-import { IX, IX_SESSION, IX_V4, IX_VAULT, TREASURY_SEED, CONFIG_SEED, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
+import { IX, IX_SESSION, IX_V4, IX_V5, IX_VAULT, TREASURY_SEED, CONFIG_SEED, INSTRUCTIONS_SYSVAR, PID_PROGRAM_ID, SECP256R1_PRECOMPILE, MAX_PROTECTED } from "@peridotvault/pid-core";
 
 /**
  * Build the passkey-signed `initialize(account_id, authority, clientDataJSON)` instruction (disc 0).
@@ -597,6 +597,31 @@ export function buildUpdateAuthorityInstruction(
   });
 }
 
+/**
+ * V5 cluster-bound `updateAuthority` (ANT-868 B4, disc 20): byte-identical
+ * layout to V3 — the version lives in the discriminant + the V5 signed
+ * payload (op-tag ‖ program ‖ cluster ‖ account ‖ nonce ‖ newAuthority ‖
+ * expiry, see `buildUpdateAuthorityPayloadV5`), never in extra fields.
+ */
+export function buildUpdateAuthorityInstructionV5(
+  smartAccount: PublicKey,
+  nonce: bigint,
+  newAuthorityCompressed: Uint8Array,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (newAuthorityCompressed.length !== 33) throw new Error("new authority must be 33 bytes");
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data: concat([IX_V5.updateAuthority], u64le(nonce), newAuthorityCompressed, i64le(expiry), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+  });
+}
+
 /** V2 `close(nonce, expiry, clientDataJSON)` (disc 4). No SDK caller existed in V1;
  *  provided so teardown is constructible and testable. */
 export function buildCloseInstruction(
@@ -668,6 +693,56 @@ export function buildExecuteInstructionV3(
     ],
     programId,
     data: concat([IX.execute], u64le(nonce), call, i64le(expiry), u16le(feePolicyVersion), u64le(networkFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
+  });
+}
+
+/**
+ * V5 cluster-bound `execute` (ANT-868 B4, disc 21): byte-identical layout to
+ * V3 `execute` — same keys, same confinement checks. The version lives in the
+ * discriminant + the V5 signed payload (op-tag ‖ program ‖ cluster ‖ account
+ * ‖ nonce ‖ expiry ‖ policy ‖ callHash, see `buildExecutePayloadV5`).
+ */
+export function buildExecuteInstructionV5(
+  smartAccount: PublicKey,
+  treasury: PublicKey,
+  relayer: PublicKey,
+  nonce: bigint,
+  target: PublicKey,
+  metas: ExecuteMeta[],
+  data: Uint8Array,
+  feePolicyVersion: number,
+  networkFeeLamports: bigint,
+  expiry: number,
+  clientDataJSON: Uint8Array,
+  programId: PublicKey = PID_PROGRAM_ID,
+): TransactionInstruction {
+  if (target.equals(programId)) throw new Error("execute target cannot be the smart-account program");
+  const smartStr = smartAccount.toBase58();
+  const relayerStr = relayer.toBase58();
+  for (const m of metas) {
+    if (m.signer && m.address.toBase58() !== smartStr && m.address.toBase58() !== relayerStr) {
+      throw new Error(`execute signer meta must be the PDA or relayer: ${m.address.toBase58()}`);
+    }
+  }
+  const call = serializeExecuteCall(target, metas, data);
+    assertCanonicalTreasury(treasury, programId);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: smartAccount, isSigner: false, isWritable: true },
+      { pubkey: relayer, isSigner: true, isWritable: true },
+      { pubkey: treasury, isSigner: false, isWritable: true },
+      { pubkey: target, isSigner: false, isWritable: false },
+      { pubkey: INSTRUCTIONS_SYSVAR, isSigner: false, isWritable: false },
+      // The PDA is never an outer signer (it signs the CPI via seeds); every
+      // other meta mirrors its bound flags outward so the CPI privilege check passes.
+      ...metas.map((m) => ({
+        pubkey: m.address,
+        isSigner: m.signer && m.address.toBase58() === relayerStr,
+        isWritable: m.writable,
+      })),
+    ],
+    programId,
+    data: concat([IX_V5.execute], u64le(nonce), call, i64le(expiry), u16le(feePolicyVersion), u64le(networkFeeLamports), u16le(clientDataJSON.length), clientDataJSON) as unknown as Buffer,
   });
 }
 
@@ -774,8 +849,10 @@ export function buildRegisterSessionInstruction(
 /**
  * Session-signed `sessionExecute` (disc 8): one gameplay CPI authorized by the
  * session keypair (tx envelope signer) + on-chain record (seq, expiry,
- * inactivity). The vault PDA must not appear anywhere — enforced here
- * fail-fast and on-chain. No `remaining_accounts`: `gameAccounts` must cover
+ * inactivity, ANT-863 B3 generation epoch). The vault PDA is passed READ-ONLY
+ * at index 0 solely as the epoch source for the rotation-revokes-sessions
+ * check — it is enforced here fail-fast and on-chain to never enter the
+ * session CPI. No `remaining_accounts`: `gameAccounts` must cover
  * every non-session meta exactly once, in order.
  */
 export function buildSessionExecuteInstruction(
@@ -817,6 +894,7 @@ export function buildSessionExecuteInstruction(
   }
   return new TransactionInstruction({
     keys: [
+      { pubkey: vault, isSigner: false, isWritable: false },
       { pubkey: sessionPda, isSigner: false, isWritable: true },
       { pubkey: gameProgram, isSigner: false, isWritable: false },
       { pubkey: gameProgramData, isSigner: false, isWritable: false },

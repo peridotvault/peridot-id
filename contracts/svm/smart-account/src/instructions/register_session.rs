@@ -106,11 +106,13 @@ pub fn process(
 
     // Fresh session PDA only; derivation binds (account, session key).
     // (Length is checked at entry: only an unallocated account reaches here.)
-    let (authority, account_id) = {
+    // The vault epoch is stamped into the record (ANT-863 B3): a later
+    // rotation bumps the vault epoch and this session goes stale.
+    let (authority, account_id, generation) = {
         let borrowed = vault.try_borrow()?;
         let state = SmartAccount::try_from_bytes(&borrowed)?;
         verify_nonce(&state, nonce)?;
-        (state.authority(), state.account_id())
+        (state.authority(), state.account_id(), state.session_generation())
     };
     verify_pda(vault, program_id, account_id)?;
     let bump = verify_session_pda(session, program_id, account_id, session_key)?;
@@ -218,7 +220,8 @@ pub fn process(
             snapshot_has_auth,
             snapshot_slot,
             bump,
-        );
+            generation,
+        )?;
     }
 
     pinocchio_log::log!("PeridotEvent::SessionRegistered");

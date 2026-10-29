@@ -81,12 +81,19 @@ pub enum PeridotError {
     /// ANT-635 revenue vault: `RemoveAdmin` targeting the last live admin
     /// (floor-1, EVM `PeridotFactory` parity). Additive-only (28).
     CannotRemoveLastAdmin = 28,
+    /// ANT-863 B3 rotation/session epoch: the session record's stamped
+    /// generation no longer matches the vault epoch (the owner rotated since
+    /// registration, implicitly revoking the session). Distinct from
+    /// `SessionRevoked` (explicit per-session revoke) so UX/indexers can
+    /// tell "rotated, re-register" apart. Additive-only (29).
+    SessionStaleGeneration = 29,
     /// ANT-870 P6.1: the token account (or mint) carries a Token-2022
     /// extension the vault/session flows do not support (transfer-fee,
     /// confidential, memo, CPI-guard, hooks, … — see the matrix in
     /// `programdata.rs`). Fail-closed: balance/authority semantics the
-    /// program cannot see are never trusted. Additive-only (29).
-    UnsupportedTokenExtension = 29,
+    /// program cannot see are never trusted. B3 claimed 29 on `paperclip`
+    /// first, so this takes the next free slot (additive-only, 30).
+    UnsupportedTokenExtension = 30,
 }
 
 impl From<PeridotError> for ProgramError {

@@ -1,26 +1,38 @@
 //! Gameplay execution authorized by an Ed25519 session key (WHITEPAPER.md §11).
 //!
 //! Security boundary (structurally different from the EVM executor — nothing
-//! is ported): the vault PDA that holds economic value NEVER appears in the
-//! game CPI. The only signer the program lends is the session PDA, which holds
-//! rent-exempt minimum only and which no other program can `invoke_signed`
-//! for (seeds resolve under the caller's program id — runtime-proven). Even if
-//! the game forwards the session signer's status further, there is no value to
-//! move: the vault is absent, and listed protected accounts are hash-pinned
-//! before/after the call (owner, lamports, data — hence delegate and
-//! close_authority changes are caught even when balances do not move).
+//! is ported): the vault PDA that holds economic value is passed READ-ONLY at
+//! index 0 solely to read the session-generation epoch (ANT-863 B3) — it is
+//! NEVER forwarded into the game CPI. The only signer the program lends is
+//! the session PDA, which holds rent-exempt minimum only and which no other
+//! program can `invoke_signed` for (seeds resolve under the caller's program
+//! id — runtime-proven). Even if the game forwards the session signer's
+//! status further, there is no value to move: the vault is absent from the
+//! CPI, and listed protected accounts are hash-pinned before/after the call
+//! (owner, lamports, data — hence delegate and close_authority changes are
+//! caught even when balances do not move).
 //!
 //! `remaining_accounts` are rejected outright: the account count must match
 //! exactly, so the Neodyme `remaining_accounts` substitution class cannot
 //! occur. Upgrade visibility is record-and-log: the game's ProgramData
 //! authority + slot refresh `last_seen_*` every execution for backend
 //! indexers; there is deliberately no enforcement (WHITEPAPER.md §11).
+//!
+//! ANT-863 B3: the vault epoch check makes rotation revoke sessions. A
+//! session registered before the latest rotation carries an older stamped
+//! generation than the vault and fails with `SessionStaleGeneration` —
+//! re-register after rotating. The check reads the vault through the
+//! passed account (not the CPI path), so a spoofed vault cannot pass:
+//! the PDA is derived from the record's own `account_id`.
 
 use crate::{
     auth,
     errors::PeridotError,
     programdata,
-    state::{verify_session_pda, SessionAccount, SessionAccountMut, SESSION_STATE_LEN},
+    state::{
+        verify_pda, verify_session_pda, SessionAccount, SessionAccountMut, SmartAccount,
+        SESSION_STATE_LEN, SESSION_STATE_LEN_V1,
+    },
 };
 use alloc::vec::Vec;
 use pinocchio::{
@@ -50,30 +62,39 @@ pub const MAX_SESSION_DATA: usize = 1_024;
 pub const MAX_PROTECTED: usize = 8;
 
 /// Accounts (exact count — no `remaining_accounts`, ever):
-///   0. `[WRITE]` session PDA (record + sole CPI signer)
-///   1. `[]` game program (must equal the allowlisted program, never this program)
-///   2. `[]` upgrade evidence: the game's ProgramData (upgradeable games) or the
+///   0. `[]` vault PDA (read-only; epoch source for the ANT-863 B3
+///      generation check — never forwarded into the game CPI)
+///   1. `[WRITE]` session PDA (record + sole CPI signer)
+///   2. `[]` game program (must equal the allowlisted program, never this program)
+///   3. `[]` upgrade evidence: the game's ProgramData (upgradeable games) or the
 ///      game program itself (immutable: native/deprecated loader)
-///   3. `[SIGNER]` session Ed25519 key (must equal the registered key)
-///   4.. game CPI accounts for each non-session meta, in order
+///   4. `[SIGNER]` session Ed25519 key (must equal the registered key)
+///   5.. game CPI accounts for each non-session meta, in order
 pub fn process(
     program_id: &Address,
     accounts: &[AccountView],
     data: &InstructionData,
 ) -> ProgramResult {
-    if accounts.len() < 4 {
+    if accounts.len() < 5 {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
 
-    let session = &accounts[0];
-    let game_program = &accounts[1];
-    let game_programdata = &accounts[2];
-    let session_signer = &accounts[3];
+    let vault = &accounts[0];
+    let session = &accounts[1];
+    let game_program = &accounts[2];
+    let game_programdata = &accounts[3];
+    let session_signer = &accounts[4];
 
     if !session.owned_by(program_id) {
         return Err(PeridotError::WrongOwner.into());
     }
-    if session.data_len() != SESSION_STATE_LEN {
+    if !vault.owned_by(program_id) {
+        return Err(PeridotError::WrongOwner.into());
+    }
+    // v2 (206B) is the write format; legacy v1 (205B) records execute
+    // normally until the first post-upgrade rotation (generation 0 == every
+    // legacy vault epoch). Version gating lives in `try_from_bytes` below.
+    if session.data_len() != SESSION_STATE_LEN && session.data_len() != SESSION_STATE_LEN_V1 {
         return Err(ProgramError::InvalidAccountData);
     }
     if !session_signer.is_signer() {
@@ -114,7 +135,7 @@ pub fn process(
     }
 
     // Load the record first: every check below keys off it.
-    let (session_key, account_id, allowed_program, record_seq) = {
+    let (session_key, account_id, allowed_program, record_seq, record_generation) = {
         let borrowed = session.try_borrow()?;
         let record = SessionAccount::try_from_bytes(&borrowed)?;
         if !record.is_active() {
@@ -125,15 +146,25 @@ pub fn process(
             record.account_id(),
             record.allowed_program(),
             record.seq(),
+            record.generation(),
         )
     };
+    // ANT-863 B3 first: a session that predates the latest rotation is dead —
+    // report the actionable error before signer/sequence details. Both PDAs
+    // derive from the record's own account_id, so a spoofed vault cannot pass.
+    verify_session_pda(session, program_id, account_id, session_key)?;
+    verify_pda(vault, program_id, account_id)?;
+    {
+        let borrowed = vault.try_borrow()?;
+        let vault_state = SmartAccount::try_from_bytes(&borrowed)?;
+        crate::state::check_session_generation(record_generation, vault_state.session_generation())?;
+    }
     if session_signer.address().as_array() != &session_key {
         return Err(PeridotError::Unauthorized.into());
     }
     if seq != record_seq {
         return Err(PeridotError::BadSessionSeq.into());
     }
-    verify_session_pda(session, program_id, account_id, session_key)?;
 
     // Target confinement: exactly the allowlisted game, never this program.
     if game_program.address().as_array() != &allowed_program {
@@ -154,21 +185,39 @@ pub fn process(
         crate::state::check_session_time(record.expires_at(), record.last_used(), now)?;
     }
 
-    // The vault PDA must not appear anywhere in this call. It is derived
-    // on-chain (bpf) so a caller cannot rename it away.
+    // The vault PDA must not appear anywhere in this call EXCEPT as the
+    // read-only epoch source at index 0. It is derived on-chain (bpf) from
+    // the record's own account_id (checked above), so a caller cannot rename
+    // it away — and it is never forwarded into the CPI below.
     #[cfg(any(target_os = "solana", target_arch = "bpf"))]
     {
-        let (vault, _) = Address::find_program_address(
+        let (vault_addr, _) = Address::find_program_address(
             &[b"peridot_id", b"account", &account_id],
             program_id,
         );
+        debug_assert_eq!(vault.address(), &vault_addr);
         for (addr, _) in metas.iter() {
-            if addr == vault.as_array() {
+            if addr == vault_addr.as_array() {
                 return Err(PeridotError::SessionScopeViolation.into());
             }
         }
-        for view in accounts.iter().skip(4) {
-            if view.address() == &vault {
+        for view in accounts.iter().skip(5) {
+            if view.address() == &vault_addr {
+                return Err(PeridotError::SessionScopeViolation.into());
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
+    {
+        // Host stubs skip PDA derivation (no bpf syscall); the exact-count
+        // check below still pins the account layout for unit tests.
+        for (addr, _) in metas.iter() {
+            if addr == vault.address().as_array() {
+                return Err(PeridotError::SessionScopeViolation.into());
+            }
+        }
+        for view in accounts.iter().skip(5) {
+            if view.address() == vault.address() {
                 return Err(PeridotError::SessionScopeViolation.into());
             }
         }
@@ -191,9 +240,9 @@ pub fn process(
     if !session_signs {
         return Err(PeridotError::Unauthorized.into());
     }
-    // Exact account count: non-session metas map 1:1 to accounts[4..].
+    // Exact account count: non-session metas map 1:1 to accounts[5..].
     // Anything else (the `remaining_accounts` class) fails here.
-    if accounts.len() != 4 + non_session {
+    if accounts.len() != 5 + non_session {
         return Err(ProgramError::NotEnoughAccountKeys);
     }
     // Protected addresses must be a subset of the metas (otherwise the check
@@ -277,7 +326,7 @@ pub fn process(
     let mut snapshots: Vec<Snapshot> = Vec::with_capacity(protected.len());
     for p in protected.iter() {
         // The session PDA itself may be protected (rent-pinning): it maps to
-        // account 0, which the scan below skips — check it first, mirroring
+        // account 1, which the scan below skips — check it first, mirroring
         // the post-CPI loop.
         let (lamports, owner, data_hash, token_auth) = if p == session.address().as_array() {
             let borrowed = session.try_borrow()?;
@@ -286,7 +335,7 @@ pub fn process(
         } else {
             let view = accounts
                 .iter()
-                .skip(4)
+                .skip(5)
                 .find(|v| v.address().as_array() == p)
                 .ok_or(PeridotError::SessionScopeViolation)?;
             let borrowed = view.try_borrow()?;
@@ -324,7 +373,9 @@ pub fn process(
 
     let mut cpi_addresses: Vec<Address> = Vec::with_capacity(meta_count);
     let mut cpi_views: Vec<&AccountView> = Vec::with_capacity(meta_count);
-    let mut cursor = 4usize;
+    // Game accounts start at index 5 (0 = vault epoch source, 1-4 = session
+    // record, game, evidence, signer). The vault is never forwarded.
+    let mut cursor = 5usize;
     for (addr, flags) in metas.iter() {
         let parsed = Address::new_from_array(*addr);
         if flags & FLAG_SESSION_SIGNER != 0 {
@@ -372,7 +423,7 @@ pub fn process(
         } else {
             let view = accounts
                 .iter()
-                .skip(4)
+                .skip(5)
                 .find(|v| v.address().as_array() == p)
                 .ok_or(PeridotError::SessionScopeViolation)?;
             let owner = programdata::owner_bytes(view);
@@ -440,6 +491,13 @@ mod tests {
         assert_eq!(PeridotError::SessionSpendExceeded as u32, 24);
         assert_eq!(PeridotError::FeeExceedsMax as u32, 12);
         assert_eq!(PeridotError::UnknownFeePolicy as u32, 13);
+    }
+
+    #[test]
+    fn stale_generation_uses_fresh_discriminant() {
+        // ANT-863 B3 rotation/session epoch: additive-only error 29 (the
+        // 25-28 vault family is taken; V3 discriminants untouched).
+        assert_eq!(PeridotError::SessionStaleGeneration as u32, 29);
     }
 
     #[test]
