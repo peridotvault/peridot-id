@@ -8,12 +8,17 @@
 // Domain-free since ANT-197: no RP-ID hash is stored or verified on-chain.
 //
 // Creation is permissionless (ANT-610 spec §5, ANT-612): ANY signer may submit
-// `activate`/`activateV4` — a signature proves possession of the supplied key,
-// but does not establish that the signer is entitled to the supplied PID,
-// and every claim still splits relayerFee → submitter + protocolFee → the
+// `activate`/`activateV4` — a signature proves possession of the supplied key.
+// ANT-866 B1 binds the claim to the key: the PDA commits to
+// `sha256(authority)`, so counterfactual funding at a bound address is
+// unclaimable by non-owners (a different key derives a different address).
+// Every claim still splits relayerFee → submitter + protocolFee → the
 // program-bound `[b"treasury"]` PDA vault (ANT-635). No treasury keypair, no
 // allowlist, no build-time recipient. Direct `initialize` (disc 0) is dead in
-// all builds (`InitializeDeprecated`).
+// all builds (`InitializeDeprecated`); immediate `close` (disc 4) is dead in
+// all builds (`CloseDeprecated`) — teardown routes through the grace flow
+// (`close_request`/`close_cancel`/`close_finalize`, disc 33-35) with a
+// permanent tombstone (see tests/b1-close.mjs).
 //
 //
 // Usage:
@@ -49,10 +54,18 @@ const POLICY_V1 = 1;
 // protocolFee = floor(networkFee * 5000 / 10000).
 const protocolFeeOf = (net) => (BigInt(net) * 5000n) / 10_000n;
 
-const conn = new Connection("http://127.0.0.1:8899", "confirmed");
+const RPC_URL = process.argv[3] || "http://127.0.0.1:8899";
+const conn = new Connection(RPC_URL, "confirmed");
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest();
 const b64url = (b) => Buffer.from(b).toString("base64url");
 const pidToSeed32 = (pid) => sha256(Buffer.from(pid.trim().toLowerCase(), "utf8"));
+// ANT-866 B1: vault PDAs commit to the claiming key (`sha256(authority)` seed);
+// tombstones are pid-only (block re-claim by any key).
+const keyHash = (authComp) => sha256(Buffer.from(authComp));
+const vaultPda = (accountId32, authComp) => PublicKey.findProgramAddressSync(
+  [Buffer.from("peridot_id"), Buffer.from("account"), accountId32, keyHash(authComp)], PROGRAM)[0];
+const tombstonePda = (accountId32) => PublicKey.findProgramAddressSync(
+  [Buffer.from("peridot_id"), Buffer.from("tombstone"), accountId32], PROGRAM)[0];
 
 // Program-bound revenue vault PDAs (ANT-635): no treasury keypair exists.
 // Protocol fees go to the `[b"treasury"]` PDA (derived per program id) on
@@ -231,6 +244,7 @@ function activateIx(accountId32, authorityComp, policy, expiry, networkFee, rela
       { pubkey: TREASURY_PDA, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
       { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+      { pubkey: tombstonePda(accountId32), isSigner: false, isWritable: false },
     ],
     programId: PROGRAM,
     data: Buffer.concat([Buffer.from([5]), accountId32, authorityComp, u16(policy), i64(expiry), u64(networkFee), u16(s.clientDataJSON.length), s.clientDataJSON]),
@@ -299,8 +313,7 @@ async function main() {
   // cases must measure against live time or they genuinely execute and burn nonces).
   const liveNow = async () => conn.getBlockTime(await conn.getSlot());
   const accountId32 = pidToSeed32("testmain@pid");
-  const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("peridot_id"), Buffer.from("account"), accountId32], PROGRAM);
+  const pda = vaultPda(accountId32, authorityComp);
   console.log(`program ${PROGRAM.toBase58()} pda ${pda.toBase58()}`);
   console.log(`treasury ${TREASURY_PDA.toBase58()} config ${CONFIG_PDA.toBase58()}`);
 
@@ -324,11 +337,16 @@ async function main() {
     [rentPayer],
     "delegated treasury appoint rejected (Unauthorized)",
   );
-  await expectOk(
-    new Transaction().add(initTreasuryIx(adminKp.publicKey, adminKp.publicKey.toBuffer())),
-    [adminKp],
-    "init treasury creates config + vault PDAs",
-  );
+  // Idempotent across reruns on one ledger (first-writer-wins).
+  if (!(await conn.getAccountInfo(CONFIG_PDA))) {
+    await expectOk(
+      new Transaction().add(initTreasuryIx(adminKp.publicKey, adminKp.publicKey.toBuffer())),
+      [adminKp],
+      "init treasury creates config + vault PDAs",
+    );
+  } else {
+    results.push("PASS init treasury creates config + vault PDAs (already initialized)"); passed++;
+  }
   {
     const cfg = await conn.getAccountInfo(CONFIG_PDA);
     assert.ok(cfg, "config PDA exists");
@@ -476,8 +494,8 @@ async function main() {
 
   // ---- initialize: squat attempt (stranger claims victim id with own key) ----
   const squatId = pidToSeed32("testsquat@pid");
-  const [squatPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), squatId], PROGRAM);
   const squatAuth = compressedPub(p2);
+  const squatPda = vaultPda(squatId, squatAuth);
   await expectErr(
     initTx(squatId, squatAuth, rentPayer.publicKey, squatPda, { privateKey: k2, publicKey: p2 }),
     [rentPayer],
@@ -503,12 +521,13 @@ await expectOk(
   results.push("PASS permissionless creation fee split (payer 1)"); passed++;
 
 const acct = await conn.getAccountInfo(pda);
-  assert.equal(acct.data.length, 80, "state len 80 (domain-free)");
-  assert.equal(acct.data[0], 2, "version = 2");
+  assert.equal(acct.data.length, 112, "state len 112 (bound V3)");
+  assert.equal(acct.data[0], 3, "version = 3");
   assert.equal(acct.data[1], 1, "authority_type = secp256r1");
   assert.equal(acct.data.readBigUInt64LE(4), 0n, "nonce = 0");
   assert.equal(Buffer.from(acct.data.subarray(12, 45)).equals(authorityComp), true, "authority stored");
   assert.equal(Buffer.from(acct.data.subarray(48, 80)).equals(accountId32), true, "account_id stored");
+  assert.equal(Buffer.from(acct.data.subarray(80, 112)).equals(keyHash(authorityComp)), true, "claim-time key hash stored (B1 binding)");
   results.push("PASS domain-free state layout"); passed++;
 
   // ---- activate again → AlreadyInitialized (no replay, no double fee) ----
@@ -523,7 +542,7 @@ const acct = await conn.getAccountInfo(pda);
   // authorizes the claim. Volunteer payer (2nd distinct submitter, AC-S1).
   {
     const freeId = pidToSeed32("testfree@pid");
-    const [freePda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), freeId], PROGRAM);
+    const freePda = vaultPda(freeId, authorityComp);
 await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
       SystemProgram.transfer({ fromPubkey: volunteer.publicKey, toPubkey: freePda, lamports: 150_000_000 })
     ), [volunteer], { commitment: "confirmed" }), "confirmed");
@@ -534,7 +553,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
       "foreign-prefix assertion accepted (domain-free, payer 2)",
     );
     const freeAcct = await conn.getAccountInfo(freePda);
-    assert.equal(freeAcct.data.length, 80, "foreign-prefix account is 80 bytes");
+    assert.equal(freeAcct.data.length, 112, "foreign-prefix account is 112 bytes");
   }
 
   // ---- activate: permissionless claim + attested split, payer 3 (disc 5) ----
@@ -542,7 +561,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   // is reimbursed exactly; the vault still takes the protocol cut.
   {
     const actId = pidToSeed32("testactivate@pid");
-    const [actPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), actId], PROGRAM);
+    const actPda = vaultPda(actId, authorityComp);
     const funded = 150_000_000; // 0.15 SOL
     await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: actPda, lamports: funded })
@@ -559,7 +578,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
 
     const claimed = await conn.getAccountInfo(actPda);
     assert.ok(claimed, "activate created on-chain account");
-    assert.equal(claimed.data.length, 80, "activate wrote 80-byte domain-free state");
+    assert.equal(claimed.data.length, 112, "activate wrote 112-byte bound state");
     assert.equal(claimed.owner.toBase58(), PROGRAM.toBase58(), "activate transferred ownership to program");
     assert.equal(claimed.lamports, funded - Number(TOTAL_FEE), "total fee reimbursed out of PDA");
     // Volunteer paid the tx fee (~5000) on top, so assert protocol exactly, relayer at-least.
@@ -575,7 +594,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   // This does not prevent a claimant from supplying their own authority.
   {
     const vicId = pidToSeed32("testvictim@pid");
-    const [vicPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), vicId], PROGRAM);
+    const vicPda = vaultPda(vicId, authorityComp);
     await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: vicPda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
@@ -589,22 +608,38 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     assert.equal((await conn.getAccountInfo(vicPda)).owner.toBase58(), SystemProgram.programId.toBase58(), "wrong-key claim created nothing");
   }
 
-  // Security characterization, not an anti-squat guarantee: an unclaimed PID
-  // can currently be activated with an independently chosen key. The test
-  // documents the present boundary until PID entitlement is enforced on-chain.
+  // ---- ANT-866 B1 anti-squat proof: a claimant-selected key lands elsewhere ----
+  // The pre-B1 characterization ("any key can activate any unclaimed PID at
+  // its address") is CLOSED: the PDA commits to the claiming key, so an
+  // attacker key derives a DIFFERENT address. Victim pre-funding at the bound
+  // address is unclaimable by non-owners (counterfactual funding safety).
   {
-    const victimId = pidToSeed32("test-unclaimed-victim@pid");
-    const [victimPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("peridot_id"), Buffer.from("account"), victimId], PROGRAM,
-    );
+    const boundVictimId = pidToSeed32("test-bound-victim@pid");
+    const boundVictimPda = vaultPda(boundVictimId, authorityComp);
+    const attackerPda = vaultPda(boundVictimId, squatAuth);
+    assert.notEqual(attackerPda.toBase58(), boundVictimPda.toBase58(), "distinct keys derive distinct PDAs");
+    await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: boundVictimPda, lamports: 150_000_000 })
+    ), [rentPayer], { commitment: "confirmed" }), "confirmed");
+    const victimBefore = (await conn.getAccountInfo(boundVictimPda)).lamports;
+    // Attacker self-signs a claim for the victim's pid with the ATTACKER key
+    // (self-funded — the squatter pays their own claim, as in PoC-A).
+    await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: attackerPda, lamports: 150_000_000 })
+    ), [rentPayer], { commitment: "confirmed" }), "confirmed");
     await expectOk(
-      activateIx(victimId, squatAuth, POLICY_V1, exp(), 0n, rentPayer.publicKey, victimPda, { privateKey: k2, publicKey: p2 }),
+      activateIx(boundVictimId, squatAuth, POLICY_V1, exp(), NETWORK_FEE, rentPayer.publicKey, attackerPda, { privateKey: k2, publicKey: p2 }),
       [rentPayer],
-      "characterization: claimant-selected authority can activate an unclaimed PID",
+      "attacker claim lands on the attacker's own bound PDA (permissionless, harmless)",
     );
-    const claimed = await conn.getAccountInfo(victimPda);
-    assert.ok(claimed, "claimant created the account");
-    assert.deepEqual(claimed.data.subarray(12, 45), squatAuth, "claimant authority is stored");
+    const attackerAcct = await conn.getAccountInfo(attackerPda);
+    assert.ok(attackerAcct, "attacker claim created the attacker's account");
+    assert.deepEqual(attackerAcct.data.subarray(12, 45), squatAuth, "attacker authority is stored on the attacker's account");
+    // Victim pre-fund untouched: no code, full balance, still system-owned.
+    const victimAfter = await conn.getAccountInfo(boundVictimPda);
+    assert.equal(victimAfter.lamports, victimBefore, "victim pre-fund untouched by squat attempt");
+    assert.equal(victimAfter.owner.toBase58(), SystemProgram.programId.toBase58(), "victim PDA unclaimed");
+    results.push("PASS B1 counterfactual funding unclaimable by non-owners"); passed++;
   }
 
   // ---- activate an already-initialized account → rejected ----
@@ -617,7 +652,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   // ---- activate with non-canonical vault account → InvalidDestination ----
   {
     const swapId = pidToSeed32("testswaptreasury@pid");
-    const [swapPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), swapId], PROGRAM);
+    const swapPda = vaultPda(swapId, authorityComp);
     await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: swapPda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
@@ -632,6 +667,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
         { pubkey: evilTreasury.publicKey, isSigner: false, isWritable: true },
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
         { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false },
+        { pubkey: tombstonePda(swapId), isSigner: false, isWritable: false },
       ],
       programId: PROGRAM,
       data: Buffer.concat([Buffer.from([5]), swapId, authorityComp, u16(POLICY_V1), i64(exp()), u64(NETWORK_FEE), u16(s.clientDataJSON.length), s.clientDataJSON]),
@@ -647,7 +683,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   // ---- activate with unknown policy → UnknownFeePolicy ----
   {
     const polId = pidToSeed32("testpolicy@pid");
-    const [polPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), polId], PROGRAM);
+    const polPda = vaultPda(polId, authorityComp);
     await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: polPda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
@@ -755,7 +791,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
   // ---- cross-account replay: A's nonce-0 assertion replayed on sibling B ----
   {
     const sibId = pidToSeed32("testsibling@pid");
-    const [sibPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), sibId], PROGRAM);
+    const sibPda = vaultPda(sibId, authorityComp);
     await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: sibPda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
@@ -804,7 +840,7 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
 
   // ---- account mismatch (wrong PDA in args vs actual) ----
   const otherId = pidToSeed32("testother@pid");
-  const [otherPda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), otherId], PROGRAM);
+  const otherPda = vaultPda(otherId, authorityComp);
   await expectErr(
     withdrawIx(otherPda, dest.publicKey, rentPayer.publicKey, 1, 1_000_000, destBytes, POLICY_V1, NETWORK_FEE, expiry, { privateKey, publicKey }, accountId32),
     [rentPayer],
@@ -861,10 +897,13 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     "dust rounding withdraw valid",
   );
 
-  // ---- close: valid on a throwaway account; self-destination rejected ----
+  // ---- close: immediate teardown is permanently disabled (ANT-866 B1) ----
+  // Disc 4 still decodes, then rejects with CloseDeprecated — teardown must
+  // route through the grace flow (close_request → cancel/finalize), covered
+  // adversarially in tests/b1-close.mjs (squat + close-drain + re-claim).
   {
     const closeId = pidToSeed32("testclose@pid");
-    const [closePda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), closeId], PROGRAM);
+    const closePda = vaultPda(closeId, authorityComp);
     await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(
       SystemProgram.transfer({ fromPubkey: rentPayer.publicKey, toPubkey: closePda, lamports: 150_000_000 })
     ), [rentPayer], { commitment: "confirmed" }), "confirmed");
@@ -876,17 +915,14 @@ await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transact
     await expectErr(
       closeIx(closePda, closeId, closePda, 0, exp(), { privateKey, publicKey }),
       [rentPayer],
-      "close to self rejected (InvalidDestination)",
+      "immediate close rejected (CloseDeprecated)",
     );
-    const destBefore = (await conn.getAccountInfo(dest.publicKey)).lamports;
-    const pdaBefore = (await conn.getAccountInfo(closePda)).lamports;
-    await expectOk(
+    await expectErr(
       closeIx(closePda, closeId, dest.publicKey, 0, exp(), { privateKey, publicKey }),
       [rentPayer],
-      "close valid (rent drained)",
+      "immediate close-to-destination rejected (CloseDeprecated)",
     );
-    assert.equal((await conn.getAccountInfo(dest.publicKey)).lamports - destBefore, pdaBefore, "rent returned to destination");
-    assert.equal(await conn.getAccountInfo(closePda), null, "closed account removed");
+    assert.ok(await conn.getAccountInfo(closePda), "deprecated close moved nothing");
   }
 
   // ---- sponsored token withdraw (disc 2) — tokens move via SPL CPI, attested split ----

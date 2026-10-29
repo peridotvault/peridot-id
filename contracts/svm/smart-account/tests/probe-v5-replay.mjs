@@ -52,7 +52,10 @@ const authNewA = compressedPub(kNewA.publicKey);
 const kNewB = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
 const authNewB = compressedPub(kNewB.publicKey);
 const pid = pidToSeed32("probev5replay@pid");
-const [pda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), pid], PROGRAM);
+// ANT-866 B1: vault PDA commits to the claiming key; activate carries the (absent) tombstone.
+const keyHash = (authComp) => sha256(Buffer.from(authComp));
+const [pda] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("account"), pid, keyHash(authV)], PROGRAM);
+const [tombstone] = PublicKey.findProgramAddressSync([Buffer.from("peridot_id"), Buffer.from("tombstone"), pid], PROGRAM);
 
 async function setup(conn) {
   const payer = Keypair.generate(); const dest = Keypair.generate();
@@ -66,7 +69,7 @@ async function setup(conn) {
   const tA = await conn.getBlockTime(await conn.getSlot());
   const h = sha256(Buffer.concat([DOMAIN_V3, Buffer.from([5]), pid, authV, u16(POLICY_V1), i64(tA + 300)]));
   const s = signPayload(kV, h);
-  await sendAndConfirmTransaction(conn, new Transaction().add(new TransactionInstruction({ keys: [{ pubkey: payer.publicKey, isSigner: true, isWritable: true }, { pubkey: pda, isSigner: false, isWritable: true }, { pubkey: TREASURY_PDA, isSigner: false, isWritable: true }, { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false }], programId: PROGRAM, data: Buffer.concat([Buffer.from([5]), pid, authV, u16(POLICY_V1), i64(tA + 300), u64(0n), u16(s.clientDataJSON.length), s.clientDataJSON]) }), buildSecpIx(s.comp, s.sig, s.messageData)), [payer], { commitment: "confirmed", skipPreflight: true });
+  await sendAndConfirmTransaction(conn, new Transaction().add(new TransactionInstruction({ keys: [{ pubkey: payer.publicKey, isSigner: true, isWritable: true }, { pubkey: pda, isSigner: false, isWritable: true }, { pubkey: TREASURY_PDA, isSigner: false, isWritable: true }, { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, { pubkey: INSTRUCTIONS, isSigner: false, isWritable: false }, { pubkey: tombstone, isSigner: false, isWritable: false }], programId: PROGRAM, data: Buffer.concat([Buffer.from([5]), pid, authV, u16(POLICY_V1), i64(tA + 300), u64(0n), u16(s.clientDataJSON.length), s.clientDataJSON]) }), buildSecpIx(s.comp, s.sig, s.messageData)), [payer], { commitment: "confirmed", skipPreflight: true });
   await conn.confirmTransaction(await sendAndConfirmTransaction(conn, new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: pda, lamports: 2 * LAMPORTS_PER_SOL })), [payer], { commitment: "confirmed" }), "confirmed");
   return { payer, dest };
 }
