@@ -150,6 +150,7 @@ contract PeridotAccountBatch {
     error Expired();
     error CallFailed();
     error ZeroAuthority();
+    error SaltNotBound();
     error InsufficientFunds();
     error UnknownFeePolicy();
     error ExceedsMaxBps();
@@ -309,6 +310,8 @@ contract PeridotAccountBatch {
     /// under DOMAIN_V4, and the contract enforces `networkFee + protocolFee ≤
     /// maxTotalFee` (FeeExceedsMax) with the pure-percentage fee formula
     /// (ANT-747: floor leg removed) before any payout.
+    /// @dev B1 binding (ANT-866): same `SaltNotBound` gate as `PeridotAccount`
+    /// — `salt` MUST equal `keccak256(pidHash ‖ x ‖ y)`, checked pre-verify.
     /// @dev `nonReentrant` for uniformity (ANT-563 note): not exploitable
     /// without it (`msg.sender == _factory`, payouts only to factory-trusted
     /// targets, `initialized` set before calls), but every other external-call
@@ -317,6 +320,7 @@ contract PeridotAccountBatch {
         bytes32 salt,
         bytes32 x,
         bytes32 y,
+        bytes32 pidHash,
         uint16 feePolicyVersion,
         uint256 maxTotalFee,
         uint64 deadline,
@@ -333,6 +337,7 @@ contract PeridotAccountBatch {
         if (msg.sender != _factory) revert Unauthorized();
         if (block.timestamp > deadline) revert Expired();
         if (deadline - block.timestamp > MAX_TTL) revert Expired();
+        if (salt != keccak256(abi.encodePacked(pidHash, x, y))) revert SaltNotBound();
         uint256 bps = _policyProtocolBpsV4(feePolicyVersion);
         bytes32 expected = keccak256(
             abi.encodePacked(

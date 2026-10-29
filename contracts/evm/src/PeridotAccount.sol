@@ -143,6 +143,7 @@ contract PeridotAccount {
     error Expired();
     error CallFailed();
     error ZeroAuthority();
+    error SaltNotBound();
     error InsufficientFunds();
     error UnknownFeePolicy();
     error ExceedsMaxBps();
@@ -289,10 +290,18 @@ contract PeridotAccount {
     /// deploy; `msg.sender` here is the factory itself),
     /// protocolFee → factory vault. (Gas sanity is enforced by the factory
     /// frame, which observes the full activation cost.)
+    /// @dev B1 binding (ANT-866): `salt` MUST equal
+    /// `keccak256(pidHash ‖ x ‖ y)` (`SaltNotBound` otherwise), checked before
+    /// signature verification. The signed payload still binds `salt` (frozen
+    /// shape), so the equation transitively binds the signed claim to
+    /// (pid, key): pre-B1 keyless salts (`sha256(pid)`) have no pidHash
+    /// preimage and are unclaimable. Fail-fast placement also saves the
+    /// P-256 precompile on smuggled salts.
     function initialize(
         bytes32 salt,
         bytes32 x,
         bytes32 y,
+        bytes32 pidHash,
         uint16 feePolicyVersion,
         uint64 deadline,
         uint256 networkFee,
@@ -308,6 +317,7 @@ contract PeridotAccount {
         if (msg.sender != _factory) revert Unauthorized();
         if (block.timestamp > deadline) revert Expired();
         if (deadline - block.timestamp > MAX_TTL) revert Expired();
+        if (salt != keccak256(abi.encodePacked(pidHash, x, y))) revert SaltNotBound();
         // Version gate before signature verification: unknown policies revert
         // identically for every caller and reveal nothing about the key.
         uint256 bps = _policyProtocolBps(feePolicyVersion);
@@ -353,6 +363,7 @@ contract PeridotAccount {
     /// under DOMAIN_V4, and the contract enforces `networkFee + protocolFee ≤
     /// maxTotalFee` (FeeExceedsMax) with the pure-percentage fee formula
     /// (ANT-747: floor leg removed) before any payout.
+    /// @dev B1 binding (ANT-866): same `SaltNotBound` gate as `initialize`.
     /// @dev `nonReentrant` for uniformity (ANT-563 note): not exploitable
     /// without it (`msg.sender == _factory`, payouts only to factory-trusted
     /// targets, `initialized` set before calls), but every other external-call
@@ -361,6 +372,7 @@ contract PeridotAccount {
         bytes32 salt,
         bytes32 x,
         bytes32 y,
+        bytes32 pidHash,
         uint16 feePolicyVersion,
         uint256 maxTotalFee,
         uint64 deadline,
@@ -377,6 +389,7 @@ contract PeridotAccount {
         if (msg.sender != _factory) revert Unauthorized();
         if (block.timestamp > deadline) revert Expired();
         if (deadline - block.timestamp > MAX_TTL) revert Expired();
+        if (salt != keccak256(abi.encodePacked(pidHash, x, y))) revert SaltNotBound();
         uint256 bps = _policyProtocolBpsV4(feePolicyVersion);
         bytes32 expected = keccak256(
             abi.encodePacked(
