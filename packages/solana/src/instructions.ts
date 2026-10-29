@@ -774,8 +774,10 @@ export function buildRegisterSessionInstruction(
 /**
  * Session-signed `sessionExecute` (disc 8): one gameplay CPI authorized by the
  * session keypair (tx envelope signer) + on-chain record (seq, expiry,
- * inactivity). The vault PDA must not appear anywhere — enforced here
- * fail-fast and on-chain. No `remaining_accounts`: `gameAccounts` must cover
+ * inactivity, ANT-863 B3 generation epoch). The vault PDA is passed READ-ONLY
+ * at index 0 solely as the epoch source for the rotation-revokes-sessions
+ * check — it is enforced here fail-fast and on-chain to never enter the
+ * session CPI. No `remaining_accounts`: `gameAccounts` must cover
  * every non-session meta exactly once, in order.
  */
 export function buildSessionExecuteInstruction(
@@ -817,6 +819,7 @@ export function buildSessionExecuteInstruction(
   }
   return new TransactionInstruction({
     keys: [
+      { pubkey: vault, isSigner: false, isWritable: false },
       { pubkey: sessionPda, isSigner: false, isWritable: true },
       { pubkey: gameProgram, isSigner: false, isWritable: false },
       { pubkey: gameProgramData, isSigner: false, isWritable: false },
