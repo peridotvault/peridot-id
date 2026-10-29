@@ -66,23 +66,33 @@ pub struct HttpResponse {
     pub upgrade: Option<bool>,
 }
 
-/// Fixed, deterministic query-path error responses (tree-certified).
+/// Fixed, deterministic query-path responses (tree-certified).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FixedResponse {
     /// `GET /mcp` (POST-only endpoint).
     MethodNotAllowed,
-    /// Any path other than `/mcp`.
+    /// Any path other than `/mcp` (except `/.well-known/ic-domains`).
     NotFound,
+    /// `/.well-known/ic-domains`: custom-domain ownership file listing
+    /// `mcp.peridot.id` (boundary nodes read this to issue TLS).
+    IcDomains,
 }
+
+/// Custom domains this canister claims, one per line in the served file.
+pub const CUSTOM_DOMAINS: &str = "mcp.peridot.id";
 
 impl FixedResponse {
     /// Tree path for this response's certification entry: the 405 lives at
     /// the exact `/mcp` path; the 404 (served for every other request path)
-    /// lives at the `/` wildcard prefix.
+    /// lives at the `/` wildcard prefix; the ic-domains file lives at its
+    /// exact well-known path.
     fn tree_path(&self) -> HttpCertificationPath<'static> {
         match self {
             FixedResponse::MethodNotAllowed => HttpCertificationPath::exact("/mcp"),
             FixedResponse::NotFound => HttpCertificationPath::wildcard("/"),
+            FixedResponse::IcDomains => {
+                HttpCertificationPath::exact("/.well-known/ic-domains")
+            }
         }
     }
 
@@ -90,17 +100,29 @@ impl FixedResponse {
         match self {
             FixedResponse::MethodNotAllowed => 405,
             FixedResponse::NotFound => 404,
+            FixedResponse::IcDomains => 200,
+        }
+    }
+
+    pub fn content_type(&self) -> &'static str {
+        match self {
+            // Boundary nodes expect the ownership file as plain text.
+            FixedResponse::IcDomains => "text/plain",
+            _ => "application/json",
         }
     }
 
     pub fn body(&self) -> Vec<u8> {
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": serde_json::Value::Null,
-            "error": {"code": -32600, "message": "Invalid Request"}
-        })
-        .to_string()
-        .into_bytes()
+        match self {
+            FixedResponse::IcDomains => format!("{CUSTOM_DOMAINS}\n").into_bytes(),
+            _ => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": serde_json::Value::Null,
+                "error": {"code": -32600, "message": "Invalid Request"}
+            })
+            .to_string()
+            .into_bytes(),
+        }
     }
 }
 
@@ -148,6 +170,10 @@ pub enum Route {
 /// dispatcher (POST-only).
 pub fn route(method: &str, url: &str, is_update: bool) -> Route {
     let path = url.split('?').next().unwrap_or("");
+    // Custom-domain ownership file (any method; boundary nodes GET it).
+    if path == "/.well-known/ic-domains" {
+        return Route::Fixed(FixedResponse::IcDomains);
+    }
     if path != "/mcp" {
         return Route::Fixed(FixedResponse::NotFound);
     }
@@ -278,7 +304,7 @@ pub fn certified_fixed(kind: FixedResponse) -> CertifiedFixed {
     let response = CertResponse::builder()
         .with_status_code(StatusCode::from_u16(kind.status()).expect("fixed status valid"))
         .with_headers(vec![
-            ("Content-Type".to_string(), "application/json".to_string()),
+            ("Content-Type".to_string(), kind.content_type().to_string()),
             (
                 CERTIFICATE_EXPRESSION_HEADER_NAME.to_string(),
                 expr.clone(),
@@ -301,10 +327,11 @@ pub fn certified_fixed(kind: FixedResponse) -> CertifiedFixed {
 /// All fixed certifications in insertion order. The order is part of the
 /// tree shape: [`install_certification`] and [`serve_fixed`] must use the
 /// same order so witnesses verify against the persisted root hash.
-fn all_fixed() -> [CertifiedFixed; 2] {
+fn all_fixed() -> [CertifiedFixed; 3] {
     [
         certified_fixed(FixedResponse::MethodNotAllowed),
         certified_fixed(FixedResponse::NotFound),
+        certified_fixed(FixedResponse::IcDomains),
     ]
 }
 
@@ -492,7 +519,11 @@ mod tests {
 
     #[test]
     fn fixed_responses_carry_expression_header() {
-        for kind in [FixedResponse::MethodNotAllowed, FixedResponse::NotFound] {
+        for kind in [
+            FixedResponse::MethodNotAllowed,
+            FixedResponse::NotFound,
+            FixedResponse::IcDomains,
+        ] {
             let c = certified_fixed(kind);
             let has_expr = c.response.headers().iter().any(|(n, _)| {
                 n.eq_ignore_ascii_case(CERTIFICATE_EXPRESSION_HEADER_NAME)
@@ -533,6 +564,42 @@ mod tests {
             with_cert.headers()
         );
         assert_eq!(with_cert.status_code().as_u16(), 404);
+    }
+
+    #[test]
+    fn well_known_ic_domains_serves_claimed_domain() {
+        assert_eq!(
+            route("GET", "/.well-known/ic-domains", false),
+            Route::Fixed(FixedResponse::IcDomains)
+        );
+        assert_eq!(
+            route("GET", "/.well-known/ic-domains?x=1", true),
+            Route::Fixed(FixedResponse::IcDomains)
+        );
+        // Neighboring well-known paths still 404; /mcp behavior unchanged.
+        assert_eq!(
+            route("GET", "/.well-known/other", false),
+            Route::Fixed(FixedResponse::NotFound)
+        );
+        let kind = FixedResponse::IcDomains;
+        assert_eq!(kind.status(), 200);
+        assert_eq!(kind.content_type(), "text/plain");
+        assert_eq!(kind.body(), b"mcp.peridot.id\n".to_vec());
+    }
+
+    #[test]
+    fn well_known_ic_domains_is_certified() {
+        let with_cert = serve_fixed(
+            Some(vec![1, 2, 3]),
+            FixedResponse::IcDomains,
+            "/.well-known/ic-domains",
+        );
+        assert!(
+            with_cert.headers().iter().any(|(n, _)| n == "IC-Certificate"),
+            "ic-domains must carry a v2 certificate header, got: {:?}",
+            with_cert.headers()
+        );
+        assert_eq!(with_cert.status_code().as_u16(), 200);
     }
 
     #[test]

@@ -79,11 +79,12 @@ repo-wide `dfx.json` appears (Phase 3+).
 cargo test -p peridot_mcp            # 49 tests, must be green
 
 dfx start --background               # local replica + HTTP gateway
+rustup target add wasm32-unknown-unknown
 dfx deploy                           # builds the wasm, installs peridot_mcp
 dfx canister id peridot_mcp          # <canister-id> for the URL below
 
 # smoke test through the gateway (initialize -> notifications -> list -> call):
-GW=http://<canister-id>.localhost:4943
+GW=http://uxrrr-q7777-77774-qaaaq-cai.localhost:4943
 curl -s -X POST $GW/mcp \
   -H 'Accept: application/json, text/event-stream' \
   -H 'Content-Type: application/json' \
@@ -165,7 +166,7 @@ complete initialize → tools/list → tools/call against this URL.
   406; unsupported `MCP-Protocol-Version` is 400. `Mcp-Session-Id` is ignored
   on input and never emitted. Every update response carries
   `Content-Type: application/json`.
-- `OPTIONS /mcp` → 204 + CORS headers. `GET /mcp` → 405. Other paths → 404.
+- `OPTIONS /mcp` → 204 + CORS headers. `GET /mcp` → 405. `/.well-known/ic-domains` → 200 `text/plain` (`mcp.peridot.id`, tree-certified, for custom-domain ownership). Other paths → 404.
 - Limits: request ≤ 64 KB (else 413 + `-32602`), response ≤ 32 KB
   (search lists truncate with `"truncated": true`), string args ≤ 500 chars
   (chars, not bytes). Stateless: no batch, no sessions.

@@ -99,7 +99,10 @@ fn http_request_update(req: HttpRequest) -> HttpResponse {
             let body = kind.body();
             HttpResponse {
                 status_code: kind.status(),
-                headers: json_headers(),
+                headers: vec![HeaderField(
+                    "Content-Type".to_string(),
+                    kind.content_type().to_string(),
+                )],
                 body,
                 upgrade: None,
             }
