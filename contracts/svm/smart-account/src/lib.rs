@@ -799,12 +799,12 @@ mod ant866_close_pins {
 
     #[test]
     fn close_flow_errors_pinned_additive() {
-        assert_eq!(PeridotError::Tombstoned as u32, 30);
-        assert_eq!(PeridotError::AccountClosing as u32, 31);
-        assert_eq!(PeridotError::CloseTicketNotFound as u32, 32);
-        assert_eq!(PeridotError::GraceNotElapsed as u32, 33);
-        assert_eq!(PeridotError::CloseDeprecated as u32, 34);
-        assert_eq!(PeridotError::CloseAlreadyRequested as u32, 35);
+        assert_eq!(PeridotError::Tombstoned as u32, 31);
+        assert_eq!(PeridotError::AccountClosing as u32, 32);
+        assert_eq!(PeridotError::CloseTicketNotFound as u32, 33);
+        assert_eq!(PeridotError::GraceNotElapsed as u32, 34);
+        assert_eq!(PeridotError::CloseDeprecated as u32, 35);
+        assert_eq!(PeridotError::CloseAlreadyRequested as u32, 36);
         // Pre-existing errors frozen.
         assert_eq!(PeridotError::SessionStaleGeneration as u32, 29);
         assert_eq!(PeridotError::AlreadyInitialized as u32, 0);
