@@ -45,10 +45,16 @@ function setup() {
 }
 
 describe("AccountService", () => {
-  it("ensureAccount seeds the smart_account with the derived PDA address", async () => {
+  it("ensureAccount seeds the smart_account with the bound PDA address", async () => {
+    // B1 (ANT-866): the Solana row binds the registered (oldest active) key —
+    // the only address that key can claim.
+    const { deriveSmartAccountAddress } = jest.requireActual("../common/smart-account") as typeof import("../common/smart-account");
+    const { coseKey } = jest.requireActual("../../test/factories") as typeof import("../../test/factories");
+    const { coseToCompressedSecp256r1 } = jest.requireActual("../credentials/cose") as typeof import("../credentials/cose");
     const { service, prisma, security } = setup();
     prisma.chainAccount.findFirst.mockResolvedValueOnce(null); // smart row missing
-    prisma.chainAccount.findMany.mockResolvedValue([chainRow()]);
+    const expected = deriveSmartAccountAddress("ifal@pid", PROGRAM_ID, coseToCompressedSecp256r1(coseKey())).address;
+    prisma.chainAccount.findMany.mockResolvedValue([{ ...chainRow(), address: expected }]);
 
     const views = await service.ensureAccount("ifal@pid");
 
@@ -56,12 +62,12 @@ describe("AccountService", () => {
       data: {
         pid: "ifal@pid",
         chainId: "chain-sol",
-        address: DERIVED,
+        address: expected,
         accountType: SMART,
       },
     });
     expect(security.log).toHaveBeenCalledWith("ifal@pid", "account.created", {});
-    expect(views[0].address).toBe(DERIVED);
+    expect(views[0].address).not.toBe(DERIVED); // stale keyless PDA, never seeded
   });
 
   it("ensureAccount does not reseed the smart row when it already exists", async () => {

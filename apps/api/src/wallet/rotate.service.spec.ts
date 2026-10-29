@@ -21,8 +21,10 @@ const adapterMock = {
   isActivated: jest.fn(async () => true),
   chainTime: jest.fn(async () => 1_000_000),
   getNonce: jest.fn(async () => 4n),
+  getNonceOf: jest.fn(async () => 4n),
   submitRotateAuthorityTx: jest.fn(async () => "sig-rotate"),
   getAuthority: jest.fn(async () => Buffer.from(rotatedKeyHex, "hex")),
+  getAuthorityOf: jest.fn(async () => Buffer.from(rotatedKeyHex, "hex")),
   parseTransaction: jest.fn(async () => ({ signature: "sig", fee: 5000 })),
 };
 

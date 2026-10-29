@@ -49,7 +49,10 @@ export class SessionKeysService {
       throw new BadRequestException("session key and game program must differ");
     }
     const accountId32 = hexToBytes(dto.accountId);
-    const { address } = deriveSessionAddress(accountId32, sessionKey);
+    // B1 (ANT-866): session PDAs are namespaced per vault key — the caller
+    // (wallet) supplies the claiming authority it registered with.
+    const vaultAuthority = hexToBytes(dto.vaultAuthority);
+    const { address } = deriveSessionAddress(accountId32, vaultAuthority, sessionKey);
     const recordedAuthority = dto.recordedHasAuthority && dto.recordedAuthority
       ? new PublicKey(dto.recordedAuthority).toBytes()
       : new Uint8Array(32);

@@ -4,7 +4,7 @@ import { deriveEvmSmartAccountAddressBound } from "@peridotvault/pid-evm";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection, solanaReferenceFor } from "../common/chains";
 import { deriveSmartAccountAddress } from "../common/smart-account";
-import { coseToRawXy } from "../credentials/cose";
+import { coseToCompressedSecp256r1, coseToRawXy } from "../credentials/cose";
 import { isP2002 } from "../prisma/prisma-error";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -115,9 +115,17 @@ export class AccountService {
     // Resolve the program id (registry) before any DB write so it can't orphan rows.
     const programId = await this.programId(selection);
 
-    // The smart-account address is deterministically resolvable before on-chain
-    // initialization — seed the chain_accounts row with the derived PDA address.
-    const derived = deriveSmartAccountAddress(pid, programId).address;
+    // B1 (ANT-866): the Solana PDA commits to the claiming passkey, so the
+    // row is deferred until an active authority exists — a keyless row would
+    // advertise an unclaimable funding target. The activation path heals any
+    // pre-binding row to the bound address before broadcasting.
+    const authority = await this.prisma.authority.findFirst({
+      where: { pid, status: "active" },
+      orderBy: { createdAt: "asc" },
+    });
+    const derived = authority
+      ? deriveSmartAccountAddress(pid, programId, coseToCompressedSecp256r1(Buffer.from(authority.publicKey))).address
+      : null;
     const existingChain = await this.prisma.chainAccount.findFirst({
       where: {
         pid,
@@ -126,22 +134,27 @@ export class AccountService {
       },
     });
     if (!existingChain) {
-      const chainId = await this.chains.solanaChainIdOrThrow(selection);
-      try {
-        await this.prisma.chainAccount.create({
-          data: {
-            pid,
-            chainId,
-            address: derived,
-            accountType: ACCOUNT_TYPE_SMART,
-          },
-        });
-        await this.security.log(pid, "account.created", {});
-      } catch (err) {
-        // concurrent create → already present; P2002 is fine.
-        if (!isP2002(err)) throw err;
+      if (derived === null) {
+        // No passkey yet: defer the Solana row too (see above). EVM rows
+        // defer the same way; getChains throws NotFound until any row lands.
+      } else {
+        const chainId = await this.chains.solanaChainIdOrThrow(selection);
+        try {
+          await this.prisma.chainAccount.create({
+            data: {
+              pid,
+              chainId,
+              address: derived,
+              accountType: ACCOUNT_TYPE_SMART,
+            },
+          });
+          await this.security.log(pid, "account.created", {});
+        } catch (err) {
+          // concurrent create → already present; P2002 is fine.
+          if (!isP2002(err)) throw err;
+        }
       }
-    } else if (existingChain.address !== derived) {
+    } else if (derived !== null && existingChain.address !== derived) {
       // Re-point the stored address to the current program id's PDA (e.g. after an on-chain
       // program redeploy changed the program id). Without this, balance reads and activation
       // would target a stale address that holds no funds.

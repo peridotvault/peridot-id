@@ -29,6 +29,8 @@ const adapterMock = {
   estimateWithdrawFee: jest.fn(async () => 5000n),
   chainTime: jest.fn(async () => 1_000_000),
   getNonce: jest.fn(async () => 7n),
+  getNonceOf: jest.fn(async () => 7n),
+  getAuthorityOf: jest.fn(async () => new Uint8Array(33).fill(9)),
   getBalanceOf: jest.fn(async (addr: { toBase58: () => string } | string) => {
     const s = typeof addr === "string" ? addr : addr.toBase58();
     return s === RELAYER ? relayerBalance : 100_000_000;
@@ -114,6 +116,7 @@ beforeEach(() => {
   relayerBalance = 1_000_000_000;
   adapterMock.isActivated.mockResolvedValue(true);
   adapterMock.getNonce.mockResolvedValue(7n);
+  adapterMock.getNonceOf.mockResolvedValue(7n);
   adapterMock.getBalanceOf.mockImplementation(async (addr: { toBase58: () => string } | string) => {
     const s = typeof addr === "string" ? addr : addr.toBase58();
     return s === RELAYER ? relayerBalance : 100_000_000;
@@ -692,6 +695,7 @@ describe("SponsoredWithdrawService", () => {
     // Validation reads nonce 7; the crashed attempt consumed it (now 8) and the
     // history confirms ⇒ proven landed, no rebroadcast.
     adapterMock.getNonce.mockResolvedValueOnce(7n).mockResolvedValue(8n);
+    adapterMock.getNonceOf.mockResolvedValueOnce(8n);
     adapterMock.getHistory.mockResolvedValue([{ signature: "sig-h", err: null }]);
     const landed = await service.withdraw(IDENTITY_ID, base);
     expect(landed).toMatchObject({ signature: "sig-h", status: "confirmed" });

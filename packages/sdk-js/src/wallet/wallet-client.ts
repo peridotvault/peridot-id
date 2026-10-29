@@ -446,8 +446,8 @@ export class PeridotWallet {
     const adapter = await this.solana();
     const signature =
       input.asset === "SOL"
-        ? await adapter.depositSol(pid, feePayer, lamports)
-        : await adapter.depositToken(pid, new PublicKey(input.asset), feePayer, lamports);
+        ? await adapter.depositSol(pid, await this.authorityCompressed(), feePayer, lamports)
+        : await adapter.depositToken(pid, await this.authorityCompressed(), new PublicKey(input.asset), feePayer, lamports);
     return { signature };
   }
 
@@ -499,7 +499,7 @@ export class PeridotWallet {
               expiry,
               feePolicyVersion: quote.feePolicyVersion,
               maxTotalFee,
-              sourceAta: await adapter.tokenAta(pid, new PublicKey(input.asset)),
+              sourceAta: await adapter.tokenAta(pid, await this.authorityCompressed(), new PublicKey(input.asset)),
             });
       const a = await this.signer().sign(p, {});
       const res = await this.api.post<SponsoredSubmitResult>("/v1/wallet/withdraw", {
@@ -727,7 +727,7 @@ export class PeridotWallet {
       });
     for (const meta of byMint.values()) {
       if (!meta.isPinned) continue;
-      const ata = await adapter.tokenAta(pid, new PublicKey(meta.mint)).catch(() => null);
+      const ata = await adapter.tokenAta(pid, await this.authorityCompressed(), new PublicKey(meta.mint)).catch(() => null);
       out.push({
         mint: meta.mint,
         amount: "0",

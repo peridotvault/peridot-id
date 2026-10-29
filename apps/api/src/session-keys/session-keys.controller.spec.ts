@@ -24,6 +24,7 @@ function dtoFor(accountId: string): RegisterSessionDto {
   const d = new RegisterSessionDto();
   d.vault = "VaultPDA1111111111111111111111111111111111";
   d.accountId = accountId;
+  d.vaultAuthority = "0x" + "02" + "11".repeat(32);
   d.sessionPubkey = "SessionKey11111111111111111111111111111111";
   d.allowedProgram = "GameProgram1111111111111111111111111111111";
   d.expiresAt = Math.floor(Date.now() / 1000) + 3600;

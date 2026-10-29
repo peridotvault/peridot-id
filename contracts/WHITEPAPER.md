@@ -54,10 +54,10 @@ another version's payloads.
 | Payload hash | `sha256(DOMAIN_V3‖opTag‖LE fields)` (`auth.rs::payload_hash_v3`) | `keccak256(DOMAIN_V3‖opTag‖chainid‖account‖…)` (`execute`/`updateAuthority`) |
 | Authority encoding | 33B compressed key + 32B RP-ID hash in 112B PDA state v2 (`state.rs`) | `bytes32 x, y` + `bytes32 rpIdHash` storage (`PeridotAccount.sol`) |
 | Sig verify | Secp256r1 precompile + Instructions-sysvar introspection (next ix), signer == stored, RP-ID hash + UV-flag `0x04` enforced (`auth.rs::verify_secp256r1_v2`) | Direct `P256.verify` (OZ, RIP-7212/fallback, low-S inside) + on-chain RP-ID hash + UV-flag `0x04` (`_verify`) |
-| Address | PDA `["peridot_id","account",sha256(pid)]`, program `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT` — deterministic per (seeds, program id); **one program keypair on every cluster → one address everywhere** | CREATE2 EIP-1167 proxy, `salt = keccak256(pidHash ‖ x ‖ y)` with `pidHash = sha256(pid)` (ANT-866/B1 PID-key binding; pre-funding any other salt is unclaimable), same factory+impl → same address every chain |
+| Address | PDA `["peridot_id","account",sha256(pid),sha256(authority)]` (ANT-866/B1 PID-key binding; pre-funding any other address is unclaimable), program `CiwLJ1hMNjSRdZj2yMVt9BseRTjVd4pjz7Mxr9yXf6NT` — deterministic per (seeds, program id); **one program keypair on every cluster → one address everywhere** | CREATE2 EIP-1167 proxy, `salt = keccak256(pidHash ‖ x ‖ y)` with `pidHash = sha256(pid)` (ANT-866/B1 PID-key binding; pre-funding any other salt is unclaimable), same factory+impl → same address every chain |
 | Clock | `Clock` sysvar, `i64 expiry` (TTL ≤ 600s enforced) | `block.timestamp`, `u64 deadline` (TTL ≤ 600s enforced) |
 | Fee model | Attested networkFee + fixed protocol %: program recomputes `protocolFee`, splits relayerFee → relayer signer, protocolFee → canonical vault. EVM sanity-bounds attestation against measured gas (`GasAnomaly`); SVM relies on formula + `meta.fee` reconciliation | Same split: relayerFee → `msg.sender`, protocolFee → factory vault; same policy table/bound; same reconciliation |
-| State | v2 PDA 112B (`v1 80B prefix + rpIdHash[32]`; v1 readable, V3 ops require v2) | Contract storage (`authorityX/Y`, `rpIdHash`, `nonce`, `initialized`, `factory`, V4 `_permissions`/`_modules`/`_locked`; `__gap` 44→38 slots) |
+| State | v3 PDA 112B (80B prefix + `key_hash[32] = sha256(authority-at-claim)`; pre-B1 80B states rejected — ANT-866/B1; tombstone PDA 74B `["peridot_id","tombstone",sha256(pid)]` per closed pid, close-ticket PDA 107B during grace) | Contract storage (`authorityX/Y`, `rpIdHash`, `nonce`, `initialized`, `factory`, V4 `_permissions`/`_modules`/`_locked`; `__gap` 44→38 slots) |
 
 ## 2. V3 authorization + fee schema (canonical)
 
@@ -206,9 +206,10 @@ distinction, enforced on-chain and proven by the adversarial suite.
 
 ## 5. SVM — dispatch + state
 
-- `lib.rs::process_instruction` — checks program id, splits discriminator byte → `Instruction::{Initialize=0, WithdrawSol=1, WithdrawToken=2, UpdateAuthority=3, Close=4, Activate=5, Execute=6, RegisterSession=7, SessionExecute=8, RevokeSession=9, CloseSession=10}` → handler. Owner authority is secp256r1 via precompile; session keys are Ed25519 (envelope signatures + on-chain record, §11).
-- `state.rs::SmartAccount` (read) / `SmartAccountMut` (write) — v2 112B (`try_from_bytes` accepts v1 80B read-only; writers stamp v2), `authority()`, `account_id()`, `rp_id_hash()` (`MissingRpIdHash` on v1), `nonce()`, `initialize(id,key,rpId)`, `set_authority`, `increment_nonce`.
-- `verify_pda(account, program, account_id)` — real `find_program_address` on-chain; host stub returns 255 (covered by integration suite, not units).
+- `lib.rs::process_instruction` — checks program id, splits discriminator byte → `Instruction::{Initialize=0, WithdrawSol=1, WithdrawToken=2, UpdateAuthority=3, Close=4, Activate=5, Execute=6, RegisterSession=7, SessionExecute=8, RevokeSession=9, CloseSession=10, …, CloseRequest=33, CloseCancel=34, CloseFinalize=35}` → handler. Owner authority is secp256r1 via precompile; session keys are Ed25519 (envelope signatures + on-chain record, §11).
+- `state.rs::SmartAccount` (read) / `SmartAccountMut` (write) — v3 112B (V3-only readers; pre-B1 80B states rejected), `authority()`, `account_id()`, `key_hash()` (claim-time binding, never rewritten), `nonce()`, `require_active()` (rejects non-ACTIVE with `AccountClosing`), `initialize(id,key)` (stamps v3 + hash), `set_authority`, `set_status`, `increment_nonce`, `bump_session_generation`.
+- `verify_pda(account, program, account_id, key_hash)` — bound seeds on-chain; host stub returns 255 (covered by integration suite, not units). `verify_ticket_pda` / `verify_tombstone_absent` (tombstone keyed by pid only) likewise.
+- Immediate `Close` (4) is permanently disabled (`CloseDeprecated` — decodes, then rejects); teardown is `close_request` (grace opens, ticket created, nonce consumed) → `close_cancel` (revive, rent refunded) or `close_finalize` (permissionless after `CLOSE_GRACE_SECS` = 7d: tombstone written, full balance to the bound destination, vault + ticket deleted).
 - `verify_nonce` — `state.nonce == ix.nonce` else `InvalidNonce`.
 - `errors.rs::PeridotError`: `…/Forbidden` (retained discriminant 11, no longer emitted — creation is permissionless since ANT-612), `FeeExceedsMax = 12` (reintroduced for the V4 fee-cap family — discriminant preserved from the retired slot; V3 verifiers never emit it), `UnknownFeePolicy = 13`, `MissingRpIdHash = 14`, `ExceedsMaxBps = 15`, `InvalidTarget = 16` (execute self-call), session errors 17–22 (`SessionNotFound/Revoked/Expired`, `BadSessionSeq`, `SessionScopeViolation`, `SessionTtlExceeded`), `SessionSpendExceeded = 24` (C3 per-execution session-PDA spend pin).
 - `fee.rs`: `FEE_POLICY_V1 = 1` (frozen), `FEE_POLICY_V2 = 2` (accepted for pre-ANT-747 signed intents; ANT-747 removed the floor leg); `policy_protocol_bps()` (frozen v1-only gate); `policy_protocol_bps_v4()` (v1/v2 gate, both 5000 bps); `split_attested_fee()` (single money path: `floor(n×bps/10000)`, no floors); `total_fee()` (saturating add).
@@ -346,9 +347,9 @@ keypair per session (envelope signatures are Ed25519-only; the precompile is
 instruction-data-only, 0-CU, one 5,000-lamport fee per use — so P-256
 authorizes registration once, never per gameplay action).
 
-Accounts: vault PDA `["peridot_id","account",sha256(pid)]` (existing, 80B
-since ANT-197);
-session PDA `["peridot_id","session",account_id,session_pubkey]`, program-owned,
+Accounts: vault PDA `["peridot_id","account",sha256(pid),sha256(authority)]` (bound, 112B
+since ANT-866 B1);
+session PDA `["peridot_id","session",account_id,sha256(authority),session_pubkey]` (key-namespaced since ANT-866 B1), program-owned,
 fixed 206B v2 record (`version u8 ‖ status u8 ‖ session_pubkey[32] ‖ account_id[32] ‖
 expires_at i64LE ‖ last_used i64LE ‖ seq u64LE ‖ allowed_program[32] ‖
 recorded_authority[32] ‖ recorded_has_authority u8 ‖ recorded_slot u64LE ‖
