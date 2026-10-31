@@ -5,7 +5,8 @@
 //   passkey-authorized withdrawal → verify balance + nonce on devnet.
 //
 // Requires the devnet program built with PID_BACKEND = this backend, and:
-//   PID_RELAYER_SECRET=64-byte-hex  (dev backend keypair)
+//   RELAYER_SVM_SECRET_KEY=64-byte-hex or JSON 64-byte array  (dev backend keypair;
+//   legacy PID_RELAYER_SECRET still honored)
 // ANT-635: no PID_TREASURY_PUBKEY — the fee vault is the ["treasury"] PDA per program id.
 // The Google-OAuth browser leg (Playwright + virtual authenticator) is the documented
 // follow-up in docs/tasks/011-e2e-devnet-transaction.md; here the API is mocked and the
@@ -19,9 +20,22 @@ import { PeridotWallet } from "@peridotvault/pid-sdk-js";
 import { SolanaAdapter, SolanaRpc, b64url, buildWebAuthnMessage, deriveTreasuryPda, pidToSeed32, toHex } from "@peridotvault/pid-solana";
 const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
 
-const BACKEND_SECRET = process.env.PID_RELAYER_SECRET;
-assert.ok(BACKEND_SECRET && /^[0-9a-fA-F]{128}$/.test(BACKEND_SECRET), "PID_RELAYER_SECRET (64-byte hex) required");
-const backend = Keypair.fromSecretKey(Buffer.from(BACKEND_SECRET, "hex"));
+const BACKEND_SECRET = process.env.RELAYER_SVM_SECRET_KEY ?? process.env.PID_RELAYER_SECRET;
+assert.ok(BACKEND_SECRET, "RELAYER_SVM_SECRET_KEY required (64-byte hex or JSON 64-byte array)");
+let backendBytes;
+{
+  const t = BACKEND_SECRET.trim();
+  if (t.startsWith("[")) {
+    const arr = JSON.parse(t);
+    assert.ok(Array.isArray(arr) && arr.length === 64, "RELAYER_SVM_SECRET_KEY JSON array must hold 64 bytes");
+    backendBytes = Buffer.from(arr);
+  } else {
+    const hex = t.startsWith("0x") ? t.slice(2) : t;
+    assert.ok(/^[0-9a-fA-F]{128}$/.test(hex), "RELAYER_SVM_SECRET_KEY must be 64-byte hex or JSON 64-byte array");
+    backendBytes = Buffer.from(hex, "hex");
+  }
+}
+const backend = Keypair.fromSecretKey(backendBytes);
 
 const RPC = "https://api.devnet.solana.com";
 const N = BigInt("0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551");

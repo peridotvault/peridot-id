@@ -92,7 +92,7 @@ services:
       # no per-env pin). Pin explicitly only for passkey continuity when
       # rotating domains with existing credentials.
       WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-}
-      PID_RELAYER_SECRET: ${PID_RELAYER_SECRET}
+      RELAYER_SVM_SECRET_KEY: ${RELAYER_SVM_SECRET_KEY}
       DOKU_MODE: ${DOKU_MODE:-sandbox}
       DOKU_CLIENT_ID: ${DOKU_CLIENT_ID}
       DOKU_SECRET_KEY: ${DOKU_SECRET_KEY}
