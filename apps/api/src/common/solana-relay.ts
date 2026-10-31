@@ -231,6 +231,7 @@ export function relayerKeypair(ps: PidSolanaModule, config: ConfigService): Keyp
     secret = config.getOrThrow<string>("RELAYER_SVM_SECRET_KEY");
   } catch {
     secret = config.getOrThrow<string>("PID_RELAYER_SECRET");
+    console.warn("[deprecation] PID_RELAYER_SECRET fallback used; migrate to RELAYER_SVM_SECRET_KEY");
   }
   return Keypair.fromSecretKey(parseRelayerSvmSecretBytes(fromHex, secret));
 }
