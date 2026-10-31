@@ -11,15 +11,15 @@ registry re-seed, rent sims, and cron ops.
 
 | Artifact | Path | sha256 |
 |---|---|---|
-| Account wasm | `contracts/stellar-account/wasm/peridot_stellar_account.wasm` | `0be4974994827c7b653e6d1cb1221f21068ba0f75414302af768828fc59b5bdf` |
-| Factory wasm | `contracts/stellar-factory/wasm/peridot_stellar_factory.wasm` | `c33c6424ac69793bd63c1120b791325e3d33b82246b3fbf5177b41c5a936b3bf` |
+| Account wasm | `contracts/stellar/account/wasm/peridot_stellar_account.wasm` | `0be4974994827c7b653e6d1cb1221f21068ba0f75414302af768828fc59b5bdf` |
+| Factory wasm | `contracts/stellar/factory/wasm/peridot_stellar_factory.wasm` | `c33c6424ac69793bd63c1120b791325e3d33b82246b3fbf5177b41c5a936b3bf` |
 
 Sizes: account 72649 B, factory 13199 B. Built with `stellar contract build`
 (stellar 28.1.0), `overflow-checks = true` release profile.
-Rebuild: `cd contracts/stellar-account && stellar contract build`,
-`cd contracts/stellar-factory && stellar contract build`, then re-sha256.
+Rebuild: `cd contracts/stellar/account && stellar contract build`,
+`cd contracts/stellar/factory && stellar contract build`, then re-sha256.
 The factory unit tests `contractimport!` the account wasm from
-`contracts/stellar-account/wasm/` — rebuilding the account wasm requires
+`contracts/stellar/account/wasm/` — rebuilding the account wasm requires
 re-running the factory tests.
 
 ## Dependency pins (S1 §1)
@@ -61,12 +61,12 @@ python3 -c "import hashlib; print(hashlib.sha256(b'ifal@pid').hexdigest())"
 # 1. Upload the account wasm (returns ACCOUNT_WASM_HASH — must equal the
 #    sha256 of the account wasm file above)
 stellar contract upload \
-  --wasm contracts/stellar-account/wasm/peridot_stellar_account.wasm \
+  --wasm contracts/stellar/account/wasm/peridot_stellar_account.wasm \
   --network testnet --source-account trevor-p1-testnet
 
 # 2. Deploy the factory, pinning the account wasm hash
 stellar contract deploy \
-  --wasm contracts/stellar-factory/wasm/peridot_stellar_factory.wasm \
+  --wasm contracts/stellar/factory/wasm/peridot_stellar_factory.wasm \
   --network testnet --source-account trevor-p1-testnet \
   -- --account-wasm-hash <ACCOUNT_WASM_HASH>
 # → FACTORY_ID
@@ -100,12 +100,12 @@ stellar contract invoke \
 
 ## Test evidence (this branch, 2026-10-27 — require_auth fix)
 
-- `contracts/stellar`: **38 passed, 0 failed** (S1 local AC green, unchanged)
-- `contracts/stellar-account`: **9 passed, 0 failed** — includes T3 golden
+- `contracts/stellar/phase0-experiments`: **38 passed, 0 failed** (S1 local AC green, unchanged)
+- `contracts/stellar/account`: **9 passed, 0 failed** — includes T3 golden
   scope-hash vectors byte-identical to the local cores
   (`3ec34e…`, `fdbb3e…`, `01853f…`), DOMAIN_V2 28B, cross-network digest
   split, snapshot pin, min(expiry) gates
-- `contracts/stellar-factory`: **6 passed, 0 failed** — pid salt vectors
+- `contracts/stellar/factory`: **6 passed, 0 failed** — pid salt vectors
   byte-identical to `salt.rs` (`98bc15cc…`, `d7824b…`, `12fcda…`),
   AC1.6 distinctness, AC1.7 fail-closed (4/8/0/31/33-byte salts), and
   **predict→deploy parity against the real account wasm**
@@ -130,8 +130,8 @@ stellar contract invoke \
 
 ## ANT-712 residual close-out (Troy, 2026-10-27 — AC2.8 + AC3.4 on-chain)
 
-Operator: `contracts/stellar-account/scripts/ac712/` (README there has the
-full command log + 8 host/SDK findings). New crate `contracts/stellar-policy`
+Operator: `contracts/stellar/account/scripts/ac712/` (README there has the
+full command log + 8 host/SDK findings). New crate `contracts/stellar/policy`
 (OZ `Policy`, deny-first FINANCIAL_FNS mirror of `rules.rs`): **10/10 cargo
 tests**; in-tree wasm is v2 with the execute-dispatch layer
 (`2fd03ff3…71d63b568f`; v1 `4fadfcca…3013a0bc3e35` superseded on-chain). Reference actors
@@ -148,8 +148,8 @@ verifier `CD7HL6U…LQLL7QXSDB` (Phase-0, confirmed live, reused), policy v1
 | (d) Replay-reject | Same assertion, fresh envelope → enforce-sim `#3114 ChallengeInvalid`; submitted tx **`5defe5cb…`** FAILED with on-chain `#3114` |
 | AC3.4 token-deny | Rule 2 (`nonfinancial-only-v2` + policy v2, tx `425259c6…`); decimals probe tx `34887291…` SUCCESS (rule authorizes, policy passes); `execute(SAC, transfer, …)` → enforce-sim contract `#1`, submitted tx **`cdfc24ad…`** FAILED with on-chain `UnauthorizedFinancialOp` (`enforce` → `fail_with_error #1` on the transfer dispatch) |
 
-Local suites at close-out: stellar 38/38, stellar-account 9/9,
-stellar-factory 6/6, stellar-policy 10/10, `@peridotvault/pid-stellar` 13/13,
+Local suites at close-out: phase0-experiments 38/38, account 9/9,
+factory 6/6, policy 10/10, `@peridotvault/pid-stellar` 13/13,
 ac712 operator 10/10.
 
 Known residual: Delegated (G-key) nested self-auth (`AuthPayload{Delegated}`
@@ -162,7 +162,7 @@ semantics, audit-adjacent).
 
 ## ANT-715 fail-closed layer-2 (Troy, 2026-10-27 — follow-up to ANT-713 review)
 
-`contracts/stellar-policy/src/lib.rs`: layer 2 is now scoped to
+`contracts/stellar/policy/src/lib.rs`: layer 2 is now scoped to
 account-originated `execute` (`call.contract == smart_account`) and
 fail-closed within that scope — args that do not decode as
 `(Address, Symbol, Vec<Val>)` (wrong arity, non-symbol target fn) DENY with
@@ -174,6 +174,6 @@ surface beyond the reviewed deny path (same error code, no external calls).
 
 | Item | Evidence |
 |---|---|
-| `cargo test -p peridot-stellar-policy` | **13 passed, 0 failed** — 10 existing (2 re-scoped to account-originated contexts, incl. 8-fn deny-list + byte-parity with `contracts/stellar/src/rules.rs` `FINANCIAL_FNS` exact case-sensitive per R4) + 3 new fail-closed pins: `malformed_account_execute_wrong_arity_denied`, `malformed_account_execute_non_symbol_target_fn_denied` (`String` "transfer"), `non_account_execute_shaped_call_passes` |
-| In-tree wasm (rebuilt `stellar contract build`, stellar 28.1.0) | `contracts/stellar-policy/wasm/peridot_stellar_policy.wasm`, sha256 `67893d0b…bae62e6e` (v3; supersedes v2 `2fd03ff3…71d63b568f`) — needs testnet upload before it enforces anything on-chain |
+| `cargo test -p peridot-stellar-policy` | **13 passed, 0 failed** — 10 existing (2 re-scoped to account-originated contexts, incl. 8-fn deny-list + byte-parity with `contracts/stellar/phase0-experiments/src/rules.rs` `FINANCIAL_FNS` exact case-sensitive per R4) + 3 new fail-closed pins: `malformed_account_execute_wrong_arity_denied`, `malformed_account_execute_non_symbol_target_fn_denied` (`String` "transfer"), `non_account_execute_shaped_call_passes` |
+| In-tree wasm (rebuilt `stellar contract build`, stellar 28.1.0) | `contracts/stellar/policy/wasm/peridot_stellar_policy.wasm`, sha256 `67893d0b…bae62e6e` (v3; supersedes v2 `2fd03ff3…71d63b568f`) — needs testnet upload before it enforces anything on-chain |
 | Security-surface review | Same `UnauthorizedFinancialOp` code path, still zero external calls in `enforce` (reentrancy-safe by construction); no new privileged fns — Tobias review optional, no secrets/keys involved |

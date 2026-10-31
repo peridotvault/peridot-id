@@ -13,7 +13,7 @@ import {PeridotPermissionExecutor} from "../src/PeridotPermissionExecutor.sol";
 /// the Phase-1b path; old accounts stay on the legacy factory/implementation),
 /// ADMINS (required — comma-separated revenue-admin addresses, same on every chain;
 /// the factory itself is the canonical revenue vault, so no treasury address),
-/// DEPLOYER_PRIVATE_KEY. Same-address flow: first deploy the implementation via
+/// DEPLOYER_EVM_PRIVATE_KEY (see contracts/.env.example). Same-address flow: first deploy the implementation via
 /// the keyless CREATE2 deployer on every chain, then set IMPLEMENTATION and run
 /// this script the same way so the factory lands at one address everywhere.
 /// Creation is permissionless (ANT-610): no relayer allowlist — any submitter
@@ -24,7 +24,7 @@ contract Deploy is Script {
         address implementation = vm.envOr("IMPLEMENTATION", address(0));
         bool useBatch = vm.envOr("USE_BATCH_IMPL", false);
         address[] memory admins = vm.envAddress("ADMINS", ",");
-        uint256 key = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 key = vm.envUint("DEPLOYER_EVM_PRIVATE_KEY");
         vm.startBroadcast(key);
         if (implementation == address(0)) {
             implementation = useBatch ? address(new PeridotAccountBatch()) : address(new PeridotAccount());

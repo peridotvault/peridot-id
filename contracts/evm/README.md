@@ -78,7 +78,7 @@ forge test
 ```sh
 cd contracts/evm
 anvil &   # localhost:8545, funded default keys
-DEPLOYER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+DEPLOYER_EVM_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 ADMINS=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
   forge script script/Deploy.s.sol --rpc-url http://127.0.0.1:8545 --broadcast
 ```
@@ -129,7 +129,7 @@ Phase-1 chains — same flow on each, same addresses everywhere:
    all four testnets) with the same bytecode → same address.
 2. Run the factory script with that address on each chain:
     ```sh
-    IMPLEMENTATION=0x... ADMINS=0x... DEPLOYER_PRIVATE_KEY=0x... \
+    IMPLEMENTATION=0x... ADMINS=0x... DEPLOYER_EVM_PRIVATE_KEY=0x... \
       forge script script/Deploy.s.sol --rpc-url $EVM_RPC_URL_97 --broadcast
     ```
    Deploying the factory through the same keyless deployer keeps the factory
@@ -153,7 +153,7 @@ Phase-1 chains — same flow on each, same addresses everywhere:
 1. Deploy the batch factory with `USE_BATCH_IMPL=1` (same keyless-CREATE2
    discipline as above for identical addresses everywhere):
     ```sh
-    USE_BATCH_IMPL=1 IMPLEMENTATION=0x... ADMINS=0x... DEPLOYER_PRIVATE_KEY=0x... \
+    USE_BATCH_IMPL=1 IMPLEMENTATION=0x... ADMINS=0x... DEPLOYER_EVM_PRIVATE_KEY=0x... \
       forge script script/Deploy.s.sol --rpc-url $EVM_RPC_URL_10143 --broadcast
     ```
    With `IMPLEMENTATION` unset the script deploys the batch implementation
@@ -179,7 +179,7 @@ into chat/logs.
 ## Notes
 
 - `out/`, `cache/`, `broadcast/` are gitignored. Broadcast receipts contain no
-  secrets, but deployer keys only ever travel via `DEPLOYER_PRIVATE_KEY` env.
+  secrets, but deployer keys only ever travel via `DEPLOYER_EVM_PRIVATE_KEY` env.
 - `deriveEvmSmartAccountAddress` (`@peridotvault/pid-evm`) must stay byte-identical
   to `PeridotFactory` salt handling — the forge parity test (`test_LogCreate2Parity`)
   is the cross-check.

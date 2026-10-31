@@ -285,7 +285,7 @@ mod test {
 
     mod account {
         // Canonical deploy artifact (also what Trevor uploads on testnet).
-        soroban_sdk::contractimport!(file = "../stellar-account/wasm/peridot_stellar_account.wasm");
+        soroban_sdk::contractimport!(file = "../account/wasm/peridot_stellar_account.wasm");
     }
 
     fn setup(e: &Env) -> Address {

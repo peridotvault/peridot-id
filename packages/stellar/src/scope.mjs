@@ -1,5 +1,5 @@
 // Canonical scope descriptor builder — T3 parity with
-// contracts/stellar/src/rules.rs `scope_canonical` / `scope_hash` (ANT-703).
+// contracts/stellar/phase0-experiments/src/rules.rs `scope_canonical` / `scope_hash` (ANT-703).
 //
 // Layout (fixed-width, length-prefixed, field-ordered):
 //   class_tag NUL ‖ n_contracts u32le ‖ contracts (32B each, granted order) ‖
