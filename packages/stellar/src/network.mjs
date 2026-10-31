@@ -1,4 +1,4 @@
-// F1 network pre-check — parity with contracts/stellar/src/auth.rs (ANT-703).
+// F1 network pre-check — parity with contracts/stellar/phase0-experiments/src/auth.rs (ANT-703).
 //
 // The contract recomputes `network_id` from `env.ledger().network_id()`
 // (host truth, SHA-256 of the network passphrase) and rejects mismatches

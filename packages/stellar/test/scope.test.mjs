@@ -1,5 +1,5 @@
 // T3 TS↔Rust parity tests (ANT-703). Golden vectors are pinned by
-// contracts/stellar/src/rules.rs `golden_scope_hash_vectors` — any layout
+// contracts/stellar/phase0-experiments/src/rules.rs `golden_scope_hash_vectors` — any layout
 // divergence fails here by design.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
