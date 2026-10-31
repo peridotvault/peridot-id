@@ -1,5 +1,6 @@
 // ANT-712 networked operator — AC2.8 passkey EXECUTE + AC3.4 token-deny.
-// Testnet-only. Env: RPC_URL, NETWORK_PASSPHRASE, SOURCE_SECRET,
+// Testnet-only. Env: RPC_URL, NETWORK_PASSPHRASE, RELAYER_SVM_SECRET_KEY
+// (SOURCE_SECRET accepted as a deprecated fallback),
 // PILOT, VERIFIER, POLICY, SAC. Steps:
 //   node run.mjs keygen
 //   node run.mjs add-rule <secp-priv-hex> <65B-pubkey-hex>
@@ -46,8 +47,8 @@ const randNonce = () =>
   (BigInt(`0x${Buffer.from(crypto.getRandomValues(new Uint8Array(8))).toString('hex')}`) - (1n << 63n)).toString();
 
 function sourceKeypair() {
-  const secret = process.env.SOURCE_SECRET;
-  if (!secret) throw new Error('SOURCE_SECRET env required (test key only, never mainnet)');
+  const secret = process.env.RELAYER_SVM_SECRET_KEY || process.env.SOURCE_SECRET;
+  if (!secret) throw new Error('RELAYER_SVM_SECRET_KEY env required (test key only, never mainnet)');
   return Keypair.fromSecret(secret);
 }
 

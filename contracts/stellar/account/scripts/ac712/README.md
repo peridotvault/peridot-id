@@ -28,13 +28,13 @@ execute preimage == `authDigestHex()` over the submitted envelope's
 ## Run
 
 ```sh
-cd contracts/stellar-account/scripts/ac712
+cd contracts/stellar/account/scripts/ac712
 npm install   # isolated; not part of the pnpm workspace
 export RPC_URL=https://soroban-testnet.stellar.org
 export NETWORK_PASSPHRASE='Test SDF Network ; September 2015'
 export PILOT=<passkey-only pilot> VERIFIER=<webauthn verifier>
 export POLICY=<policy> SAC=<native SAC>
-export SOURCE_SECRET=<operator ed25519 secret>   # fee payer only (relayer pattern)
+export RELAYER_SVM_SECRET_KEY=<operator ed25519 secret>   # fee payer only (relayer pattern; matches contracts/.env.example; legacy SOURCE_SECRET still accepted)
 export PUB65_HEX=<65B uncompressed secp256r1 pubkey hex>
 node run.mjs keygen   # fresh operator key (fund via friendbot)
 node --test "test/*.test.mjs"   # 10 unit tests (determinism + shapes; chain is the truth gate)
