@@ -1,6 +1,5 @@
 // ANT-712 networked operator — AC2.8 passkey EXECUTE + AC3.4 token-deny.
-// Testnet-only. Env: RPC_URL, NETWORK_PASSPHRASE, RELAYER_SVM_SECRET_KEY
-// (SOURCE_SECRET accepted as a deprecated fallback),
+// Testnet-only. Env: RPC_URL, NETWORK_PASSPHRASE, RELAYER_SVM_SECRET_KEY,
 // PILOT, VERIFIER, POLICY, SAC. Steps:
 //   node run.mjs keygen
 //   node run.mjs add-rule <secp-priv-hex> <65B-pubkey-hex>
@@ -48,10 +47,6 @@ const randNonce = () =>
 
 function sourceKeypair() {
   if (process.env.RELAYER_SVM_SECRET_KEY) return Keypair.fromSecret(process.env.RELAYER_SVM_SECRET_KEY);
-  if (process.env.SOURCE_SECRET) {
-    console.error('[ac712] Using deprecated SOURCE_SECRET; migrate to RELAYER_SVM_SECRET_KEY');
-    return Keypair.fromSecret(process.env.SOURCE_SECRET);
-  }
   throw new Error('RELAYER_SVM_SECRET_KEY env required (test key only, never mainnet)');
 }
 

@@ -103,24 +103,15 @@ describe("relayer SVM secret (ANT-920)", () => {
     expect(() => parseRelayerSvmSecretBytes(fromHex, "not-a-key")).toThrow();
   });
 
-  it("prefers RELAYER_SVM_SECRET_KEY over the legacy fallback", () => {
+  it("uses RELAYER_SVM_SECRET_KEY", () => {
     const kp = relayerKeypair(fakePs, cfg({
       RELAYER_SVM_SECRET_KEY: ARR,
-      PID_RELAYER_SECRET: HEX,
     })) as unknown as { secretKey: Uint8Array };
     expect(kp.secretKey[0]).toBe(0);
     expect(kp.secretKey[63]).toBe(63);
   });
 
-  it("honors the legacy PID_RELAYER_SECRET fallback when the new key is unset", () => {
-    const kp = relayerKeypair(fakePs, cfg({ PID_RELAYER_SECRET: HEX })) as unknown as {
-      secretKey: Uint8Array;
-    };
-    expect(kp.secretKey).toHaveLength(64);
-    expect(kp.secretKey[0]).toBe(0x11);
-  });
-
-  it("throws when neither key is set", () => {
+  it("throws when RELAYER_SVM_SECRET_KEY is unset", () => {
     expect(() => relayerKeypair(fakePs, cfg({}))).toThrow();
   });
 });

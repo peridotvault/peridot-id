@@ -5,8 +5,8 @@
 //   passkey-authorized withdrawal → verify balance + nonce on devnet.
 //
 // Requires the devnet program built with PID_BACKEND = this backend, and:
-//   RELAYER_SVM_SECRET_KEY=64-byte-hex or JSON 64-byte array  (dev backend keypair;
-//   legacy PID_RELAYER_SECRET still honored)
+//   RELAYER_SVM_SECRET_KEY=64-byte-hex or JSON 64-byte array  (dev backend keypair)
+// ANT-927: deprecated PID_RELAYER_SECRET fallback removed.
 // ANT-635: no PID_TREASURY_PUBKEY — the fee vault is the ["treasury"] PDA per program id.
 // The Google-OAuth browser leg (Playwright + virtual authenticator) is the documented
 // follow-up in docs/tasks/011-e2e-devnet-transaction.md; here the API is mocked and the
@@ -20,7 +20,7 @@ import { PeridotWallet } from "@peridotvault/pid-sdk-js";
 import { SolanaAdapter, SolanaRpc, b64url, buildWebAuthnMessage, deriveTreasuryPda, pidToSeed32, toHex } from "@peridotvault/pid-solana";
 const RP_ID_HASH = crypto.createHash("sha256").update("peridot-id.example").digest();
 
-const BACKEND_SECRET = process.env.RELAYER_SVM_SECRET_KEY ?? process.env.PID_RELAYER_SECRET;
+const BACKEND_SECRET = process.env.RELAYER_SVM_SECRET_KEY;
 assert.ok(BACKEND_SECRET, "RELAYER_SVM_SECRET_KEY required (64-byte hex or JSON 64-byte array)");
 let backendBytes;
 {
