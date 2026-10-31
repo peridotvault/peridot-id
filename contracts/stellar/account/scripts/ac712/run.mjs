@@ -47,9 +47,12 @@ const randNonce = () =>
   (BigInt(`0x${Buffer.from(crypto.getRandomValues(new Uint8Array(8))).toString('hex')}`) - (1n << 63n)).toString();
 
 function sourceKeypair() {
-  const secret = process.env.RELAYER_SVM_SECRET_KEY || process.env.SOURCE_SECRET;
-  if (!secret) throw new Error('RELAYER_SVM_SECRET_KEY env required (test key only, never mainnet)');
-  return Keypair.fromSecret(secret);
+  if (process.env.RELAYER_SVM_SECRET_KEY) return Keypair.fromSecret(process.env.RELAYER_SVM_SECRET_KEY);
+  if (process.env.SOURCE_SECRET) {
+    console.error('[ac712] Using deprecated SOURCE_SECRET; migrate to RELAYER_SVM_SECRET_KEY');
+    return Keypair.fromSecret(process.env.SOURCE_SECRET);
+  }
+  throw new Error('RELAYER_SVM_SECRET_KEY env required (test key only, never mainnet)');
 }
 
 async function buildOpTx(op, fee = '10000') {
