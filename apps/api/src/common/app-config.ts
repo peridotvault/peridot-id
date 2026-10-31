@@ -9,8 +9,8 @@ import ms from "ms";
  * `*.env.example` files document them as hardcoded (no KEY= line) and the
  * compose file no longer interpolates them.
  *
- * Secrets (DATABASE_URL, JWT_*, GOOGLE_CLIENT_*, BREVO_*, DOKU_*, PID_RELAYER_*)
- * stay env-only and are NOT here.
+ * Secrets (DATABASE_URL, JWT_*, GOOGLE_CLIENT_*, BREVO_*, DOKU_*, RELAYER_*,
+ * PID_RELAYER_BREAKER_*) stay env-only and are NOT here.
  *
  * TTL parsing standard (ANT-227 item 4): every TTL in this file is an
  * `ms`-compatible duration string (e.g. "15m", "24h", "30d"). Never pass a raw

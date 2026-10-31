@@ -186,10 +186,54 @@ export function feeChainForEvmReference(reference: string): FeeChain {
   }
 }
 
+/**
+ * Parse the Solana relayer secret from env.
+ *
+ * Accepts the canonical `RELAYER_SVM_SECRET_KEY` formats:
+ * - 64-byte hex (128 chars, optional `0x` prefix — the `PID_RELAYER_SECRET` shape), or
+ * - JSON array of 64 bytes (solana-keygen export shape, as in `.env.example`).
+ *
+ * Anything else throws (fail closed — never derive a key from a truncated value).
+ */
+export function parseRelayerSvmSecretBytes(fromHex: (hex: string) => Uint8Array, raw: string): Uint8Array {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    let arr: unknown;
+    try {
+      arr = JSON.parse(trimmed);
+    } catch {
+      throw new Error("RELAYER_SVM_SECRET_KEY is not valid JSON");
+    }
+    if (
+      !Array.isArray(arr) ||
+      arr.length !== 64 ||
+      !arr.every((b) => Number.isInteger(b) && (b as number) >= 0 && (b as number) <= 255)
+    ) {
+      throw new Error("RELAYER_SVM_SECRET_KEY JSON array must hold 64 bytes (0-255)");
+    }
+    return Uint8Array.from(arr as number[]);
+  }
+  const hex = trimmed.startsWith("0x") || trimmed.startsWith("0X") ? trimmed.slice(2) : trimmed;
+  if (!/^[0-9a-fA-F]{128}$/.test(hex)) {
+    throw new Error("RELAYER_SVM_SECRET_KEY must be 64-byte hex (128 chars) or a JSON array of 64 bytes");
+  }
+  return fromHex(hex);
+}
+
 export function relayerKeypair(ps: PidSolanaModule, config: ConfigService): Keypair {
   const { Keypair, fromHex } = ps;
-  const secret = config.getOrThrow<string>("PID_RELAYER_SECRET");
-  return Keypair.fromSecretKey(fromHex(secret));
+  // ANT-920: RELAYER_SVM_SECRET_KEY is the canonical Solana relayer secret
+  // (apps/api/.env.example + contracts/.env.example + root .env.example).
+  // PID_RELAYER_SECRET is the deprecated expand-then-contract fallback —
+  // remove once Trevor confirms Infisical /apps/api carries RELAYER_SVM_SECRET_KEY.
+  let secret: string;
+  try {
+    secret = config.getOrThrow<string>("RELAYER_SVM_SECRET_KEY");
+  } catch {
+    secret = config.getOrThrow<string>("PID_RELAYER_SECRET");
+    console.warn("[deprecation] PID_RELAYER_SECRET fallback used; migrate to RELAYER_SVM_SECRET_KEY");
+  }
+  return Keypair.fromSecretKey(parseRelayerSvmSecretBytes(fromHex, secret));
 }
 
 /**

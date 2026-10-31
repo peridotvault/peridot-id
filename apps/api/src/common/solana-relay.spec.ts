@@ -2,8 +2,10 @@ import {
   QUOTE_DRIFT_DENOMINATOR,
   QUOTE_DRIFT_NUMERATOR,
   exceedsDriftBound,
+  parseRelayerSvmSecretBytes,
   protocolFeeBps,
   protocolFeeOf,
+  relayerKeypair,
 } from "./solana-relay";
 
 describe("quote drift bound (120.00% integer ratio, no floats)", () => {
@@ -61,5 +63,64 @@ describe("protocol fee math", () => {
     expect(protocolFeeOf(10000n, 5000)).toBe(5000n);
     expect(protocolFeeOf(1n, 5000)).toBe(0n);
     expect(protocolFeeOf(3n, 5000)).toBe(1n);
+  });
+});
+
+describe("relayer SVM secret (ANT-920)", () => {
+  const fromHex = (hex: string) => Uint8Array.from(Buffer.from(hex, "hex"));
+  const fakePs = {
+    Keypair: { fromSecretKey: (b: Uint8Array) => ({ secretKey: b }) },
+    fromHex,
+  } as never;
+  const cfg = (vals: Record<string, string>) =>
+    ({
+      getOrThrow: (key: string) => {
+        if (key in vals) return vals[key];
+        throw new Error(`Missing config: ${key}`);
+      },
+    }) as never;
+  const HEX = "11".repeat(64);
+  const ARR = `[${Array.from({ length: 64 }, (_, i) => i % 256).join(",")}]`;
+
+  it("parses 64-byte hex", () => {
+    expect(parseRelayerSvmSecretBytes(fromHex, HEX)).toHaveLength(64);
+  });
+
+  it("parses 0x-prefixed hex", () => {
+    expect(parseRelayerSvmSecretBytes(fromHex, `0x${HEX}`)).toHaveLength(64);
+  });
+
+  it("parses a JSON 64-byte array (solana-keygen shape)", () => {
+    const out = parseRelayerSvmSecretBytes(fromHex, ARR);
+    expect(out).toHaveLength(64);
+    expect(out[0]).toBe(0);
+    expect(out[63]).toBe(63);
+  });
+
+  it("rejects truncated hex and wrong-length arrays (fail closed)", () => {
+    expect(() => parseRelayerSvmSecretBytes(fromHex, "abcd")).toThrow();
+    expect(() => parseRelayerSvmSecretBytes(fromHex, "[1,2,3]")).toThrow();
+    expect(() => parseRelayerSvmSecretBytes(fromHex, "not-a-key")).toThrow();
+  });
+
+  it("prefers RELAYER_SVM_SECRET_KEY over the legacy fallback", () => {
+    const kp = relayerKeypair(fakePs, cfg({
+      RELAYER_SVM_SECRET_KEY: ARR,
+      PID_RELAYER_SECRET: HEX,
+    })) as unknown as { secretKey: Uint8Array };
+    expect(kp.secretKey[0]).toBe(0);
+    expect(kp.secretKey[63]).toBe(63);
+  });
+
+  it("honors the legacy PID_RELAYER_SECRET fallback when the new key is unset", () => {
+    const kp = relayerKeypair(fakePs, cfg({ PID_RELAYER_SECRET: HEX })) as unknown as {
+      secretKey: Uint8Array;
+    };
+    expect(kp.secretKey).toHaveLength(64);
+    expect(kp.secretKey[0]).toBe(0x11);
+  });
+
+  it("throws when neither key is set", () => {
+    expect(() => relayerKeypair(fakePs, cfg({}))).toThrow();
   });
 });
