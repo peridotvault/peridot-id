@@ -190,7 +190,7 @@ export function feeChainForEvmReference(reference: string): FeeChain {
  * Parse the Solana relayer secret from env.
  *
  * Accepts the canonical `RELAYER_SVM_SECRET_KEY` formats:
- * - 64-byte hex (128 chars, optional `0x` prefix — the `PID_RELAYER_SECRET` shape), or
+ * - 64-byte hex (128 chars, optional `0x` prefix), or
  * - JSON array of 64 bytes (solana-keygen export shape, as in `.env.example`).
  *
  * Anything else throws (fail closed — never derive a key from a truncated value).
@@ -222,17 +222,11 @@ export function parseRelayerSvmSecretBytes(fromHex: (hex: string) => Uint8Array,
 
 export function relayerKeypair(ps: PidSolanaModule, config: ConfigService): Keypair {
   const { Keypair, fromHex } = ps;
-  // ANT-920: RELAYER_SVM_SECRET_KEY is the canonical Solana relayer secret
-  // (apps/api/.env.example + contracts/.env.example + root .env.example).
-  // PID_RELAYER_SECRET is the deprecated expand-then-contract fallback —
-  // remove once Trevor confirms Infisical /apps/api carries RELAYER_SVM_SECRET_KEY.
-  let secret: string;
-  try {
-    secret = config.getOrThrow<string>("RELAYER_SVM_SECRET_KEY");
-  } catch {
-    secret = config.getOrThrow<string>("PID_RELAYER_SECRET");
-    console.warn("[deprecation] PID_RELAYER_SECRET fallback used; migrate to RELAYER_SVM_SECRET_KEY");
-  }
+  // ANT-927: RELAYER_SVM_SECRET_KEY is the only Solana relayer secret. The
+  // deprecated PID_RELAYER_SECRET fallback is removed here; do not promote
+  // past paperclip until Infisical /apps/api is confirmed to carry
+  // RELAYER_SVM_SECRET_KEY in all envs (dev/test/main) — see ANT-927.
+  const secret = config.getOrThrow<string>("RELAYER_SVM_SECRET_KEY");
   return Keypair.fromSecretKey(parseRelayerSvmSecretBytes(fromHex, secret));
 }
 

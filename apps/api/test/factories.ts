@@ -86,9 +86,9 @@ export function solanaRelayerConfig(extra: Record<string, unknown> = {}) {
   return {
     get: jest.fn((key: string, def?: unknown) => values[key] ?? def),
     getOrThrow: jest.fn((key: string) => {
-      // ANT-920: RELAYER_SVM_SECRET_KEY is canonical; PID_RELAYER_SECRET stays
-      // as the deprecated fallback until Infisical rotation lands.
-      if (key === "RELAYER_SVM_SECRET_KEY" || key === "PID_RELAYER_SECRET") return "11".repeat(64);
+      // ANT-927: RELAYER_SVM_SECRET_KEY is the only Solana relayer secret
+      // (deprecated PID_RELAYER_SECRET fallback removed).
+      if (key === "RELAYER_SVM_SECRET_KEY") return "11".repeat(64);
       throw new Error(`Missing config: ${key}`);
     }),
   };
