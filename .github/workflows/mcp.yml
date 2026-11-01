@@ -45,16 +45,23 @@ jobs:
         working-directory: apps/mcp
         run: ./scripts/sync-docs --check
 
+      # dfxvm's installer asks for confirmation unless DFXVM_INIT_YES is set
+      # (no TTY in CI). Vendor pin: 0.29.2, per apps/mcp/docs/topup-runbook.md.
       - name: Install dfx
         env:
           DFX_VERSION: 0.29.2
-        run: DFX_VERSION=0.29.2 sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)"
+          DFXVM_INIT_YES: "true"
+        run: |
+          set -euo pipefail
+          sh -c "$(curl -fsSL --retry 10 --connect-timeout 5 --max-time 20 --retry-connrefused https://internetcomputer.org/install.sh)"
+          echo "$HOME/.local/share/dfx/bin" >> "$GITHUB_PATH"
 
       - name: Import controller identity
         env:
           DFX_IDENTITY_PEM_B64: ${{ secrets.DFX_IDENTITY_PEM_B64 }}
         run: |
           set -euo pipefail
+          dfx --version
           printf '%s' "$DFX_IDENTITY_PEM_B64" | base64 -d > "$RUNNER_TEMP/id.pem"
           chmod 600 "$RUNNER_TEMP/id.pem"
           dfx identity import ci "$RUNNER_TEMP/id.pem" --storage-mode plaintext
