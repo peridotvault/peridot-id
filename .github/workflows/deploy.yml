@@ -41,15 +41,24 @@ jobs:
           username: ${{ secrets.PROD_VPS_USER }}
           key: ${{ secrets.PROD_VPS_SSH_KEY }}
           command_timeout: 60m
+          # Default is false: a failed command would be ignored and the job
+          # would still report success (that shipped a stale tree for days).
+          script_stop: true
           script: |
-            # ANT-347 M4: fetch over SSH with the VPS read-only deploy key.
-            # Never embed GH_PAT in the remote URL or expand secrets inline —
-            # both leak into CI logs / process tables. Rotate GH_PAT now that
-            # it is no longer used by deploys.
+            set -euo pipefail
+            # Fetch over HTTPS: origin is already https and the repo is public,
+            # so the VPS needs no GitHub deploy key and no github.com entry in
+            # known_hosts. A missing host key used to break `git fetch` while
+            # the deploy kept going against the old checkout.
             cd /opt/apps/peridot-id/peridot-id
-            git fetch git@github.com:peridotvault/peridot-id.git main
+            git fetch origin main
             git reset --hard FETCH_HEAD
             git checkout -B main FETCH_HEAD
+            # Never deploy a stale tree: prove the checkout is this commit.
+            test "$(git rev-parse HEAD)" = "${{ github.sha }}" || {
+              echo "::error::checkout is $(git rev-parse HEAD), expected ${{ github.sha }}"
+              exit 1
+            }
             # Disk guard: a full disk kills the image export mid-build (seen on
             # sandbox). Running images are never pruned — only build cache and
             # superseded tags go.
@@ -82,15 +91,22 @@ jobs:
           # is installed on the sandbox VPS.
           password: ${{ secrets.SANDBOX_VPS_PASSWORD }}
           command_timeout: 60m
+          # Default is false: a failed command would be ignored and the job
+          # would still report success (that shipped a stale tree for days).
+          script_stop: true
           script: |
+            set -euo pipefail
             # Dedicated sandbox host + clone. Uses deploy/.env.test
             # (DOKU sandbox — no real money ever moves here).
-            # ANT-347 M4/M5: SSH fetch via VPS read-only deploy key (no GH_PAT
-            # in URL); key auth only — SANDBOX_VPS_PASSWORD removed.
             cd /opt/apps/peridot-id/peridot-id-test
-            git fetch git@github.com:peridotvault/peridot-id.git test
+            git fetch origin test
             git reset --hard FETCH_HEAD
             git checkout -B test FETCH_HEAD
+            # Never deploy a stale tree: prove the checkout is this commit.
+            test "$(git rev-parse HEAD)" = "${{ github.sha }}" || {
+              echo "::error::checkout is $(git rev-parse HEAD), expected ${{ github.sha }}"
+              exit 1
+            }
             # Disk guard: a full disk kills the image export mid-build (seen on
             # sandbox). Running images are never pruned — only build cache and
             # superseded tags go.
