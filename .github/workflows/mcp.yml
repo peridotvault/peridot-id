@@ -80,7 +80,10 @@ jobs:
           cargo build --release --target wasm32-unknown-unknown
           sha256sum "$WASM"
           dfx canister status peridot_id_mcp --network ic || true   # before: cycles + module hash
-          dfx canister install peridot_id_mcp --network ic --mode upgrade --wasm "$WASM"
+          # --yes: the candid compat check asks for consent when it cannot
+          # write the previous .did (no prior deploy dir in a fresh checkout).
+          mkdir -p .dfx/ic/canisters/peridot_id_mcp
+          dfx canister install peridot_id_mcp --network ic --mode upgrade --yes --wasm "$WASM"
           dfx canister status peridot_id_mcp --network ic
 
       # Rollback material: the canister is stateless, so re-installing a prior
