@@ -62,8 +62,12 @@ jobs:
             # Disk guard: a full disk kills the image export mid-build (seen on
             # sandbox). Running images are never pruned — only build cache and
             # superseded tags go.
+            # if/then, not `[ -z ] && ...`: with `set -e` a false test returns 1
+            # and kills the script (silently) before up.sh ever runs.
             avail_kb=$(df --output=avail -k /var/lib/docker 2>/dev/null | tail -1 | tr -dc '0-9')
-            [ -z "$avail_kb" ] && avail_kb=$(df --output=avail -k / | tail -1 | tr -dc '0-9')
+            if [ -z "$avail_kb" ]; then
+              avail_kb=$(df --output=avail -k / | tail -1 | tr -dc '0-9')
+            fi
             if [ "${avail_kb:-0}" -lt 8388608 ]; then
               echo "low disk (${avail_kb}KB free) — pruning builder cache and unused images"
               docker builder prune -af || true
@@ -110,8 +114,12 @@ jobs:
             # Disk guard: a full disk kills the image export mid-build (seen on
             # sandbox). Running images are never pruned — only build cache and
             # superseded tags go.
+            # if/then, not `[ -z ] && ...`: with `set -e` a false test returns 1
+            # and kills the script (silently) before up.sh ever runs.
             avail_kb=$(df --output=avail -k /var/lib/docker 2>/dev/null | tail -1 | tr -dc '0-9')
-            [ -z "$avail_kb" ] && avail_kb=$(df --output=avail -k / | tail -1 | tr -dc '0-9')
+            if [ -z "$avail_kb" ]; then
+              avail_kb=$(df --output=avail -k / | tail -1 | tr -dc '0-9')
+            fi
             if [ "${avail_kb:-0}" -lt 8388608 ]; then
               echo "low disk (${avail_kb}KB free) — pruning builder cache and unused images"
               docker builder prune -af || true
