@@ -113,14 +113,14 @@ pub fn rank(query: &str, docs: &[DocEntry]) -> Vec<DocHit> {
 /// Search the generated Mintlify corpus.
 ///
 /// Fast path over the baked index: lowercase title/excerpt pairs are computed
-/// once (ANT-853) instead of re-lowercasing all 175 entries per call. Output
+/// once (ANT-853) instead of re-lowercasing all 174 entries per call. Output
 /// is identical to `rank(query, &DOCS)` (see `cached_rank_matches_generic_rank`).
 pub fn search_docs(query: &str) -> Vec<DocHit> {
     rank_generated(query)
 }
 
 /// Precomputed lowercase `(title, excerpt)` pairs for [`DOCS`], in order
-/// (ANT-853: amortizes the per-call `to_lowercase` over the 175-entry corpus).
+/// (ANT-853: amortizes the per-call `to_lowercase` over the 174-entry corpus).
 static LOWER_CORPUS: OnceLock<Vec<(String, String)>> = OnceLock::new();
 
 fn lower_corpus() -> &'static [(String, String)] {
@@ -285,7 +285,7 @@ mod tests {
         // 13 Mintlify pages x sections + OpenAPI operations; the exact
         // count is owned by sync-docs (see generated_docs.meta.json).
         assert!(DOCS.len() >= 100, "corpus too small: {}", DOCS.len());
-        assert_eq!(DOCS.len(), 175);
+        assert_eq!(DOCS.len(), 174);
         for doc in &DOCS {
             assert!(
                 doc.url.starts_with("https://docs.peridot.id/"),

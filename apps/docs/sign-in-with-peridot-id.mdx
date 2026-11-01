@@ -63,13 +63,17 @@ async function signIn() {
 
 Auth opens a centered **popup** on the PeridotID origin (Google, plus the PID
 picker/claim if the visitor has no PeridotID yet). It stays open through the
-whole flow and closes only once the user allows (your page receives the
-one-time `pid_code` via `window.opener`) or denies/cancels. If the popup is
-blocked, the SDK falls back to a new tab automatically; `peridot.auth.loginTab()`
-is available if you prefer a tab outright. You never handle a password and
-nothing runs in your DOM. Passkeys run on the PeridotID origin (browsers bind
-WebAuthn to our domain); Google uses the redirect round-trip. No API calls happen
-before login, so there is nothing CORS-related to configure.
+whole flow and closes itself once the user allows (your page receives the
+one-time `pid_code` via `window.opener`) or denies/cancels — no bridge code on
+your page. Only when the browser gives the popup no opener (a plain tab, or
+`Cross-Origin-Opener-Policy: same-origin` on your page) does it fall back to a
+full-page `redirect_uri?pid_code=…` navigation; that is the one case where a
+landing page needs `forwardPopupLoginCode()`. If the popup is blocked, the SDK
+falls back to a new tab automatically; `peridot.auth.loginTab()` is available if
+you prefer a tab outright. You never handle a password and nothing runs in your
+DOM. Passkeys run on the PeridotID origin (browsers bind WebAuthn to our domain);
+Google uses the redirect round-trip. No API calls happen before login, so there
+is nothing CORS-related to configure.
 
 > **First sign-in creates a PID.** If the visitor has no PeridotID yet, the
 > window shows the emission-free **Create your PID** step (the handle is permanent

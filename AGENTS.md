@@ -57,6 +57,12 @@ pnpm --filter @peridotvault/pid-api dev        # API on :3300
 cd apps/wallet && pnpm dev:web         # Vite dev server on :3302
 ```
 
+Login popup close check (the flow dapps depend on): open the dashboard demo
+route (`/demo`) against the local wallet. Sign in once, then click “Sign in with
+PeridotID” again with the wallet session already live — the popup must close by
+itself (<2s), the demo must show the pid, and the popup must never land on the
+dapp URL. Repeat after `localStorage.clear()` for the fresh-login path.
+
 After pulling (or whenever Prisma complains about a missing column, e.g.
 P2022 on `fiat_provider_*`): `pnpm --filter @peridotvault/pid-api exec
 prisma migrate deploy`, then restart the API. (`nest --watch` rebuilds code

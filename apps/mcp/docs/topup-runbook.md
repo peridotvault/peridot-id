@@ -89,6 +89,13 @@ design". Address explicitly in the cutover comment.
 
 ## 3. Upgrades
 
+- **CI:** `.github/workflows/mcp.yml` upgrades the canister on every push to
+  `main` that touches `apps/mcp/**` or `apps/docs/**`. Gates: `cargo test -p
+  peridot_id_mcp` + `./scripts/sync-docs --check` (a stale baked index would
+  keep serving old guidance to agents). Each run uploads its wasm as a
+  rollback artifact (30 days). Secret: `DFX_IDENTITY_PEM_B64` in the
+  `production` environment — a dedicated CI principal added as controller.
+  No top-up in CI (see §6).
 - Stateless canister: no stable memory, no timers, no sessions — upgrades
   carry no data.
 - Upgrade = rebuild from the target `paperclip` tip (Section 0 steps) +

@@ -13,12 +13,9 @@ The PeridotID API is versioned under `/v1` and grouped by concern:
 
 ## Base URL
 
-All endpoints are prefixed with `/v1`.
-
-| Environment | Base URL |
-|---|---|
-| Production | `https://api.peridot.id/v1` |
-| Local dev | `http://localhost:3300/v1` |
+All endpoints are prefixed with `/v1`. Requests go to the production API declared in the
+OpenAPI `servers` entry — application code never sets it: the [SDK](/sdk) resolves the
+host itself, and `baseUrl` exists only for [self-hosting](/self-hosting).
 
 ## Authentication
 

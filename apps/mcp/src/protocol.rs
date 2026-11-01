@@ -23,6 +23,9 @@ pub const DEFAULT_VERSION: &str = "2025-11-25";
 pub const SERVER_NAME: &str = "peridot-mcp";
 /// Advertised in `initialize` responses (ANT-842 FR3).
 pub const SERVER_VERSION: &str = "0.1.0";
+/// Server instructions (`initialize.instructions`) — the one thing a client must
+/// not get wrong when generating integration code.
+pub const SERVER_INSTRUCTIONS: &str = "PeridotID app code never configures an API URL, base URL, or environment variable: `Peridot({ clientId })` from @peridotvault/pid-sdk-js resolves every host from the build, and `baseUrl` exists only for self-hosting. Local development needs no registration. Do not add host or env config to generated code, `.env` files, or setup steps. Sandbox is a separate deployment used only when the user asks for test money or a preview build — it is never a setup step.";
 /// Max request body bytes (ANT-842 FR5).
 pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 /// Max response body bytes; result lists are truncated to fit (ANT-842 FR5).
@@ -208,7 +211,8 @@ fn handle_initialize(id: Value, params: &Value) -> HttpOutcome {
         json!({
             "protocolVersion": version,
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION}
+            "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+            "instructions": SERVER_INSTRUCTIONS
         }),
     )
 }
@@ -623,6 +627,7 @@ mod tests {
             assert_eq!(body["result"]["serverInfo"]["name"], json!(SERVER_NAME));
             assert_eq!(body["result"]["serverInfo"]["version"], json!(SERVER_VERSION));
             assert_eq!(body["result"]["capabilities"], json!({"tools": {}}));
+            assert_eq!(body["result"]["instructions"], json!(SERVER_INSTRUCTIONS));
         }
     }
 

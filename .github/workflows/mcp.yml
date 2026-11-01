@@ -1,0 +1,83 @@
+name: Deploy MCP canister
+
+# The MCP canister bakes apps/docs into its wasm (apps/mcp/scripts/sync-docs),
+# so a docs change only reaches agents after a rebuild + upgrade. This job is
+# that upgrade. Runbook: apps/mcp/docs/topup-runbook.md (upgrade + rollback).
+#
+# Required secret (Environment: production): DFX_IDENTITY_PEM_B64 — the base64
+# PEM of a dedicated CI principal that is a controller of peridot_id_mcp
+# (dfx canister update-settings peridot_id_mcp --network ic --add-controller …).
+# Cycles are NOT topped up here: any top-up needs board approval (runbook §6).
+# Set "Required reviewers" on the production environment to turn this into a
+# gated deploy without touching this file.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/mcp/**"
+      - "apps/docs/**"
+      - ".github/workflows/mcp.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-mcp:
+    runs-on: ubuntu-latest
+    environment: Production
+    concurrency:
+      group: deploy-mcp-canister
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Rust wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Unit + integration tests
+        working-directory: apps/mcp
+        run: cargo test -p peridot_id_mcp
+
+      # Stale index = agents keep reading the old guidance. Fail here, not in prod.
+      - name: Generated index is in sync with apps/docs
+        working-directory: apps/mcp
+        run: ./scripts/sync-docs --check
+
+      - name: Install dfx
+        env:
+          DFX_VERSION: 0.29.2
+        run: DFX_VERSION=0.29.2 sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)"
+
+      - name: Import controller identity
+        env:
+          DFX_IDENTITY_PEM_B64: ${{ secrets.DFX_IDENTITY_PEM_B64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$DFX_IDENTITY_PEM_B64" | base64 -d > "$RUNNER_TEMP/id.pem"
+          chmod 600 "$RUNNER_TEMP/id.pem"
+          dfx identity import ci "$RUNNER_TEMP/id.pem" --storage-mode plaintext
+          dfx identity use ci
+          dfx identity get-principal   # visible in the log on purpose: which principal deployed
+
+      - name: Build + upgrade canister
+        working-directory: apps/mcp
+        run: |
+          set -euo pipefail
+          WASM=target/wasm32-unknown-unknown/release/peridot_id_mcp.wasm
+          cargo build --release --target wasm32-unknown-unknown
+          sha256sum "$WASM"
+          dfx canister status peridot_id_mcp --network ic || true   # before: cycles + module hash
+          dfx canister install peridot_id_mcp --network ic --mode upgrade --wasm "$WASM"
+          dfx canister status peridot_id_mcp --network ic
+
+      # Rollback material: the canister is stateless, so re-installing a prior
+      # run's wasm (--mode reinstall) is safe. Keep a month of history.
+      - name: Keep wasm for rollback
+        uses: actions/upload-artifact@v4
+        with:
+          name: peridot_id_mcp-${{ github.sha }}
+          path: apps/mcp/target/wasm32-unknown-unknown/release/peridot_id_mcp.wasm
+          retention-days: 30
+          if-no-files-found: error

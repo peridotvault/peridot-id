@@ -200,3 +200,84 @@ test("openPeridotPopup: binds expectedPid in the URL and REQUEST", async () => {
     },
   );
 });
+
+/** Install a fake hosted login window: `opener` is the dapp window (or null). */
+async function withLoginWindow(opener, fn) {
+  const saved = globalThis.window;
+  const w = {
+    location: {
+      search: "",
+      assigned: null,
+      assign(url) {
+        w.location.assigned = url;
+      },
+    },
+    opener,
+    closed: false,
+    close() {
+      w.closed = true;
+    },
+  };
+  globalThis.window = w;
+  try {
+    return await fn(w);
+  } finally {
+    globalThis.window = saved;
+  }
+}
+
+const REDIRECT_URI = "https://dapp.example/auth/callback";
+
+test("deliverLoginResult: hands the code to the opener and closes — no redirect", async () => {
+  const { deliverLoginResult } = await import("../dist/esm/popup.js");
+  const sent = [];
+  const opener = { closed: false, postMessage: (msg, target) => sent.push({ msg, target }) };
+  await withLoginWindow(opener, (w) => {
+    const how = deliverLoginResult(DAPP_ORIGIN, { ok: true, data: { pidCode: "c1" } }, REDIRECT_URI);
+    assert.equal(how, "opener");
+    assert.deepEqual(sent, [{ msg: { type: "pid-popup-result", ok: true, data: { pidCode: "c1" } }, target: DAPP_ORIGIN }]);
+    assert.equal(w.closed, true, "popup closes itself");
+    assert.equal(w.location.assigned, null, "the popup never navigates to the dapp");
+  });
+});
+
+test("deliverLoginResult: no opener → full-page redirect with the code", async () => {
+  const { deliverLoginResult } = await import("../dist/esm/popup.js");
+  for (const opener of [null, { closed: true, postMessage() { throw new Error("must not post"); } }]) {
+    await withLoginWindow(opener, (w) => {
+      const how = deliverLoginResult(DAPP_ORIGIN, { ok: true, data: { pidCode: "c2" } }, REDIRECT_URI);
+      assert.equal(how, "redirect");
+      assert.equal(w.location.assigned, `${REDIRECT_URI}?pid_code=c2`);
+      assert.equal(w.closed, false, "nothing to close — the dapp page takes over");
+    });
+  }
+});
+
+test("deliverLoginResult: no opener + deny → redirect with access_denied", async () => {
+  const { deliverLoginResult } = await import("../dist/esm/popup.js");
+  await withLoginWindow(null, (w) => {
+    const how = deliverLoginResult(DAPP_ORIGIN, { ok: false, error: "access_denied" }, REDIRECT_URI);
+    assert.equal(how, "redirect");
+    assert.equal(w.location.assigned, `${REDIRECT_URI}?error=access_denied`);
+  });
+});
+
+test("deliverLoginResult: no opener and no redirect_uri → nothing to do", async () => {
+  const { deliverLoginResult } = await import("../dist/esm/popup.js");
+  await withLoginWindow(null, (w) => {
+    assert.equal(deliverLoginResult(DAPP_ORIGIN, { ok: true, data: { pidCode: "c3" } }), "none");
+    assert.equal(w.location.assigned, null);
+    assert.equal(w.closed, false);
+  });
+});
+
+test("readPopupParams: parses redirect_uri (http(s) only)", async () => {
+  const { readPopupParams } = await import("../dist/esm/popup.js");
+  const ok = `?popup=login&origin=${DAPP_ORIGIN}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
+  await withHostedWindow(ok, () => {
+    assert.equal(readPopupParams()?.redirectUri, REDIRECT_URI);
+  });
+  await withHostedWindow(`?popup=login&origin=${DAPP_ORIGIN}&redirect_uri=${encodeURIComponent("javascript:alert(1)")}`, () => {
+    assert.equal(readPopupParams()?.redirectUri, undefined);
+  });
+});

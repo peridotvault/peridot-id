@@ -39,6 +39,7 @@ export { authenticatePasskey, BrowserPasskeySigner, PasskeyHostedRequiredError, 
 export type { PasskeySigner } from "@peridotvault/pid-core";
 export {
   awaitPopupRequest,
+  deliverLoginResult,
   forwardPopupLoginCode,
   openLoginPopup,
   openLoginTab,

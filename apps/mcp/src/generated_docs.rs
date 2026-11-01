@@ -8,10 +8,10 @@ use crate::tools::{DocEntry, ExampleEntry, GuideEntry, SdkModule, SymbolEntry};
 /// Git tree SHA of `apps/docs/` at sync time.
 pub const SOURCE_REV: &str = "2dc3b0ffb006ded9bfc44f80f54319e4865c2cdf";
 /// SHA-256 over the normalized extracted content.
-pub const CONTENT_HASH: &str = "e82240351bc92a28318f596f89df50925058e58f4ff73e83258528a17f4b9329";
+pub const CONTENT_HASH: &str = "24ae69cf68594b2db0b8e28a31429f1e471dcf4d07eb8e8ea1eca90aa6388a94";
 
-/// Search corpus: 175 entries (guide sections + OpenAPI operations).
-pub const DOCS: [DocEntry; 175] = [
+/// Search corpus: 174 entries (guide sections + OpenAPI operations).
+pub const DOCS: [DocEntry; 174] = [
     DocEntry {
         title: "API Reference — Authentication",
         url: "https://docs.peridot.id/api/overview#authentication",
@@ -20,7 +20,7 @@ pub const DOCS: [DocEntry; 175] = [
     DocEntry {
         title: "API Reference — Base URL",
         url: "https://docs.peridot.id/api/overview#base-url",
-        excerpt: "All endpoints are prefixed with `/v1`. | Environment | Base URL | |---|---| | Production | `https://api.peridot.id/v1` | | Local dev | `http://localhost:3300/v1` |",
+        excerpt: "All endpoints are prefixed with `/v1`. Requests go to the production API declared in the OpenAPI `servers` entry — application code never sets it: the [SDK](/sdk) resolves the host itself, and `baseUrl` exists only for [self-hosting](/self-hosting).",
     },
     DocEntry {
         title: "API Reference — Coverage notes",
@@ -143,9 +143,9 @@ pub const DOCS: [DocEntry; 175] = [
         excerpt: "Sandbox and production registrations are independent — there is no automatic promote/export. When your sandbox integration works: 1. Register the app again in the **production** dashboard (same name is fine — the `client_id` will differ). 2. Add the production **allowed origins** (no localhost). 3.…",
     },
     DocEntry {
-        title: "Environments (production & sandbox) — Use the sandbox",
-        url: "https://docs.peridot.id/environments#use-the-sandbox",
-        excerpt: "1. Open the sandbox workspace and register your app there (separate `client_id`). 2. Your test build points at the sandbox **automatically**: the SDK selects the environment from `NODE_ENV` — `production` → production, anything else (unset, `development`, `staging`, `test`, …) → sandbox. A staging…",
+        title: "Environments (production & sandbox) — Test money (optional)",
+        url: "https://docs.peridot.id/environments#test-money-optional",
+        excerpt: "Integration does not require the sandbox: `localhost` needs no registration, and a production build registers one app in the production dashboard. Use the sandbox only when you deploy a **non-production build** (preview/staging) or want fake money to test with: 1. Register the app in the sandbox…",
     },
     DocEntry {
         title: "Environments (production & sandbox) — What differs (everything that can move money)",
@@ -403,14 +403,9 @@ pub const DOCS: [DocEntry; 175] = [
         excerpt: "Get a transaction (ownership-checked) — GET /wallet/transactions/{id}",
     },
     DocEntry {
-        title: "Getting started — Base URLs",
-        url: "https://docs.peridot.id/getting-started#base-urls",
-        excerpt: "All endpoints are prefixed with `/v1`. | Environment | Base URL | |---|---| | Production | `https://api.peridot.id/v1` | | Sandbox | `https://sandbox-api.peridot.id/v1`. Separate deployment, not a path prefix — verify with `GET /v1/env`. | | Local development | `http://localhost:3300/v1` | Sandbox…",
-    },
-    DocEntry {
         title: "Getting started — Prerequisites",
         url: "https://docs.peridot.id/getting-started#prerequisites",
-        excerpt: "- Node.js 20+ - A registered app (`client_id` starting with `pidapp_…`) — see [Sign in with PeridotID](/sign-in-with-peridot-id#1-register-your-app) - The browser SDK for app code: ```bash npm install @peridotvault/pid-sdk-js ``` API base URLs are preset by environment (`production` vs `sandbox`);…",
+        excerpt: "- Node.js 20+ - A registered app (`client_id` starting with `pidapp_…`) — see [Sign in with PeridotID](/sign-in-with-peridot-id#1-register-your-app). Localhost works without one. - The browser SDK for app code: ```bash npm install @peridotvault/pid-sdk-js ``` That is the whole setup: `Peridot({…",
     },
     DocEntry {
         title: "Getting started — Read the reference",
@@ -455,7 +450,7 @@ pub const DOCS: [DocEntry; 175] = [
     DocEntry {
         title: "JavaScript SDK — Initialize",
         url: "https://docs.peridot.id/sdk#initialize",
-        excerpt: "That's the whole config. `clientId` is applied to login, exchange, and fiat calls automatically. The environment is auto-detected: `NODE_ENV === 'production'` → production, everything else (unset, `development`, `staging`, `test`, …) → sandbox. The API origin, popup host, Solana RPC, and program id…",
+        excerpt: "That's the whole config. `clientId` is applied to login, exchange, and fiat calls automatically. **There is no API URL, base URL, or environment variable to set** — the environment is auto-detected: `NODE_ENV === 'production'` → production, everything else (unset, `development`, `staging`, `test`,…",
     },
     DocEntry {
         title: "JavaScript SDK — Level",
@@ -565,7 +560,7 @@ pub const DOCS: [DocEntry; 175] = [
     DocEntry {
         title: "Overview — Next steps",
         url: "https://docs.peridot.id/index#next-steps",
-        excerpt: "- [Getting started](/getting-started) — base URLs and your first request - [Authentication](/authentication) — how login, refresh, and logout work - [SDK](/sdk) — the JavaScript SDK - [Fiat & payments](/fiat) — balances, top-up, sends, fees - [Apps & workspace](/apps) — register apps, fees, escrow,…",
+        excerpt: "- [Getting started](/getting-started) — install, register an app, first request - [Authentication](/authentication) — how login, refresh, and logout work - [SDK](/sdk) — the JavaScript SDK - [Fiat & payments](/fiat) — balances, top-up, sends, fees - [Apps & workspace](/apps) — register apps, fees,…",
     },
     DocEntry {
         title: "Overview — What you get",
@@ -895,7 +890,7 @@ pub const GUIDES: [GuideEntry; 15] = [
         topic: "api/overview",
         title: "API Reference",
         url: "https://docs.peridot.id/api/overview",
-        body: "The PeridotID API is versioned under `/v1` and grouped by concern: - **Auth** — Google login, OAuth callback, token refresh, logout - **Identity** — the stable per-user identity and its login credentials - **Profile** — public profile data - **Wallet** — the wallet associated with the PID - **OpenAPI** — the machine-readable specification All endpoints are prefixed with `/v1`. | Environment | Base URL | |---|---| | Production | `https://api.peridot.id/v1` | | Local dev | `http://localhost:3300/v1` | Authentication is **cookie-based**. After Google sign-in the API sets two `HttpOnly` cookies: - `pid_access` — short-lived JWT access token (15 min), sent on every request. - `pid_refresh` — long-lived rotating refresh token (30 days), only sent to `/v1/auth`. Browsers handle these automatically; non-browser clients must send `Cookie: pid_access=<token>` on each request and call `/v1/auth/refresh` before the access token expires. Browse the endpoints in the sidebar, or read the raw [OpenAPI 3.0 specification](https://api.peridot.id/v1/openapi.yaml) (also served at `GET /v1/openapi.yaml` on either API host; a copy ships with these docs as `openapi.yaml`). Stable, documented, and covered above: auth (login, Google, email OTP, claim, refresh, sessions, grants), identity, profile, wallet, fiat money-in and ledger transfers, app registry, credentials, and the public chain/token/fee reads. **Experimental** (implemented, behavior may change): batched execution (`POST…",
+        body: "The PeridotID API is versioned under `/v1` and grouped by concern: - **Auth** — Google login, OAuth callback, token refresh, logout - **Identity** — the stable per-user identity and its login credentials - **Profile** — public profile data - **Wallet** — the wallet associated with the PID - **OpenAPI** — the machine-readable specification All endpoints are prefixed with `/v1`. Requests go to the production API declared in the OpenAPI `servers` entry — application code never sets it: the [SDK](/sdk) resolves the host itself, and `baseUrl` exists only for [self-hosting](/self-hosting). Authentication is **cookie-based**. After Google sign-in the API sets two `HttpOnly` cookies: - `pid_access` — short-lived JWT access token (15 min), sent on every request. - `pid_refresh` — long-lived rotating refresh token (30 days), only sent to `/v1/auth`. Browsers handle these automatically; non-browser clients must send `Cookie: pid_access=<token>` on each request and call `/v1/auth/refresh` before the access token expires. Browse the endpoints in the sidebar, or read the raw [OpenAPI 3.0 specification](https://api.peridot.id/v1/openapi.yaml) (also served at `GET /v1/openapi.yaml` on either API host; a copy ships with these docs as `openapi.yaml`). Stable, documented, and covered above: auth (login, Google, email OTP, claim, refresh, sessions, grants), identity, profile, wallet, fiat money-in and ledger transfers, app registry, credentials, and the public chain/token/fee reads.…",
     },
     GuideEntry {
         topic: "apps",
@@ -937,7 +932,7 @@ pub const GUIDES: [GuideEntry; 15] = [
         topic: "getting-started",
         title: "Getting started",
         url: "https://docs.peridot.id/getting-started",
-        body: "- Node.js 20+ - A registered app (`client_id` starting with `pidapp_…`) — see [Sign in with PeridotID](/sign-in-with-peridot-id#1-register-your-app) - The browser SDK for app code: ```bash npm install @peridotvault/pid-sdk-js ``` API base URLs are preset by environment (`production` vs `sandbox`); pass `baseUrl` only for self-host/localhost (`http://localhost:3300` by default — see [Self-hosting](/self-hosting)). All endpoints are prefixed with `/v1`. | Environment | Base URL | |---|---| | Production | `https://api.peridot.id/v1` | | Sandbox | `https://sandbox-api.peridot.id/v1`. Separate deployment, not a path prefix — verify with `GET /v1/env`. | | Local development | `http://localhost:3300/v1` | Sandbox has a **faucet** for instant test money (`POST /v1/fiat/test-credit`, caps Rp50.000/call, Rp100.000/day) and a manual [promote-to-production checklist](/environments#promote-to-production-manual-checklist-for-mvp). The API is versioned through the URL path (`/v1/...`). Breaking changes ship as a new major version; the previous version stays available until it is deprecated. Almost every endpoint requires an authenticated session. The quickest way to verify the API is reachable is the login endpoint, which returns the Google sign-in URL: Open `url` in a browser and sign in with Google. You are redirected back with the session cookies set. From then on, use a cookie jar for all requests: Every endpoint, schema, and example is documented in the [API reference](/api/overview).",
+        body: "- Node.js 20+ - A registered app (`client_id` starting with `pidapp_…`) — see [Sign in with PeridotID](/sign-in-with-peridot-id#1-register-your-app). Localhost works without one. - The browser SDK for app code: ```bash npm install @peridotvault/pid-sdk-js ``` That is the whole setup: `Peridot({ clientId })` resolves every host by itself. **There is no API URL, base URL, or environment variable to configure** — app code never sets a host, and `baseUrl` exists only for [self-hosting](/self-hosting). Loopback (`localhost`/`127.0.0.1`) is always accepted, so local development needs no allowed-origins entry either. The API is versioned through the URL path (`/v1/...`). Breaking changes ship as a new major version; the previous version stays available until it is deprecated. Almost every endpoint requires an authenticated session. The quickest way to verify the API is reachable is the login endpoint, which returns the Google sign-in URL: Open `url` in a browser and sign in with Google. You are redirected back with the session cookies set. From then on, use a cookie jar for all requests: Every endpoint, schema, and example is documented in the [API reference](/api/overview).",
     },
     GuideEntry {
         topic: "index",
@@ -961,7 +956,7 @@ pub const GUIDES: [GuideEntry; 15] = [
         topic: "sdk",
         title: "JavaScript SDK",
         url: "https://docs.peridot.id/sdk",
-        body: "The SDK (`@peridotvault/pid-sdk-js`) wraps the API for browsers. It sends credentials with every request, so the API's cookies are handled automatically. That's the whole config. `clientId` is applied to login, exchange, and fiat calls automatically. The environment is auto-detected: `NODE_ENV === 'production'` → production, everything else (unset, `development`, `staging`, `test`, …) → sandbox. The API origin, popup host, Solana RPC, and program id all resolve from there — chains come from the API registry, not your config. - Force an environment for a staging build with `env: 'sandbox'`. - Self-host / localhost: pass advanced `baseUrl` (and `popupBaseUrl`). - Server-side only: pass `clientSecret` (used by `auth.exchange`) — **never** in browser code. `auth.login()` resolves the Google OAuth URL — navigate to it. The user signs in and is sent back to `CLIENT_SUCCESS_URL` with the session cookies already set — or, for a new credential, to the PID picker (`?claim=1`), where they choose the permanent `<handle>@pid` (check `auth.pidAvailable(handle)` first; the handle can never be changed, reused, or reassigned): Read-only: no XP amounts in, none out. See [Levels & XP](/leveling) for the badge component, the event-reporting contract, and rate limits. Unlinking the identity's last credential fails (returns `false`) — every identity must keep at least one way to log in. The PID (`pid`, e.g. `ifal@pid`) is permanent and immutable — only the mutable labels above can be updated.…",
+        body: "The SDK (`@peridotvault/pid-sdk-js`) wraps the API for browsers. It sends credentials with every request, so the API's cookies are handled automatically. That's the whole config. `clientId` is applied to login, exchange, and fiat calls automatically. **There is no API URL, base URL, or environment variable to set** — the environment is auto-detected: `NODE_ENV === 'production'` → production, everything else (unset, `development`, `staging`, `test`, …) → sandbox. The API origin, popup host, Solana RPC, and program id all resolve from there — chains come from the API registry, not your config. - Force an environment for a staging build with `env: 'sandbox'`. - Self-host / localhost: pass advanced `baseUrl` (and `popupBaseUrl`). - Server-side only: pass `clientSecret` (used by `auth.exchange`) — **never** in browser code. `auth.login()` resolves the Google OAuth URL — navigate to it. The user signs in and is sent back to `CLIENT_SUCCESS_URL` with the session cookies already set — or, for a new credential, to the PID picker (`?claim=1`), where they choose the permanent `<handle>@pid` (check `auth.pidAvailable(handle)` first; the handle can never be changed, reused, or reassigned): Read-only: no XP amounts in, none out. See [Levels & XP](/leveling) for the badge component, the event-reporting contract, and rate limits. Unlinking the identity's last credential fails (returns `false`) — every identity must keep at least one way to log in. The PID (`pid`, e.g. `ifal@pid`) is…",
     },
     GuideEntry {
         topic: "self-hosting",

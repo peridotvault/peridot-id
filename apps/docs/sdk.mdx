@@ -31,7 +31,8 @@ const peridot = Peridot({
 ```
 
 That's the whole config. `clientId` is applied to login, exchange, and fiat calls
-automatically. The environment is auto-detected: `NODE_ENV === 'production'` →
+automatically. **There is no API URL, base URL, or environment variable to set** —
+the environment is auto-detected: `NODE_ENV === 'production'` →
 production, everything else (unset, `development`, `staging`, `test`, …) →
 sandbox. The API origin, popup host, Solana RPC, and program id all resolve from
 there — chains come from the API registry, not your config.

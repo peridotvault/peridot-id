@@ -38,9 +38,15 @@ Because environments are separate deployments, **register your app in each
 environment** you want to support (same name is fine; the `client_id` differs).
 There is no per-app environment switch.
 
-## Use the sandbox
+## Test money (optional)
 
-1. Open the sandbox workspace and register your app there (separate `client_id`).
+Integration does not require the sandbox: `localhost` needs no registration, and a
+production build registers one app in the production dashboard. Use the sandbox only
+when you deploy a **non-production build** (preview/staging) or want fake money to test
+with:
+
+1. Register the app in the sandbox workspace too — it is a separate deployment with its
+   own `client_id`.
 2. Your test build points at the sandbox **automatically**: the SDK selects the
    environment from `NODE_ENV` — `production` → production, anything else
    (unset, `development`, `staging`, `test`, …) → sandbox. A staging build that

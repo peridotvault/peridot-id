@@ -1,5 +1,17 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.10.0
+
+- **Login popups close themselves.** `deliverLoginResult(targetOrigin, result,
+  redirectUri?)` — the hosted-side hand-off: post `pid-popup-result` to the
+  opener, then `window.close()`. The popup never navigates to the dapp, so
+  `loginPopup()` needs no `forwardPopupLoginCode()` bridge. Only when there is no
+  usable opener (tab, COOP severed) does it fall back to a full-page
+  `redirect_uri?pid_code=…` navigation. Additive: `postPopupResult` and
+  `forwardPopupLoginCode` are unchanged.
+- **`readPopupParams()` exposes `redirectUri`** (http(s) only) so the hosted page
+  can mint the code for the app's exact return URL across the OAuth round-trip.
+
 ## 1.9.1
 
 - **`resolvePeridotUrls(env)`.** The canonical API + popup host table the

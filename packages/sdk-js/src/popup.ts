@@ -249,6 +249,11 @@ export interface PopupParams {
   /** Registered app this login is for (binds the issued pid_code). */
   clientId?: string;
   /**
+   * The app's `?redirect_uri=`: the exact URL the pid_code is minted for, and
+   * the fallback landing page when this window has no opener to post to.
+   */
+  redirectUri?: string;
+  /**
    * First-party opener (a PeridotID-owned page on the shared cookie domain):
    * authenticate and close — no pid_code, no consent step. The caller relies on
    * the shared session cookie. Safe for any opener to request: it yields no code.
@@ -266,6 +271,16 @@ export interface PopupParams {
   expectedPid?: string;
 }
 
+/** Login hint value from `?redirect_uri=`: must be an absolute http(s) URL. */
+function parseRedirectUri(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    return ["http:", "https:"].includes(new URL(raw).protocol) ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Hosted side: parse `?popup=<action>&origin=<origin>&method=…&client_id=…`. */
 export function readPopupParams(): PopupParams | null {
   if (typeof window === "undefined") return null;
@@ -276,6 +291,7 @@ export function readPopupParams(): PopupParams | null {
     if (action && origin) {
       const method = q.get("method") ?? undefined;
       const clientId = q.get("client_id") ?? undefined;
+      const redirectUri = parseRedirectUri(q.get("redirect_uri"));
       const firstParty = q.get("first_party") === "1";
       const sessionScope = q.get("session_scope") ?? undefined;
       const rawPid = q.get("expected_pid");
@@ -285,6 +301,7 @@ export function readPopupParams(): PopupParams | null {
         origin,
         ...(method ? { method } : {}),
         ...(clientId ? { clientId } : {}),
+        ...(redirectUri ? { redirectUri } : {}),
         ...(firstParty ? { firstParty: true } : {}),
         ...(sessionScope ? { sessionScope } : {}),
         ...(expectedPid ? { expectedPid } : {}),
@@ -362,4 +379,33 @@ export function postPopupResult(targetOrigin: string, result: PopupResult, opts?
   if (!window.opener) return;
   window.opener.postMessage({ type: POPUP_RESULT, ...result }, targetOrigin);
   if (!opts?.keepOpen) window.close();
+}
+
+/**
+ * Hosted side, login result: hand it to the opener and close — the login window
+ * never navigates to the dapp, so the dapp needs no bridge code. Only when there
+ * is no usable opener (a tab, or COOP severed it) does it fall back to a
+ * full-page `redirect_uri` navigation. Posting always precedes close().
+ */
+export function deliverLoginResult(
+  targetOrigin: string,
+  result: PopupResult<{ pidCode?: string }>,
+  redirectUri?: string,
+): "opener" | "redirect" | "none" {
+  requireBrowser();
+  const opener = window.opener;
+  if (opener && !opener.closed) {
+    opener.postMessage({ type: POPUP_RESULT, ...result }, targetOrigin);
+    window.close();
+    return "opener";
+  }
+  if (!redirectUri) return "none";
+  const url = new URL(redirectUri);
+  if (result.ok) {
+    if (result.data?.pidCode) url.searchParams.set("pid_code", result.data.pidCode);
+  } else {
+    url.searchParams.set("error", result.error || "access_denied");
+  }
+  window.location.assign(url.toString());
+  return "redirect";
 }

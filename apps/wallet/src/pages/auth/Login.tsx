@@ -31,7 +31,11 @@ export function Login({
   const { peridot } = usePeridot();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sso] = useState(readSsoParams);
+  // A `?popup=login` load carries BOTH an origin context and (when the app
+  // passed `returnTo`) `redirect_uri`. The popup context wins: the result is
+  // handed to the opener and this window closes — never a redirect to the dapp,
+  // which would leave the opener waiting forever.
+  const [sso] = useState(() => (loginContext ? null : readSsoParams()));
   // Auth-in-a-new-tab (`?popup=login&origin=…&client_id=…` opened by a dapp):
   // the tab authenticates (and creates a PID if the user has none), then mints a
   // pid_code and posts it to the opener instead of navigating.

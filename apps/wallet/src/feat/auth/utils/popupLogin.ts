@@ -1,4 +1,4 @@
-import { postPopupResult, readPopupParams, type PeridotClient } from "@peridotvault/pid-sdk-js";
+import { deliverLoginResult, readPopupParams, type PeridotClient } from "@peridotvault/pid-sdk-js";
 
 /**
  * Auth-in-a-new-tab context. Auth is a full-page flow (Google + PID picker) and
@@ -6,11 +6,16 @@ import { postPopupResult, readPopupParams, type PeridotClient } from "@peridotva
  * read from `?popup=login&origin=…&client_id=…` and persisted in sessionStorage
  * so it survives the OAuth round-trip, which returns to CLIENT_SUCCESS_URL
  * without those query params. When auth (and, for new users, PID creation)
- * completes, the tab mints a pid_code for the app and posts it to the opener.
+ * completes, the window mints a pid_code for the app and posts it to the opener.
  */
 export interface LoginContext {
   origin: string;
   clientId?: string;
+  /**
+   * The app's `?redirect_uri=`: the code is minted for this exact URL, and it is
+   * the fallback target when the opener is gone (no postMessage possible).
+   */
+  redirectUri?: string;
   method?: string;
   /** First-party opener (PeridotID-owned page): authenticate + close, no pid_code. */
   firstParty?: boolean;
@@ -26,6 +31,7 @@ export function readLoginContext(): LoginContext | null {
   if (p && p.action === "login") {
     const ctx: LoginContext = {
       origin: p.origin,
+      ...(p.redirectUri ? { redirectUri: p.redirectUri } : {}),
       ...(p.clientId ? { clientId: p.clientId } : {}),
       ...(p.method ? { method: p.method } : {}),
       ...(p.firstParty ? { firstParty: true } : {}),
@@ -64,7 +70,7 @@ function pingWalletTabs(): void {
   }
 }
 
-/** Mint a pid_code for the app and post it to the opener, then close the tab. */
+/** Mint a pid_code for the app and hand it to the opener, then close the window. */
 export async function deliverLoginCode(peridot: PeridotClient, ctx: LoginContext): Promise<boolean> {
   // First-party opener: mint its OWN session (so app logout never touches the
   // wallet), then confirm and close. No pid_code either way.
@@ -72,22 +78,22 @@ export async function deliverLoginCode(peridot: PeridotClient, ctx: LoginContext
     if (ctx.sessionScope) {
       const ok = await peridot.auth.grantSession(ctx.sessionScope);
       if (!ok) {
-        postPopupResult(ctx.origin, { ok: false, error: "Couldn't start the app session — try again." });
+        deliverLoginResult(ctx.origin, { ok: false, error: "Couldn't start the app session — try again." }, ctx.redirectUri);
         return false;
       }
     }
     pingWalletTabs();
-    postPopupResult(ctx.origin, { ok: true });
+    deliverLoginResult(ctx.origin, { ok: true }, ctx.redirectUri);
     clearLoginContext();
     return true;
   }
   try {
     const { pidCode } = await peridot.auth.authorize({
-      returnTo: ctx.origin,
+      returnTo: ctx.redirectUri ?? ctx.origin,
       ...(ctx.clientId ? { clientId: ctx.clientId } : {}),
     });
     pingWalletTabs();
-    postPopupResult(ctx.origin, { ok: true, data: { pidCode } });
+    deliverLoginResult(ctx.origin, { ok: true, data: { pidCode } }, ctx.redirectUri);
     clearLoginContext();
     return true;
   } catch {
@@ -97,6 +103,6 @@ export async function deliverLoginCode(peridot: PeridotClient, ctx: LoginContext
 
 /** Tell the opener the user declined / abandoned (e.g. cancelled PID creation). */
 export function rejectLogin(ctx: LoginContext, error = "access_denied"): void {
-  postPopupResult(ctx.origin, { ok: false, error });
+  deliverLoginResult(ctx.origin, { ok: false, error }, ctx.redirectUri);
   clearLoginContext();
 }
