@@ -70,6 +70,10 @@ jobs:
 
       - name: Build + upgrade canister
         working-directory: apps/mcp
+        # CI has no OS keyring, so the imported identity is plaintext; dfx
+        # refuses mainnet commands for that unless this warning is suppressed.
+        env:
+          DFX_WARNING: "-mainnet_plaintext_identity"
         run: |
           set -euo pipefail
           WASM=target/wasm32-unknown-unknown/release/peridot_id_mcp.wasm
