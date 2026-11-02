@@ -4,7 +4,6 @@ import type { NftItem, TokenBalance, TokenInfo } from "@peridotvault/pid-solana"
 import type { ActivationView, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { Pressable } from "../../shared/components/ui/Pressable";
 import { BottomSheet } from "../../shared/components/ui/BottomSheet";
-import { Cell, CellGrid } from "../../shared/components/ui/CellGrid";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { ArrowDownLeft, ArrowUpRight, Banknote, Coins } from "../../shared/components/icons";
@@ -68,15 +67,16 @@ export function Home({
   return (
     <div className="flex flex-col">
       <Section className="border-t-0">
-        <SectionHead className="py-9">
+        <SectionHead className="pb-7 pt-10">
           <TotalBalanceSection
             currency={d.currency}
             totalValue={totalValue}
             loading={d.busy && d.balanceIdr === null}
           />
         </SectionHead>
+        {/* Balance + actions are one block: no rail between them. */}
+        <QuickActions onSend={() => setChoice(true)} onReceive={goReceive} onSwap={goSwap} onBuy={goBuy} />
       </Section>
-      <QuickActions onSend={() => setChoice(true)} onReceive={goReceive} onSwap={goSwap} onBuy={goBuy} />
       <FiatSection
         balanceIdr={d.balanceIdr}
         balanceError={d.balanceError}
@@ -118,14 +118,21 @@ export function Home({
 
       {/* ANT-625 FR6: the selection has no smart-account row — defined empty
           state, never an infinite spinner (load() always settles; the
-          signing-block failsafe in the store is the ceiling, not the path). */}
-      {d.emptySelection && !d.busy ? (
-        <Section>
-          <SectionHead className="pb-0">
+          signing-block failsafe in the store is the ceiling, not the path).
+          The notice renders INSIDE the asset group so the chain picker stays
+          on screen — otherwise a chain with no account is a dead end. */}
+      <AssetSection
+        tab={d.assetTab}
+        onTabChange={d.setAssetTab}
+        coins={coins}
+        nfts={d.nfts}
+        busy={d.busy}
+        notice={
+          d.emptySelection && !d.busy ? (
             <div className="flex flex-col gap-2">
               <span className="font-sans text-sm font-semibold text-foreground">No {sel.label} account yet</span>
               <span className="font-sans text-sm leading-5 text-muted-foreground">
-                This selection has no smart-account row — receive address below to fund it.
+                This selection has no smart-account row — fund it from your receive address, or pick another chain above.
               </span>
               <Pressable onPress={goReceive} accessibilityLabel="Show receive addresses">
                 <div className="flex items-center gap-1 self-start border-b border-foreground py-1">
@@ -133,17 +140,9 @@ export function Home({
                 </div>
               </Pressable>
             </div>
-          </SectionHead>
-        </Section>
-      ) : (
-        <AssetSection
-          tab={d.assetTab}
-          onTabChange={d.setAssetTab}
-          coins={coins}
-          nfts={d.nfts}
-          busy={d.busy}
-        />
-      )}
+          ) : undefined
+        }
+      />
     </div>
   );
 }
@@ -429,12 +428,12 @@ function QuickActions({
   onBuy: () => void;
 }) {
   return (
-    <CellGrid cols="grid-cols-4" className="border-t border-line">
+    <div className="grid grid-cols-4 gap-2 px-6 pb-6">
       <ActionButton icon={ArrowUpRight} label="Send" onPress={onSend} />
       <ActionButton icon={ArrowDownLeft} label="Receive" onPress={onReceive} />
       <ActionButton icon={Coins} label="Swap" onPress={onSwap} />
       <ActionButton icon={Banknote} label="Buy" onPress={onBuy} />
-    </CellGrid>
+    </div>
   );
 }
 
@@ -445,10 +444,12 @@ function ActionButton({ icon: Icon, label, onPress, disabled }: { icon: typeof A
       disabled={disabled}
       accessibilityState={{ disabled: !!disabled }}
     >
-      <Cell className={`flex aspect-square w-full flex-col items-center justify-center gap-2 transition-colors hover:bg-surface ${disabled ? "opacity-40" : ""}`}>
+      <div
+        className={`flex aspect-square w-full flex-col items-center justify-center gap-2 border border-border bg-background transition-colors hover:bg-surface ${disabled ? "opacity-40" : ""}`}
+      >
         <Icon size={22} className="text-accent" />
         <span className="font-sans text-sm font-medium text-foreground">{label}</span>
-      </Cell>
+      </div>
     </Pressable>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { Section } from "../../../shared/components/ui/Section";
 import { ChainSelect } from "./ChainSelect";
@@ -16,12 +16,15 @@ export function AssetSection({
   coins,
   nfts,
   busy,
+  notice,
 }: {
   tab: "tokens" | "items";
   onTabChange: (tab: "tokens" | "items") => void;
   coins: Coin[];
   nfts: NftItem[];
   busy: boolean;
+  /** Replaces the list body; the tabs and chain picker stay visible. */
+  notice?: ReactNode;
 }) {
   return (
     <Section>
@@ -32,7 +35,9 @@ export function AssetSection({
         </div>
         <ChainSelect />
       </div>
-      {tab === "tokens" ? (
+      {notice ? (
+        <div className="px-6 py-4">{notice}</div>
+      ) : tab === "tokens" ? (
         <div className="flex flex-col divide-y divide-line">
           {coins.length === 0 && !busy && (
             <p style={s.hint} className="px-6 py-3">No assets yet — receive SOL to your address to get started.</p>
