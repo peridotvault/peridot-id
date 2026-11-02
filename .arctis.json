@@ -25,7 +25,7 @@
       },
       {
         "id": "c2",
-        "column": "plan",
+        "column": "progress",
         "title": "masukkaan Chains ke dalaam 1 group di setting",
         "desc": "",
         "order": 1,
@@ -46,8 +46,16 @@
         "desc": "ketika logout dari aplikasi yang menggunakan peridot id,  jangan membuat peridot id web yang asli menjadi logout juga!\n\nseharusnya biarkan setiap domain akan menjadi entry dan logout yang berbeda! dan seharusnya di dalam settings -> sessions / devices kita bisa logout dari peridot.id wallet. \n\n",
         "order": 0,
         "urgency": "high"
+      },
+      {
+        "id": "c5",
+        "column": "plan",
+        "title": "bottom bar pada mobile naik ke atas pada saat content kita kosong. seharusnya selalu fix di bawah",
+        "desc": "",
+        "order": 0,
+        "urgency": "medium"
       }
     ],
-    "next_id": 5
+    "next_id": 6
   }
 }

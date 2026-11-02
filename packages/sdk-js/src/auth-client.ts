@@ -235,6 +235,14 @@ export class PeridotAuth {
   }
 
   async logout(): Promise<void> {
+    // A bearer session (relying party / embed) owns NO cookie on the API host.
+    // Posting an unscoped logout from there would clear the FIRST-PARTY wallet
+    // cookies (`pid_access`/`pid_refresh`) and sign the user out of PeridotID
+    // itself — so that sign-out stays local.
+    if (this.client.hasBearer && !this.client.sessionScope) {
+      this.client.setBearer(undefined);
+      return;
+    }
     await this.client.post("/v1/auth/logout");
   }
 

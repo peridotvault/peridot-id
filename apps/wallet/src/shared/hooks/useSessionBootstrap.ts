@@ -14,6 +14,7 @@ export type Screen =
   | "topup"
   | "provisioning"
   | "passkey"
+  | "chains"
   | "settings"
   | "profile"
   | "edit-profile"

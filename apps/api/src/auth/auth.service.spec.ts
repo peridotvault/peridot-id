@@ -31,6 +31,7 @@ interface StoredDevice {
 
 interface StoredSession {
   deviceId: string;
+  scope: string | null;
   rotatedFrom: string | null;
   createdAt: Date;
   revokedAt: Date | null;
@@ -65,9 +66,10 @@ function prismaMock() {
       },
       session: {
         create: jest.fn(
-          async (args: { data: { id: string; deviceId: string; expiresAt: Date; rotatedFrom: string | null } }) => {
+          async (args: { data: { id: string; deviceId: string; scope?: string | null; expiresAt: Date; rotatedFrom: string | null } }) => {
             sessions.set(args.data.id, {
               deviceId: args.data.deviceId,
+              scope: args.data.scope ?? null,
               rotatedFrom: args.data.rotatedFrom ?? null,
               createdAt: new Date(),
               revokedAt: null,
@@ -108,6 +110,13 @@ function prismaMock() {
           return s ?? null;
         }),
         updateMany: jest.fn(async ({ where, data }: { where: { id?: string; deviceId?: string; device?: { pid: string }; revokedAt?: null }; data: { revokedAt: Date } }) => {
+          // Single session by id (Settings → per-session revoke) takes the exact
+          // row; the device/pid filters below are the family/global paths.
+          if (where.id) {
+            const one = sessions.get(where.id);
+            if (one) one.revokedAt = data.revokedAt;
+            return { count: one ? 1 : 0 };
+          }
           // Family-wide revocation (M2 fail-closed): revoke every session on the device.
           if (where.deviceId) {
             let count = 0;
@@ -141,6 +150,7 @@ function prismaMock() {
             .map(([id, s]) => ({
               id,
               deviceId: s.deviceId,
+              scope: s.scope,
               revokedAt: s.revokedAt,
               expiresAt: s.expiresAt,
               createdAt: new Date(),
@@ -526,13 +536,65 @@ describe("AuthService app sessions (per-first-party logout isolation)", () => {
     await service.grantAppSession(res as never, A, "web", "ua");
     const appRefresh = (res.cookie as jest.Mock).mock.calls.filter(([n]) => n === "pid_refresh_web").pop()[1] as string;
 
-    await service.logout({ cookies: { pid_refresh: wallet.refreshToken } } as never, resMock() as never, null);
+    await service.logout(
+      { cookies: { pid_refresh: wallet.refreshToken }, headers: {} } as never,
+      resMock() as never,
+      null,
+    );
 
     // The app's refresh token still resolves to a live session.
     const accounts = await service.listAccounts({
       cookies: { pid_refresh: appRefresh, pid_refresh_web: appRefresh },
     } as never);
     expect(accounts.map((x) => x.pid)).toContain(A);
+  });
+
+  it("a relying-party origin can never log the wallet out (unscoped logout is first-party only)", async () => {
+    const { service, res } = setup();
+    const wallet = await service.issueSession(res as never, A, "ua");
+
+    const rpRes = resMock();
+    await service.logout(
+      { cookies: { pid_refresh: wallet.refreshToken }, headers: { origin: "https://game.example" } } as never,
+      rpRes as never,
+      null,
+    );
+
+    // Nothing cleared, nothing revoked: the wallet session stays live.
+    expect(rpRes.clearCookie).not.toHaveBeenCalled();
+    const accounts = await service.listAccounts({ cookies: { pid_refresh: wallet.refreshToken } } as never);
+    expect(accounts.map((x) => x.pid)).toEqual([A]);
+  });
+
+  it("the wallet origin still signs out (unscoped)", async () => {
+    const { service, res } = setup({ WALLET_URL: "https://peridot.id" });
+    const wallet = await service.issueSession(res as never, A, "ua");
+
+    const walletRes = resMock();
+    await service.logout(
+      { cookies: { pid_refresh: wallet.refreshToken }, headers: { origin: "https://peridot.id" } } as never,
+      walletRes as never,
+      null,
+    );
+
+    const cleared = (walletRes.clearCookie as jest.Mock).mock.calls.map(([n]) => n);
+    expect(cleared).toContain("pid_refresh");
+    const accounts = await service.listAccounts({ cookies: { pid_refresh: wallet.refreshToken } } as never);
+    expect(accounts).toEqual([]);
+  });
+
+  it("labels app sessions with their scope and revokes just that one", async () => {
+    const { service, res } = setup();
+    await service.issueSession(res as never, A, "ua");
+    await service.grantAppSession(res as never, A, "dashboard", "ua");
+
+    const list = await service.listSessions(A, null);
+    expect(list.map((s) => String(s.scope)).sort()).toEqual(["dashboard", "null"]);
+
+    const appSession = list.find((s) => s.scope === "dashboard")!;
+    await expect(service.revokeSession(A, appSession.id)).resolves.toEqual({ scope: "dashboard" });
+    const after = await service.listSessions(A, null);
+    expect(after.map((s) => s.scope)).toEqual([null]);
   });
 });
 

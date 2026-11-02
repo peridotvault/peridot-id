@@ -4,6 +4,8 @@ export interface LoginResponse {
 
 export interface Session {
   id: string;
+  /** App namespace of a first-party app session (`dashboard`); null/absent = the wallet's. */
+  scope?: string | null;
   userAgent: string | null;
   lastSeenAt: string | null;
   createdAt: string;

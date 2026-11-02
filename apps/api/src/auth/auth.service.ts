@@ -29,6 +29,8 @@ import {
   parseTtlMs,
 } from "../common/app-config";
 import { isPidHandle, normalizePidHandle, toPid } from "../common/pid";
+import { firstPartyOriginsFor } from "../common/cors";
+import { extractRequestOrigin } from "../common/csrf-origin.guard";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -215,6 +217,9 @@ export class AuthService {
       data: {
         id: jti,
         deviceId,
+        // App-scoped sessions are labelled so Settings can list "Dashboard"
+        // separately from the wallet and revoke them individually.
+        scope: scope ?? null,
         rotatedFrom: rotatedFrom ?? null,
         // Guarded parse (ANT-227 item 4): a typo'd TTL must throw here, never
         // persist an Invalid-Date session row.
@@ -314,6 +319,15 @@ export class AuthService {
   }
 
   async logout(req: Request, res: Response, scope: string | null = null): Promise<void> {
+    // Unscoped logout is a FIRST-PARTY operation: it clears `pid_access` /
+    // `pid_refresh` on the API host, which is the wallet's only session. A
+    // relying party (any non-first-party origin) holds a bearer token from
+    // `exchange` and owns no cookie here — its sign-out must never end the
+    // wallet session in the same browser.
+    if (!scope) {
+      const origin = extractRequestOrigin(req);
+      if (origin && !firstPartyOriginsFor(this.config).includes(origin)) return;
+    }
     const cookies = (req as Request & { cookies?: Record<string, string> }).cookies;
     const token = scope ? cookies?.[scopeRefreshCookie(scope)] : cookies?.[REFRESH_COOKIE];
     if (token) {
@@ -427,7 +441,15 @@ export class AuthService {
 
   /** Active sessions for an identity, joined to their device (newest first). */
   async listSessions(pid: string, currentJti: string | null): Promise<
-    { id: string; userAgent: string | null; lastSeenAt: Date; createdAt: Date; expiresAt: Date; isCurrent: boolean }[]
+    {
+      id: string;
+      scope: string | null;
+      userAgent: string | null;
+      lastSeenAt: Date;
+      createdAt: Date;
+      expiresAt: Date;
+      isCurrent: boolean;
+    }[]
   > {
     const sessions = await this.prisma.session.findMany({
       where: { device: { pid }, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -436,6 +458,7 @@ export class AuthService {
     });
     return sessions.map((s) => ({
       id: s.id,
+      scope: s.scope,
       userAgent: s.device.userAgent,
       lastSeenAt: s.device.lastSeenAt,
       createdAt: s.createdAt,
@@ -452,12 +475,15 @@ export class AuthService {
     });
   }
 
-  /** Revoke a single session owned by the identity. */
-  async revokeSession(pid: string, sessionId: string): Promise<void> {
+  /** Revoke a single session owned by the identity. Returns its app scope
+   *  (null for the wallet's own session) so the caller can clear that cookie. */
+  async revokeSession(pid: string, sessionId: string): Promise<{ scope: string | null }> {
+    const session = await this.prisma.session.findUnique({ where: { id: sessionId }, include: { device: true } });
     await this.prisma.session.updateMany({
       where: { id: sessionId, device: { pid } },
       data: { revokedAt: new Date() },
     });
+    return { scope: session && session.device.pid === pid ? (session.scope ?? null) : null };
   }
 
   /**

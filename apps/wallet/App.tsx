@@ -26,6 +26,7 @@ import { Swap } from "./src/pages/chain/Swap";
 import { Topup } from "./src/pages/fiat/Topup";
 import { Provisioning } from "./src/pages/auth/Provisioning";
 import { Passkey } from "./src/pages/identity/Passkey";
+import { Chains } from "./src/pages/identity/Chains";
 import { Settings } from "./src/pages/identity/Settings";
 import { Profile } from "./src/pages/identity/Profile";
 import { EditProfile } from "./src/pages/identity/EditProfile";
@@ -202,6 +203,8 @@ export default function App() {
         );
       case "edit-profile":
         return <EditProfile onDone={pop} />;
+      case "chains":
+        return <Chains onDone={pop} />;
       case "sessions":
         return <Sessions onDone={pop} />;
       case "connected":
@@ -341,6 +344,7 @@ export default function App() {
               )}
               {screen === "settings" && (
                 <Settings
+                  goChains={() => push("chains")}
                   goPasskeys={openPasskey}
                   goSessions={() => push("sessions")}
                   goConnected={() => push("connected")}

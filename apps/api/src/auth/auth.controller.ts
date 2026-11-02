@@ -4,7 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { Request, Response } from "express";
 import { LoginResponse } from "@peridotvault/pid-types";
-import { CLAIM_COOKIE, REFRESH_COOKIE, clearClaimCookie, clearOAuthStateCookie, normalizeScope, OAUTH_STATE_COOKIE, setClaimCookie } from "../common/cookies";
+import { CLAIM_COOKIE, REFRESH_COOKIE, clearClaimCookie, clearOAuthStateCookie, clearScopedAuthCookies, normalizeScope, OAUTH_STATE_COOKIE, setClaimCookie } from "../common/cookies";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { AuthenticateFinishDto } from "../credentials/dto/credential.dto";
 import { AuthenticateStartResult, CredentialService } from "../credentials/credential.service";
@@ -624,8 +624,12 @@ export class AuthController {
   async revokeSession(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id", ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<{ ok: true }> {
-    await this.authService.revokeSession(user.pid, id);
+    const { scope } = await this.authService.revokeSession(user.pid, id);
+    // Revoking an app session from Settings must also drop that app's cookie in
+    // THIS browser, otherwise its next refresh resurrects nothing but lingers.
+    if (scope) clearScopedAuthCookies(res, this.config, scope);
     return { ok: true };
   }
 }

@@ -51,3 +51,27 @@ test("setBearer swaps back to cookie mode", async () => {
     cap.restore();
   }
 });
+
+test("bearer logout is local — it never posts the unscoped logout that clears the wallet", async () => {
+  const cap = captureFetch();
+  try {
+    const peridot = Peridot({ baseUrl: "http://localhost:3301", bearer: "read-token" });
+    await peridot.auth.logout();
+    assert.equal(cap.calls.length, 0);
+    assert.equal(peridot.hasBearer, false);
+  } finally {
+    cap.restore();
+  }
+});
+
+test("cookie-mode logout still calls the API (first-party wallet sign-out)", async () => {
+  const cap = captureFetch();
+  try {
+    const peridot = Peridot({ baseUrl: "http://localhost:3301" });
+    await peridot.auth.logout();
+    assert.equal(cap.calls.length, 1);
+    assert.match(cap.calls[0].url, /\/v1\/auth\/logout$/);
+  } finally {
+    cap.restore();
+  }
+});

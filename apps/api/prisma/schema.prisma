@@ -150,6 +150,9 @@ model Session {
   id          String    @id
   deviceId    String
   device      Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  // App-scoped session namespace (`pid_access_<scope>`); null = the wallet's
+  // own first-party session. Lets Settings label and revoke per app.
+  scope       String?
   rotatedFrom String?
   revokedAt   DateTime? @db.Timestamptz(3)
   expiresAt   DateTime @db.Timestamptz(3)

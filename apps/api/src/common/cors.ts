@@ -51,6 +51,17 @@ export function staticOriginsFor(config: ConfigService): string[] {
   ];
 }
 
+/**
+ * First-party origins only (service URLs ∪ the built-in dual-serve set).
+ * Deliberately EXCLUDES CORS_ORIGINS and every registered app origin: this is
+ * the wallet's own trust set, used where a relying party must not act with
+ * first-party authority (e.g. unscoped logout clearing the wallet's cookies).
+ */
+export function firstPartyOriginsFor(config: ConfigService): string[] {
+  const urls = resolveServiceUrls((key, def) => config.get(key, def));
+  return [...new Set([...serviceOrigins(urls), ...FIRST_PARTY_ORIGINS])];
+}
+
 /** Exact origin match. `undefined` origin = non-browser client (curl, mobile) — allowed. */
 export function isOriginAllowed(
   origin: string | undefined,

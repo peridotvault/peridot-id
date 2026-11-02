@@ -73,7 +73,8 @@ export function useConsentActions(
   };
 
   /** "Use a different account": pick another linked identity (client login) or
-   *  drop the session and log in fresh (third-party SSO). */
+   *  restart the login form (third-party SSO). Never signs the wallet out of
+   *  PeridotID — an app's login must not end the user's wallet session. */
   const useDifferentCtx = async () => {
     if (ctx?.firstParty) {
       setBusy(true);
@@ -89,17 +90,9 @@ export function useConsentActions(
       }
       return;
     }
-    setBusy(true);
-    try {
-      await peridot.auth.logout();
-    } catch {
-      // best-effort: still show the login form even if logout fails
-    } finally {
-      flags.delivered = false;
-      setSession(null);
-      setShowLogin(true);
-      setBusy(false);
-    }
+    flags.delivered = false;
+    setSession(null);
+    setShowLogin(true);
   };
 
   /** Pick a linked identity for the pending client login, then re-consent. */

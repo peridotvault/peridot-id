@@ -65,7 +65,7 @@ export class PeridotClient {
     private walletOptions: PeridotWalletOptions,
     appOptions: { clientId?: string; clientSecret?: string } = {},
     private onUnauthorized?: () => void,
-    private readonly sessionScope?: string,
+    readonly sessionScope?: string,
     private bearer?: string,
   ) {
     this.appOptions = appOptions;
@@ -96,6 +96,11 @@ export class PeridotClient {
    */
   setBearer(token?: string): void {
     this.bearer = token;
+  }
+
+  /** True when this client authenticates with a bearer token (no cookies). */
+  get hasBearer(): boolean {
+    return !!this.bearer;
   }
 
   private async request<T>(path: string, init: RequestInit & { multipart?: boolean }): Promise<{ ok: boolean; data: T | ApiError }> {

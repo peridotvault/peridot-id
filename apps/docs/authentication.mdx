@@ -126,6 +126,12 @@ idempotent — safe to call when already logged out.
 curl -b cookies.txt -c cookies.txt -X POST https://api.peridot.id/v1/auth/logout
 ```
 
+It is a **first-party** operation: only a request from the wallet/dashboard origin (or a
+non-cookie client with no `Origin` header) ends the wallet session. A relying party that
+calls it from its own origin gets an idempotent `200` and nothing else — a sign-in to
+another site can never log the user out of PeridotID. First-party apps with their own
+cookie namespace log out with `X-PID-Scope: <scope>`, which touches only that scope.
+
 ## Security notes
 
 - Access tokens are short-lived; the real secret is the rotating refresh token.

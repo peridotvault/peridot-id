@@ -230,6 +230,11 @@ See [Apps & workspace](/apps) for the machine token and the full fee model.
 await peridot.auth.logout();
 ```
 
+Sign-out is local for a relying party: your session is the bearer token from
+`exchange`, so `logout()` drops it and never touches the user's PeridotID session. A
+first-party client (`sessionScope`) logs out only its own app session. Clear your own
+cookies/state yourself.
+
 ## Refreshing
 
 Usually you never call `refresh()` directly — the `onUnauthorized` callback does it. If

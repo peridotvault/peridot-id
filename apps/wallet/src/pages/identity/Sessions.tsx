@@ -13,6 +13,12 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+/** `dashboard` → "Dashboard"; a wallet session has no scope. */
+function scopeLabel(scope?: string | null): string {
+  if (!scope) return "PeridotID wallet";
+  return scope.charAt(0).toUpperCase() + scope.slice(1);
+}
+
 export function Sessions({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -91,9 +97,10 @@ export function Sessions({ onDone }: { onDone: () => void }) {
               </div>
               <div className="flex flex-1 flex-col gap-0.5">
                 <span className="font-sans text-sm font-semibold text-foreground">
-                  {se.userAgent ?? "Unknown device"}
+                  {scopeLabel(se.scope)}
                   {se.isCurrent ? "  ·  this device" : ""}
                 </span>
+                <span className="font-sans text-xs text-muted-foreground">{se.userAgent ?? "Unknown device"}</span>
                 <span className="font-sans text-xs text-muted-foreground">Signed in {fmtDate(se.createdAt)}</span>
                 <span className="font-sans text-xs text-muted-foreground">Seen {se.lastSeenAt ? fmtDate(se.lastSeenAt) : "—"} · Expires {fmtDate(se.expiresAt)}</span>
               </div>
