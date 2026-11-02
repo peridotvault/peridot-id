@@ -24,7 +24,7 @@ export default function AppDetailPage() {
     return (
       <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <PageHeader eyebrow="Developer" title="App detail" />
-        <Card className="mt-8">
+        <Card>
           <h2 className="text-lg font-semibold tracking-tight">Sign in to manage this app</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>App settings require a signed-in session.</p>
           {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}

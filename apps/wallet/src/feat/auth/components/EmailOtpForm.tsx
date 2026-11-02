@@ -41,7 +41,7 @@ export function EmailOtpForm({
       <div style={s.container} className="flex flex-col">
         <div className="flex flex-col flex-1 w-full items-center justify-center gap-5">
           <div className="flex flex-col items-center gap-2">
-            <span className="font-serif text-3xl tracking-[-0.4px] text-foreground">Sign in with email</span>
+            <span className="font-sans text-3xl tracking-[-0.4px] text-foreground">Sign in with email</span>
             <span className="text-center font-sans text-sm text-muted-foreground">
               {step === "email" ? "We'll send you a 6-digit code." : `Code sent to ${email}`}
             </span>

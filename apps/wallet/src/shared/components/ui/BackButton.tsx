@@ -8,7 +8,7 @@ export function BackButton({ onPress, label = "Back" }: { onPress: () => void; l
       onPress={onPress}
       accessibilityLabel={label}
       style={{ flexDirection: "row" }}
-      className="items-center gap-1.5"
+      className="items-center gap-1.5 py-2"
     >
       <ArrowLeft size={18} className="text-foreground" />
       <span className="font-sans text-sm text-foreground">{label}</span>

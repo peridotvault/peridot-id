@@ -53,7 +53,7 @@ export function AccountSwitcherModal({
                   <img src={a.avatarUrl} alt="" className="h-9 w-9 rounded-full border border-border"  />
                 ) : (
                   <div className="flex flex-col h-9 w-9 items-center justify-center rounded-full bg-muted" aria-label="No profile photo">
-                    <span aria-hidden="true" className="font-serif text-base text-foreground">{(a.displayName ?? a.pid).slice(0, 1).toUpperCase()}</span>
+                    <span aria-hidden="true" className="font-sans text-base text-foreground">{(a.displayName ?? a.pid).slice(0, 1).toUpperCase()}</span>
                   </div>
                 )}
                 <div className="flex flex-col flex-1 gap-0.5">

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
 import { Pressable } from "../../shared/components/ui/Pressable";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { ChevronRight, RefreshCw } from "../../shared/components/icons";
 import type { AccountView, Profile as ProfileData } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
@@ -89,47 +89,56 @@ export function Profile({
   };
 
   return (
-    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
-      <PushHeader onBack={onDone} title="Profile" />
+    <div className="flex flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="pb-0">
+          <PushHeader onBack={onDone} title="Profile" />
+        </SectionHead>
+      </Section>
 
-      <Pressable onPress={goEditProfile}>
-        <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 border border-border bg-surface p-3.5">
-          {profile?.avatarUrl ? (
-            <img src={profile.avatarUrl} alt="" className="h-[34px] w-[34px] rounded-full border border-border"  />
-          ) : (
-            <div className="flex flex-col h-[34px] w-[34px] items-center justify-center rounded-full bg-muted" aria-label="No profile photo">
-              <span aria-hidden="true" className="font-serif text-base text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</span>
+      <Section>
+        <div className="flex flex-col divide-y divide-line">
+          <Pressable onPress={goEditProfile}>
+            <div className="flex w-full items-center gap-3 px-6 py-3 transition-colors hover:bg-surface">
+              {profile?.avatarUrl ? (
+                <img src={profile.avatarUrl} alt="" className="h-[34px] w-[34px] rounded-full border border-line"  />
+              ) : (
+                <div className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-line bg-surface" aria-label="No profile photo">
+                  <span aria-hidden="true" className="font-sans text-base text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</span>
+                </div>
+              )}
+              <span className="flex-1 font-sans text-base font-medium text-foreground">Edit Profile</span>
+              <ChevronRight size={16} className="text-muted-foreground" />
             </div>
-          )}
-          <span className="flex-1 font-sans text-base font-medium text-foreground">Edit Profile</span>
-          <ChevronRight size={16} className="text-muted-foreground" />
+          </Pressable>
+
+          <Pressable onPress={openAccounts}>
+            <div className="flex w-full items-center gap-3 py-3 transition-colors hover:bg-surface">
+              <div className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-line bg-surface">
+                <RefreshCw size={18} className="text-foreground" />
+              </div>
+              <span className="flex-1 font-sans text-base font-medium text-foreground">Switch Account</span>
+              <ChevronRight size={16} className="text-muted-foreground" />
+            </div>
+          </Pressable>
         </div>
-      </Pressable>
+      </Section>
 
       {profile?.level && (
-        <div
-          className="flex flex-col w-full gap-2 border border-border bg-surface p-3.5"
-          aria-label={`Level ${profile.level.level}, ${xpProgressLabel(profile.level)}`}
-        >
-          <div style={{ flexDirection: "row" }} className="flex flex-col items-baseline justify-between">
-            <span className="font-sans text-base font-medium text-foreground">Level <span className="font-level text-lg leading-none">{profile.level.level}</span></span>
-            <span className="font-sans text-sm text-muted-foreground">{xpProgressLabel(profile.level)}</span>
-          </div>
-          <div className="flex flex-col h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div className="flex flex-col h-full rounded-full bg-foreground" style={{ width: `${progressWidth(profile.level)}%` }}  />
-          </div>
-        </div>
+        <Section aria-label={`Level ${profile.level.level}, ${xpProgressLabel(profile.level)}`}>
+          <SectionHead className="pb-0">
+            <div className="flex w-full flex-col gap-2">
+              <div className="flex items-baseline justify-between">
+                <span className="font-sans text-base font-medium text-foreground">Level <span className="font-sans text-lg font-semibold leading-none">{profile.level.level}</span></span>
+                <span className="font-sans text-sm text-muted-foreground">{xpProgressLabel(profile.level)}</span>
+              </div>
+              <div className="flex h-1.5 w-full overflow-hidden bg-line">
+                <div className="h-full bg-accent" style={{ width: `${progressWidth(profile.level)}%` }}  />
+              </div>
+            </div>
+          </SectionHead>
+        </Section>
       )}
-
-      <Pressable onPress={openAccounts}>
-        <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 border border-border bg-surface p-3.5">
-          <div className="flex flex-col flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
-            <RefreshCw size={18} className="text-foreground" />
-          </div>
-          <span className="flex-1 font-sans text-base font-medium text-foreground">Switch Account</span>
-          <ChevronRight size={16} className="text-muted-foreground" />
-        </div>
-      </Pressable>
 
       <AccountSwitcherModal
         visible={accountsOpen}
@@ -144,6 +153,6 @@ export function Profile({
         }}
         onSignOut={signOutAccount}
       />
-    </ScrollArea>
+    </div>
   );
 }

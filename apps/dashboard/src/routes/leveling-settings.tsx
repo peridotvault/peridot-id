@@ -24,7 +24,7 @@ export default function LevelingSettingsPage() {
           <MiniButton size="sm" onClick={reload}>Retry</MiniButton>
         </div>
       )}
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col">
         <Card>
           <h2 className="text-lg font-semibold tracking-tight">Progression defaults</h2>
           {loading ? (

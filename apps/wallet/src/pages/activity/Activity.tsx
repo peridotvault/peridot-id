@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
 import { Pressable } from "../../shared/components/ui/Pressable";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
+import { Cell, CellGrid } from "../../shared/components/ui/CellGrid";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { RefreshCw } from "../../shared/components/icons";
 import type { WalletTransaction } from "@peridotvault/pid-types";
@@ -65,32 +66,47 @@ export function Activity({
   );
 
   return (
-    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
-      <ActivityHeader tab={tab} onTabChange={setTab} onRefresh={() => { chain.reload(); fiat.reload(); }} busy={busy} />
+    <div className="flex flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="pb-4">
+          <ActivityHeader tab={tab} onTabChange={setTab} onRefresh={() => { chain.reload(); fiat.reload(); }} busy={busy} />
+        </SectionHead>
+      </Section>
 
-      {chain.error && <p role="alert" style={s.error}>{chain.error}</p>}
-      {chain.error && <UIButton title="Retry" onPress={chain.reload} />}
-      {fiat.error && <p role="alert" style={s.error}>{fiat.error}</p>}
-      {fiat.error && <UIButton title="Retry" onPress={fiat.reload} />}
-      {busy && <p role="status" style={s.hint}>Loading…</p>}
-
-      {tab !== "idr" && visible.length === 0 && !busy && (
-        <p style={s.hint}>No activity yet — send, receive, or activate your account to get started.</p>
+      {(chain.error || fiat.error) && (
+        <Section className="border-t-danger/40 bg-danger/10">
+          <SectionHead className="py-3">
+            {chain.error && <p role="alert" className="font-sans text-sm text-foreground">{chain.error}</p>}
+            {chain.error && <UIButton title="Retry" onPress={chain.reload} />}
+            {fiat.error && <p role="alert" className="font-sans text-sm text-foreground">{fiat.error}</p>}
+            {fiat.error && <UIButton title="Retry" onPress={fiat.reload} />}
+          </SectionHead>
+        </Section>
       )}
-      {tab === "idr" && visible.length === 0 && !busy && (
-        <p style={s.hint}>No IDR activity yet — top up to get started.</p>
-      )}
 
-      {visible.map((item) => (
-        <FeedRow
-          key={rowKey(item)}
-          item={item}
-          onSelect={onSelect}
-          onSelectFiat={onSelectFiat}
-          onSelectLedger={onSelectLedger}
-        />
-      ))}
-    </ScrollArea>
+      <Section>
+        {busy && <p role="status" style={s.hint} className="px-6 py-3">Loading…</p>}
+
+        {tab !== "idr" && visible.length === 0 && !busy && (
+          <p style={s.hint} className="px-6 py-3">No activity yet — send, receive, or activate your account to get started.</p>
+        )}
+        {tab === "idr" && visible.length === 0 && !busy && (
+          <p style={s.hint} className="px-6 py-3">No IDR activity yet — top up to get started.</p>
+        )}
+
+        <div className="flex flex-col">
+          {visible.map((item) => (
+            <FeedRow
+              key={rowKey(item)}
+              item={item}
+              onSelect={onSelect}
+              onSelectFiat={onSelectFiat}
+              onSelectLedger={onSelectLedger}
+            />
+          ))}
+        </div>
+      </Section>
+    </div>
   );
 }
 
@@ -131,20 +147,20 @@ function ActivityHeader({
 }) {
   return (
     <>
-      <div style={{ flexDirection: "row" }} className="flex flex-col items-center justify-between">
+      <div style={{ flexDirection: "row" }} className="flex items-center justify-between">
         <h1 style={s.title}>Activity</h1>
         <Pressable onPress={onRefresh} disabled={busy} accessibilityLabel="Refresh activity">
-          <div className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
             <RefreshCw size={16} className="text-foreground" />
           </div>
         </Pressable>
       </div>
 
-      <div style={{ flexDirection: "row" }} className="flex flex-col border border-border">
+      <CellGrid cols="grid-cols-3" className="-mx-6 mt-4">
         <TabButton label="All" active={tab === "all"} onPress={() => onTabChange("all")} />
         <TabButton label="Onchain" active={tab === "onchain"} onPress={() => onTabChange("onchain")} />
         <TabButton label="IDR" active={tab === "idr"} onPress={() => onTabChange("idr")} />
-      </div>
+      </CellGrid>
     </>
   );
 }
@@ -154,11 +170,10 @@ function TabButton({ label, active, onPress }: { label: string; active: boolean;
     <Pressable
       onPress={onPress}
       accessibilityState={{ selected: active }}
-      className="flex-1"
     >
-      <div className={`flex flex-col w-full items-center py-2.5 ${active ? "bg-foreground" : "bg-background"}`}>
-        <span className={`font-sans text-sm font-medium ${active ? "text-background" : "text-muted-foreground"}`}>{label}</span>
-      </div>
+      <Cell className={`flex w-full items-center justify-center py-2.5 transition-colors ${active ? "bg-secondary" : "bg-background hover:bg-surface"}`}>
+        <span className={`font-sans text-sm font-medium ${active ? "text-foreground" : "text-muted-foreground"}`}>{label}</span>
+      </Cell>
     </Pressable>
   );
 }

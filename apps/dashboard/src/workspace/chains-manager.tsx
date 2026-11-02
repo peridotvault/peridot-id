@@ -57,7 +57,7 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
           <p className={`text-sm ${MUTED}`}>No chains registered yet — add your first chain below.</p>
           <Link
             to="/chains/create"
-            className="focus-ring mt-3 flex min-h-32 w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-1/2 lg:w-1/3"
+            className="focus-ring mt-3 flex min-h-32 w-full flex-col items-center justify-center gap-1 border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-1/2 lg:w-1/3"
           >
             <span aria-hidden="true" className="text-2xl leading-none">+</span>
             Add chain
@@ -67,7 +67,7 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Link
             to="/chains/create"
-            className="focus-ring flex min-h-32 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="focus-ring flex min-h-32 flex-col items-center justify-center gap-1 border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <span aria-hidden="true" className="text-2xl leading-none">+</span>
             Add chain

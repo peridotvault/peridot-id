@@ -137,7 +137,7 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col">
       {error && (
         <div className="flex flex-wrap items-center gap-2">
           <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>

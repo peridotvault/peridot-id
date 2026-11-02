@@ -43,7 +43,7 @@ export function PidClaimForm({
       </div>
       <div className="flex flex-col flex-1 w-full items-center justify-center gap-5">
         <div className="flex flex-col items-center gap-2">
-          <span className="font-serif text-4xl tracking-[-0.4px] text-foreground">Create your PID</span>
+          <span className="font-sans text-4xl tracking-[-0.4px] text-foreground">Create your PID</span>
           {(email || displayName) && (
             <span className="font-sans text-sm text-muted-foreground">Continuing as {displayName ?? email}</span>
           )}

@@ -455,7 +455,7 @@ export class AdminService {
     if (!chain) throw new NotFoundException("Chain not found");
     const logoKey = await this.wasabi.putChainLogo(chain.namespace, chain.reference, file);
     const logoUrl = proxyLogoUrl(this.apiBase(), logoKey);
-    if (!logoUrl) throw new Error("API_URL is not configured");
+    if (!logoUrl) throw new ServiceUnavailableException("API_URL is not configured");
     const updated = await this.prisma.chain.update({
       where: { id: chainId },
       data: { logoUrl },

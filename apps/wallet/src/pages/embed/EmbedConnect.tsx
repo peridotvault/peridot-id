@@ -1,5 +1,6 @@
 
 import { styles as s } from "../../shared/styles/theme";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { UIButton } from "../../shared/components/ui/UIButton";
 
 /**
@@ -9,10 +10,14 @@ import { UIButton } from "../../shared/components/ui/UIButton";
  */
 export function EmbedConnect({ onConnect }: { onConnect: () => void }) {
   return (
-    <div style={s.container} className="flex flex-col">
-      <h1 style={s.title}>PeridotID</h1>
-      <p style={s.subtitle}>Connect your PeridotID wallet to continue in this app.</p>
-      <UIButton title="Sign in with PeridotID" onPress={onConnect} variant="primary" />
+    <div className="flex flex-1 flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="flex flex-col gap-4 pb-8">
+          <h1 style={s.title}>PeridotID</h1>
+          <p style={s.subtitle}>Connect your PeridotID wallet to continue in this app.</p>
+          <UIButton title="Sign in with PeridotID" onPress={onConnect} variant="primary" />
+        </SectionHead>
+      </Section>
     </div>
   );
 }

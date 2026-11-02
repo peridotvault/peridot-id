@@ -40,4 +40,13 @@ describe("token logo keys", () => {
     await expect(svc.getLogo("")).rejects.toThrow("Unknown logo");
     await expect(svc.getLogo("public/chains/eip155-97.png")).rejects.toThrow("Wasabi storage is not configured");
   });
+
+  it("surfaces config/format problems as 4xx/503, never a bare 500", async () => {
+    const { WasabiStorageService } = await import("./wasabi-storage");
+    const svc = new WasabiStorageService({ get: () => "" } as never);
+    const file = (mimetype: string, size: number) => ({ buffer: Buffer.alloc(size), mimetype, size, originalname: "logo" });
+    await expect(svc.putChainLogo("eip155", "97", file("image/svg+xml", 10))).rejects.toThrow("must be PNG, JPEG, or WebP");
+    await expect(svc.putChainLogo("eip155", "97", file("image/png", 1024 * 1024))).rejects.toThrow("512KB or smaller");
+    await expect(svc.putChainLogo("eip155", "97", file("image/png", 10))).rejects.toThrow("Wasabi storage is not configured");
+  });
 });

@@ -1,11 +1,54 @@
 {
   "version": 1,
   "skills": {
+    "brand-design": {
+      "source": "../../../../../.agents/skills/brand-design",
+      "sourceType": "local",
+      "computedHash": "7f6af2f06574d457e1f4f210adb3a7042b1db92d5667c811a6cafe4a0ba37f8d"
+    },
+    "design-taste": {
+      "source": "../../../../../.agents/skills/design-taste",
+      "sourceType": "local",
+      "computedHash": "ad1470341bb89b18f632ce8c98cba9761aaa37357897cef4366913ba55ad1880"
+    },
+    "frontend-design-guidelines": {
+      "source": "../../../../../.agents/skills/frontend-design-guidelines",
+      "sourceType": "local",
+      "computedHash": "7c2b2d093b9ef8f974367202035f60816829483aaf853d85dd724984ca020e30"
+    },
+    "number-formatting": {
+      "source": "../../../../../.agents/skills/number-formatting",
+      "sourceType": "local",
+      "computedHash": "eff8a80b973c694088553eb5e973ed1f364b0e71abe027fce74b49428c99856d"
+    },
+    "page-load-animations": {
+      "source": "../../../../../.agents/skills/page-load-animations",
+      "sourceType": "local",
+      "computedHash": "7abb145c090699cfb052aa95216ee7a4f5abcf19b70a5136eedf9c159b51cae3"
+    },
     "security-audit": {
       "source": "cloudflare/security-audit-skill",
       "sourceType": "github",
       "skillPath": "skills/security-audit/SKILL.md",
       "computedHash": "98b97aad2873b3b9a8e064007c25e7827b493ba27fda8bfbdb41dab586767973"
+    },
+    "vercel-composition-patterns": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/composition-patterns/SKILL.md",
+      "computedHash": "575757e3e25761c8c562d6e395d29f0b76c98b1273c0bd72d88e6ab1bc9c7d42"
+    },
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/react-best-practices/SKILL.md",
+      "computedHash": "ca7b0c0c6e5f2750043f7f0cd72d16ac4e2abc48f9b5500d047a4b77a2506212"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/web-design-guidelines/SKILL.md",
+      "computedHash": "f3bc47f890f42a44db1007ab390709ec368e4b8c089baee6b0007182236ac474"
     }
   }
 }

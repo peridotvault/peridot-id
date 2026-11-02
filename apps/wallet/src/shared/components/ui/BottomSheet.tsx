@@ -34,7 +34,7 @@ export function BottomSheet({
         style={{ overflowY: "auto" }}
       >
         <div style={{ flexDirection: "row" }} className="flex flex-col items-center justify-between">
-          <span className="font-serif text-2xl tracking-[-0.3px] text-foreground">{title}</span>
+          <span className="font-sans text-2xl tracking-[-0.3px] text-foreground">{title}</span>
           <Pressable onPress={onClose} disabled={closeDisabled} accessibilityLabel="Close">
             <div className="flex flex-col p-1.5">
               <X size={18} className="text-muted-foreground" />

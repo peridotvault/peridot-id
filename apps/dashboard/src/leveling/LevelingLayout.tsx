@@ -35,7 +35,7 @@ export function LevelingLayout({ active, children }: { active: string; children:
     return (
       <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <PageHeader eyebrow="Leveling" title="Leveling admin" />
-        <Card className="mt-8">
+        <Card>
           <h2 className="text-lg font-semibold tracking-tight">Sign in to continue</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>Leveling administration requires a signed-in admin session.</p>
           {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
@@ -53,7 +53,7 @@ export function LevelingLayout({ active, children }: { active: string; children:
     return (
       <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <PageHeader eyebrow="Leveling" title="Leveling admin" />
-        <Card className="mt-8">
+        <Card>
           <h2 className="text-lg font-semibold tracking-tight">Admins only</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>
             Leveling configuration and XP adjustments require the admin role. Developers get no
@@ -77,7 +77,7 @@ export function LevelingLayout({ active, children }: { active: string; children:
             key={t.key}
             to={t.to}
             aria-current={t.key === active ? "page" : undefined}
-            className={`rounded-[3px] border px-3 py-1.5 text-sm font-medium transition-colors focus-ring ${
+            className={`border px-3 py-1.5 text-sm font-medium transition-colors focus-ring ${
               t.key === active
                 ? "border-foreground bg-foreground text-background"
                 : "border-border text-muted-foreground hover:text-foreground"

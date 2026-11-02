@@ -11,6 +11,7 @@ import { EmbedConnect } from "./src/pages/embed/EmbedConnect";
 import { readLoginContext } from "./src/feat/auth/utils/popupLogin";
 import { theme } from "./src/shared/styles/theme";
 import { AppColumn } from "./src/shared/components/shell/AppColumn";
+import { InfoRail } from "./src/shared/components/shell/InfoRail";
 import { useStartupGate } from "./src/shared/hooks/useStartupGate";
 import { useSessionBootstrap, type Screen } from "./src/shared/hooks/useSessionBootstrap";
 import { useSessionSync } from "./src/shared/hooks/useSessionSync";
@@ -39,6 +40,7 @@ import { UIButton } from "./src/shared/components/ui/UIButton";
 import { FiatTransfer } from "./src/pages/fiat/FiatTransfer";
 import { FiatLedgerDetail } from "./src/pages/fiat/FiatLedgerDetail";
 import { TabBar, type TabKey } from "./src/shared/components/shell/TabBar";
+import { useThreeColumn } from "./src/shared/hooks/useThreeColumn";
 import { TopBar } from "./src/shared/components/shell/TopBar";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import type { FiatItem, FiatLedgerItem } from "./src/shared/data/fiat";
@@ -122,12 +124,22 @@ export default function App() {
   // Persistent shell chrome (top bar + tab bar/sidebar) mounts on tab roots
   // only — pushes render chromeless, as before.
   const isTabRoot = screen === "home" || screen === "activity" || screen === "settings";
+  const three = useThreeColumn();
 
   // The stack only lives under tab roots: leaving them (login, provisioning)
   // drops any stale overlay so it can never resurface on the next identity.
   useEffect(() => {
     if (!isTabRoot) setStack([]);
   }, [isTabRoot]);
+
+  // Push overlays are fixed over the page: freeze the document behind them so
+  // the content under the overlay cannot scroll away.
+  useEffect(() => {
+    document.body.style.overflow = stack.length > 0 ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [stack.length]);
 
   const openPasskey = useCallback(() => {
     push("passkey");
@@ -244,7 +256,7 @@ export default function App() {
   // fallbacks) while fonts download and the session check runs in parallel.
   // fontError skips the font wait; gateForced opens after 8s no matter what.
   if ((session.bootstrapping || (!gate.fontsLoaded && !gate.fontError)) && !gate.gateForced) {
-    return <LoadingScreen fontsReady={gate.fontsLoaded} />;
+    return <LoadingScreen />;
   }
 
   return (
@@ -289,11 +301,20 @@ export default function App() {
         ) : (
           <AppColumn
             top={
-              isTabRoot ? (
+              isTabRoot && !three ? (
                 <TopBar onProfile={() => push("profile")} refreshKey={`${screen}-${epoch}`} />
               ) : undefined
             }
-            side={isTabRoot ? <TabBar current={screen} go={goTab} /> : undefined}
+            side={
+              isTabRoot ? (
+                <TabBar current={screen} go={goTab} variant={three ? "rail" : "auto"} />
+              ) : undefined
+            }
+            info={
+              isTabRoot && three ? (
+                <InfoRail onProfile={() => push("profile")} refreshKey={`${screen}-${epoch}`} />
+              ) : undefined
+            }
             overlay={isTabRoot ? renderOverlay() : undefined}
           >
             <div key={epoch} style={styles.base} id="wallet-main" className="flex flex-col">
@@ -313,7 +334,6 @@ export default function App() {
                   goTransfer={() => push("fiat-transfer")}
                   goRupiah={() => push("fiat-account")}
                   goPasskeys={openPasskey}
-                  goSettings={() => push("settings")}
                 />
               )}
               {screen === "activity" && (
@@ -340,8 +360,9 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  base: { flex: 1 },
+  // The document scrolls: the shell fills the viewport but never caps it.
+  safe: { flex: 1, minHeight: "100dvh" },
+  base: { minHeight: 0 },
 });
 
 /** ANT-341 FR4: stranded-screen guard — a detail overlay pushed with a null

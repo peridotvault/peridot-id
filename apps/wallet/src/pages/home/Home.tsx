@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import type { ApiError, Authority, Identity, Profile, ChainAccount } from "@peridotvault/pid-types";
 import type { NftItem, TokenBalance, TokenInfo } from "@peridotvault/pid-solana";
 import type { ActivationView, PeridotClient } from "@peridotvault/pid-sdk-js";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
 import { Pressable } from "../../shared/components/ui/Pressable";
 import { BottomSheet } from "../../shared/components/ui/BottomSheet";
+import { Cell, CellGrid } from "../../shared/components/ui/CellGrid";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { UIButton } from "../../shared/components/ui/UIButton";
-import { ArrowDownLeft, ArrowUpRight, Banknote, Coins, LayoutGrid } from "../../shared/components/icons";
+import { ArrowDownLeft, ArrowUpRight, Banknote, Coins } from "../../shared/components/icons";
 import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
 import { SectionTitle } from "../../shared/components/ui/SectionTitle";
@@ -38,7 +39,6 @@ interface HomeProps {
   goTransfer: () => void;
   goRupiah: () => void;
   goPasskeys: () => void;
-  goSettings: () => void;
 }
 
 export function Home({
@@ -49,7 +49,6 @@ export function Home({
   goTransfer,
   goRupiah,
   goPasskeys,
-  goSettings,
 }: HomeProps) {
   const { peridot } = usePeridot();
   const d = useHomeData(peridot);
@@ -67,18 +66,16 @@ export function Home({
   });
 
   return (
-    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
-      <Pressable onPress={goSettings} accessibilityRole="link" accessibilityLabel={`Chains: ${sel.label}. Change in Settings.`}>
-        <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-2 self-start border border-border bg-surface px-2.5 py-1.5">
-          <LayoutGrid size={14} className="text-muted-foreground" />
-          <span className="font-sans text-xs font-medium text-muted-foreground">{sel.label}</span>
-        </div>
-      </Pressable>
-      <TotalBalanceSection
-        currency={d.currency}
-        totalValue={totalValue}
-        loading={d.busy && d.balanceIdr === null}
-      />
+    <div className="flex flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="py-9">
+          <TotalBalanceSection
+            currency={d.currency}
+            totalValue={totalValue}
+            loading={d.busy && d.balanceIdr === null}
+          />
+        </SectionHead>
+      </Section>
       <QuickActions onSend={() => setChoice(true)} onReceive={goReceive} onSwap={goSwap} onBuy={goBuy} />
       <FiatSection
         balanceIdr={d.balanceIdr}
@@ -101,13 +98,21 @@ export function Home({
         onClose={() => setChoice(false)}
       />
 
-      {d.error && <p role="alert" style={s.error}>{d.error}</p>}
+      {d.error && (
+        <Section className="border-t-danger/40 bg-danger/10">
+          <SectionHead className="py-3">
+            <p role="alert" className="font-sans text-sm text-foreground">{d.error}</p>
+          </SectionHead>
+        </Section>
+      )}
 
       {d.activated && d.passkeys.length === 0 && !d.busy && (
         <Pressable onPress={goPasskeys} accessibilityLabel="Add a passkey in Security">
-          <div className="flex flex-col border border-border bg-muted p-3">
-            <span className="text-center font-sans text-sm text-muted-foreground">No passkey — add one in Security to authorize withdrawals.</span>
-          </div>
+          <Section className="bg-secondary">
+            <SectionHead className="py-3">
+              <span className="font-sans text-sm text-foreground">No passkey — add one in Security to authorize withdrawals.</span>
+            </SectionHead>
+          </Section>
         </Pressable>
       )}
 
@@ -115,21 +120,31 @@ export function Home({
           state, never an infinite spinner (load() always settles; the
           signing-block failsafe in the store is the ceiling, not the path). */}
       {d.emptySelection && !d.busy ? (
-        <div className="flex flex-col gap-2 border border-border bg-surface p-3.5">
-          <span className="font-sans text-sm font-semibold text-foreground">No {sel.label} account yet</span>
-          <span className="font-sans text-sm leading-5 text-muted-foreground">
-            This selection has no smart-account row — receive address below to fund it.
-          </span>
-          <Pressable onPress={goReceive} accessibilityLabel="Show receive addresses">
-            <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-1 border border-foreground px-2.5 py-1.5">
-              <span className="font-sans text-sm font-medium text-foreground">Show receive addresses</span>
+        <Section>
+          <SectionHead className="pb-0">
+            <div className="flex flex-col gap-2">
+              <span className="font-sans text-sm font-semibold text-foreground">No {sel.label} account yet</span>
+              <span className="font-sans text-sm leading-5 text-muted-foreground">
+                This selection has no smart-account row — receive address below to fund it.
+              </span>
+              <Pressable onPress={goReceive} accessibilityLabel="Show receive addresses">
+                <div className="flex items-center gap-1 self-start border-b border-foreground py-1">
+                  <span className="font-sans text-sm font-medium text-foreground">Show receive addresses</span>
+                </div>
+              </Pressable>
             </div>
-          </Pressable>
-        </div>
+          </SectionHead>
+        </Section>
       ) : (
-        <AssetSection tab={d.assetTab} onTabChange={d.setAssetTab} coins={coins} nfts={d.nfts} busy={d.busy} />
+        <AssetSection
+          tab={d.assetTab}
+          onTabChange={d.setAssetTab}
+          coins={coins}
+          nfts={d.nfts}
+          busy={d.busy}
+        />
       )}
-    </ScrollArea>
+    </div>
   );
 }
 
@@ -382,11 +397,11 @@ function TotalBalanceSection({
 }) {
   const { prefix, int, frac } = formatTotalParts(totalValue, currency);
   return (
-    <div className="flex flex-col gap-1 px-1">
+    <div className="flex flex-col gap-1">
       <SectionTitle as="h1">Total Balance</SectionTitle>
       {loading ? (
         <span
-          className="font-serif text-5xl text-foreground"
+          className="font-mono text-4xl text-foreground"
           role="status"
           aria-label="Loading total balance"
         >
@@ -394,8 +409,8 @@ function TotalBalanceSection({
         </span>
       ) : (
         <div style={{ flexDirection: "row" }} className="flex flex-col items-baseline" aria-label={`${prefix}${int}${frac}`}>
-          <span className="font-serif text-5xl text-foreground">{prefix}{int}</span>
-          <span className="font-serif text-4xl text-muted-foreground">{frac}</span>
+          <span className="font-mono text-4xl text-foreground">{prefix}{int}</span>
+          <span className="font-mono text-3xl text-muted-foreground">{frac}</span>
         </div>
       )}
     </div>
@@ -414,12 +429,12 @@ function QuickActions({
   onBuy: () => void;
 }) {
   return (
-    <div style={{ flexDirection: "row" }} className="flex flex-col gap-3">
+    <CellGrid cols="grid-cols-4" className="border-t border-line">
       <ActionButton icon={ArrowUpRight} label="Send" onPress={onSend} />
       <ActionButton icon={ArrowDownLeft} label="Receive" onPress={onReceive} />
       <ActionButton icon={Coins} label="Swap" onPress={onSwap} />
       <ActionButton icon={Banknote} label="Buy" onPress={onBuy} />
-    </div>
+    </CellGrid>
   );
 }
 
@@ -429,14 +444,11 @@ function ActionButton({ icon: Icon, label, onPress, disabled }: { icon: typeof A
       onPress={onPress}
       disabled={disabled}
       accessibilityState={{ disabled: !!disabled }}
-      className="flex-1"
     >
-      <div className={`flex flex-col w-full items-center gap-2 border border-border bg-surface py-3 ${disabled ? "opacity-40" : ""}`}>
-        <div className="flex flex-col h-10 w-10 items-center justify-center rounded-full bg-muted">
-          <Icon size={20} className={disabled ? "text-muted-foreground" : "text-foreground"} />
-        </div>
-        <span className={`font-sans text-sm font-medium text-foreground ${disabled ? "opacity-60" : ""}`}>{label}</span>
-      </div>
+      <Cell className={`flex aspect-square w-full flex-col items-center justify-center gap-2 transition-colors hover:bg-surface ${disabled ? "opacity-40" : ""}`}>
+        <Icon size={22} className="text-accent" />
+        <span className="font-sans text-sm font-medium text-foreground">{label}</span>
+      </Cell>
     </Pressable>
   );
 }

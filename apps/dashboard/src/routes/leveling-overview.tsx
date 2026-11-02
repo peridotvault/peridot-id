@@ -20,19 +20,19 @@ export default function LevelingOverviewPage() {
       {loading ? (
         <p role="status" className={`text-sm ${MUTED}`}>Loading overview…</p>
       ) : data ? (
-        <div className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Card>
+        <div className="flex flex-col">
+          <div className="grid gap-px bg-line sm:grid-cols-3">
+            <Card className="border-t-0">
               <p className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>XP distributed</p>
               <p className="mt-1 text-3xl font-semibold tracking-tight">{formatXp(data.totalXpDistributed)}</p>
               <p className={`mt-1 text-xs ${MUTED}`}>Net ledger sum across all users.</p>
             </Card>
-            <Card>
+            <Card className="border-t-0">
               <p className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>Users with XP state</p>
               <p className="mt-1 text-3xl font-semibold tracking-tight">{formatXp(data.totalUsers)}</p>
               <p className={`mt-1 text-xs ${MUTED}`}>Rows in user_xp_states.</p>
             </Card>
-            <Card>
+            <Card className="border-t-0">
               <p className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>Unreviewed suspicious</p>
               <p className="mt-1 text-3xl font-semibold tracking-tight">{formatXp(data.unreviewedSuspicious)}</p>
               <p className={`mt-1 text-xs ${MUTED}`}>Signals awaiting admin review below.</p>
@@ -64,13 +64,13 @@ export default function LevelingOverviewPage() {
             )}
           </Card>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
+          <div className="grid gap-px bg-line lg:grid-cols-2">
+            <Card className="border-t-0">
               <h2 className="text-lg font-semibold tracking-tight">Recent activity</h2>
               {data.recentActivity.length === 0 ? (
                 <p className={`mt-2 text-sm ${MUTED}`}>No ledger entries yet.</p>
               ) : (
-                <ul className="mt-3 divide-y divide-dotted divide-border">
+                <ul className="mt-3 divide-y divide-line">
                   {data.recentActivity.slice(0, 10).map((e) => (
                     <li key={e.id} className="flex items-baseline justify-between gap-3 py-2 text-sm">
                       <span className="min-w-0">
@@ -123,7 +123,7 @@ export function SuspiciousPanel() {
       ) : (
         <ul className="mt-3 flex flex-col gap-2">
           {data.rows.map((s) => (
-            <li key={s.id} className="rounded-lg border border-border p-3 text-sm">
+            <li key={s.id} className="border border-border p-3 text-sm">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium">{s.signal}</span>
                 <MiniButton size="xs" onClick={() => void review(s.id, true)}>Mark reviewed</MiniButton>

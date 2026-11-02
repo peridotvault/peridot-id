@@ -4,6 +4,7 @@
 // action runs here on the PeridotID origin with this session + passkey (the
 // trusted DOM), and the result is posted back to the opener's origin.
 import { useCallback, useEffect, useState } from "react";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 
 import type { PopupParams } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../../shared/app/AppContext";
@@ -55,42 +56,46 @@ export function Approve({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?
   }, [req.approve, acknowledged]);
 
   return (
-    <div style={s.container} className="flex flex-col">
-      <h1 style={s.title}>Approve request</h1>
-      {req.phase === "waiting" && <p role="status" style={s.hint}>Waiting for the app…</p>}
-      {req.phase === "preparing" && <p role="status" style={s.hint}>Loading verified details…</p>}
-      {req.phase === "redirecting" && <p style={s.hint}>Opening the payment page…</p>}
-      {req.phase === "done" && <p style={s.hint}>Done — you can close this window.</p>}
-      {(req.phase === "review" || req.phase === "busy") && (
-        <>
-          {req.action === "fiat-checkout" && fiat.checkout && (
-            <FiatQuoteBreakdown
-              quote={fiat.checkout}
-              transferFee={fiat.transferFee}
-              selectedTotalIdr={fiat.selectedQuote?.totalIdr ?? fiat.checkout.totalIdr}
-              method={fiat.checkoutMethod}
-              editable={req.phase === "review"}
-              onMethod={fiat.setCheckoutMethod}
-            />
+    <div className="flex flex-1 flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="flex flex-col gap-4 pb-8">
+          <h1 style={s.title}>Approve request</h1>
+          {req.phase === "waiting" && <p role="status" style={s.hint}>Waiting for the app…</p>}
+          {req.phase === "preparing" && <p role="status" style={s.hint}>Loading verified details…</p>}
+          {req.phase === "redirecting" && <p style={s.hint}>Opening the payment page…</p>}
+          {req.phase === "done" && <p style={s.hint}>Done — you can close this window.</p>}
+          {(req.phase === "review" || req.phase === "busy") && (
+            <>
+              {req.action === "fiat-checkout" && fiat.checkout && (
+                <FiatQuoteBreakdown
+                  quote={fiat.checkout}
+                  transferFee={fiat.transferFee}
+                  selectedTotalIdr={fiat.selectedQuote?.totalIdr ?? fiat.checkout.totalIdr}
+                  method={fiat.checkoutMethod}
+                  editable={req.phase === "review"}
+                  onMethod={fiat.setCheckoutMethod}
+                />
+              )}
+              <PopupReview
+                summary={req.action === "fiat-checkout" ? (fiat.checkoutSummary ?? req.summary) : req.summary}
+                origin={popup.origin}
+                busy={req.phase === "busy"}
+                onApprove={onApprove}
+                onDeny={req.deny}
+                approvingPid={req.approvingPid}
+                switched={req.switched}
+                gate={req.gate}
+                acknowledged={acknowledged}
+                onAcknowledgedChange={setAcknowledged}
+              />
+            </>
           )}
-          <PopupReview
-            summary={req.action === "fiat-checkout" ? (fiat.checkoutSummary ?? req.summary) : req.summary}
-            origin={popup.origin}
-            busy={req.phase === "busy"}
-            onApprove={onApprove}
-            onDeny={req.deny}
-            approvingPid={req.approvingPid}
-            switched={req.switched}
-            gate={req.gate}
-            acknowledged={acknowledged}
-            onAcknowledgedChange={setAcknowledged}
-          />
-        </>
-      )}
-      {req.phase === "failed" && (
-        <UIButton title="Close" onPress={() => void req.deny(req.expectedPid ? "wrong_account" : "access_denied")} />
-      )}
-      {req.error && <p role="alert" tabIndex={-1} id="approve-error" style={s.error}>{req.error}</p>}
+          {req.phase === "failed" && (
+            <UIButton title="Close" onPress={() => void req.deny(req.expectedPid ? "wrong_account" : "access_denied")} />
+          )}
+          {req.error && <p role="alert" tabIndex={-1} id="approve-error" style={s.error}>{req.error}</p>}
+        </SectionHead>
+      </Section>
     </div>
   );
 }

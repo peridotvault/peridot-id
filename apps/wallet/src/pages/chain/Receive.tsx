@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 
 import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
@@ -31,34 +32,38 @@ export function Receive({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div style={s.container} className="flex flex-col">
-      <PushHeader onBack={onDone} title="Receive" />
-      <p style={s.subtitle}>Share an address below. EVM chains share one address everywhere.</p>
+    <div className="flex flex-1 flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="flex flex-col gap-4 pb-8">
+          <PushHeader onBack={onDone} title="Receive" />
+          <p style={s.subtitle}>Share an address below. EVM chains share one address everywhere.</p>
 
-      {targets.length === 0 && <p style={s.hint}>Account not initialized.</p>}
+          {targets.length === 0 && <p style={s.hint}>Account not initialized.</p>}
 
-      {!solanaAvailable && (
-        <p style={s.hint}>Solana deposits are available in Testnet Mode. EVM addresses below work as usual.</p>
-      )}
+          {!solanaAvailable && (
+            <p style={s.hint}>Solana deposits are available in Testnet Mode. EVM addresses below work as usual.</p>
+          )}
 
-      <DepositCardList
-        targets={targets}
-        solAlert={solanaAvailable && !gate.isActive}
-        copiedKey={copiedKey}
-        onOpen={openSol}
-        onCopy={copy}
-      />
+          <DepositCardList
+            targets={targets}
+            solAlert={solanaAvailable && !gate.isActive}
+            copiedKey={copiedKey}
+            onOpen={openSol}
+            onCopy={copy}
+          />
 
 
-      {solanaAvailable && (
-        <SolActivationModal
-          target={selectedSol}
-          gate={gate}
-          copiedKey={copiedKey}
-          onClose={() => setSelectedSol(null)}
-          onCopy={copy}
-        />
-      )}
+          {solanaAvailable && (
+            <SolActivationModal
+              target={selectedSol}
+              gate={gate}
+              copiedKey={copiedKey}
+              onClose={() => setSelectedSol(null)}
+              onCopy={copy}
+            />
+          )}
+        </SectionHead>
+      </Section>
     </div>
   );
 }

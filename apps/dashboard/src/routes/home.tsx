@@ -27,7 +27,7 @@ export default function WorkspacePage() {
     return (
       <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <PageHeader eyebrow="PeridotID for developers" title="Workspace" />
-        <Card className="mt-8">
+        <Card>
           <h2 className="text-lg font-semibold tracking-tight">Sign in to manage your apps</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>
             Register <code>client_id</code>s, edit allowed origins, and generate backend secrets.

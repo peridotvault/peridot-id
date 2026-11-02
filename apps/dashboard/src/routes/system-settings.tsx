@@ -67,7 +67,7 @@ export default function SystemSettingsPage() {
     return (
       <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <PageHeader eyebrow="Admin" title="System settings" />
-        <Card className="mt-8">
+        <Card>
           <h2 className="text-lg font-semibold tracking-tight">Sign in to continue</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>System settings require a signed-in admin session.</p>
           {sessionError && (
@@ -90,7 +90,7 @@ export default function SystemSettingsPage() {
     return (
       <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <PageHeader eyebrow="Admin" title="System settings" />
-        <Card className="mt-8">
+        <Card>
           <h2 className="text-lg font-semibold tracking-tight">Admin access required</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>
             System settings are restricted to admins. Your own level stays visible in the wallet.
@@ -351,7 +351,7 @@ function SettingsSection({ client }: { client: PeridotClient }) {
             {group !== "all" ? ` in ${GROUP_LABELS[group]}` : ""}. Clear the filter to see all keys.
           </p>
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col">
             {GROUP_ORDER.filter((g) => groupsPresent.includes(g)).map((g) => {
               const inGroup = filtered.filter((s) => groupForKey(s.key) === g);
               if (inGroup.length === 0) return null;
@@ -364,7 +364,7 @@ function SettingsSection({ client }: { client: PeridotClient }) {
                     {inGroup.map((s) => (
                       <li
                         key={s.key}
-                        className="rounded-lg border border-border p-3 sm:p-4"
+                        className="border border-border p-3 sm:p-4"
                       >
                         <SettingRow
                           setting={s}
@@ -520,7 +520,7 @@ function EditForm({
   if (conflict) {
     // 409: never silent-overwrite (F-E3) — show actor/time/current + Reload.
     return (
-      <div role="alert" className="rounded-lg border border-amber-500/50 p-3">
+      <div role="alert" className="border border-amber-500/50 p-3">
         <p className="text-sm font-semibold">Changed by someone else — not overwritten</p>
         <p className={`mt-1 text-sm ${MUTED}`}>
           Changed by {conflict.updatedBy} at {formatUpdatedAt(conflict.updatedAt)} (now v{conflict.version}).
@@ -551,7 +551,7 @@ function EditForm({
   const entry = lookupKey(setting.key);
   return (
     <form
-      className="flex flex-col gap-2 rounded-lg border border-dotted border-border p-3"
+      className="flex flex-col gap-2 border border-line p-3"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();

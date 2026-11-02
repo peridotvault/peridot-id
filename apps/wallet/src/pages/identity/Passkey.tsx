@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
 import { Pressable } from "../../shared/components/ui/Pressable";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { KeyRound, Plus, Trash2 } from "../../shared/components/icons";
 import type { Authority } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
@@ -61,58 +61,74 @@ export function Passkey({ onDone }: { onDone: () => void }) {
   const onlyOne = authorities.length <= 1;
 
   return (
-    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 16 }}>
-      <PushHeader onBack={onDone} title="Passkeys" />
-      <p style={s.subtitle}>
-        Passkeys authorize your on-chain wallet (secp256r1). Register one on this device to
-        sign in and authorize withdrawals. Your last passkey cannot be removed.
-      </p>
-      {error && <p role="alert" style={s.error}>{error}</p>}
+    <div className="flex flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="pb-0">
+          <PushHeader onBack={onDone} title="Passkeys" />
+          <p style={s.subtitle} className="mt-2">
+            Passkeys authorize your on-chain wallet (secp256r1). Register one on this device to
+            sign in and authorize withdrawals. Your last passkey cannot be removed.
+          </p>
+        </SectionHead>
+      </Section>
 
-      <Pressable onPress={register} disabled={busy}>
-        <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center justify-center gap-2 border border-border bg-surface py-3">
-          <Plus size={16} className="text-foreground" />
-          <span className="font-sans text-sm font-medium text-foreground">{busy ? "Waiting for passkey…" : "Add Passkey"}</span>
-        </div>
-      </Pressable>
-      {authorities.length > 0 && (
-        <p style={s.hint}>One platform passkey per device — add extras from another device or a security key.</p>
+      {error && (
+        <Section className="border-t-danger/40 bg-danger/10">
+          <SectionHead className="py-3">
+            <p role="alert" className="font-sans text-sm text-foreground">{error}</p>
+          </SectionHead>
+        </Section>
       )}
 
-      {authorities.map((a) => (
-        <div key={a.id} style={s.card} className="flex flex-col">
-          <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
-            <div className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full bg-muted">
-              <KeyRound size={16} className="text-foreground" />
-            </div>
-            <div className="flex flex-col flex-1 gap-0.5">
-              <span className="font-sans text-base font-semibold text-foreground">Passkey</span>
-              <span className="font-sans text-xs text-muted-foreground">Added {fmtDate(a.createdAt)}</span>
-              <span className="font-sans text-xs text-muted-foreground">Last used {fmtDate(a.lastUsedAt)}</span>
-              {a.credentialId && (
-                <span className="whitespace-nowrap overflow-hidden text-ellipsis font-mono text-xs text-muted-foreground" title={`ID ${a.credentialId}`}>
-                  ID {a.credentialId}
-                </span>
-              )}
-            </div>
-            <Pressable
-              onPress={() => revoke(a.id)}
-              disabled={busy || onlyOne}
-              accessibilityLabel={`Remove passkey ${a.credentialId ?? a.id}`}
-            >
-              <div className={`flex flex-col p-2 ${onlyOne ? "opacity-40" : ""}`}>
-                <Trash2 size={16} className={onlyOne ? "text-muted-foreground" : "text-danger"} />
-              </div>
-            </Pressable>
-          </div>
-          {onlyOne && (
-            <span className="font-sans text-xs text-muted-foreground">This is your only passkey — keep it to stay able to sign in.</span>
+      <Section>
+        <div className="px-6 py-3">
+          <UIButton
+            title={busy ? "Waiting for passkey…" : "Add Passkey"}
+            icon={<Plus size={16} className="text-foreground" />}
+            onPress={register}
+            disabled={busy}
+          />
+          {authorities.length > 0 && (
+            <p style={s.hint} className="mt-3">One platform passkey per device — add extras from another device or a security key.</p>
           )}
         </div>
-      ))}
 
-      {authorities.length === 0 && <p style={s.hint}>No passkeys yet. Add one above.</p>}
+        <div className="flex flex-col divide-y divide-line">
+          {authorities.map((a) => (
+            <div key={a.id} className="flex flex-col">
+              <div className="flex items-center gap-3 px-6 py-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+                  <KeyRound size={16} className="text-foreground" />
+                </div>
+                <div className="flex flex-1 flex-col gap-0.5">
+                  <span className="font-sans text-base font-semibold text-foreground">Passkey</span>
+                  <span className="font-sans text-xs text-muted-foreground">Added {fmtDate(a.createdAt)}</span>
+                  <span className="font-sans text-xs text-muted-foreground">Last used {fmtDate(a.lastUsedAt)}</span>
+                  {a.credentialId && (
+                    <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-muted-foreground" title={`ID ${a.credentialId}`}>
+                      ID {a.credentialId}
+                    </span>
+                  )}
+                </div>
+                <Pressable
+                  onPress={() => revoke(a.id)}
+                  disabled={busy || onlyOne}
+                  accessibilityLabel={`Remove passkey ${a.credentialId ?? a.id}`}
+                >
+                  <div className={`flex p-3 ${onlyOne ? "opacity-40" : ""}`}>
+                    <Trash2 size={16} className={onlyOne ? "text-muted-foreground" : "text-danger"} />
+                  </div>
+                </Pressable>
+              </div>
+              {onlyOne && (
+                <span className="px-6 pb-3 font-sans text-xs text-muted-foreground">This is your only passkey — keep it to stay able to sign in.</span>
+              )}
+            </div>
+          ))}
+        </div>
 
-    </ScrollArea>
+        {authorities.length === 0 && <p style={s.hint} className="px-6 py-3">No passkeys yet. Add one above.</p>}
+      </Section>
+    </div>
   );
 }

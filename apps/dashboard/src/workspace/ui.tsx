@@ -1,30 +1,20 @@
-import type { CSSProperties, ComponentPropsWithoutRef, ReactNode } from "react";
+import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
-/** One-corner card cut — same clip as the landing features/pricing cards. */
-const CARD_CLIP: CSSProperties = {
-  clipPath: "polygon(0 0, calc(100% - 34px) 0, 100% 34px, 100% 100%, 0 100%)",
-};
-
-/** Small two-corner cut for mini buttons. */
-const MINI_CUT =
-  "[clip-path:polygon(5px_0,100%_0,100%_calc(100%-5px),calc(100%-5px)_100%,0_100%,0_5px)]";
-
-/** Hairline-cut card: 1px border illusion (outer bg-border p-px + inner surface). */
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={`bg-border p-px ${className}`} style={CARD_CLIP}>
-      <div className="bg-background p-6" style={CARD_CLIP}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
+/** Small themed button (outline or solid) for card actions. */
 type MiniButtonProps = Omit<ComponentPropsWithoutRef<"button">, "className" | "type"> & {
   className?: string;
   variant?: "outline" | "solid";
   size?: "xs" | "sm";
 };
+
+/** Content block: a connecting top rule, square corners — never a floating card. */
+export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={`border-t border-line bg-background p-6 ${className}`}>
+      {children}
+    </div>
+  );
+}
 
 /** Small themed button (outline or solid) for card actions. */
 export function MiniButton({ variant = "outline", size = "xs", className = "", ...rest }: MiniButtonProps) {
@@ -36,7 +26,7 @@ export function MiniButton({ variant = "outline", size = "xs", className = "", .
   return (
     <button
       type="button"
-      className={`inline-flex shrink-0 items-center gap-1 transition-colors focus-ring disabled:opacity-60 ${pad} ${skin} ${MINI_CUT} ${className}`}
+      className={`inline-flex shrink-0 items-center gap-1 transition-colors focus-ring disabled:opacity-60 ${pad} ${skin} ${className}`}
       {...rest}
     />
   );
@@ -44,7 +34,7 @@ export function MiniButton({ variant = "outline", size = "xs", className = "", .
 
 /** Themed text input / select. */
 export const FIELD =
-  "mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-ring";
+  "mt-1 w-full border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-ring";
 
 /** Section eyebrow + titles, landing hierarchy. */
 export const EYEBROW_UPPER = "text-xs font-medium uppercase tracking-widest text-muted-foreground";
@@ -55,5 +45,5 @@ export const MUTED = "text-muted-foreground";
 export const ERROR = "text-red-600 dark:text-red-400";
 export const WARN = "text-amber-700 dark:text-amber-300";
 
-/** Landing dotted divider. */
-export const DIVIDER = "border-t border-dotted border-border";
+/** Connecting hairline between blocks. */
+export const DIVIDER = "border-t border-line";

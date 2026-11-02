@@ -26,7 +26,7 @@ export default function WorkspaceTokensPage() {
     return (
       <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <PageHeader eyebrow="Token registry" title="Tokens" />
-        <Card className="mt-8">
+        <Card>
           <h2 className="text-lg font-semibold tracking-tight">Sign in to manage tokens</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>The token registry is admin-only.</p>
           {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}

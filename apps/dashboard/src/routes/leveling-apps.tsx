@@ -51,7 +51,7 @@ export default function LevelingAppsPage() {
         ) : (
           <ul className="mt-3 flex flex-col gap-2">
             {data.map((app) => (
-              <li key={app.id} className="rounded-lg border border-border p-3 text-sm">
+              <li key={app.id} className="border border-border p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span>
                     <span className="font-medium">{app.name}</span>
@@ -91,7 +91,7 @@ function Badge({ on, label }: { on: boolean; label: string }) {
   const cls = on
     ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
     : "bg-muted text-muted-foreground";
-  return <span className={`rounded-[3px] px-2 py-0.5 text-[11px] font-semibold ${cls}`}>{label}</span>;
+  return <span className={`px-2 py-0.5 text-[11px] font-semibold ${cls}`}>{label}</span>;
 }
 
 function AppControls({ app, onChanged }: { app: XpApp; onChanged: () => void }) {
@@ -185,7 +185,7 @@ function AppControls({ app, onChanged }: { app: XpApp; onChanged: () => void }) 
   };
 
   return (
-    <div className="mt-3 flex flex-col gap-3 rounded-lg bg-muted/40 p-3">
+    <div className="mt-3 flex flex-col gap-3 bg-muted/40 p-3">
       {/* Verification */}
       <section aria-label="Verification">
         <h3 className="text-sm font-semibold">Verification</h3>

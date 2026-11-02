@@ -3,6 +3,7 @@ import { usePeridot } from "../../shared/app/AppContext";
 import { readLoginContext, type LoginContext } from "../../feat/auth/utils/popupLogin";
 import { readSsoParams, ssoOrigin } from "../../feat/auth/utils/sso";
 import { LoadingScreen } from "../../shared/components/shell/LoadingScreen";
+import { BrandMark } from "../../shared/components/ui/BrandMark";
 import { AccountSwitcherModal } from "../../shared/components/shell/AccountSwitcherModal";
 import { SsoConsentModal } from "../../feat/auth/components/SsoConsentModal";
 import { useAppVerified } from "../../feat/auth/hooks/useAppVerified";
@@ -150,7 +151,7 @@ export function Login({
   if (finished) {
     return (
       <div style={flatten([s.container, { justifyContent: "center", alignItems: "center" }])} className="flex flex-col">
-        <h1 style={s.title}>PeridotID</h1>
+        <h1><BrandMark size="md" /></h1>
         <p style={s.hint}>{finished}</p>
       </div>
     );

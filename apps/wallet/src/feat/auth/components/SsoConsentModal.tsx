@@ -1,6 +1,7 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { X } from "../../../shared/components/icons";
 import { styles as s } from "../../../shared/styles/theme";
+import { BrandMark } from "../../../shared/components/ui/BrandMark";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 
 // One-tap SSO consent as an overlay modal: dimmed scrim + centered card.
@@ -32,11 +33,11 @@ export function SsoConsentModal({
       {/* relative + z lifts the card above the absolute scrim. */}
       <div className="flex flex-col relative z-10 w-full max-w-[380px] gap-3 border border-border bg-surface p-5">
         <Pressable onPress={onDeny} disabled={busy} accessibilityLabel="Deny and close" className="absolute right-2 top-2 z-[1]">
-          <div className="flex flex-col p-2">
+          <div className="flex flex-col p-3">
             <X size={18} className="text-muted-foreground" />
           </div>
         </Pressable>
-        <span className="text-center font-serif text-3xl tracking-[-0.3px] text-foreground">PeridotID</span>
+        <BrandMark size="md" />
         <span className="text-center font-sans text-sm font-medium text-foreground">Allow {origin} to sign in with your PeridotID?</span>
         {verified ? <span className="text-center font-sans text-xs text-success"><span aria-hidden="true">✓ </span>Verified partner — 0% PeridotID fee</span> : null}
         <span className="text-center font-sans text-xs text-muted-foreground">

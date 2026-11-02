@@ -105,6 +105,16 @@ to the tunnel URL — localhost values never reach DOKU.
 - Only `pid-core` (primitives) and `pid-solana` (chain adapter) may import
   `@solana/web3.js` (web3.js layering rule, CI-enforced).
 
+## UI / frontend
+
+- `brand.md` is the source of truth for wallet + dashboard color, type and logo.
+  Dark only; peridot green `#349b65` / `#87ee83`; Space Grotesk everywhere,
+  JetBrains Mono for money and changing figures.
+- Project skills in `.agents/skills/` (install with `npx skills add … -y`):
+  load `frontend-design-guidelines` + `design-taste` for UI work,
+  `number-formatting` for amounts, `page-load-animations` for entrance motion,
+  `web-design-guidelines` for accessibility audits.
+
 ## Verification
 
 - API: `pnpm --filter @peridotvault/pid-api exec jest` (318 tests).

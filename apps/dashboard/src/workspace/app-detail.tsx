@@ -316,7 +316,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         <Link to="/" className={`text-sm ${MUTED} hover:underline`}>
           ← All apps
         </Link>
-        <Card className="mt-4">
+        <Card>
           <p className="font-semibold">App not found</p>
           <p className={`mt-1 text-sm ${MUTED}`}>This app does not exist or you do not have access to it.</p>
         </Card>
@@ -396,8 +396,8 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
       )}
       {msg && <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">{msg}</p>}
 
-      <div className="mt-6 grid gap-4">
-        <Card>
+      <div className="mt-6 grid gap-px bg-line">
+        <Card className="border-t-0">
           <p className={SECTION_LABEL}>Your fiat balance</p>
           <p className="mt-2 text-2xl font-semibold">{balance === null ? "—" : fmtIdr(balance)}</p>
           <p className={`mt-1 text-xs ${MUTED}`}>
@@ -407,7 +407,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         </Card>
 
         {isSandboxEnv && (
-          <Card>
+          <Card className="border-t-0">
             <p className={SECTION_LABEL}>Sandbox faucet — test credit</p>
             <p className={`mt-1 text-xs ${MUTED}`}>
               Instant test money for this sandbox workspace. No DOKU checkout, no real funds.
@@ -444,7 +444,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           </Card>
         )}
 
-        <Card>
+        <Card className="border-t-0">
           <p className={SECTION_LABEL}>Allowed origins</p>
           <p className={`mt-1 text-xs ${MUTED}`}>
             Login redirects and API calls are accepted from these websites. Bare http(s) origin only —
@@ -453,7 +453,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           {app.allowedOrigins.length > 0 ? (
             <ul className="mt-2 flex flex-col gap-1.5">
               {app.allowedOrigins.map((o) => (
-                <li key={o} className="flex items-center justify-between gap-2 rounded-lg bg-muted px-3 py-1.5">
+                <li key={o} className="flex items-center justify-between gap-2 bg-muted px-3 py-1.5">
                   <code className="break-all font-mono text-xs">{o}</code>
                   <MiniButton
                     onClick={() => void save({ allowedOrigins: app.allowedOrigins.filter((x) => x !== o) })}
@@ -488,13 +488,13 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           {originError && <p role="alert" className={`mt-2 text-xs ${ERROR}`}>{originError}</p>}
         </Card>
 
-        <Card>
+        <Card className="border-t-0">
           <p className={SECTION_LABEL}>Backend secret</p>
           {revealed ? (
-            <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
+            <div className="mt-2 border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
               <p className="text-xs font-semibold">Copy it now — it will never be shown again.</p>
               <div className="mt-2 flex items-center gap-2">
-                <code className="break-all rounded bg-white px-2 py-1 font-mono text-xs dark:bg-black/50">{revealed}</code>
+                <code className="break-all rounded-sm bg-surface px-2 py-1 font-mono text-xs dark:bg-black/50">{revealed}</code>
                 <CopyButton text={revealed} />
                 <MiniButton onClick={() => setRevealed(null)}>Dismiss</MiniButton>
               </div>
@@ -516,7 +516,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           )}
         </Card>
 
-        <Card>
+        <Card className="border-t-0">
           <p className={SECTION_LABEL}>Webhook endpoint</p>
           <p className={`mt-1 text-xs ${MUTED}`}>
             PeridotID POSTs signed ledger events here (e.g. <code className="font-mono">fiat.transfer.posted</code> when
@@ -524,10 +524,10 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
             <code className="font-mono">X-Pid-Signature: sha256=&lt;hex&gt;</code> over the raw body.
           </p>
           {revealedWebhook ? (
-            <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
+            <div className="mt-2 border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
               <p className="text-xs font-semibold">Copy it now — it will never be shown again.</p>
               <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-                <code className="min-w-0 flex-1 break-all rounded bg-white px-2 py-1 font-mono text-xs dark:bg-black/50">
+                <code className="min-w-0 flex-1 break-all rounded-sm bg-surface px-2 py-1 font-mono text-xs dark:bg-black/50">
                   {revealedWebhook}
                 </code>
                 <div className="flex shrink-0 gap-2">
@@ -537,7 +537,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
               </div>
             </div>
           ) : app.webhookUrl ? (
-            <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-muted px-3 py-1.5">
+            <div className="mt-2 flex items-center justify-between gap-2 bg-muted px-3 py-1.5">
               <code className="min-w-0 flex-1 break-all font-mono text-xs">{app.webhookUrl}</code>
               <MiniButton onClick={() => void clearWebhook()} disabled={busy}>
                 Remove
@@ -574,7 +574,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           <p className={`mt-1 text-xs ${MUTED}`}>https required (http allowed only for localhost). Setting a new URL rotates the signing secret.</p>
         </Card>
 
-        <Card>
+        <Card className="border-t-0">
           <p className={SECTION_LABEL}>App fees</p>
           <p className={`mt-1 text-xs ${MUTED}`}>
             Stacked on top of the global PeridotID fee (0.1%, min Rp100, no cap) and credited to this app&apos;s account.

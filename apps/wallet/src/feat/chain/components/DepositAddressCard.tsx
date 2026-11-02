@@ -24,7 +24,7 @@ export function DepositAddressCard({
         currently requires about {requiredSol.toFixed(4)} SOL.
       </span>
       <Pressable onPress={onCopy} accessibilityLabel="Copy deposit address">
-        <div style={{ flexDirection: "row" }} className="flex flex-col mt-1 w-full items-center justify-between gap-2 border border-border bg-muted p-3">
+        <div style={{ flexDirection: "row" }} className="flex w-full items-center justify-between gap-2 border-t border-line py-3">
           <span style={s.mono} className="select-text flex-1">
             {address ? `${address.slice(0, 8)}…${address.slice(-8)}` : "—"}
           </span>

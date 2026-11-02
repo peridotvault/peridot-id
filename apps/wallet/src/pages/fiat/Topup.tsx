@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
+import { Section } from "../../shared/components/ui/Section";
 import { TextField } from "../../shared/components/ui/TextField";
 import { openExternalUrl } from "../../shared/app/openExternal";
 import { usePeridot } from "../../shared/app/AppContext";
@@ -88,72 +88,76 @@ export function Topup({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <ScrollArea contentContainerStyle={s.container}>
-      <PushHeader
-        onBack={onDone}
-        title="Top Up"
-        subtitle="Enter what you want credited — you pay that plus the fees shown below."
-      />
-      {gated && (
-        <div className="flex flex-col border border-border bg-muted p-3">
-          <span className="font-sans text-sm font-semibold text-foreground">Disabled in Testnet Mode</span>
-          <span className="font-sans text-sm leading-5 text-muted-foreground">
-            Real-money checkout is mainnet-only — switch back to Mainnet in Settings to top up.
-          </span>
-        </div>
-      )}
-      {frozen && !gated && <p style={s.hint}>Network is switching — top-ups pause until balances reload.</p>}
+    <div className="flex flex-col">
+      <Section className="border-t-0">
+        <div className="flex flex-col gap-4 px-6 py-6">
+          <PushHeader
+            onBack={onDone}
+            title="Top Up"
+            subtitle="Enter what you want credited — you pay that plus the fees shown below."
+          />
+          {gated && (
+            <div className="-mx-6 flex flex-col border-t border-secondary bg-secondary px-6 py-3">
+              <span className="font-sans text-sm font-semibold text-foreground">Disabled in Testnet Mode</span>
+              <span className="font-sans text-sm leading-5 text-muted-foreground">
+                Real-money checkout is mainnet-only — switch back to Mainnet in Settings to top up.
+              </span>
+            </div>
+          )}
+          {frozen && !gated && <p style={s.hint}>Network is switching — top-ups pause until balances reload.</p>}
 
-      {/* ANT-341 FR7: submit errors render above the fold (no scroll to find them). */}
-      {error && <p role="alert" tabIndex={-1} id="topup-error" style={s.error}>{error}</p>}
+          {/* ANT-341 FR7: submit errors render above the fold (no scroll to find them). */}
+          {error && <p role="alert" tabIndex={-1} id="topup-error" style={s.error}>{error}</p>}
 
-      <div className="flex flex-col mt-3 gap-1.5 border border-border bg-surface p-3">
-        <label htmlFor="topupAmount">
-          <span style={s.label}>Amount credited to you (IDR)</span>
-        </label>
-        <TextField id="topupAmount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000"  />
-        {belowMin && <p role="alert" style={s.error}>Minimum top-up is Rp50.000.</p>}
-
-        {q.quote && (
-          <>
-            {q.noMethods ? (
-              <p role="alert" style={s.error}>No payment methods available right now. Try again later.</p>
-            ) : (
-              <FiatQuoteBreakdown
-                quote={q.quote}
-                transferFee={q.transferFee}
-                selectedTotalIdr={q.selected?.totalIdr ?? q.quote.totalIdr}
-                method={q.method}
-                editable
-                onMethod={q.setMethod}
-              />
-            )}
-          </>
-        )}
-
-        <UIButton
-          title={busy ? "Creating…" : q.selected ? `Pay ${fmtIdr(q.selected.totalIdr)}` : "Pay"}
-          onPress={createCheckout}
-          disabled={busy || gated || frozen || !q.quote || belowMin || q.noMethods}
-          variant="primary"
-        />
-        {sync.pending && (
           <div className="flex flex-col gap-1.5">
-            <p style={s.hint}>Complete your payment, then tap Check status — your Saldo updates once the payment is confirmed.</p>
-            <UIButton
-              title={sync.syncing ? "Checking…" : "Check payment status"}
-              onPress={() => sync.checkStatus(sync.pending!)}
-              disabled={sync.syncing}
-            />
-            <UIButton title="Open payment page" onPress={() => openUrl(sync.pending!.paymentUrl)} />
-          </div>
-        )}
-        {sync.syncMsg && <p role="status" style={s.hint}>{sync.syncMsg}</p>}
-      </div>
+            <label htmlFor="topupAmount">
+              <span style={s.label}>Amount credited to you (IDR)</span>
+            </label>
+            <TextField id="topupAmount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000"  />
+            {belowMin && <p role="alert" style={s.error}>Minimum top-up is Rp50.000.</p>}
 
-      <p style={s.hint}>
-        Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Verified apps pay a Rp0 PeridotID fee. Tap Check payment status after paying — your Saldo updates once confirmed.
-      </p>
-    </ScrollArea>
+            {q.quote && (
+              <>
+                {q.noMethods ? (
+                  <p role="alert" style={s.error}>No payment methods available right now. Try again later.</p>
+                ) : (
+                  <FiatQuoteBreakdown
+                    quote={q.quote}
+                    transferFee={q.transferFee}
+                    selectedTotalIdr={q.selected?.totalIdr ?? q.quote.totalIdr}
+                    method={q.method}
+                    editable
+                    onMethod={q.setMethod}
+                  />
+                )}
+              </>
+            )}
+
+            <UIButton
+              title={busy ? "Creating…" : q.selected ? `Pay ${fmtIdr(q.selected.totalIdr)}` : "Pay"}
+              onPress={createCheckout}
+              disabled={busy || gated || frozen || !q.quote || belowMin || q.noMethods}
+              variant="primary"
+            />
+            {sync.pending && (
+              <div className="flex flex-col gap-1.5">
+                <p style={s.hint}>Complete your payment, then tap Check status — your Saldo updates once the payment is confirmed.</p>
+                <UIButton
+                  title={sync.syncing ? "Checking…" : "Check payment status"}
+                  onPress={() => sync.checkStatus(sync.pending!)}
+                  disabled={sync.syncing}
+                />
+                <UIButton title="Open payment page" onPress={() => openUrl(sync.pending!.paymentUrl)} />
+              </div>
+            )}
+            {sync.syncMsg && <p role="status" style={s.hint}>{sync.syncMsg}</p>}
+          </div>
+
+          <p style={s.hint}>
+            Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Verified apps pay a Rp0 PeridotID fee. Tap Check payment status after paying — your Saldo updates once confirmed.
+          </p>
+        </div>
+      </Section>
+    </div>
   );
 }

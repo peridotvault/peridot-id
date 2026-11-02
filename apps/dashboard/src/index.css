@@ -1,63 +1,54 @@
-/* Dashboard base styles. Theme tokens mirror apps/docs/app/global.css so the
-   ported workspace UI renders identically (light default, `.dark` opt-in). */
+/* Dashboard base styles. Theme tokens mirror brand.md (PeridotVault system):
+   dark only, peridot green, Space Grotesk. */
 
 @import "tailwindcss";
 
-/* Drive the `dark:` variant off the `.dark` class (toggled from
-   prefers-color-scheme in main.tsx) instead of the OS media query. */
+/* Drive the `dark:` variant off the `.dark` class. The app is dark-only now:
+   index.html sets `class="dark"` so every `dark:` variant resolves. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --brand-1: #349b65;
   --brand-2: #87ee83;
 
-  --background: #ffffff;
-  --foreground: #0a0a0a;
-  --muted: #f5f5f5;
-  --muted-foreground: #737373;
-  --border: #e5e5e5;
-  --ring: #0a0a0a;
-  --accent: #0a0a0a;
-  --accent-foreground: #ffffff;
-  --font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --background: #0d0f0e;
+  --surface: #060807;
+  --card: #060807;
+  --foreground: #e0e4e4;
+  --paragraph: #b5b5b5;
+  --muted: #363636;
+  --muted-foreground: #7d7d7d;
+  --border: #ffffff28;
+  --line: #ffffff14;
+  --ring: #87ee83;
+  --accent: #87ee83;
+  --accent-foreground: #0a0c0b;
+  --font-sans: "Space Grotesk", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --font-serif: "Source Serif 4", ui-serif, Georgia, "Times New Roman", serif;
-}
-
-.dark {
-  --background: #0a0a0a;
-  --foreground: #fafafa;
-  --muted: #171717;
-  --muted-foreground: #a3a3a3;
-  --border: #262626;
-  --ring: #fafafa;
-  --accent: #fafafa;
-  --accent-foreground: #0a0a0a;
 }
 
 @theme inline {
   --color-brand-1: var(--brand-1);
   --color-brand-2: var(--brand-2);
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-card: var(--card);
   --color-foreground: var(--foreground);
+  --color-paragraph: var(--paragraph);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
+  --color-line: var(--line);
   --color-ring: var(--ring);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
-  --font-serif: var(--font-serif);
 }
 
 html {
-  color-scheme: light;
-  scrollbar-gutter: stable;
-}
-
-html.dark {
   color-scheme: dark;
+  scrollbar-gutter: stable;
 }
 
 html,

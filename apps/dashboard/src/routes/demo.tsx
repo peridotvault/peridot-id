@@ -99,7 +99,7 @@ export default function DemoPage() {
         Behaves like an external app: no session, no signer — approvals open the PeridotID popup.
       </p>
 
-      <Card className="mt-8">
+      <Card>
         <h2 className="text-lg font-semibold tracking-tight">1 · Connect</h2>
         {pid ? (
           <p className="mt-1 text-sm">
@@ -115,7 +115,7 @@ export default function DemoPage() {
         )}
       </Card>
 
-      <Card className="mt-4">
+      <Card>
         <h2 className="text-lg font-semibold tracking-tight">2 · Top up (popup approval)</h2>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <input
@@ -140,7 +140,7 @@ export default function DemoPage() {
         )}
       </Card>
 
-      <Card className="mt-4">
+      <Card>
         <h2 className="text-lg font-semibold tracking-tight">3 · Transfer (popup approval)</h2>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <input

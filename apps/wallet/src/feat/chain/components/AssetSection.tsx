@@ -1,11 +1,15 @@
 import { useState } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
+import { Section } from "../../../shared/components/ui/Section";
+import { ChainSelect } from "./ChainSelect";
 import type { NftItem } from "@peridotvault/pid-solana";
 import { styles as s } from "../../../shared/styles/theme";
 import type { Coin } from "../utils/coins";
 
-// Tokens/Items tabs + lists. TabButton stays here (not shared): Home's
-// bare-text underline variant differs from Activity's boxed pill.
+// Asset group: Tokens/Items tabs on the left, chain picker on the right, then
+// the lists. One block — Total Balance stays the first thing on Home. TabButton
+// stays here (not shared): Home's bare-text underline variant differs from
+// Activity's boxed pill.
 export function AssetSection({
   tab,
   onTabChange,
@@ -20,18 +24,21 @@ export function AssetSection({
   busy: boolean;
 }) {
   return (
-    <>
-      <div style={{ flexDirection: "row" }} className="flex flex-col gap-5 py-1.5">
-        <TabButton label="Tokens" active={tab === "tokens"} onPress={() => onTabChange("tokens")} />
-        <TabButton label="Items" active={tab === "items"} onPress={() => onTabChange("items")} />
+    <Section>
+      <div style={{ flexDirection: "row" }} className="flex items-center justify-between gap-4 px-6 pb-2 pt-4">
+        <div style={{ flexDirection: "row" }} className="flex items-center gap-5">
+          <TabButton label="Tokens" active={tab === "tokens"} onPress={() => onTabChange("tokens")} />
+          <TabButton label="Items" active={tab === "items"} onPress={() => onTabChange("items")} />
+        </div>
+        <ChainSelect />
       </div>
       {tab === "tokens" ? (
-        <>
+        <div className="flex flex-col divide-y divide-line">
           {coins.length === 0 && !busy && (
-            <p style={s.hint}>No assets yet — receive SOL to your address to get started.</p>
+            <p style={s.hint} className="px-6 py-3">No assets yet — receive SOL to your address to get started.</p>
           )}
           {coins.map((coin) => (
-            <div key={coin.key} style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border-b border-border py-2.5">
+            <div key={coin.key} style={{ flexDirection: "row" }} className="flex items-center gap-3 px-6 py-3">
               <CoinIcon symbol={coin.symbol} image={coin.image} />
               <div className="flex flex-col flex-1">
                 <span className="font-sans text-base font-semibold text-foreground">{coin.symbol}</span>
@@ -44,14 +51,14 @@ export function AssetSection({
               <span className="font-mono text-base font-medium text-foreground">{coin.amount}</span>
             </div>
           ))}
-        </>
+        </div>
       ) : (
-        <>
+        <div className="flex flex-col divide-y divide-line">
           {nfts.length === 0 && !busy && (
-            <p style={s.hint}>No items yet — SPL collectibles in this wallet appear here.</p>
+            <p style={s.hint} className="px-6 py-3">No items yet — SPL collectibles in this wallet appear here.</p>
           )}
           {nfts.map((nft) => (
-            <div key={nft.mint} style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border-b border-border py-2.5">
+            <div key={nft.mint} style={{ flexDirection: "row" }} className="flex items-center gap-3 px-6 py-3">
               <div className="flex flex-col flex-1">
                 <span className="font-sans text-base font-semibold text-foreground">{nft.name ?? "Unnamed item"}</span>
                 <span className="font-sans text-xs text-muted-foreground">{nft.mint.slice(0, 4)}…{nft.mint.slice(-4)}</span>
@@ -59,11 +66,11 @@ export function AssetSection({
             </div>
           ))}
           {nfts.length > 0 && (
-            <p style={s.hint}>SPL collectibles only — Token-2022 and compressed NFTs need a DAS RPC.</p>
+            <p style={s.hint} className="px-6 py-3">SPL collectibles only — Token-2022 and compressed NFTs need a DAS RPC.</p>
           )}
-        </>
+        </div>
       )}
-    </>
+    </Section>
   );
 }
 

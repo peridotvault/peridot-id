@@ -9,7 +9,7 @@ export function ChainRow({ tx: t, onSelect }: { tx: WalletTransaction; onSelect:
   const m = meta(t);
   const Icon = m.icon;
   return (
-    <Pressable key={t.id} style={s.card} onPress={() => onSelect(t)}>
+    <Pressable key={t.id} style={s.card} className="px-6" onPress={() => onSelect(t)}>
       <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
         <div style={{ backgroundColor: m.color + "22" }} className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full">
           <Icon size={16} color={m.color} />

@@ -7,7 +7,7 @@
 // Wasabi account blocks public bucket reads) — no signed URLs, no secrets.
 // Reads never need credentials (fail-open to `logoUrl: null`); uploads throw
 // when WASABI_* env is missing.
-import { Injectable, Optional } from "@nestjs/common";
+import { BadRequestException, Injectable, Optional, PayloadTooLargeException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
@@ -79,7 +79,9 @@ export class WasabiStorageService {
       secret: this.env("WASABI_SECRET_KEY"),
     };
     if (!s.endpoint || !s.bucket || !s.access || !s.secret) {
-      throw new Error("Wasabi storage is not configured (WASABI_ENDPOINT/BUCKET_NAME/ACCESS_KEY/SECRET_KEY)");
+      throw new ServiceUnavailableException(
+        "Wasabi storage is not configured (WASABI_ENDPOINT/BUCKET_NAME/ACCESS_KEY/SECRET_KEY)",
+      );
     }
     return s;
   }
@@ -117,9 +119,9 @@ export class WasabiStorageService {
 
   private checkedExt(file: UploadFile): string {
     const ext = extForMime(file.mimetype);
-    if (!ext) throw new Error("Logo must be PNG, JPEG, or WebP");
+    if (!ext) throw new BadRequestException("Logo must be PNG, JPEG, or WebP");
     if (file.size > LOGO_MAX_BYTES || file.buffer.length > LOGO_MAX_BYTES) {
-      throw new Error("Logo must be 512KB or smaller");
+      throw new PayloadTooLargeException("Logo must be 512KB or smaller");
     }
     return ext;
   }

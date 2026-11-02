@@ -24,7 +24,7 @@ export default function WorkspaceFeesPage() {
     return (
       <main className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
         <PageHeader eyebrow="Treasury" title="Fees" />
-        <Card className="mt-8">
+        <Card>
           <h2 className="text-lg font-semibold tracking-tight">Sign in to manage fees</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>The fees console is admin-only.</p>
           {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}

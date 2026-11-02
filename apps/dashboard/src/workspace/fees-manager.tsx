@@ -216,7 +216,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
         </p>
       )}
 
-      <div className="mt-6 flex w-fit gap-1 rounded-md border border-border bg-muted p-1" role="tablist" aria-label="Fee settings">
+      <div className="mt-6 flex w-fit gap-1 border border-border bg-muted p-1" role="tablist" aria-label="Fee settings">
         {tabOrder.map((k) => (
           <button
             key={k}
@@ -231,7 +231,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
             }}
             onClick={() => setTab(k)}
             onKeyDown={(e) => onTabKeyDown(e, k)}
-            className={`rounded-[3px] px-3 py-1 text-sm font-medium transition-colors focus-ring ${
+            className={`px-3 py-1 text-sm font-medium transition-colors focus-ring ${
               tab === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -240,7 +240,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
         ))}
       </div>
 
-      <div role="tabpanel" id={`fees-panel-${tab}`} aria-labelledby={`fees-tab-${tab}`} className="mt-4 grid gap-4">
+      <div role="tabpanel" id={`fees-panel-${tab}`} aria-labelledby={`fees-tab-${tab}`} className="mt-4 grid gap-px bg-line">
         {tab === "chain" ? (
           <ChainFeesManager client={client} />
         ) : tab === "peridot" ? (

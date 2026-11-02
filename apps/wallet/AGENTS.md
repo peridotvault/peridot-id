@@ -13,8 +13,9 @@ src/
                       # subfolders. Route-private helpers live in-file. Never
                       # screen→screen imports.
   shared/             # highest reusable layer: usable by >1 feature AND by shell
-    styles/           # index.css (+tokens/fonts/base split), theme.ts
-                      # (TS token source, byte-identical to tokens.css),
+    styles/           # index.css (+tokens/base split), theme.ts
+                      # (TS token source, byte-identical to tokens.css;
+                      # brand.md is the spec),
                       # stylesheet.ts (StyleSheet + flatten, Phase 4 exceptions)
     data/             # apiCache.ts (cachedRead/invalidate/clearApiCache),
                       # currency.ts (IDR/USD pref + CoinGecko), fiat.ts
@@ -29,9 +30,11 @@ src/
     components/
       ui/             # generic primitives: Pressable, UIButton, TextField,
                       # Modal, BottomSheet, ScrollArea, BackButton,
-                      # PushHeader, AsciiRidges(*)
-      shell/          # app chrome: TabBar, TopBar, HomeHeader, AppColumn,
-                      # LoadingScreen, AccountSwitcherModal
+                      # PushHeader, AsciiRidges(*), Section/SectionHead,
+                      # CellGrid, BrandMark
+      shell/          # app chrome: TabBar (bottom|sidebar|rail), TopBar,
+                      # BrandTop, ProfileButton, HomeHeader, InfoRail,
+                      # AppColumn, LoadingScreen, AccountSwitcherModal
       icons.ts        # lucide barrel (deep per-icon imports only)
     hooks/            # session bootstrap/sync, startup gate, networkMode
                       # view, wide layout, window dimensions

@@ -54,7 +54,7 @@ export default function LevelingTasksPage() {
           <>
             <ul className="mt-3 flex flex-col gap-2">
               {data.rows.map((t) => (
-                <li key={t.id} className="rounded-lg border border-border p-3 text-sm">
+                <li key={t.id} className="border border-border p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span>
                       <span className="font-medium">{t.name}</span>

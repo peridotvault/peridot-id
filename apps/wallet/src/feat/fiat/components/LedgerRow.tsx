@@ -17,7 +17,7 @@ export function LedgerRow({ item, onSelect }: { item: FiatLedgerItem; onSelect: 
   // Only posted money gets a sign: pending/failed/cancelled moved nothing.
   const sign = posted ? (incoming ? "+" : "-") : "";
   return (
-    <Pressable key={tx.id} style={s.card} onPress={() => onSelect(item)}>
+    <Pressable key={tx.id} style={s.card} className="px-6" onPress={() => onSelect(item)}>
       <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
         <div style={{ backgroundColor: color + "22" }} className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full">
           <Icon size={16} className={tone} />

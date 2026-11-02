@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable } from "../../shared/components/ui/Pressable";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
@@ -85,39 +86,49 @@ export function Provisioning({ onContinue }: { onContinue: () => void }) {
   }, [run]);
 
   return (
-    <div style={s.container} className="flex flex-col">
-      <h1 style={s.title}>Setting up your wallet</h1>
-      <p style={s.subtitle}>Creating your on-chain account — this usually takes a few seconds.</p>
+    <div className="flex flex-1 flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="pb-0">
+          <h1 style={s.title}>Setting up your wallet</h1>
+          <p style={s.subtitle} className="mt-2">Creating your on-chain account — this usually takes a few seconds.</p>
+        </SectionHead>
+      </Section>
 
-      {STEPS.map((step) => {
-        const st = states[step.key];
-        return (
-          <div key={step.key} className="flex flex-col mt-3 gap-2 border border-border bg-surface p-3">
-            <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
-              <span
-                className={`w-7 text-center font-sans text-xl font-semibold ${st.status === "done" ? "text-success" : st.status === "failed" ? "text-danger" : "text-muted-foreground"}`}
-                aria-label={`${step.label}: ${stepStatusLabel(st.status)}`}
-              >
-                {glyph(st.status)}
-              </span>
-              <div className="flex flex-col flex-1 gap-0.5">
-                <span className="font-sans text-base font-semibold text-foreground">{step.label}</span>
-                <span className="font-sans text-xs text-muted-foreground">{step.hint}</span>
-              </div>
-              {st.status === "failed" && (
-                <Pressable onPress={() => run(step.key)} accessibilityLabel={`Retry ${step.label}`}>
-                  <div className="flex flex-col border border-border bg-background px-3 py-1.5">
-                    <span className="font-sans text-sm font-medium text-foreground">Retry</span>
+      <Section>
+        <div className="flex flex-col divide-y divide-line">
+            {STEPS.map((step) => {
+              const st = states[step.key];
+              return (
+                <div key={step.key} className="flex flex-col px-6 py-3">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`w-7 text-center font-sans text-xl font-semibold ${st.status === "done" ? "text-success" : st.status === "failed" ? "text-danger" : "text-muted-foreground"}`}
+                      aria-label={`${step.label}: ${stepStatusLabel(st.status)}`}
+                    >
+                      {glyph(st.status)}
+                    </span>
+                    <div className="flex flex-1 flex-col gap-0.5">
+                      <span className="font-sans text-base font-semibold text-foreground">{step.label}</span>
+                      <span className="font-sans text-xs text-muted-foreground">{step.hint}</span>
+                    </div>
+                    {st.status === "failed" && (
+                      <Pressable onPress={() => run(step.key)} accessibilityLabel={`Retry ${step.label}`}>
+                        <div className="border border-border px-3 py-1.5">
+                          <span className="font-sans text-sm font-medium text-foreground">Retry</span>
+                        </div>
+                      </Pressable>
+                    )}
                   </div>
-                </Pressable>
-              )}
-            </div>
-            {st.error && <p role="alert" style={s.error}>{st.error}</p>}
+                  {st.error && <p role="alert" className="mt-2 font-sans text-sm text-foreground">{st.error}</p>}
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
 
-      <UIButton title="Continue to home" onPress={onContinue} variant="primary" />
+        <div className="px-6 py-4">
+          <UIButton title="Continue to home" onPress={onContinue} variant="primary" />
+        </div>
+      </Section>
     </div>
   );
 }

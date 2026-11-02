@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
 import { cachedRead } from "../../shared/data/apiCache";
@@ -54,28 +54,41 @@ export function FiatAccount({
   const parts = balanceIdr === null ? null : formatTotalParts(Number(balanceIdr), "IDR");
 
   return (
-    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 14 }}>
-      <PushHeader onBack={onDone} title="Rupiah" />
+    <div className="flex flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="pb-0">
+          <PushHeader onBack={onDone} title="Rupiah" />
+        </SectionHead>
+      </Section>
+
       {error ? (
-        <>
-          <p role="alert" style={s.error}>{error}</p>
-          <UIButton title="Retry" onPress={load} />
-        </>
-      ) : !parts ? (
-        <span
-          className="font-serif text-5xl text-foreground"
-          role="status"
-          aria-label="Loading Rupiah balance"
-        >
-          …
-        </span>
+        <Section className="border-t-danger/40 bg-danger/10">
+          <SectionHead className="py-3">
+            <p role="alert" className="font-sans text-sm text-foreground">{error}</p>
+            <div className="mt-2"><UIButton title="Retry" onPress={load} /></div>
+          </SectionHead>
+        </Section>
       ) : (
-        <div style={{ flexDirection: "row" }} className="flex flex-col items-baseline" aria-label={`${parts.prefix}${parts.int}${parts.frac}`}>
-          <span className="font-serif text-5xl text-foreground">{parts.prefix}{parts.int}</span>
-          <span className="font-serif text-4xl text-muted-foreground">{parts.frac}</span>
-        </div>
+        <Section>
+          <SectionHead className="pb-5">
+          {!parts ? (
+            <span
+              className="font-mono text-4xl text-foreground"
+              role="status"
+              aria-label="Loading Rupiah balance"
+            >
+              …
+            </span>
+          ) : (
+            <div className="flex items-baseline" aria-label={`${parts.prefix}${parts.int}${parts.frac}`}>
+              <span className="font-mono text-4xl text-foreground">{parts.prefix}{parts.int}</span>
+              <span className="font-mono text-3xl text-muted-foreground">{parts.frac}</span>
+            </div>
+          )}
+          </SectionHead>
+        </Section>
       )}
       <FiatAccountActions onSend={goSend} onTopup={goTopup} />
-    </ScrollArea>
+    </div>
   );
 }

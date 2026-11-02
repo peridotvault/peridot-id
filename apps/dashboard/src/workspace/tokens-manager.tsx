@@ -52,7 +52,7 @@ export function TokensManager({ client }: { client: PeridotClient }) {
           <p className={`text-sm ${MUTED}`}>No tokens registered yet — add your first token below.</p>
           <Link
             to="/tokens/create"
-            className="focus-ring mt-3 flex min-h-32 w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-1/2 lg:w-1/3"
+            className="focus-ring mt-3 flex min-h-32 w-full flex-col items-center justify-center gap-1 border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-1/2 lg:w-1/3"
           >
             <span aria-hidden="true" className="text-2xl leading-none">+</span>
             Add token
@@ -63,7 +63,7 @@ export function TokensManager({ client }: { client: PeridotClient }) {
           <div className="mt-4">
             <Link
               to="/tokens/create"
-              className="focus-ring flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-1/2 lg:w-1/3"
+              className="focus-ring flex min-h-16 flex-col items-center justify-center gap-1 border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-1/2 lg:w-1/3"
             >
               <span aria-hidden="true" className="text-2xl leading-none">+</span>
               Add token

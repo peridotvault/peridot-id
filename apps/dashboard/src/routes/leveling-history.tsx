@@ -24,8 +24,8 @@ export default function LevelingHistoryPage() {
           <MiniButton size="sm" onClick={reload}>Retry</MiniButton>
         </div>
       )}
-      <div className="flex flex-col gap-4">
-        <div className="grid gap-4 lg:grid-cols-2">
+      <div className="flex flex-col">
+        <div className="grid gap-px bg-line lg:grid-cols-2">
           <AdjustForm onDone={reload} />
           <ReverseForm onDone={reload} />
         </div>
@@ -80,7 +80,7 @@ export default function LevelingHistoryPage() {
 
 function LedgerRow({ entry: e }: { entry: LedgerEntry }) {
   return (
-    <tr className="border-b border-dotted border-border align-top">
+    <tr className="border-b border-line align-top">
       <td className="whitespace-nowrap py-1.5 pr-3 text-xs">{new Date(e.createdAt).toLocaleString()}</td>
       <td className="max-w-[140px] truncate py-1.5 pr-3" title={e.pid}>{e.pid}</td>
       <td className="py-1.5 pr-3">{e.kind}</td>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { openExternalUrl } from "../../shared/app/openExternal";
 import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
@@ -42,41 +42,62 @@ export function FiatDetail({ item: initial, onDone }: { item: FiatItem; onDone: 
   };
 
   return (
-    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 12 }}>
-      <PushHeader onBack={onDone} title="Deposit" />
-      <span className="my-2 font-serif text-3xl text-foreground">{fmtIdr(tx.netIdr ?? tx.grossIdr)}</span>
+    <div className="flex flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="pb-0">
+          <PushHeader onBack={onDone} title="Deposit" />
+        </SectionHead>
+      </Section>
 
-      {awaitingPayment && (
-        <div style={s.card} className="flex flex-col">
-          <span className="font-sans text-sm leading-[19px] text-muted-foreground">Waiting for payment — complete it, then come back and check status.</span>
-          {tx.paymentUrl && (
-            <UIButton
-              title="Open DOKU payment page"
-              onPress={() => openExternalUrl(tx.paymentUrl as string).catch(() => setError("Could not open the DOKU payment page."))}
-              variant="primary"
-            />
-          )}
+      <Section>
+        <SectionHead className="pb-0">
+        <span className="font-mono text-2xl text-foreground">{fmtIdr(tx.netIdr ?? tx.grossIdr)}</span>
+
+        {awaitingPayment && (
+          <div className="mt-3 flex flex-col gap-3 border-t border-line pt-3">
+            <span className="font-sans text-sm leading-[19px] text-muted-foreground">Waiting for payment — complete it, then come back and check status.</span>
+            {tx.paymentUrl && (
+              <UIButton
+                title="Open DOKU payment page"
+                onPress={() => openExternalUrl(tx.paymentUrl as string).catch(() => setError("Could not open the DOKU payment page."))}
+                variant="primary"
+              />
+            )}
+          </div>
+        )}
+        </SectionHead>
+
+        <div className="flex flex-col divide-y divide-line border-t border-line">
+          <Field label="Status" value={fiatStatusLabel(item.kind, tx.providerStatus)} />
+          {tx.feeIdr && <Field label="Service fee" value={fmtIdr(tx.feeIdr)} />}
+          <Field label="Created" value={fmtDate(item.createdAt)} />
         </div>
+      </Section>
+
+      {error && (
+        <Section className="border-t-danger/40 bg-danger/10">
+          <SectionHead className="py-3">
+            <p role="alert" className="font-sans text-sm text-foreground">{error}</p>
+          </SectionHead>
+        </Section>
       )}
-
-      <Field label="Status" value={fiatStatusLabel(item.kind, tx.providerStatus)} />
-      {tx.feeIdr && <Field label="Service fee" value={fmtIdr(tx.feeIdr)} />}
-      <Field label="Created" value={fmtDate(item.createdAt)} />
-
-      {error && <p role="alert" style={s.error}>{error}</p>}
 
       {(awaitingPayment || tx.providerStatus === "processing") && (
-        <UIButton title={checking ? "Checking…" : "Check status"} onPress={sync} disabled={checking} />
+        <Section>
+          <SectionHead className="pb-8">
+            <UIButton title={checking ? "Checking…" : "Check status"} onPress={sync} disabled={checking} />
+          </SectionHead>
+        </Section>
       )}
-    </ScrollArea>
+    </div>
   );
 }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span style={s.label}>{label}</span>
-      <span className="select-text font-sans text-sm text-foreground">{value}</span>
+    <div className="flex items-baseline justify-between gap-4 px-6 py-3">
+      <span className="font-sans text-xs uppercase tracking-[0.6px] text-muted-foreground">{label}</span>
+      <span className="select-text text-right font-sans text-sm text-foreground">{value}</span>
     </div>
   );
 }

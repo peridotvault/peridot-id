@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Pressable } from "../../shared/components/ui/Pressable";
 import { ChevronRight, FlaskConical, KeyRound, Monitor, Link2, Check, Banknote, TriangleAlert, LayoutGrid } from "../../shared/components/icons";
 import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
@@ -7,6 +6,7 @@ import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead } from "../../shared/data/apiCache";
 import { styles as s } from "../../shared/styles/theme";
 import { BackButton } from "../../shared/components/ui/BackButton";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { CURRENCIES, getCurrency, setCurrency, type Currency } from "../../shared/data/currency";
 import { setNetworkMode } from "../../shared/data/networkMode";
@@ -107,197 +107,159 @@ export function Settings({ goPasskeys, goSessions, goConnected, goAppConnections
   }, [net.switching, sel]);
 
   return (
-    <ScrollArea className="flex-1 bg-background" contentContainerStyle={{ padding: 24, gap: 10 }}>
-      {!tabRoot && <BackButton onPress={onDone} />}
+    <div className="flex flex-col">
+      {!tabRoot && (
+        <Section className="border-t-0">
+          <SectionHead className="pb-0 pt-4">
+            <BackButton onPress={onDone} />
+          </SectionHead>
+        </Section>
+      )}
 
-      <h1 style={s.title}>Settings</h1>
+      <Section className={tabRoot ? "border-t-0" : ""}>
+        <SectionHead>
+          <h1 style={s.title}>Settings</h1>
+        </SectionHead>
+      </Section>
 
       {loadError && (
-        <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border border-danger bg-surface p-3.5">
-          <p role="alert" style={s.error} className="flex-1">
-            {loadError}
-          </p>
-          <Pressable onPress={load} accessibilityRole="button" accessibilityLabel="Retry loading settings">
-            <div className="flex flex-col border border-border px-2.5 py-1.5">
-              <span className="font-sans text-sm font-medium text-foreground">Retry</span>
-            </div>
-          </Pressable>
-        </div>
+        <Section className="border-t-danger/40 bg-danger/10">
+          <SectionHead className="py-3">
+            <p role="alert" className="font-sans text-sm text-foreground">{loadError}</p>
+            <Retry onPress={load} label="Retry loading settings" />
+          </SectionHead>
+        </Section>
       )}
 
-      <span className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Security</span>
-      <Row icon={Link2} label="App connections" value="Manage" onPress={goAppConnections} />
-      <Row icon={KeyRound} label="Passkeys" value={`${passkeys.length} active`} onPress={goPasskeys} />
-      <Row icon={Link2} label="Recovery" value={google ? "Google · Connected" : "Add Google"} onPress={goConnected} />
-      <Row icon={Monitor} label="Sessions / Devices" value={`${sessions.length} active`} onPress={goSessions} />
+      <Group title="Security">
+        <Row icon={Link2} label="App connections" value="Manage" onPress={goAppConnections} />
+        <Row icon={KeyRound} label="Passkeys" value={`${passkeys.length} active`} onPress={goPasskeys} />
+        <Row icon={Link2} label="Recovery" value={google ? "Google · Connected" : "Add Google"} onPress={goConnected} />
+        <Row icon={Monitor} label="Sessions / Devices" value={`${sessions.length} active`} onPress={goSessions} />
+      </Group>
 
-      <span className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Network</span>
       {net.testnet && (
-        <div style={{ flexDirection: "row" }} className="flex flex-col items-start gap-3 border border-border bg-muted p-3.5">
-          <TriangleAlert size={18} className="mt-0.5 shrink-0 text-foreground" />
-          <div className="flex flex-col flex-1 gap-1">
-            <span className="font-sans text-sm font-semibold text-foreground">TESTNET — not real money</span>
-            <span className="font-sans text-sm leading-5 text-muted-foreground">
-              Balances are testnet-only and separate from mainnet. Fiat top-ups and transfers are disabled; explorer links carry ?cluster=devnet.
-            </span>
-          </div>
-        </div>
+        <Section className="border-t-secondary bg-secondary">
+          <SectionHead className="py-3">
+            <div className="flex items-start gap-3">
+              <TriangleAlert size={18} className="mt-0.5 shrink-0 text-foreground" />
+              <div className="flex flex-1 flex-col gap-1">
+                <span className="font-sans text-sm font-semibold text-foreground">TESTNET — not real money</span>
+                <span className="font-sans text-sm leading-5 text-foreground">
+                  Balances are testnet-only and separate from mainnet. Fiat top-ups and transfers are disabled; explorer links carry ?cluster=devnet.
+                </span>
+              </div>
+            </div>
+          </SectionHead>
+        </Section>
       )}
-      <Pressable
-        onPress={toggleNetwork}
-        disabled={net.switching}
-        accessibilityRole="switch"
-        accessibilityState={{ checked: net.testnet }}
-        accessibilityLabel="Testnet Mode"
-      >
-        <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 border border-border bg-surface p-3.5">
-          <div className="flex flex-col flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
-            <FlaskConical size={18} className="text-foreground" />
-          </div>
-          <div className="flex flex-col flex-1 gap-0.5">
-            <span className="font-sans text-base font-medium text-foreground">Testnet Mode</span>
-            <span className="font-sans text-xs text-muted-foreground">
-              {net.switching ? "Switching network…" : net.testnet ? "On — using testnet chain" : "Off — using mainnet"}
-            </span>
-          </div>
-          <div
-            style={{ flexDirection: "row" }}
-            className={`flex flex-col items-center gap-1 border px-2.5 py-1.5 ${net.testnet ? "border-foreground" : "border-border"}`}
-          >
-            {net.testnet && <Check size={14} className="text-foreground" />}
-            <span className={`font-sans text-sm font-medium ${net.testnet ? "text-foreground" : "text-muted-foreground"}`}>
-              {net.switching ? "…" : net.testnet ? "ON" : "OFF"}
-            </span>
-          </div>
-        </div>
-      </Pressable>
+
+      <Group title="Network">
+        <ToggleRow
+          icon={FlaskConical}
+          label="Testnet Mode"
+          hint={net.switching ? "Switching network…" : net.testnet ? "On — using testnet chain" : "Off — using mainnet"}
+          on={net.testnet}
+          busy={net.switching}
+          onPress={toggleNetwork}
+        />
+      </Group>
 
       {/* ANT-625 FR1: Chains group — master All-chains row + one row per
           GET /v1/chains row (name + testnet badge + toggle). Toggles are
           disabled while a network/selection switch propagates. */}
-      <span className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Chains</span>
-      <span className="font-sans text-xs text-muted-foreground">
-        {sel.selection.mode === "all"
-          ? "Showing all chains — data loads for every available chain."
-          : `Showing ${sel.label} — data loads only for selected chains.`}
-      </span>
+      <Group title="Chains">
+        <p className="px-6 py-3 font-sans text-xs text-muted-foreground">
+          {sel.selection.mode === "all"
+            ? "Showing all chains — data loads for every available chain."
+            : `Showing ${sel.label} — data loads only for selected chains.`}
+        </p>
 
-      {sel.notice && (
-        <Pressable onPress={sel.dismissNotice} accessibilityRole="button" accessibilityLabel="Dismiss chain notice">
-          <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border border-border bg-muted p-3.5">
-            <span role="status" className="flex-1 font-sans text-sm text-muted-foreground">{sel.notice}</span>
-          </div>
-        </Pressable>
-      )}
+        {sel.notice && (
+          <Pressable onPress={sel.dismissNotice} accessibilityRole="button" accessibilityLabel="Dismiss chain notice">
+            <span role="status" className="block px-6 py-3 font-sans text-sm text-muted-foreground">{sel.notice}</span>
+          </Pressable>
+        )}
 
-      <Pressable
-        onPress={toggleMaster}
-        disabled={net.switching}
-        accessibilityRole="switch"
-        accessibilityState={{ checked: sel.selection.mode === "all" }}
-        accessibilityLabel="All chains"
-      >
-        <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 border border-border bg-surface p-3.5">
-          <div className="flex flex-col flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
-            <LayoutGrid size={18} className="text-foreground" />
-          </div>
-          <div className="flex flex-col flex-1 gap-0.5">
-            <span className="font-sans text-base font-medium text-foreground">All chains</span>
-            <span className="font-sans text-xs text-muted-foreground">
-              {net.switching ? "Switching…" : sel.selection.mode === "all" ? "On — using every chain" : "Off — custom selection below"}
+        <ToggleRow
+          icon={LayoutGrid}
+          label="All chains"
+          hint={net.switching ? "Switching…" : sel.selection.mode === "all" ? "On — using every chain" : "Off — custom selection below"}
+          on={sel.selection.mode === "all"}
+          busy={net.switching}
+          onPress={toggleMaster}
+        />
+
+        {sel.chainsError && (
+          <div className="px-6 py-3">
+            <span role="alert" className="font-sans text-sm text-muted-foreground">
+              Couldn&apos;t load the chain list ({sel.chainsError}) — showing your saved selection. Retry to refresh.
             </span>
+            <Retry onPress={sel.retryChains} label="Retry loading chains" />
           </div>
-          <div
-            style={{ flexDirection: "row" }}
-            className={`flex flex-col items-center gap-1 border px-2.5 py-1.5 ${sel.selection.mode === "all" ? "border-foreground" : "border-border"}`}
-          >
-            {sel.selection.mode === "all" && <Check size={14} className="text-foreground" />}
-            <span className={`font-sans text-sm font-medium ${sel.selection.mode === "all" ? "text-foreground" : "text-muted-foreground"}`}>
-              {net.switching ? "…" : sel.selection.mode === "all" ? "ON" : "OFF"}
-            </span>
+        )}
+
+        {sel.chains.length === 0 && !sel.chainsError && (
+          <span role="status" className="block px-6 py-3 font-sans text-sm text-muted-foreground">Loading chains…</span>
+        )}
+
+        {sel.chains.map((c) => {
+          const on = isChainSelected(sel.selection, c.namespace, c.reference);
+          return (
+            <ToggleRow
+              key={`${c.namespace}:${c.reference}`}
+              icon={LayoutGrid}
+              label={c.name}
+              hint={`${c.namespace}:${c.reference.slice(0, 8)}${c.reference.length > 8 ? "…" : ""}`}
+              testnet={c.isTestnet}
+              on={on}
+              busy={net.switching}
+              onPress={() => sel.toggle(c.namespace, c.reference)}
+            />
+          );
+        })}
+      </Group>
+
+      <Group title="Preferences">
+        {/* flexWrap: at 320px the two currency pills drop below the label instead of squeezing. */}
+        <div className="flex flex-wrap items-center gap-3 px-6 py-3">
+          <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+            <Banknote size={18} className="text-foreground" />
           </div>
-        </div>
-      </Pressable>
-
-      {sel.chainsError && (
-        <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3 border border-danger bg-surface p-3.5">
-          <span role="alert" className="flex-1 font-sans text-sm text-muted-foreground">
-            Couldn&apos;t load the chain list ({sel.chainsError}) — showing your saved selection. Retry to refresh.
-          </span>
-          <Pressable onPress={sel.retryChains} accessibilityRole="button" accessibilityLabel="Retry loading chains">
-            <div className="flex flex-col border border-border px-2.5 py-1.5">
-              <span className="font-sans text-sm font-medium text-foreground">Retry</span>
-            </div>
-          </Pressable>
-        </div>
-      )}
-
-      {sel.chains.length === 0 && !sel.chainsError && (
-        <span role="status" className="font-sans text-sm text-muted-foreground">Loading chains…</span>
-      )}
-
-      {sel.chains.map((c) => {
-        const on = isChainSelected(sel.selection, c.namespace, c.reference);
-        return (
-          <Pressable
-            key={`${c.namespace}:${c.reference}`}
-            onPress={() => sel.toggle(c.namespace, c.reference)}
-            disabled={net.switching}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: on }}
-            accessibilityLabel={`${c.name}${c.isTestnet ? " (testnet)" : ""}`}
-          >
-            <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 border border-border bg-surface p-3.5">
-              <div className="flex flex-col flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
-                <LayoutGrid size={18} className="text-foreground" />
+          <span className="flex-1 font-sans text-base font-medium text-foreground">Currency</span>
+          {CURRENCIES.map((c) => (
+            <Pressable
+              key={c}
+              onPress={() => pickCurrency(c)}
+              accessibilityState={{ selected: currency === c }}
+            >
+              <div className={`flex items-center gap-1 border px-2.5 py-1.5 ${currency === c ? "border-foreground" : "border-border"}`}>
+                {currency === c && <Check size={14} className="text-foreground" />}
+                <span className={`font-sans text-sm font-medium ${currency === c ? "text-foreground" : "text-muted-foreground"}`}>{c}</span>
               </div>
-              <div className="flex flex-col flex-1 gap-0.5">
-                <span className="font-sans text-base font-medium text-foreground">{c.name}</span>
-                <span className="font-sans text-xs text-muted-foreground">
-                  {c.namespace}:{c.reference.slice(0, 8)}{c.reference.length > 8 ? "…" : ""}
-                </span>
-              </div>
-              {c.isTestnet && (
-                <span className="font-sans text-xs font-bold tracking-[1px] text-muted-foreground">TESTNET</span>
-              )}
-              <div
-                style={{ flexDirection: "row" }}
-                className={`flex flex-col items-center gap-1 border px-2.5 py-1.5 ${on ? "border-foreground" : "border-border"}`}
-              >
-                {on && <Check size={14} className="text-foreground" />}
-                <span className={`font-sans text-sm font-medium ${on ? "text-foreground" : "text-muted-foreground"}`}>
-                  {net.switching ? "…" : on ? "ON" : "OFF"}
-                </span>
-              </div>
-            </div>
-          </Pressable>
-        );
-      })}
-
-      <span className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Preferences</span>
-      {/* flexWrap: at 320px the two currency pills drop below the label instead of squeezing. */}
-      <div style={{ flexDirection: "row", flexWrap: "wrap" }} className="flex flex-col items-center gap-2 border border-border bg-surface p-3.5">
-        <div className="flex flex-col flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
-          <Banknote size={18} className="text-foreground" />
+            </Pressable>
+          ))}
         </div>
-        <span className="flex-1 font-sans text-base font-medium text-foreground">Currency</span>
-        {CURRENCIES.map((c) => (
-          <Pressable
-            key={c}
-            onPress={() => pickCurrency(c)}
-            accessibilityState={{ selected: currency === c }}
-          >
-            <div style={{ flexDirection: "row" }} className={`flex flex-col items-center gap-1 border px-2.5 py-1.5 ${currency === c ? "border-foreground" : "border-border"}`}>
-              {currency === c && <Check size={14} className="text-foreground" />}
-              <span className={`font-sans text-sm font-medium ${currency === c ? "text-foreground" : "text-muted-foreground"}`}>{c}</span>
-            </div>
-          </Pressable>
-        ))}
-      </div>
+      </Group>
 
-      <span className="mt-4 font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">Account</span>
-      <UIButton title="Sign Out" onPress={onLogout} variant="danger" />
-    </ScrollArea>
+      <Section>
+        <SectionHead className="pb-8">
+          <UIButton title="Sign Out" onPress={onLogout} variant="danger" />
+        </SectionHead>
+      </Section>
+    </div>
+  );
+}
+
+// One titled block: the heading sits on the section rule, rows are dividers.
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Section>
+      <SectionHead className="pb-0 pt-4">
+        <span className="font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">{title}</span>
+      </SectionHead>
+      <div className="flex flex-col divide-y divide-line">{children}</div>
+    </Section>
   );
 }
 
@@ -314,13 +276,68 @@ function Row({
 }) {
   return (
     <Pressable onPress={onPress} accessibilityLabel={label}>
-      <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 border border-border bg-surface p-3.5">
-        <div className="flex flex-col flex h-[34px] w-[34px] items-center justify-center rounded-full bg-muted">
+      <div className="flex w-full items-center gap-3 px-6 py-3 transition-colors hover:bg-surface">
+        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-line bg-surface">
           <Icon size={18} className="text-foreground" />
         </div>
         <span className="flex-1 font-sans text-base font-medium text-foreground">{label}</span>
         {value && <span className="font-sans text-sm text-muted-foreground">{value}</span>}
         <ChevronRight size={16} className="text-muted-foreground" />
+      </div>
+    </Pressable>
+  );
+}
+
+function ToggleRow({
+  icon: Icon,
+  label,
+  hint,
+  on,
+  busy,
+  testnet,
+  onPress,
+}: {
+  icon: typeof KeyRound;
+  label: string;
+  hint: string;
+  on: boolean;
+  busy?: boolean;
+  testnet?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={busy}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: on }}
+      accessibilityLabel={testnet ? `${label} (testnet)` : label}
+    >
+      <div className="flex w-full items-center gap-3 px-6 py-3 transition-colors hover:bg-surface">
+        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+          <Icon size={18} className="text-foreground" />
+        </div>
+        <div className="flex flex-1 flex-col gap-0.5">
+          <span className="font-sans text-base font-medium text-foreground">{label}</span>
+          <span className="font-sans text-xs text-muted-foreground">{hint}</span>
+        </div>
+        {testnet && <span className="font-sans text-xs font-bold tracking-[1px] text-muted-foreground">TESTNET</span>}
+        <div className={`flex items-center gap-1 border px-2.5 py-1.5 ${on ? "border-foreground" : "border-border"}`}>
+          {on && <Check size={14} className="text-foreground" />}
+          <span className={`font-sans text-sm font-medium ${on ? "text-foreground" : "text-muted-foreground"}`}>
+            {busy ? "…" : on ? "ON" : "OFF"}
+          </span>
+        </div>
+      </div>
+    </Pressable>
+  );
+}
+
+function Retry({ onPress, label }: { onPress: () => void; label: string }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
+      <div className="mt-2 flex items-center self-start border-b border-foreground py-1">
+        <span className="font-sans text-sm font-medium text-foreground">Retry</span>
       </div>
     </Pressable>
   );

@@ -1,7 +1,9 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
+import { Section, SectionHead } from "../../../shared/components/ui/Section";
 import { TextField } from "../../../shared/components/ui/TextField";
 import { styles as s } from "../../../shared/styles/theme";
 import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
+import { BrandMark } from "../../../shared/components/ui/BrandMark";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import { ArrowRight, Mail } from "../../../shared/components/icons";
 
@@ -66,80 +68,85 @@ export function LoginOptions({
   return (
     <div className="flex flex-col flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <div style={s.container} className="flex flex-col">
-      <div className="flex flex-col flex-1 w-full items-center justify-center gap-5">
-        <div className="flex flex-col items-center gap-2">
-          <span className="font-serif text-4xl tracking-[-0.4px] text-foreground">PeridotID</span>
-          {ssoOrigin ? (
-            <span className="font-sans text-sm text-muted-foreground">Sign in to continue to {ssoOrigin}</span>
-          ) : ctxOrigin ? (
-            <span className="font-sans text-sm text-muted-foreground">Sign in to continue to {ctxOrigin}</span>
-          ) : null}
-        </div>
-        {error && <p role="alert" style={s.error}>{error}</p>}
-        <div className="flex flex-col w-full max-w-[343px] gap-3">
-          <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-2">
-            <div className="flex flex-col flex-1 items-center gap-2.5 border border-border bg-background px-5 py-[15px]" style={{ flexDirection: "row" }}>
-              <Mail size={16} className="text-muted-foreground" />
-              <TextField
-                id="login-email-inline"
-                aria-label="Email address"
-                className="flex-1 p-0 font-sans text-sm text-foreground [--placeholder:var(--color-muted-foreground)] outline-none"
-                value={email}
-                onChangeText={onEmailChange}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                returnKeyType="go"
-                placeholder="Continue with email"
-                editable={!busy}
-                onSubmitEditing={onSubmitEmail}
-               />
-            </div>
-            <Pressable
-              onPress={onSubmitEmail}
-              disabled={busy}
-              accessibilityRole="button"
-              accessibilityLabel="Continue with email"
-              style={({ pressed }) => ({ opacity: pressed && !busy ? 0.7 : busy ? 0.55 : 1 })}
-              className="self-stretch"
-            >
-              <div className="flex flex-col flex h-full w-[50px] items-center justify-center border border-foreground bg-foreground">
-                <ArrowRight size={18} className="text-background" />
+      <div className="flex flex-1 flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="flex flex-col gap-4 pb-8">
+            <div className="flex flex-col flex-1 w-full items-center justify-center gap-5">
+              <div className="flex flex-col items-center gap-2">
+                <BrandMark size="lg" />
+                {ssoOrigin ? (
+                  <span className="font-sans text-sm text-muted-foreground">Sign in to continue to {ssoOrigin}</span>
+                ) : ctxOrigin ? (
+                  <span className="font-sans text-sm text-muted-foreground">Sign in to continue to {ctxOrigin}</span>
+                ) : null}
               </div>
-            </Pressable>
-          </div>
-          <UIButton
-            title="Continue with Google"
-            onPress={onGoogle}
-            disabled={busy}
-            align="left"
-            icon={<GoogleIcon size={16} />}
-          />
-          <UIButton
-            title="Continue with Apple"
-            disabled
-            align="left"
-            icon={<AppleIcon size={18} className="text-muted-foreground" />}
-          />
-          <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
-            <div className="flex flex-col h-px flex-1 bg-border"  />
-            <span className="font-sans text-xs text-muted-foreground">or</span>
-            <div className="flex flex-col h-px flex-1 bg-border"  />
-          </div>
-          {stepUp && (
-            <span className="text-center font-sans text-sm text-foreground">Session expired — please confirm it's you with your passkey.</span>
-          )}
-          <UIButton
-            title={busy ? "Waiting for passkey…" : "Select a passkey"}
-            onPress={onPasskey}
-            disabled={busy}
-            variant="primary"
-          />
-          <span className="text-center font-sans text-xs text-muted-foreground">By continuing, I agree to PeridotID Terms of Use and Privacy notice</span>
-        </div>
-      </div>
-      </div>
+              {error && <p role="alert" style={s.error}>{error}</p>}
+              <div className="flex flex-col w-full max-w-[343px] gap-3">
+                <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-2">
+                  <div className="flex flex-col flex-1 items-center gap-2.5 border border-border bg-background px-5 py-[15px]" style={{ flexDirection: "row" }}>
+                    <Mail size={16} className="text-muted-foreground" />
+                    <TextField
+                      id="login-email-inline"
+                      aria-label="Email address"
+                      className="flex-1 p-0 font-sans text-sm text-foreground [--placeholder:var(--color-muted-foreground)] outline-none"
+                      value={email}
+                      onChangeText={onEmailChange}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="email-address"
+                      returnKeyType="go"
+                      placeholder="Continue with email"
+                      editable={!busy}
+                      onSubmitEditing={onSubmitEmail}
+                     />
+                  </div>
+                  <Pressable
+                    onPress={onSubmitEmail}
+                    disabled={busy}
+                    accessibilityRole="button"
+                    accessibilityLabel="Continue with email"
+                    style={({ pressed }) => ({ opacity: pressed && !busy ? 0.7 : busy ? 0.55 : 1 })}
+                    className="self-stretch"
+                  >
+                    <div className="flex flex-col flex h-full w-[50px] items-center justify-center border border-foreground bg-foreground">
+                      <ArrowRight size={18} className="text-background" />
+                    </div>
+                  </Pressable>
+                </div>
+                <UIButton
+                  title="Continue with Google"
+                  onPress={onGoogle}
+                  disabled={busy}
+                  align="left"
+                  icon={<GoogleIcon size={16} />}
+                />
+                <UIButton
+                  title="Continue with Apple"
+                  disabled
+                  align="left"
+                  icon={<AppleIcon size={18} className="text-muted-foreground" />}
+                />
+                <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+                  <div className="flex flex-col h-px flex-1 bg-border"  />
+                  <span className="font-sans text-xs text-muted-foreground">or</span>
+                  <div className="flex flex-col h-px flex-1 bg-border"  />
+                </div>
+                {stepUp && (
+                  <span className="text-center font-sans text-sm text-foreground">Session expired — please confirm it's you with your passkey.</span>
+                )}
+                <UIButton
+                  title={busy ? "Waiting for passkey…" : "Select a passkey"}
+                  onPress={onPasskey}
+                  disabled={busy}
+                  variant="primary"
+                />
+                <span className="text-center font-sans text-xs text-muted-foreground">By continuing, I agree to PeridotID Terms of Use and Privacy notice</span>
+              </div>
+            </div>
+      
+        </SectionHead>
+      </Section>
+    </div>
     </div>
   );
 }

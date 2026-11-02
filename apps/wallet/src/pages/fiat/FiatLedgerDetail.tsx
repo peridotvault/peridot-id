@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
+import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
@@ -50,30 +50,51 @@ export function FiatLedgerDetail({ item: initial, onDone }: { item: FiatLedgerIt
   };
 
   return (
-    <ScrollArea className="flex-1 bg-background" contentContainerStyle={s.container}>
-      <PushHeader onBack={onDone} title={titleOf(item, incoming)} />
-      <span className="my-2 font-serif text-3xl text-foreground">{sign}{fmtIdr(amount)}</span>
+    <div className="flex flex-col">
+      <Section className="border-t-0">
+        <SectionHead className="pb-0">
+          <PushHeader onBack={onDone} title={titleOf(item, incoming)} />
+        </SectionHead>
+      </Section>
 
-      <Field label="Status" value={ledgerStatusLabel(tx.status)} />
-      {tx.counterpartyPid && <Field label={incoming ? "From" : "To"} value={tx.counterpartyPid} />}
-      <Field label={incoming ? "Credited" : "Debited"} value={fmtIdr(tx.amountIdr)} />
-      <Field label="Reference" value={tx.entryGroup} />
-      <Field label="Created" value={fmtDate(item.createdAt)} />
+      <Section>
+        <SectionHead className="pb-0">
+          <span className="font-mono text-2xl text-foreground">{sign}{fmtIdr(amount)}</span>
+        </SectionHead>
 
-      {error && <p role="alert" style={s.error}>{error}</p>}
+        <div className="flex flex-col divide-y divide-line border-t border-line">
+          <Field label="Status" value={ledgerStatusLabel(tx.status)} />
+          {tx.counterpartyPid && <Field label={incoming ? "From" : "To"} value={tx.counterpartyPid} />}
+          <Field label={incoming ? "Credited" : "Debited"} value={fmtIdr(tx.amountIdr)} />
+          <Field label="Reference" value={tx.entryGroup} />
+          <Field label="Created" value={fmtDate(item.createdAt)} />
+        </div>
+      </Section>
+
+      {error && (
+        <Section className="border-t-danger/40 bg-danger/10">
+          <SectionHead className="py-3">
+            <p role="alert" className="font-sans text-sm text-foreground">{error}</p>
+          </SectionHead>
+        </Section>
+      )}
 
       {cancellable && (
-        <UIButton title={busy ? "Cancelling…" : "Cancel transfer"} onPress={cancel} disabled={busy} variant="danger" />
+        <Section>
+          <SectionHead className="pb-8">
+            <UIButton title={busy ? "Cancelling…" : "Cancel transfer"} onPress={cancel} disabled={busy} variant="danger" />
+          </SectionHead>
+        </Section>
       )}
-    </ScrollArea>
+    </div>
   );
 }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span style={s.label}>{label}</span>
-      <span className="select-text font-sans text-sm text-foreground">{value}</span>
+    <div className="flex items-baseline justify-between gap-4 px-6 py-3">
+      <span className="font-sans text-xs uppercase tracking-[0.6px] text-muted-foreground">{label}</span>
+      <span className="select-text text-right font-sans text-sm text-foreground">{value}</span>
     </div>
   );
 }

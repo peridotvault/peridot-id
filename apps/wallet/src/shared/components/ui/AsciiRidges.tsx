@@ -605,7 +605,7 @@ export const AsciiRidgesGL: React.FC<AsciiRidgesProps> = (props) => {
           bottom: 0,
           pointerEvents: "none",
           background:
-            "linear-gradient(to bottom, #0a0a0a 0%, transparent 25%, transparent 80%, #0a0a0a 100%)",
+            "linear-gradient(to bottom, #0d0f0e 0%, transparent 25%, transparent 80%, #0d0f0e 100%)",
         }}
       />
     </div>
@@ -854,7 +854,7 @@ const AsciiRidges2D: React.FC<AsciiRidgesProps> = (props) => {
           bottom: 0,
           pointerEvents: "none",
           background:
-            "linear-gradient(to bottom, #0a0a0a 0%, transparent 25%, transparent 80%, #0a0a0a 100%)",
+            "linear-gradient(to bottom, #0d0f0e 0%, transparent 25%, transparent 80%, #0d0f0e 100%)",
         }}
       />
     </div>

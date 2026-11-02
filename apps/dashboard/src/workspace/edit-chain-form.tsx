@@ -78,7 +78,7 @@ export function EditChainForm({
 
   return (
     <div>
-      <div className={`rounded-lg border border-border px-3 py-2 font-mono text-xs ${MUTED}`}>
+      <div className={`border border-border px-3 py-2 font-mono text-xs ${MUTED}`}>
         {chain.namespace}:{chain.reference} · id {chain.id}
       </div>
       {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}

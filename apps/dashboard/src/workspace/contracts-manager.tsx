@@ -87,7 +87,7 @@ export function ContractsManager({ client }: { client: PeridotClient }) {
             </select>
           </label>
           {chain && (
-            <Card className="mt-4">
+            <Card>
               <div className="flex flex-col gap-2">
                 {(chain.contracts ?? []).map((k) => (
                   <div key={k.type} className="flex items-center gap-2 font-mono text-xs">

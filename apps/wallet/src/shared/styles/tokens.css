@@ -1,16 +1,32 @@
 /* Brand tokens (byte-identical to styles/theme.ts): sidebar and other
-   Tailwind-styled components consume these so the palette stays single-source. */
+   Tailwind-styled components consume these so the palette stays single-source.
+   Values mirror the PeridotVault marketing system (brand.md). */
 @theme {
-  --color-background: #0a0a0a;
-  --color-surface: #141414;
-  --color-muted: #171717;
-  --color-border: #262626;
-  --color-foreground: #fafafa;
-  --color-muted-foreground: #a3a3a3;
+  /* Brand */
+  --color-primary: #349b65;
+  --color-secondary: #349b6650;
+  --color-accent: #87ee83;
+
+  /* Surfaces */
+  --color-background: #0d0f0e;
+  --color-surface: #060807;
+  --color-card: #060807;
+  --color-muted: #363636;
+
+  /* Lines */
+  --color-border: #ffffff28;
+  --color-line: #ffffff14;
+
+  /* Text */
+  --color-foreground: #e0e4e4;
+  --color-paragraph: #b5b5b5;
+  --color-label: #ffffff60;
+  --color-muted-foreground: #7d7d7d;
+
+  /* Status */
   --color-danger: #ff5f57;
-  --color-success: #28c840;
-  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-serif: "Source Serif 4", Georgia, serif;
+  --color-success: #87ee83;
+
+  --font-sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --font-level: "NT Brick Sans", "Geist", system-ui, sans-serif;
 }

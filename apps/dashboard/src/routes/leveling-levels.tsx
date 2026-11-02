@@ -35,7 +35,7 @@ export default function LevelingLevelsPage() {
           <div className="mt-4"><PolicyDraftForm onDone={reload} /></div>
         </Card>
       ) : (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col">
           <Card>
             <h2 className="text-lg font-semibold tracking-tight">Policy versions</h2>
             <ul className="mt-3 flex flex-col gap-2">
@@ -45,13 +45,13 @@ export default function LevelingLevelsPage() {
                     type="button"
                     onClick={() => setSelectedId(p.id)}
                     aria-pressed={selected?.id === p.id}
-                    className={`flex w-full flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors focus-ring ${
+                    className={`flex w-full flex-wrap items-center gap-2 border px-3 py-2 text-left text-sm transition-colors focus-ring ${
                       selected?.id === p.id ? "border-foreground" : "border-border hover:border-foreground/50"
                     }`}
                   >
                     <span className="font-medium">v{p.version}</span>
                     {p.active && (
-                      <span className="rounded-[3px] bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      <span className="bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
                         active
                       </span>
                     )}
@@ -107,7 +107,7 @@ function PolicyDraftForm({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="rounded-lg border border-border p-4">
+    <div className="border border-border p-4">
       <h3 className="text-sm font-semibold">Draft policy version</h3>
       <div className="mt-2 grid gap-2 sm:grid-cols-3">
         <label className="text-xs">Base<input aria-label="Formula base" className={FIELD} value={base} inputMode="numeric" onChange={(e) => setBase(e.target.value)} /></label>
@@ -182,7 +182,7 @@ function ThresholdTable({
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.level} className="border-b border-dotted border-border">
+                <tr key={r.level} className="border-b border-line">
                   <td className="py-1.5 pr-4 font-medium">L{r.level}</td>
                   <td className="py-1.5 pr-4 text-right">{formatXp(r.draftXp)}</td>
                   <td className="py-1.5 pr-4 text-right">{r.activeXp === null ? "—" : formatXp(r.activeXp)}</td>
@@ -342,7 +342,7 @@ function SimulatorCard() {
             </thead>
             <tbody>
               {rows.slice(0, 25).map((r) => (
-                <tr key={r.level} className="border-b border-dotted border-border">
+                <tr key={r.level} className="border-b border-line">
                   <td className="py-1.5 pr-4 font-medium">L{r.level}</td>
                   <td className="py-1.5 text-right">{formatXp(r.cumulativeXp)}</td>
                 </tr>

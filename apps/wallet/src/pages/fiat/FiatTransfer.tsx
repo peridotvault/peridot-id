@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ScrollArea } from "../../shared/components/ui/ScrollArea";
+import { Section } from "../../shared/components/ui/Section";
 import { TextField } from "../../shared/components/ui/TextField";
 import type { FiatTransferInquiryView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../../shared/app/AppContext";
@@ -140,49 +140,57 @@ export function FiatTransfer({ onDone }: { onDone: () => void }) {
 
   if (inquiry) {
     return (
-      <ScrollArea contentContainerStyle={s.container}>
-        <PushHeader onBack={cancel} title="Review transfer" />
-        <div className="flex flex-col gap-2.5 border border-border bg-surface p-3">
-          <Row label="To" value={inquiry.beneficiaryPid} />
-          <Row label="They receive" value={fmtIdr(inquiry.netIdr)} />
-          <Row label="Service fee" value={fmtIdr(inquiry.feeIdr)} />
-          <Row label="Total debited" value={fmtIdr(inquiry.grossIdr)} />
+      <div className="flex flex-col">
+        <Section className="border-t-0">
+          <div className="flex flex-col gap-4 px-6 py-6">
+            <PushHeader onBack={cancel} title="Review transfer" />
+            <div className="flex flex-col divide-y divide-line border-t border-line">
+              <Row label="To" value={inquiry.beneficiaryPid} />
+              <Row label="They receive" value={fmtIdr(inquiry.netIdr)} />
+              <Row label="Service fee" value={fmtIdr(inquiry.feeIdr)} />
+              <Row label="Total debited" value={fmtIdr(inquiry.grossIdr)} />
+            </div>
+            {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error-review" style={s.error}>{error}</p>}
+            <UIButton title={busy ? "Sending…" : "Confirm & send"} onPress={confirm} disabled={busy || gated || frozen} variant="primary" />
         </div>
-        {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error-review" style={s.error}>{error}</p>}
-        <UIButton title={busy ? "Sending…" : "Confirm & send"} onPress={confirm} disabled={busy || gated || frozen} variant="primary" />
-      </ScrollArea>
+        </Section>
+      </div>
     );
   }
 
   return (
-    <ScrollArea contentContainerStyle={s.container}>
-      <PushHeader onBack={onDone} title="Transfer" />
-      <p style={s.subtitle}>Send from your balance to any PeridotID user. The fee is quoted from the amount you enter.</p>
-      {gated && (
-        <div className="flex flex-col border border-border bg-muted p-3">
-          <span className="font-sans text-sm font-semibold text-foreground">Disabled in Testnet Mode</span>
-          <span className="font-sans text-sm leading-5 text-muted-foreground">
-            Fiat transfers move real money — switch back to Mainnet in Settings to send.
-          </span>
+    <div className="flex flex-col">
+      <Section className="border-t-0">
+        <div className="flex flex-col gap-4 px-6 py-6">
+          <PushHeader onBack={onDone} title="Transfer" />
+          <p style={s.subtitle}>Send from your balance to any PeridotID user. The fee is quoted from the amount you enter.</p>
+          {gated && (
+            <div className="-mx-6 flex flex-col border-t border-secondary bg-secondary px-6 py-3">
+              <span className="font-sans text-sm font-semibold text-foreground">Disabled in Testnet Mode</span>
+              <span className="font-sans text-sm leading-5 text-muted-foreground">
+                Fiat transfers move real money — switch back to Mainnet in Settings to send.
+              </span>
+            </div>
+          )}
+          {frozen && !gated && <p style={s.hint}>Network is switching — transfers pause until balances reload.</p>}
+          <label htmlFor="fiat-to">
+            <span style={s.label}>Recipient PID</span>
+          </label>
+          <TextField id="fiat-to" aria-label="Recipient PID" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid"  />
+          <label htmlFor="fiat-amount">
+            <span style={s.label}>Amount (IDR)</span>
+          </label>
+          <TextField id="fiat-amount" aria-label="Amount (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000"  />
+          <label htmlFor="fiat-note">
+            <span style={s.label}>Note (optional)</span>
+          </label>
+          <TextField id="fiat-note" aria-label="Note (optional)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for"  />
+          <p style={s.hint}>Recipient must have a PeridotID account.</p>
+          {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error" style={s.error}>{error}</p>}
+          <UIButton title={busy ? "Checking…" : "Continue"} onPress={prepare} disabled={busy || gated || frozen || !to || !amount} variant="primary" />
         </div>
-      )}
-      {frozen && !gated && <p style={s.hint}>Network is switching — transfers pause until balances reload.</p>}
-      <label htmlFor="fiat-to">
-        <span style={s.label}>Recipient PID</span>
-      </label>
-      <TextField id="fiat-to" aria-label="Recipient PID" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid"  />
-      <label htmlFor="fiat-amount">
-        <span style={s.label}>Amount (IDR)</span>
-      </label>
-      <TextField id="fiat-amount" aria-label="Amount (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000"  />
-      <label htmlFor="fiat-note">
-        <span style={s.label}>Note (optional)</span>
-      </label>
-      <TextField id="fiat-note" aria-label="Note (optional)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for"  />
-      <p style={s.hint}>Recipient must have a PeridotID account.</p>
-      {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error" style={s.error}>{error}</p>}
-      <UIButton title={busy ? "Checking…" : "Continue"} onPress={prepare} disabled={busy || gated || frozen || !to || !amount} variant="primary" />
-    </ScrollArea>
+      </Section>
+    </div>
   );
 }
 

@@ -104,7 +104,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
         </div>
       )}
 
-      <Card className="mt-8">
+      <Card>
         <h3 className="font-semibold tracking-tight">Register a new app</h3>
         <p className={`mt-1 text-sm ${MUTED}`}>Just a name — everything else is configured inside the app.</p>
         <label className="mt-3 block text-sm">

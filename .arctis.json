@@ -1,0 +1,53 @@
+{
+  "tasks": {
+    "columns": [
+      {
+        "id": "plan",
+        "title": "Plan"
+      },
+      {
+        "id": "progress",
+        "title": "In Progress"
+      },
+      {
+        "id": "done",
+        "title": "Done"
+      }
+    ],
+    "cards": [
+      {
+        "id": "c1",
+        "column": "done",
+        "title": "All Chains pindahkan ke atas tokens dan items",
+        "desc": "",
+        "order": 0,
+        "urgency": "medium"
+      },
+      {
+        "id": "c2",
+        "column": "plan",
+        "title": "masukkaan Chains ke dalaam 1 group di setting",
+        "desc": "",
+        "order": 1,
+        "urgency": "medium"
+      },
+      {
+        "id": "c3",
+        "column": "progress",
+        "title": "update the  Action Button UI sebaiknya ga di gabung. sebaiknya buttonnya punya button container sendiri aja. ini jadi jelek",
+        "desc": "",
+        "order": 0,
+        "urgency": "medium"
+      },
+      {
+        "id": "c4",
+        "column": "plan",
+        "title": "ketika logout dari aplikasi yang menggunakan peridot id,  jangan membuat peridot id web yang asli menjadi logout juga!",
+        "desc": "ketika logout dari aplikasi yang menggunakan peridot id,  jangan membuat peridot id web yang asli menjadi logout juga!\n\nseharusnya biarkan setiap domain akan menjadi entry dan logout yang berbeda! dan seharusnya di dalam settings -> sessions / devices kita bisa logout dari peridot.id wallet. \n\n",
+        "order": 0,
+        "urgency": "high"
+      }
+    ],
+    "next_id": 5
+  }
+}

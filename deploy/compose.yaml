@@ -68,6 +68,13 @@ services:
       API_DOMAIN: ${API_DOMAIN:-}
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-}
       BREVO_API_KEY: ${BREVO_API_KEY}
+      # Logo storage (Wasabi S3). Admin token/chain logo uploads throw 500
+      # without these — the bucket is per env (pid / pid-test).
+      WASABI_ENDPOINT: ${WASABI_ENDPOINT}
+      WASABI_REGION: ${WASABI_REGION:-ap-southeast-1}
+      WASABI_BUCKET_NAME: ${WASABI_BUCKET_NAME}
+      WASABI_ACCESS_KEY: ${WASABI_ACCESS_KEY}
+      WASABI_SECRET_KEY: ${WASABI_SECRET_KEY}
       # COOKIE_SECURE derives from the API_URL protocol (https → true in every
       # deployed env). Override only for the http-API-behind-https-proxy edge.
       COOKIE_SECURE: ${COOKIE_SECURE:-}
