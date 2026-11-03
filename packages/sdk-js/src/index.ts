@@ -20,6 +20,7 @@ export {
   sumTransferFee,
   type CheckoutDepositView,
   type DepositQuoteView,
+  type FiatPaymentView,
   type PaymentMethodQuote,
   type TransferFeeParts,
   type FeePolicyView,

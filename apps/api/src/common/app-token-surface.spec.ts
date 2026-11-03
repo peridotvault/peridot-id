@@ -1,3 +1,5 @@
+import { FiatPaymentsController } from "../fiat/fiat-payments.controller";
+import { FiatDeliveriesController } from "../fiat/fiat-deliveries.controller";
 // App-token write surface guard (ANT-233 F1 residual). Fail-closed CI check:
 // every state-changing route (POST/PUT/PATCH/DELETE) carrying JwtAuthGuard
 // must also carry UserTokenGuard (user-session-only) or AdminGuard (which
@@ -41,6 +43,8 @@ jest.mock("@peridotvault/pid-solana", () => ({
 }));
 
 const CONTROLLERS = [
+  FiatPaymentsController,
+  FiatDeliveriesController,
   AccountController,
   AdminController,
   AuthController,
@@ -73,6 +77,11 @@ const WRITE_METHODS = new Set([RequestMethod.POST, RequestMethod.PUT, RequestMet
  * UserTokenGuard, so a leaked app secret cannot mint owner passkey challenges.
  */
 const ALLOWLIST: Record<string, string> = {
+  "FiatPaymentsController.create": "fiat:payment scope; app bound, external Checkout money-in only",
+  "FiatPaymentsController.quote": "app-bound fee quote; moves no funds",
+  "FiatPaymentsController.cancel": "fiat:payment scope; only the authenticated app's unpaid intent",
+  "FiatPaymentsController.refund": "fiat:payment scope; beneficiary balance only, original payer and remaining principal enforced",
+
   "FiatLedgerController.inquiry": "documented escrow-release path (owner pid spends own funds; 1h TTL bounds theft)",
   "FiatLedgerController.confirm": "documented escrow-release path (owner pid spends own funds; 1h TTL bounds theft)",
   "FiatLedgerController.cancel": "cancel of own unposted intent; same escrow path as inquiry/confirm",

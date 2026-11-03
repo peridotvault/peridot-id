@@ -91,7 +91,7 @@ export class AppTokenDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^fiat:transfer$/, { message: "scope must be fiat:transfer" })
+  @Matches(/^fiat:(transfer|payment)$/, { message: "scope must be fiat:transfer or fiat:payment" })
   scope?: string;
 }
 

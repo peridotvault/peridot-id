@@ -457,17 +457,17 @@ describe("FiatSubAccountService", () => {
     expect(view.paymentUrl).toBe("https://pay.example/1");
   });
 
-  it("createCheckoutDeposit rejects net below Rp50.000 with a clear minimum error", async () => {
+  it("createCheckoutDeposit rejects net below Rp10.000 with a clear minimum error", async () => {
     const { service, prisma, checkout } = setup();
     prisma.fiatProviderAccount.findUnique.mockResolvedValue({ ...ACTIVE });
-    await expect(service.createCheckoutDeposit("ifal@pid", "49999")).rejects.toMatchObject({
+    await expect(service.createCheckoutDeposit("ifal@pid", "9000")).rejects.toMatchObject({
       status: 400,
-      message: expect.stringContaining("Minimum top-up is Rp50.000"),
+      response: expect.objectContaining({ code: "MIN_AMOUNT_BELOW_FLOOR", minimumIdr: "10000" }),
     });
     expect(checkout.createPayment).not.toHaveBeenCalled();
     expect(prisma.fiatProviderTransaction.create).not.toHaveBeenCalled();
     // Boundary: exactly Rp50.000 passes the minimum (quotes without error).
-    await expect(service.quoteDeposit("50000")).resolves.toMatchObject({ netIdr: "50000" });
+    await expect(service.quoteDeposit("10000")).resolves.toMatchObject({ netIdr: "10000", minimumIdr: "10000" });
   });
 
   it("createCheckoutDeposit applies flat 5% with no cap (net 1M → gross 1.05M)", async () => {
@@ -691,14 +691,14 @@ describe("FiatSubAccountService", () => {
     expect(prisma.fiatWebhookEvent.update).toHaveBeenCalledWith(expect.objectContaining({ where: { externalId: "ext-3" } }));
   });
 
-  it("webhook flags VA credits below the Rp50.000 net minimum (funds preserved)", async () => {
+  it("webhook flags VA credits below the Rp10.000 net minimum (funds preserved)", async () => {
     const { service, prisma } = setup();
     prisma.fiatProviderTransaction.findUnique.mockResolvedValueOnce(null);
     prisma.fiatProviderAccount.findFirst.mockResolvedValueOnce(null);
     prisma.fiatProviderAccount.findMany.mockResolvedValueOnce([{ ...ACTIVE }]);
     // Gross 50.000 → fee 2.500 → net 47.500 < 50.000: kept, flagged.
     await expect(
-      service.webhook("ext-4", JSON.stringify({ partnerReferenceNo: "VA2", toAccount: "888001140340010", amount: { value: "50000.00", currency: "IDR" } })),
+      service.webhook("ext-4", JSON.stringify({ partnerReferenceNo: "VA2", toAccount: "888001140340010", amount: { value: "10000.00", currency: "IDR" } })),
     ).resolves.toEqual({ ok: true });
     expect(prisma.fiatProviderTransaction.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2345,5 +2345,19 @@ describe("FiatSubAccountService", () => {
     expect(sac.transferInquiry).not.toHaveBeenCalled();
     expect(sac.transferPayment).not.toHaveBeenCalled();
     expect(ledger.issueForDeposit).not.toHaveBeenCalled();
+  });
+});
+
+describe("global Checkout floor", () => {
+  it("applies one floor to every app and returns structured validation", async () => {
+    const { service } = setup();
+    await expect(service.quoteDeposit("9000", "pidapp_kinno")).rejects.toMatchObject({ response: { code: "MIN_AMOUNT_BELOW_FLOOR", minimumIdr: "10000" } });
+    await expect(service.quoteDeposit("9000", "another_app")).rejects.toMatchObject({ response: { code: "MIN_AMOUNT_BELOW_FLOOR", minimumIdr: "10000" } });
+    await expect(service.quoteDeposit("10000", "pidapp_kinno")).resolves.toMatchObject({ minimumIdr: "10000" });
+  });
+  it("accepts a Rp10.000 Checkout creation", async () => {
+    const { service, checkout } = setup();
+    await expect(service.createCheckoutDeposit("ifal@pid", "10000")).resolves.toMatchObject({ netIdr: "10000" });
+    expect(checkout.createPayment).toHaveBeenCalledTimes(1);
   });
 });

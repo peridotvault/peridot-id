@@ -78,8 +78,11 @@ Fiat (one namespace `fiat`, see docs/FIAT_LEDGER.md): **DOKU Checkout is
 money-in only** (no Sub-Account). Every user balance lives on the internal
 fiat ledger (`fiat_ledger_entries`). Env: `DOKU_MODE/CLIENT_ID/SECRET_KEY`
 (Checkout), optional `PID_FIAT_LEDGER_ENABLED` (default true),
-`PID_FIAT_LEDGER_APP_ALLOWLIST` (escrow recipients, e.g. `live2dev@pid`),
-`PID_FIAT_LEDGER_TREASURY_PID`, `DOKU_WEBHOOK_URL`. On corroborated payment the
+`PID_FIAT_LEDGER_APP_ALLOWLIST` (optional extra transfer allowlist),
+`PID_FIAT_LEDGER_TREASURY_PID`, `DOKU_WEBHOOK_URL`. Recipients are eligible
+when they own an active app in the DB (created in the dashboard) — no ops
+registration. Fiat minimum/maximum are code constants in
+`apps/api/src/fiat/fiat-limits.ts`, not env. On corroborated payment the
 API issues `fiat_issue` (NET) + `fiat_fee`; issuance runs only inside the API
 (CI-guarded — no route/SDK/wallet issuance). DOKU Sub-Account / Unified Ledger
 code stays frozen (docs/FUTURE_UNIFIED_LEDGER.md).

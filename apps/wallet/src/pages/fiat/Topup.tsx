@@ -10,7 +10,7 @@ import { fmtIdr } from "../../shared/data/fiat";
 import { isNetworkSwitching, isTestnetMode } from "../../shared/data/networkMode";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
 import { FiatQuoteBreakdown } from "../../feat/fiat/components/FiatQuoteBreakdown";
-import { digitsOnly, groupDigits, MIN_NET_IDR } from "../../feat/fiat/utils/topupAmount";
+import { digitsOnly, groupDigits } from "../../feat/fiat/utils/topupAmount";
 import { useDepositQuote } from "../../feat/fiat/hooks/useDepositQuote";
 import { useCheckoutSync } from "../../feat/fiat/hooks/useCheckoutSync";
 
@@ -42,7 +42,7 @@ export function Topup({ onDone }: { onDone: () => void }) {
   const frozen = nm.switching;
 
   const digits = net.replace(/\D/g, "");
-  const belowMin = /^\d+$/.test(digits) && BigInt(digits) > 0n && BigInt(digits) < MIN_NET_IDR;
+  const belowMin = /^\d+$/.test(digits) && BigInt(digits) > 0n && BigInt(digits) < q.minimum;
 
   const openUrl = (url: string) => {
     openExternalUrl(url).catch(() => setError("Could not open the payment page."));
@@ -65,8 +65,8 @@ export function Topup({ onDone }: { onDone: () => void }) {
         setError("Enter the net amount you want credited.");
         return;
       }
-      if (BigInt(digits) < MIN_NET_IDR) {
-        setError("Minimum top-up is Rp50.000.");
+      if (BigInt(digits) < q.minimum) {
+        setError(`Minimum top-up is ${fmtIdr(q.minimum.toString())}.`);
         return;
       }
       if (!q.method) {
@@ -113,8 +113,8 @@ export function Topup({ onDone }: { onDone: () => void }) {
             <label htmlFor="topupAmount">
               <span style={s.label}>Amount credited to you (IDR)</span>
             </label>
-            <TextField id="topupAmount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="50.000"  />
-            {belowMin && <p role="alert" style={s.error}>Minimum top-up is Rp50.000.</p>}
+            <TextField id="topupAmount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="10.000"  />
+            {belowMin && <p role="alert" style={s.error}>Minimum top-up is {fmtIdr(q.minimum.toString())}.</p>}
 
             {q.quote && (
               <>
@@ -154,7 +154,7 @@ export function Topup({ onDone }: { onDone: () => void }) {
           </div>
 
           <p style={s.hint}>
-            Minimum top-up {fmtIdr(MIN_NET_IDR.toString())} net. Verified apps pay a Rp0 PeridotID fee. Tap Check payment status after paying — your Saldo updates once confirmed.
+            Minimum top-up {fmtIdr(q.minimum.toString())} net. Verified apps pay a Rp0 PeridotID fee. Tap Check payment status after paying — your Saldo updates once confirmed.
           </p>
         </div>
       </Section>

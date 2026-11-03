@@ -145,6 +145,7 @@ export function sumTransferFee(parts: TransferFeeParts): string {
 
 /** Transparent top-up quote (moves no money). */
 export interface DepositQuoteView {
+  minimumIdr: string;
   amountIdr: string;
   netIdr: string;
   /** PeridotID platform fee (Rp0 for verified apps) — excludes PPN. */
@@ -202,7 +203,7 @@ interface ApiLike {
 function unwrap<T>(res: { ok: boolean; data: T | ApiError }, fallback: string): T {
   if (!res.ok || "statusCode" in (res.data as object)) {
     const msg = (res.data as ApiError)?.message ?? fallback;
-    throw new Error(Array.isArray(msg) ? msg.join(" ") : msg);
+    throw Object.assign(new Error(Array.isArray(msg) ? msg.join(" ") : msg), res.data);
   }
   return res.data as T;
 }
@@ -272,6 +273,31 @@ export class PeridotFiat {
    * apps), app fee, per-method DOKU gateway fee and total. Render this on the
    * PeridotID checkout summary before creating the deposit.
    */
+  async quotePayment(input: { amountIdr: string; clientId?: string; paymentMethod?: string }) {
+    return unwrap(await this.api.post<DepositQuoteView & { grossIdr: string; feeIdr: string }>(`${BASE}/payments/quote`, input), "Payment request failed");
+  }
+
+  async createPayment(input: { amountIdr: string; externalId: string; paymentMethod: string; clientId?: string; beneficiaryPid?: string; payerPid?: string; description?: string; metadata?: Record<string, unknown> }) {
+    return unwrap(await this.api.post<FiatPaymentView>(`${BASE}/payments`, input), "Payment request failed");
+  }
+
+  async getPayment(id: string) {
+    return unwrap(await this.api.get<FiatPaymentView>(`${BASE}/payments/${encodeURIComponent(id)}`), "Get payment failed");
+  }
+
+  async cancelPayment(id: string) {
+    return unwrap(await this.api.post<FiatPaymentView>(`${BASE}/payments/${encodeURIComponent(id)}/cancel`, {}), "Cancel payment failed");
+  }
+
+  async refundPayment(id: string, input: { requestId: string; amountIdr?: string }) {
+    return unwrap(await this.api.post<{ refundId: string; amountIdr: string }>(`${BASE}/payments/${encodeURIComponent(id)}/refund`, input), "Payment request failed");
+  }
+
+  async listPayments(query: { externalId?: string; status?: string; createdAfter?: string; clientId?: string } = {}) {
+    const params = new URLSearchParams(Object.entries(query).filter((entry): entry is [string, string] => entry[1] !== undefined));
+    return unwrap(await this.api.get<FiatPaymentView[]>(`${BASE}/payments?${params}`), "List payments failed");
+  }
+
   async quoteDeposit(input: { netAmountIdr: string; clientId?: string; paymentMethod?: string }): Promise<DepositQuoteView> {
     const cid = this.appId(input.clientId);
     return unwrap(
@@ -286,7 +312,7 @@ export class PeridotFiat {
 
   /**
    * Create a Checkout deposit intent: DOKU-hosted page. netAmountIdr is the
-   * NET credited to the user (minimum Rp50.000); PeridotID fee + app fee +
+   * NET credited to the user (minimum Rp10.000); PeridotID fee + app fee +
    * the selected method's gateway fee and total are quoted upfront.
    * `paymentMethod` (DOKU code) locks the channel at DOKU. Third-party mode
    * opens the PeridotID popup (`fiat-checkout`) which navigates to DOKU on
@@ -351,4 +377,24 @@ export class PeridotFiat {
   async cancelTransaction(id: string): Promise<FiatLedgerEntry> {
     return unwrap(await this.api.post<FiatLedgerEntry>(`${BASE}/transfers/${id}/cancel`), "Cancel failed");
   }
+}
+
+export interface FiatPaymentView {
+  id: string;
+  appClientId: string;
+  payerPid: string | null;
+  beneficiaryPid: string;
+  status: "created" | "pending" | "paid" | "expired" | "failed" | "cancelled";
+  paymentUrl: string | null;
+  grossIdr: string;
+  netIdr: string;
+  feeIdr: string;
+  totalIdr: string;
+  externalId: string;
+  description: string | null;
+  metadata: Record<string, unknown>;
+  expiresAt: string;
+  paidAt: string | null;
+  createdAt: string;
+  refundedIdr: string;
 }

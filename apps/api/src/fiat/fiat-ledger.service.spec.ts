@@ -1,3 +1,4 @@
+import * as webhookHttp from "./webhook-http";
 import { createHmac } from "node:crypto";
 import { ConfigService } from "@nestjs/config";
 import { encryptSecret } from "../common/secret-crypto";
@@ -68,6 +69,7 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
     pidApp: { findMany: jest.fn(async () => []), findFirst: jest.fn(async () => null), findUnique: jest.fn(async () => null) },
     pidAppFee: { findUnique: jest.fn(async () => null) },
     fiatLedgerEvent: {
+      updateMany: jest.fn(async () => ({ count: 1 })),
       create: jest.fn(async (args: any) => ({ id: "e1", ...args.data })),
       findFirst: jest.fn(async () => null),
       findMany: jest.fn(async () => []),
@@ -95,6 +97,7 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
       // atomic outbox path.
       pidApp: {
         findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+        findFirst: (...args: any[]) => (prisma.pidApp.findFirst as any)(...args),
       },
       fiatLedgerEvent: {
         findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
@@ -156,32 +159,38 @@ describe("FiatLedgerService.issueForDeposit", () => {
   });
 });
 
-// M7 (ANT-802): Phase-1 escrow-only — every transfer needs an allowlisted
-// app PID on one side. Money-moving tests run against a live2dev@pid
-// allowlist; the gate itself is pinned in the transfers block.
+// Transfers are escrow-only: one side must be an active PidApp owner (created
+// in the dashboard) or be on the optional operator allowlist.
 const ESCROW = { PID_FIAT_LEDGER_APP_ALLOWLIST: "live2dev@pid" };
 
 describe("FiatLedgerService transfers", () => {
-  it("rejects user→user sends when neither side is allowlisted (M7)", async () => {
+  it("rejects user→user sends when neither side owns an app", async () => {
     const { service, prisma } = setup(ESCROW);
     prisma.identity.findUnique.mockResolvedValue({ pid: "rani@pid" });
     await expect(
       service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "rani@pid" }),
-    ).rejects.toThrow("Transfers are limited to escrow recipients");
+    ).rejects.toThrow("Transfers are limited to app owners");
     expect(prisma.fiatLedgerEntry.create).not.toHaveBeenCalled();
   });
 
-  it("rejects ALL transfers when the allowlist is empty/missing (M7 fail-closed)", async () => {
+  it("allows a recipient who owns an active app without any allowlist", async () => {
     const { service, prisma } = setup();
     prisma.identity.findUnique.mockResolvedValue({ pid: "live2dev@pid" });
-    await expect(
-      service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" }),
-    ).rejects.toThrow("Transfers are limited to escrow recipients");
-    expect(prisma.fiatLedgerEntry.create).not.toHaveBeenCalled();
+    prisma.pidApp.findFirst.mockResolvedValueOnce({ id: "app1" });
+    const inq = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" });
+    expect(inq.grossIdr).toBe("500000");
   });
 
-  it("re-checks the allowlist at confirm (pre-enforcement intents never post, M7)", async () => {
-    // Intent sides are both outside the allowlist: even a `created` intent
+  it("allows an app owner to pay out to a user without any allowlist", async () => {
+    const { service, prisma } = setup();
+    prisma.identity.findUnique.mockResolvedValue({ pid: "rani@pid" });
+    prisma.pidApp.findFirst.mockResolvedValueOnce({ id: "app1" });
+    const inq = await service.transferInquiry("appowner@pid", { amountIdr: "500000", beneficiaryPid: "rani@pid" });
+    expect(inq.grossIdr).toBe("500000");
+  });
+
+  it("re-checks eligibility at confirm (pre-enforcement intents never post)", async () => {
+    // Intent sides are both ineligible: even a `created` intent
     // (minted before enforcement) dies at confirm.
     const { service, prisma } = setup(ESCROW);
     prisma.fiatLedgerEntry.findFirst.mockResolvedValue({
@@ -190,13 +199,14 @@ describe("FiatLedgerService transfers", () => {
       feePolicyVersion: 3, counterparty: {}, createdAt: new Date(),
     });
     // In-txn recheck sees `created` (passes the race gate), so the failure
-    // asserted is the allowlist re-check, not the race guard.
+    // asserted is the eligibility re-check, not the race guard.
     prisma.$transaction.mockImplementationOnce(async (fn: any) => fn({
       $queryRaw: jest.fn(async () => []),
       fiatLedgerEntry: { findFirst: jest.fn(async () => ({ id: "intent1", status: "created" })) },
+      pidApp: { findFirst: jest.fn(async () => null) },
     }));
     await expect(service.transferConfirm("dev@pid", "intent1")).rejects.toThrow(
-      "Transfers are limited to escrow recipients",
+      "Transfers are limited to app owners",
     );
   });
 
@@ -238,6 +248,7 @@ describe("FiatLedgerService transfers", () => {
       },
       pidApp: {
         findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+        findFirst: (...args: any[]) => (prisma.pidApp.findFirst as any)(...args),
       },
       fiatLedgerEvent: {
         findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
@@ -510,11 +521,11 @@ describe("FiatLedgerService callbacks", () => {
   it("delivers a pending event with an HMAC signature", async () => {
     const { service, events, prisma } = setup();
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
-      { id: "e1", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: { hello: "world" }, attempts: 0 },
+      { id: "e1", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: { hello: "world" }, createdAt: new Date(), nextAttemptAt: new Date(), attempts: 0 },
     ]);
     prisma.pidApp.findFirst.mockResolvedValueOnce({ webhookSecret: "s3cr3t" });
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
-    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+    jest.spyOn(webhookHttp, "postWebhook").mockImplementation(fetchMock as never);
 
     const res = await events.dispatchEvents({});
     expect(res.sent).toBe(1);
@@ -523,20 +534,20 @@ describe("FiatLedgerService callbacks", () => {
     expect(init.headers["X-Pid-Event"]).toBe("fiat.transfer.posted");
     const expected = "sha256=" + createHmac("sha256", "s3cr3t").update(init.body).digest("hex");
     expect(init.headers["X-Pid-Signature"]).toBe(expected);
-    expect(prisma.fiatLedgerEvent.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "delivered" }) }));
+    expect(prisma.fiatLedgerEvent.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "delivered" }) }));
   });
 
   it("retries a failed delivery with backoff", async () => {
     const { service, events, prisma } = setup();
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
-      { id: "e2", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: {}, attempts: 0 },
+      { id: "e2", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: {}, createdAt: new Date(), nextAttemptAt: new Date(), attempts: 0 },
     ]);
     prisma.pidApp.findFirst.mockResolvedValueOnce({ webhookSecret: "s" });
-    (global as unknown as { fetch: unknown }).fetch = jest.fn(async () => ({ ok: false, status: 500 }));
+    jest.spyOn(webhookHttp, "postWebhook").mockResolvedValue({ ok: false, status: 500 });
 
     const res = await events.dispatchEvents({});
     expect(res.failed).toBe(1);
-    expect(prisma.fiatLedgerEvent.update).toHaveBeenCalledWith(
+    expect(prisma.fiatLedgerEvent.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "pending", attempts: 1 }) }),
     );
   });
@@ -544,7 +555,7 @@ describe("FiatLedgerService callbacks", () => {
   it("signs with the secret of the app matching the event URL (not the first app)", async () => {
     const { service, events, prisma } = setup();
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
-      { id: "e3", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://b/hook", payload: { hello: "world" }, attempts: 0 },
+      { id: "e3", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://b/hook", payload: { hello: "world" }, createdAt: new Date(), nextAttemptAt: new Date(), attempts: 0 },
     ]);
     // Owner holds two apps; the ownerPid-only lookup used to pick app A's
     // secret for app B's URL. The service must resolve by (ownerPid, URL).
@@ -552,7 +563,7 @@ describe("FiatLedgerService callbacks", () => {
       args?.where?.webhookUrl === "https://b/hook" ? { webhookSecret: "secret-B" } : { webhookSecret: "secret-A" },
     );
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
-    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+    jest.spyOn(webhookHttp, "postWebhook").mockImplementation(fetchMock as never);
 
     const res = await events.dispatchEvents({});
     expect(res.sent).toBe(1);
@@ -567,17 +578,17 @@ describe("FiatLedgerService callbacks", () => {
   it("refuses unsigned dispatch when the target app/secret is gone", async () => {
     const { service, events, prisma } = setup();
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
-      { id: "e4", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://gone/hook", payload: {}, attempts: 0 },
+      { id: "e4", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://gone/hook", payload: {}, createdAt: new Date(), nextAttemptAt: new Date(), attempts: 0 },
     ]);
     prisma.pidApp.findFirst.mockResolvedValueOnce(null); // revoked/deleted app
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
-    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+    jest.spyOn(webhookHttp, "postWebhook").mockImplementation(fetchMock as never);
 
     const res = await events.dispatchEvents({});
     expect(res.sent).toBe(0);
     expect(res.failed).toBe(1);
     expect(fetchMock).not.toHaveBeenCalled(); // never send with an empty-key HMAC
-    expect(prisma.fiatLedgerEvent.update).toHaveBeenCalledWith(
+    expect(prisma.fiatLedgerEvent.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "pending", attempts: 1 }) }),
     );
   });
@@ -585,7 +596,7 @@ describe("FiatLedgerService callbacks", () => {
   it("enqueues a callback when an app owns a transfer party", async () => {
     const { service, events, prisma } = setup(ESCROW);
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
-    prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", webhookUrl: "https://x/hook" }]);
+    prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", clientId: "pidapp_test", webhookUrl: "https://x/hook" }]);
     const inq = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" });
     prisma.fiatLedgerEntry.findFirst.mockResolvedValueOnce({
       id: "intent1", kind: "fiat_transfer_out", pid: "dev@pid", counterpartyPid: "live2dev@pid",
@@ -602,6 +613,7 @@ describe("FiatLedgerService callbacks", () => {
       // Atomic outbox: the confirm txn itself reads apps + writes events.
       pidApp: {
         findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+        findFirst: (...args: any[]) => (prisma.pidApp.findFirst as any)(...args),
       },
       fiatLedgerEvent: {
         findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
@@ -623,7 +635,7 @@ describe("FiatLedgerService callbacks", () => {
         data: expect.objectContaining({
           eventType: "fiat.transfer.posted",
           targetPid: "live2dev@pid",
-          idempotencyKey: `${inq.entryGroup}:live2dev@pid`,
+          idempotencyKey: `${inq.entryGroup}:pidapp_test`,
         }),
       }),
     );
@@ -632,7 +644,7 @@ describe("FiatLedgerService callbacks", () => {
   it("skips a duplicate outbox enqueue on retried confirm", async () => {
     const { service, events, prisma } = setup(ESCROW);
     prisma.identity.findUnique.mockResolvedValueOnce({ pid: "live2dev@pid" });
-    prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", webhookUrl: "https://x/hook" }]);
+    prisma.pidApp.findMany.mockResolvedValueOnce([{ ownerPid: "live2dev@pid", clientId: "pidapp_test", webhookUrl: "https://x/hook" }]);
     // A previous confirm already enqueued this movement's callback.
     prisma.fiatLedgerEvent.findFirst.mockResolvedValueOnce({ id: "e0" });
     const inq = await service.transferInquiry("dev@pid", { amountIdr: "500000", beneficiaryPid: "live2dev@pid" });
@@ -656,6 +668,7 @@ describe("FiatLedgerService callbacks", () => {
       },
       pidApp: {
         findMany: (...args: any[]) => (prisma.pidApp.findMany as any)(...args),
+        findFirst: (...args: any[]) => (prisma.pidApp.findFirst as any)(...args),
       },
       fiatLedgerEvent: {
         findFirst: (...args: any[]) => (prisma.fiatLedgerEvent.findFirst as any)(...args),
@@ -837,11 +850,11 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
     const enc = encryptSecret(raw, TEST_KEY);
     expect(enc.startsWith("enc:v1:")).toBe(true);
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
-      { id: "e-enc", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: { hello: "world" }, attempts: 0 },
+      { id: "e-enc", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: { hello: "world" }, createdAt: new Date(), nextAttemptAt: new Date(), attempts: 0 },
     ]);
     prisma.pidApp.findFirst.mockResolvedValueOnce({ webhookSecret: enc });
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
-    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+    jest.spyOn(webhookHttp, "postWebhook").mockImplementation(fetchMock as never);
 
     const res = await events.dispatchEvents({});
     expect(res.sent).toBe(1);
@@ -854,11 +867,11 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
     const enc = encryptSecret("pidwh_secret", TEST_KEY);
     const { service, events, prisma } = setup({ PID_SECRETS_ENC_KEY: "" });
     prisma.fiatLedgerEvent.findMany.mockResolvedValueOnce([
-      { id: "e-nokey", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: {}, attempts: 0 },
+      { id: "e-nokey", eventType: "fiat.transfer.posted", targetPid: "app@pid", targetUrl: "https://x/hook", payload: {}, createdAt: new Date(), nextAttemptAt: new Date(), attempts: 0 },
     ]);
     prisma.pidApp.findFirst.mockResolvedValueOnce({ webhookSecret: enc });
     const fetchMock = jest.fn(async () => ({ ok: true, status: 200 }));
-    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+    jest.spyOn(webhookHttp, "postWebhook").mockImplementation(fetchMock as never);
 
     const res = await events.dispatchEvents({});
     expect(res.sent).toBe(0);

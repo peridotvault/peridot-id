@@ -11,13 +11,14 @@ export function useDepositQuote(
   net: string,
   onError: (msg: string) => void,
 ) {
+  const [minimum, setMinimum] = useState(MIN_NET_IDR);
   const [quote, setQuote] = useState<DepositQuoteView | null>(null);
   const [method, setMethod] = useState<string | null>(null);
 
   // Quote the top-up (moves no money) once the user pauses on a valid amount.
   useEffect(() => {
     const trimmed = net.replace(/\D/g, "");
-    if (!/^\d+$/.test(trimmed) || BigInt(trimmed) < MIN_NET_IDR) {
+    if (!/^\d+$/.test(trimmed) || BigInt(trimmed) <= 0n) {
       setQuote(null);
       return;
     }
@@ -28,11 +29,16 @@ export function useDepositQuote(
         .quoteDeposit({ netAmountIdr: n.toString() })
         .then((q) => {
           if (cancelled) return;
+          setMinimum(BigInt(q.minimumIdr));
           setQuote(q);
           setMethod((m) => pickMethod(m, q.paymentMethods));
         })
         .catch((e) => {
-          if (!cancelled) onError(e instanceof Error ? e.message : String(e));
+          if (cancelled) return;
+          setQuote(null);
+          if (e?.code === "MIN_AMOUNT_BELOW_FLOOR" && /^\d+$/.test(e.minimumIdr)) {
+            setMinimum(BigInt(e.minimumIdr));
+          } else onError(e instanceof Error ? e.message : String(e));
         });
     }, 250);
     return () => {
@@ -47,5 +53,5 @@ export function useDepositQuote(
   // gateway (fee+PPN). The quote is method-less, so derive from the selection.
   const transferFee = quote ? selectedTransferFee(quote, selected) : "0";
 
-  return { quote, setQuote, method, setMethod, selected, noMethods, transferFee };
+  return { minimum, quote, setQuote, method, setMethod, selected, noMethods, transferFee };
 }

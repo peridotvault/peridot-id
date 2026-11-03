@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
+import { WebhookDeliveries } from "./webhook-deliveries";
 import { unwrap } from "./api";
 import { normalizeOriginInput } from "./origins";
 import type { AppFee, PidApp } from "./app-types";
@@ -574,6 +575,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           <p className={`mt-1 text-xs ${MUTED}`}>https required (http allowed only for localhost). Setting a new URL rotates the signing secret.</p>
         </Card>
 
+        <WebhookDeliveries key={appId} client={client} appId={appId} />
         <Card className="border-t-0">
           <p className={SECTION_LABEL}>App fees</p>
           <p className={`mt-1 text-xs ${MUTED}`}>

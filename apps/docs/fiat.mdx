@@ -34,7 +34,7 @@ Balance is replayed from the immutable journal, never trusted from a cached numb
 ## Top up (money in)
 
 `checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns the DOKU
-payment URL. `netAmountIdr` is what you want **credited** (minimum Rp50.000); the
+payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the
 fee is quoted on top.
 
 ```ts
@@ -160,3 +160,38 @@ auth/wallet reads which return `T | ApiError`. See [Errors](/errors).
 
 - [Apps & workspace](/apps) — register an app, set its fees, read its escrow.
 - [API reference](/api/overview) — every fiat endpoint and schema.
+
+
+## Direct app checkout
+
+Create a payment with `POST /v1/fiat/payments` using an app token scoped to
+`fiat:payment`, or a payer session with `clientId`. `amountIdr` is credited in
+full to the beneficiary; fees are added to `totalIdr`. `externalId` is mandatory
+and unique per app. The payer needs no existing balance.
+
+```json
+{"amountIdr":"10000","externalId":"ORDER-1","paymentMethod":"QRIS","payerPid":"alice@pid"}
+```
+
+The response contains `id`, `paymentUrl`, `netIdr`, `feeIdr`, `totalIdr`,
+`expiresAt` and `status`. Use `/payments/quote` before checkout and
+`GET /payments/:id` for status. Session callers cannot specify another payer.
+Machine callers without a payer PID cannot receive PID refunds.
+
+`POST /payments/:id/refund` accepts `requestId` and optional `amountIdr` for a
+partial refund to the original payer's PeridotID balance. Fees are excluded.
+The beneficiary must authorize the refund and have enough balance.
+
+Fiat webhooks now deliver automatically. Verify the raw-body HMAC in
+`X-Pid-Signature`, deduplicate by `eventId`, and use the app dashboard's delivery
+log to replay events. Retries continue for longer than 24 hours. Public HTTPS
+endpoints are required; use a tunnel for local testing.
+
+Quotes return `minimumIdr`; below-minimum errors include
+`code: "MIN_AMOUNT_BELOW_FLOOR"` and `minimumIdr`. The floor is the same for
+every app (Rp10.000, hardcoded in the API — no env or per-app setting), and a
+single payment is capped at Rp10.000.000 (`PAYMENT_ABOVE_CEILING`).
+
+Cancellation hides the link locally; already issued DOKU URLs remain subject to
+provider expiry. A confirmed late payment is accounted for. Bank withdrawals
+remain unavailable.

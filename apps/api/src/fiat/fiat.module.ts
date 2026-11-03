@@ -1,3 +1,6 @@
+import { FiatDeliveriesController } from "./fiat-deliveries.controller";
+import { FiatPaymentsService } from "./fiat-payments.service";
+import { FiatPaymentsController } from "./fiat-payments.controller";
 import { Module } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { DokuCheckoutClient, DokuSubAccountProvider } from "@peridotvault/pid-payments";
@@ -26,7 +29,7 @@ const FAUCET_ENABLED = process.env.PID_FAUCET_ENABLED === "true";
 
 @Module({
   imports: [SecurityModule],
-  controllers: [FiatController, FiatLedgerController, ...(FAUCET_ENABLED ? [FaucetController] : [])],
+  controllers: [FiatDeliveriesController, FiatPaymentsController, FiatController, FiatLedgerController, ...(FAUCET_ENABLED ? [FaucetController] : [])],
   providers: [
     // DOKU Sub-Account provider — legacy surface kept for internal/admin
     // paths only; the user-facing money-in (Checkout) needs no sub-account.
@@ -55,6 +58,7 @@ const FAUCET_ENABLED = process.env.PID_FAUCET_ENABLED === "true";
         });
       },
     },
+    FiatPaymentsService,
     FiatSubAccountService,
     FiatLedgerService,
     FiatLedgerChainService,

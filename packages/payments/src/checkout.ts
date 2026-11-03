@@ -73,6 +73,7 @@ export interface CheckoutPaymentInput {
   paymentMethodTypes?: string[];
   /** Checkout page lifetime in minutes (default 60, per docs). */
   dueMinutes?: number;
+  recoverAbandonedCart?: boolean;
   /** Per-payment notify URL override (documents: additional_info.override_notification_url). */
   notifyUrl?: string;
 }
@@ -187,7 +188,7 @@ export class DokuCheckoutClient {
     if (input.grossAmountIdr > 999_999_999_999n) throw new ProviderError(400, "gross amount exceeds Checkout 12-digit limit");
     const bodyObj: Record<string, unknown> = {
       // language: DOKU-rendered page/receipt locale (documented optional).
-      order: { amount: Number(input.grossAmountIdr), invoice_number: input.invoiceNumber, currency: "IDR", language: CHECKOUT_LANGUAGE },
+      order: { amount: Number(input.grossAmountIdr), invoice_number: input.invoiceNumber, currency: "IDR", language: CHECKOUT_LANGUAGE, ...(input.recoverAbandonedCart !== undefined ? { recover_abandoned_cart: input.recoverAbandonedCart } : {}) },
       payment: {
         payment_due_date: input.dueMinutes ?? 60,
         ...(input.paymentMethodTypes ? { payment_method_types: input.paymentMethodTypes } : {}),
@@ -233,7 +234,7 @@ export class DokuCheckoutClient {
     };
     let res: Response;
     try {
-      res = await fetch(`${this.base()}${CHECKOUT_PAYMENT_PATH}`, { method: "POST", headers, body });
+      res = await fetch(`${this.base()}${CHECKOUT_PAYMENT_PATH}`, { method: "POST", headers, body, signal: AbortSignal.timeout(15_000) });
     } catch {
       throw new ProviderError(null, "Payment gateway unreachable");
     }
@@ -286,7 +287,7 @@ export class DokuCheckoutClient {
     };
     let res: Response;
     try {
-      res = await fetch(`${this.base()}${target}`, { method: "GET", headers });
+      res = await fetch(`${this.base()}${target}`, { method: "GET", headers, signal: AbortSignal.timeout(5000) });
     } catch {
       throw new ProviderError(null, "Payment gateway unreachable");
     }

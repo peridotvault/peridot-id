@@ -64,7 +64,8 @@ export function AppColumn({
         <div style={s.rail} className="flex flex-col">
           <div className={stickyTop}>{top}</div>
           {body}
-          <div className={stickyBottom}>{side}</div>
+          {/* mt-auto: short pages eat the leftover viewport so the bar still sits at the bottom. */}
+          <div className={`${stickyBottom} mt-auto`}>{side}</div>
         </div>
       </div>
     );

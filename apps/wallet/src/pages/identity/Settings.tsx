@@ -83,9 +83,8 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
   // modal — Settings is the only place.
   const net = useNetworkMode();
   const toggleNetwork = useCallback(() => {
-    if (net.switching) return;
     setNetworkMode(net.mode === "testnet" ? "mainnet" : "testnet");
-  }, [net.mode, net.switching]);
+  }, [net.mode]);
 
   // Chain selection lives on its own page (pages/identity/Chains); Settings
   // only shows the active selection label on the "Chains" row.
@@ -143,9 +142,8 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
         <ToggleRow
           icon={FlaskConical}
           label="Testnet Mode"
-          hint={net.switching ? "Switching network…" : net.testnet ? "On — using testnet chain" : "Off — using mainnet"}
+          hint={net.testnet ? "On — using testnet chain" : "Off — using mainnet"}
           on={net.testnet}
-          busy={net.switching}
           onPress={toggleNetwork}
         />
         <Row icon={LayoutGrid} label="Chains" value={sel.label} onPress={goChains} />

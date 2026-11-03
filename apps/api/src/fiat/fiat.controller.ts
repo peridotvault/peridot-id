@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
+import { FiatPaymentsService } from "./fiat-payments.service";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Logger, Param, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import type { Request } from "express";
 import { AdminGuard } from "../common/admin.guard";
@@ -17,7 +18,8 @@ import { AdminBackfillDto, CheckoutDepositDto, CreateFeePolicyDto, DepositQuoteD
 @Controller("v1/fiat")
 @UseGuards(ThrottlerGuard)
 export class FiatController {
-  constructor(private readonly fiat: FiatSubAccountService, private readonly paymentFee: PaymentFeeService) {}
+  private readonly logger = new Logger(FiatController.name);
+  constructor(private readonly fiat: FiatSubAccountService, private readonly paymentFee: PaymentFeeService, private readonly payments: FiatPaymentsService) {}
 
   /** Fee policy (PeridotID fee, separate from DOKU's own fee). */
   @Get("fee-policy")
@@ -81,7 +83,7 @@ export class FiatController {
   /**
    * Create a Checkout deposit intent: DOKU-hosted page (all banks, QRIS,
    * e-money, cards). netAmountIdr is the NET credited to the user (minimum
-   * Rp50.000); PeridotID fee + app fee + the selected method's gateway fee
+   * Rp10.000); PeridotID fee + app fee + the selected method's gateway fee
    * and total payable are quoted upfront.
    */
   @Post("deposits/checkout")
@@ -118,12 +120,15 @@ export class FiatController {
   @Post("webhook")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 120, ttl: 60000 } })
-  webhook(
+  async webhook(
     @Headers("x-external-id") externalId: string | undefined,
     @Headers("x-doku-signature") signature: string | undefined,
     @Req() req: Request,
   ) {
     const rawBody: string = (req as Request & { rawBody?: string }).rawBody ?? JSON.stringify(req.body ?? {});
+    // Direct payments have their own invoice prefix and re-corroborate with DOKU,
+    // so they must not depend on the deposit webhook's signature gate above.
+    await this.payments.notify(rawBody).catch(e => this.logger.warn(`payment notify: ${String(e).slice(0, 160)}`));
     return this.fiat.webhook(externalId ?? (req.headers["x-external-id"] as string | undefined), rawBody, signature);
   }
 

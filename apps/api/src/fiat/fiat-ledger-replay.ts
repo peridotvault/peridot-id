@@ -34,7 +34,7 @@ export interface FiatLedgerReplayResult {
   errors: string[];
 }
 
-const CREDIT_IN = new Set(["fiat_issue", "fiat_transfer_in", "fiat_app_fee"]);
+const CREDIT_IN = new Set(["fiat_payment_in", "fiat_issue", "fiat_transfer_in", "fiat_app_fee"]);
 const CREDIT_OUT = new Set(["fiat_transfer_out"]);
 
 function seqOf(r: FiatLedgerRow): bigint {
@@ -83,7 +83,7 @@ export function replayFiatLedger(rows: FiatLedgerRow[]): FiatLedgerReplayResult 
       }
     };
 
-    if (r.kind === "fiat_issue") {
+    if (r.kind === "fiat_issue" || r.kind === "fiat_payment_in") {
       checkDirection("in");
       credit(r.pid, r.amountIdr);
       bump("in");

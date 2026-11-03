@@ -12,8 +12,10 @@
 2. Own a normal PeridotID account, e.g. `live2dev@pid` (1 identity = 1 wallet,
    like any user). It financially behaves as an ordinary participant: it holds
    balance and can send/receive.
-3. Ops adds it to the credit allowlist env: `PID_FIAT_LEDGER_APP_ALLOWLIST`
-   must include `live2dev@pid`. Treasury label: `PID_FIAT_LEDGER_TREASURY_PID`.
+3. No operator step: owning an active `PidApp` makes the PID eligible for
+   transfers and payments (the dashboard app record is the onboarding).
+   `PID_FIAT_LEDGER_APP_ALLOWLIST` remains optional for PIDs without an app.
+   Treasury label: `PID_FIAT_LEDGER_TREASURY_PID`.
 4. Users sign in via SSO (`pid_code` → `POST /v1/auth/exchange`); money ceremonies
    run through the PeridotID popup (`credit-transfer`) with server-quoted
    Approve/Deny — Live2Dev never touches amounts or account numbers.

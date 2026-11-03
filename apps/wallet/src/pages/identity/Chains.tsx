@@ -5,19 +5,16 @@ import { Retry } from "../../shared/components/ui/Retry";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { ToggleRow } from "../../shared/components/ui/ToggleRow";
 import { isChainSelected } from "../../shared/data/selectedChains";
-import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
 import { useSelectedChains } from "../../shared/hooks/useSelectedChains";
 
 // Chain selection (ANT-625 FR1): master All-chains row + one row per registry
 // chain. Lives on its own page — Settings keeps a single "Chains" row in the
 // Network group. Toggles write the selectedChains store (persisted in
-// localStorage, signing stays blocked while the switch propagates).
+// localStorage, signed payloads stay blocked while the switch propagates).
 export function Chains({ onDone }: { onDone: () => void }) {
-  const net = useNetworkMode();
   const sel = useSelectedChains();
 
   const toggleMaster = useCallback(() => {
-    if (net.switching) return;
     if (sel.selection.mode === "all") {
       // Custom covering every known row: no visible change, and the user can
       // now deselect rows one by one. Refresh first when rows are still
@@ -30,7 +27,7 @@ export function Chains({ onDone }: { onDone: () => void }) {
     } else {
       sel.setAll();
     }
-  }, [net.switching, sel]);
+  }, [sel]);
 
   return (
     <div className="flex flex-col">
@@ -60,9 +57,8 @@ export function Chains({ onDone }: { onDone: () => void }) {
             <ToggleRow
               icon={LayoutGrid}
               label="All chains"
-              hint={net.switching ? "Switching…" : sel.selection.mode === "all" ? "On — using every chain" : "Off — custom selection below"}
+              hint={sel.selection.mode === "all" ? "On — using every chain" : "Off — custom selection below"}
               on={sel.selection.mode === "all"}
-              busy={net.switching}
               onPress={toggleMaster}
               className="px-4"
             />
@@ -75,7 +71,6 @@ export function Chains({ onDone }: { onDone: () => void }) {
                 hint={`${c.namespace}:${c.reference.slice(0, 8)}${c.reference.length > 8 ? "…" : ""}`}
                 testnet={c.isTestnet}
                 on={isChainSelected(sel.selection, c.namespace, c.reference)}
-                busy={net.switching}
                 onPress={() => sel.toggle(c.namespace, c.reference)}
                 className="px-4"
               />

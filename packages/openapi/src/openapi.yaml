@@ -83,6 +83,150 @@ tags:
     description: Machine-readable API specification
 
 paths:
+  /fiat/payments:
+    post:
+      tags: [fiat]
+      summary: Create direct app Checkout (amount credited in full; fees on top)
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateFiatPayment'}
+      responses:
+        '200':
+          description: Existing or new payment intent
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FiatPayment'}
+        '400':
+          description: Invalid amount or metadata; below-floor errors include code MIN_AMOUNT_BELOW_FLOOR and minimumIdr (global Rp10.000), above-cap errors include PAYMENT_ABOVE_CEILING and maximumIdr (global Rp10.000.000); paymentMethod is required
+        '409':
+          description: externalId already used with different payer, beneficiary or amount
+    get:
+      tags: [fiat]
+      summary: Latest 100 payments visible to the caller
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: query, name: externalId, schema: {type: string}}
+        - {in: query, name: status, schema: {type: string}}
+        - {in: query, name: createdAfter, schema: {type: string, format: date-time}}
+        - {in: query, name: clientId, schema: {type: string}}
+      responses:
+        '200':
+          description: Payment list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/FiatPayment'}
+  /fiat/payments/quote:
+    post:
+      tags: [fiat]
+      summary: Quote direct payment without creating a DOKU invoice
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/FiatPaymentQuoteInput'}
+      responses:
+        '200':
+          description: Fees added to amountIdr; includes minimumIdr, grossIdr, feeIdr and totalIdr
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/DepositQuote'}
+                  - type: object
+                    properties:
+                      grossIdr: {type: string}
+                      feeIdr: {type: string}
+  /fiat/payments/{id}:
+    get:
+      tags: [fiat]
+      summary: Read payment status
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FiatPayment'
+        '404': {description: Payment not visible to caller}
+        '409': {description: Payment state or idempotency conflict}
+  /fiat/payments/{id}/cancel:
+    post:
+      tags: [fiat]
+      summary: Cancel created or pending intent locally
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FiatPayment'
+        '404': {description: Payment not visible to caller}
+        '409': {description: Payment state or idempotency conflict}
+  /fiat/payments/{id}/refund:
+    post:
+      tags: [fiat]
+      summary: Refund remaining or partial principal to original payer PID
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId: {type: string, minLength: 1, maxLength: 64}
+                amountIdr: {type: string, pattern: '^[1-9][0-9]{0,11}$'}
+      responses:
+        '200':
+          description: Result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  refundId: {type: string}
+                  amountIdr: {type: string}
+        '404': {description: Payment not visible to caller}
+        '409': {description: Payment state or idempotency conflict}
+  /apps/{id}/webhook/deliveries:
+    get:
+      tags: [apps]
+      summary: Latest 100 webhook deliveries for owned app
+      security: [{cookieAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Outbox rows with payload, status, attempts and lastError
+          content:
+            application/json:
+              schema: {type: array, items: {type: object}}
+  /apps/{id}/webhook/deliveries/{eventId}/replay:
+    post:
+      tags: [apps]
+      summary: Queue replay retaining stable eventId and payload
+      security: [{cookieAuth: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+        - {in: path, name: eventId, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Queued for delivery}
+        '404': {description: App or event not owned by caller}
   /auth/login:
     post:
       tags: [auth]
@@ -1818,7 +1962,7 @@ paths:
       tags: [fiat]
       summary: Create a Checkout deposit intent (DOKU-hosted page, all channels)
       description: |
-        netAmountIdr is the NET credited to the user (minimum Rp50.000,
+        netAmountIdr is the NET credited to the user (minimum Rp10.000,
         API-enforced — no DOKU minimum). Total payable = net + PeridotID fee
         (0.1% min Rp100 no cap; Rp0 for verified apps) + the app's stacked fee
         (when `clientId` is given) + the selected method's DOKU gateway fee.
@@ -2869,6 +3013,10 @@ paths:
 
 components:
   securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
     cookieAuth:
       type: apiKey
       in: cookie
@@ -2977,6 +3125,44 @@ components:
             message: "XP intake is disabled"
 
   schemas:
+    FiatPaymentQuoteInput:
+      type: object
+      required: [amountIdr]
+      properties:
+        amountIdr: {type: string, pattern: '^[1-9][0-9]{0,11}$', example: '10000'}
+        clientId: {type: string, description: Required for session callers; fixed by machine token}
+        paymentMethod: {type: string, example: QRIS, description: DOKU method category; required when creating a payment}
+    CreateFiatPayment:
+      allOf:
+        - {$ref: '#/components/schemas/FiatPaymentQuoteInput'}
+        - type: object
+          required: [externalId, paymentMethod]
+          properties:
+            externalId: {type: string, minLength: 1, maxLength: 128}
+            beneficiaryPid: {type: string, description: Defaults to app owner; escrow allowlist applies}
+            payerPid: {type: string, description: Optional machine attribution; session fixes payer}
+            description: {type: string, maxLength: 256}
+            metadata: {type: object, additionalProperties: true, description: Maximum 2048 UTF-8 bytes}
+    FiatPayment:
+      type: object
+      properties:
+        id: {type: string}
+        appClientId: {type: string}
+        payerPid: {type: string, nullable: true}
+        beneficiaryPid: {type: string}
+        status: {type: string, enum: [created, pending, paid, expired, failed, cancelled]}
+        paymentUrl: {type: string, nullable: true}
+        grossIdr: {type: string, description: Principal credited to beneficiary}
+        netIdr: {type: string, description: Equal to grossIdr; fees paid on top}
+        feeIdr: {type: string}
+        totalIdr: {type: string}
+        externalId: {type: string}
+        description: {type: string, nullable: true}
+        metadata: {type: object, additionalProperties: true}
+        expiresAt: {type: string, format: date-time}
+        paidAt: {type: string, format: date-time, nullable: true}
+        createdAt: {type: string, format: date-time}
+        refundedIdr: {type: string}
     LoginResponse:
       type: object
       required: [url]
@@ -4049,8 +4235,11 @@ components:
 
     DepositQuote:
       type: object
-      required: [amountIdr, netIdr, peridotFeeIdr, peridotTaxIdr, appFeeIdr, appCategory, gatewayFeeEnabled, gatewayFeeIdr, gatewayTaxIdr, transferFeeIdr, totalIdr, feePolicyVersion, paymentMethods]
+      required: [minimumIdr, amountIdr, netIdr, peridotFeeIdr, peridotTaxIdr, appFeeIdr, appCategory, gatewayFeeEnabled, gatewayFeeIdr, gatewayTaxIdr, transferFeeIdr, totalIdr, feePolicyVersion, paymentMethods]
       properties:
+        minimumIdr:
+          type: string
+          example: "10000"
         amountIdr:
           type: string
         netIdr:
@@ -4245,6 +4434,9 @@ components:
         taxBps:
           type: integer
           description: PPN (VAT) on the PeridotID fee, basis points (1100 = 11%)
+        minimumIdr:
+          type: string
+          description: Global NET minimum for top-ups and direct payments (whole IDR, code constant)
         active:
           type: boolean
 

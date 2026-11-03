@@ -15,7 +15,7 @@
 - Economics (locked): global PeridotID fee = **0.1% (10 bps), min Rp100, no cap**
   (`calcServiceFee`, active `FiatFeePolicy`), snapshotted per movement
   (`feePolicyVersion`). Applies to every fiat movement (user↔user, escrow,
-  topup, withdraw). Minimum top-up **Rp50.000 NET**.
+  topup, withdraw). Minimum top-up **Rp10.000 NET**.
 - **PPN (VAT), configurable, never hardcoded**: `FiatFeePolicy.taxBps` (PeridotID
   PPN on its fee, default 1100 = 11%) and the singleton `FiatTaxSetting.dokuTaxBps`
   (DOKU PPN on the gateway fee, default 1100). Tax is computed on the **fee**, not
@@ -72,16 +72,17 @@ hash (`GET /v1/fiat/admin/chain/head`) outside the DB (e.g. on-chain) and
 compare later. Backfill pre-existing rows with `POST /v1/fiat/admin/chain/backfill`.
 Pure logic + tests: `apps/api/src/fiat/fiat-ledger-hash.ts`.
 
-## Callbacks (escrow apps) — DEFERRED
+## Callbacks (app webhooks) — ACTIVE
 
-External callbacks are **not in use yet** (no app UI; nothing enqueues unless a
-webhook URL is set). The backend stays dormant for a later re-enable: a party
-that owns a `PidApp` with a webhook URL would receive signed callbacks when a
-transfer posts, registered via `POST /v1/apps/:id/webhook { url }` (https;
-returns the signing secret ONCE). Delivery is an outbox (`fiat_ledger_events`),
-async + retried by `POST /v1/fiat/admin/dispatch-events` (cron), HMAC-SHA256 in
-`X-Pid-Signature: sha256=<hex>`; event name in `X-Pid-Event`. The ledger remains
-the source of truth; apps can also poll `GET /v1/fiat/ledger`.
+A party that owns a `PidApp` with a webhook URL receives signed callbacks:
+`fiat.payment.paid|expired|failed`, `fiat.deposit.paid`, `fiat.transfer.posted`.
+Registered via `POST /v1/apps/:id/webhook { url }` (https; returns the signing
+secret ONCE). Delivery is a transactional outbox (`fiat_ledger_events`) drained
+by an in-process worker every 2 seconds with per-event leases, HMAC-SHA256 in
+`X-Pid-Signature: sha256=<hex>`; event name in `X-Pid-Event`. Retries use
+exponential backoff for >24h (40 attempts). Owners can inspect and replay
+deliveries from the dashboard or `GET /v1/apps/:id/webhook/deliveries`. The
+ledger remains the source of truth; apps can also poll `GET /v1/fiat/ledger`.
 
 ## Machine auth (app backend)
 
@@ -187,7 +188,7 @@ PPN is folded into `Transfer Fee`; the API still returns the parts separately.
 | `PID_FIAT_LEDGER_ENABLED` | `true` | master switch for issue + send |
 | `PID_FIAT_LEDGER_FROZEN` | `false` | when `true`: new issues/sends rejected, reads stay |
 | `PID_FIAT_LEDGER_TREASURY_PID` | `` | treasury label PID (env) |
-| `PID_FIAT_LEDGER_APP_ALLOWLIST` | `` | Phase-1 escrow-only (M7): comma-separated PIDs; every transfer must have one side on this list. Fail-closed — empty/missing denies ALL transfers. REQUIRED in deployed envs. |
+| `PID_FIAT_LEDGER_APP_ALLOWLIST` | `` | Optional transfer allowlist: comma-separated PIDs allowed on one side of a transfer. Recipients that own an active `PidApp` (created in the dashboard) are eligible without it; app owners need nothing from ops. |
 | `DOKU_WEBHOOK_SECRET` | `` | Source auth for `POST /v1/fiat/webhook` (M11): when set, pushes must carry `X-Doku-Signature: sha256=<hex HMAC-SHA256(rawBody)>` (else 401 before any DB write). Provision in deployed envs. |
 
 In-memory freeze override exists for ops (`POST /v1/fiat/admin/freeze`; env is

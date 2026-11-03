@@ -15,11 +15,11 @@ import { CHAIN_LOCK, GENESIS_HASH, entryHash } from "./fiat-ledger-hash";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { CHECKOUT_CLIENT } from "./checkout-client.token";
+import { MIN_CHECKOUT_NET_IDR } from "./fiat-limits";
 
-/** Minimum internal-credit issue, NET IDR. Mirrors the Checkout intent minimum
- *  (MIN_CHECKOUT_NET_IDR in fiat-subaccount.service) — kept as its own const
- *  so neither module imports the other at runtime (DI cycle). */
-export const MIN_FIAT_DEPOSIT_NET_IDR = 50_000n;
+/** Minimum internal-credit issue, NET IDR — the same global floor every app
+ *  uses. Legacy deposits with no `minimumIdr` snapshot fall back to it. */
+export const MIN_FIAT_DEPOSIT_NET_IDR = MIN_CHECKOUT_NET_IDR;
 
 /** Gateway payloads are JSON by contract — cast once, at the boundary. */
 const json = (v: unknown): Prisma.InputJsonValue => v as Prisma.InputJsonValue;
@@ -109,9 +109,10 @@ export class FiatLedgerService {
   }
 
   /**
-   * Escrow-recipient allowlist (M7, ANT-802): comma-separated PIDs with an
-   * allowlisted app on one side of every transfer (e.g. `live2dev@pid`).
-   * Normalized (trimmed, lowercased, deduped, empties dropped).
+   * Optional extra allowlist for transfers (`PID_FIAT_LEDGER_APP_ALLOWLIST`):
+   * comma-separated PIDs (e.g. `live2dev@pid`). App owners no longer need it —
+   * an active PidApp owned by the recipient is enough. Normalized (trimmed,
+   * lowercased, deduped, empties dropped).
    */
   fiatAllowlist(): string[] {
     const raw = this.config.get<string>("PID_FIAT_LEDGER_APP_ALLOWLIST", "") || "";
@@ -119,17 +120,26 @@ export class FiatLedgerService {
   }
 
   /**
-   * Phase-1 escrow-only gate (M7, ANT-802): at least one side of the transfer
-   * must be an allowlisted app PID — user→user sends are rejected. Fail
-   * closed: an empty/missing allowlist denies ALL transfers (never silently
-   * open). The allowlist itself is never echoed (the caller already knows
-   * the recipient they sent).
+   * Escrow-only gate: at least one side of the transfer must be eligible —
+   * the owner of an active PidApp (self-service: developers register apps in
+   * the dashboard, so no operator list is required) or a PID on the optional
+   * `PID_FIAT_LEDGER_APP_ALLOWLIST` env. User→user sends are still rejected.
+   * Fails closed. The allowlist is never echoed.
    */
-  private requireAllowlistedSide(pid: string, beneficiaryPid: string): void {
+  private async requireEligibleSide(
+    tx: { pidApp: { findFirst: (a: unknown) => Promise<{ id: string } | null> } },
+    pid: string,
+    beneficiaryPid: string,
+  ): Promise<void> {
     const allow = this.fiatAllowlist();
-    if (allow.length === 0 || (!allow.includes(pid) && !allow.includes(beneficiaryPid))) {
-      throw new ForbiddenException("Transfers are limited to escrow recipients");
-    }
+    if (allow.includes(pid) || allow.includes(beneficiaryPid)) return;
+    // Either side may be the app: user→app pay-ins and app→user payouts both
+    // qualify. The dashboard app record is the only registration needed.
+    const app = await tx.pidApp.findFirst({
+      where: { ownerPid: { in: [pid, beneficiaryPid] }, isActive: true },
+      select: { id: true },
+    });
+    if (!app) throw new ForbiddenException("Transfers are limited to app owners");
   }
 
   private requireUsable(): void {
@@ -247,7 +257,7 @@ export class FiatLedgerService {
     const tax = this.quotedBigint(cp["taxQuote"]) ?? 0n;
     const appFee = this.quotedBigint(cp["appFeeQuote"]) ?? 0n;
     const appOwnerPid = typeof cp["appOwnerPid"] === "string" ? (cp["appOwnerPid"] as string) : null;
-    if (net === null || net < MIN_FIAT_DEPOSIT_NET_IDR) {
+    if (net === null || net < (this.quotedBigint(cp["minimumIdr"]) ?? MIN_FIAT_DEPOSIT_NET_IDR)) {
       this.logger.warn(`issue skipped for ${row.providerRef}: net below minimum or unknown`);
       return;
     }
@@ -303,6 +313,14 @@ export class FiatLedgerService {
               }]
             : []),
         ]);
+        if (typeof cp["appId"] === "string") {
+          const app = await tx.pidApp.findUnique({ where: { id: cp["appId"] } });
+          if (app?.isActive && app.webhookUrl) await tx.fiatLedgerEvent.create({ data: {
+            eventType: "fiat.deposit.paid", idempotencyKey: `${issueKey}:deposit`, targetPid: app.ownerPid, targetUrl: app.webhookUrl,
+            payload: { type: "fiat.deposit.paid", occurredAt: new Date().toISOString(), appClientId: app.clientId,
+              externalId: null, depositId: row.id, amountIdr: net.toString(), feeIdr: fee.toString(), payerPid: row.pid },
+          } });
+        }
       });
     } catch (err) {
       // Unique violation = concurrent issue won the race — verify posted, else rethrow to log.
@@ -469,8 +487,8 @@ export class FiatLedgerService {
     if (beneficiaryPid === pid) throw new BadRequestException("Cannot transfer to yourself");
     const recipient = await this.prisma.identity.findUnique({ where: { pid: beneficiaryPid } }).catch(() => null);
     if (!recipient) throw new NotFoundException("Recipient has no PeridotID account yet");
-    // M7 (ANT-802): escrow-only — enforced before any row is written.
-    this.requireAllowlistedSide(pid, beneficiaryPid);
+    // Escrow-only — enforced before any row is written.
+    await this.requireEligibleSide(this.prisma as never, pid, beneficiaryPid);
     // Global PeridotID fee (+ its PPN) + (when an app initiated this) the app's own
     // fee for the operation (default "transaction"; "escrow" legs carry no app fee).
     const { globalFee, peridotTaxIdr, appFee, appId, appOwnerPid, policyVersion } = await this.quoteFees(appClientId, input.operation ?? "transaction", gross);
@@ -548,9 +566,9 @@ export class FiatLedgerService {
         if (!fresh || fresh.status !== "created") {
           throw new BadRequestException("Transfer is closed — start a new inquiry");
         }
-        // M7 (ANT-802) re-check: intents minted before enforcement (or with a
-        // since-emptied allowlist) can never confirm.
-        this.requireAllowlistedSide(pid, beneficiaryPid);
+        // Re-check: intents minted before enforcement (or for a recipient that
+        // no longer owns an active app) can never confirm.
+        await this.requireEligibleSide(tx as never, pid, beneficiaryPid);
         const senderBalance = await this.postedBalanceTx(tx as never, pid);
         if (senderBalance < gross) {
           throw new BadRequestException("Insufficient internal credit");
@@ -903,7 +921,7 @@ export class FiatLedgerService {
    * complete. `ops[].id` updates an existing row (the transfer intent) instead
    * of inserting.
    */
-  private async appendChained(
+  async appendChained(
     tx: {
       $executeRaw: (q: unknown) => Promise<number>;
       fiatLedgerEntry: {
@@ -950,7 +968,7 @@ export class FiatLedgerService {
   private async enqueueTransferEventsTx(
     tx: {
       pidApp: {
-        findMany: (a: unknown) => Promise<Array<{ ownerPid: string; webhookUrl: string | null }>>;
+        findMany: (a: unknown) => Promise<Array<{ ownerPid: string; clientId: string; webhookUrl: string | null }>>;
       };
       fiatLedgerEvent: {
         findFirst: (a: unknown) => Promise<{ id: string } | null>;
@@ -961,7 +979,7 @@ export class FiatLedgerService {
   ): Promise<void> {
     const apps = await tx.pidApp.findMany({
       where: { ownerPid: { in: [e.fromPid, e.toPid] }, isActive: true, webhookUrl: { not: null } },
-      select: { ownerPid: true, webhookUrl: true },
+      select: { ownerPid: true, clientId: true, webhookUrl: true },
     });
     if (apps.length === 0) return;
     const payload = {
@@ -973,13 +991,13 @@ export class FiatLedgerService {
     for (const a of apps) {
       if (!a.webhookUrl) continue;
       // Retried confirms converge: the first commit wins, later ones skip.
-      const idempotencyKey = `${e.entryGroup}:${a.ownerPid}`;
+      const idempotencyKey = `${e.entryGroup}:${a.clientId}`;
       const existing = await tx.fiatLedgerEvent.findFirst({ where: { idempotencyKey } });
       if (existing) continue;
       await tx.fiatLedgerEvent.create({
         data: {
           eventType: "fiat.transfer.posted", targetPid: a.ownerPid, targetUrl: a.webhookUrl,
-          payload: json(payload), idempotencyKey,
+          payload: json({ ...payload, appClientId: a.clientId, externalId: null, transferId: e.entryGroup, amountIdr: e.grossIdr.toString(), payerPid: e.fromPid }), idempotencyKey,
         },
       });
     }
@@ -1013,14 +1031,14 @@ export class FiatLedgerService {
    *  Locks the `identities` rows directly — every credit holder IS an identity
    *  (enforced by the journal FK), so no marker table is needed. The in-txn
    *  balance recheck stays the double-spend guard. */
-  private async lockAccounts(tx: { $queryRaw: (q: unknown) => Promise<unknown> }, pids: string[]) {
+  async lockAccounts(tx: { $queryRaw: (q: unknown) => Promise<unknown> }, pids: string[]) {
     const keys = [...new Set(pids)].sort();
     await tx.$queryRaw(
       Prisma.sql`SELECT "pid" FROM "identities" WHERE "pid" IN (${Prisma.join(keys)}) ORDER BY "pid" FOR UPDATE`,
     );
   }
 
-  private async postedBalanceTx(tx: { fiatLedgerEntry: { findMany: (a: never) => Promise<Array<{ kind: string; amountIdr: bigint; direction: string | null }>> } }, pid: string): Promise<bigint> {
+  async postedBalanceTx(tx: { fiatLedgerEntry: { findMany: (a: never) => Promise<Array<{ kind: string; amountIdr: bigint; direction: string | null }>> } }, pid: string): Promise<bigint> {
     const rows = await tx.fiatLedgerEntry.findMany({
       where: { pid, status: "posted" },
       select: { kind: true, amountIdr: true, direction: true },
@@ -1036,6 +1054,7 @@ export class FiatLedgerService {
     let bal = 0n;
     for (const r of rows) {
       switch (r.kind) {
+        case "fiat_payment_in":
         case "fiat_issue":
         case "fiat_transfer_in":
         case "fiat_app_fee":
