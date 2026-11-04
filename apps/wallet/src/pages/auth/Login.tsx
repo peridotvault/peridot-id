@@ -140,7 +140,7 @@ export function Login({
         busy={busy}
         error={error}
         onAllow={consent.allowApp}
-        onDifferent={() => setShowLogin(true)}
+        onDifferent={consent.useDifferentCtx}
         onDeny={consent.denyApp}
         verified={appVerified}
       />
@@ -157,21 +157,23 @@ export function Login({
     );
   }
 
+  // "Use a different account" picker — same modal for client login and SSO.
+  if ((sso || ctx) && session && consent.picker !== null) {
+    return (
+      <AccountSwitcherModal
+        visible
+        accounts={consent.picker}
+        busy={busy}
+        error={consent.pickerError}
+        onClose={() => consent.setPicker(null)}
+        onSelect={consent.pickAccount}
+        onAdd={consent.addAccountCtx}
+      />
+    );
+  }
+
   // Auth-in-a-new-tab + pre-existing session: explicit consent, same card as SSO.
   if (ctx && session && !showLogin && claim.claim === null) {
-    if (consent.picker !== null) {
-      return (
-        <AccountSwitcherModal
-          visible
-          accounts={consent.picker}
-          busy={busy}
-          error={consent.pickerError}
-          onClose={() => consent.setPicker(null)}
-          onSelect={consent.pickAccount}
-          onAdd={consent.addAccountCtx}
-        />
-      );
-    }
     return (
       <SsoConsentModal
         origin={ctx.origin}
