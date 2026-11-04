@@ -142,26 +142,47 @@ fn all_tokens_at(hay: &str, toks: &[&str]) -> Option<usize> {
 ///
 /// Tier 0/1 = the whole query appears as a phrase (title first). Tier 2/3/4 =
 /// every token appears (title, excerpt, or spread across both) — this is what
-/// keeps multi-word questions from returning nothing.
-fn score_doc(title_lc: &str, excerpt_lc: &str, q: &str, toks: &[&str]) -> Option<(u8, usize)> {
+/// keeps multi-word questions from returning nothing. Tier 5 = at least half
+/// the tokens appear (ranked by how many), so a question whose wording does not
+/// exist verbatim in the corpus still lands on the closest page instead of an
+/// empty result.
+fn score_doc(title_lc: &str, excerpt_lc: &str, q: &str, toks: &[&str]) -> Option<(u8, usize, usize)> {
     if let Some(p) = title_lc.find(q) {
-        return Some((0, p));
+        return Some((0, 0, p));
     }
     if let Some(p) = excerpt_lc.find(q) {
-        return Some((1, p));
+        return Some((1, 0, p));
     }
     if let Some(p) = all_tokens_at(title_lc, toks) {
-        return Some((2, p));
+        return Some((2, 0, p));
     }
     if let Some(p) = all_tokens_at(excerpt_lc, toks) {
-        return Some((3, p));
+        return Some((3, 0, p));
     }
     let mut first = usize::MAX;
+    let mut every = true;
     for t in toks {
-        let p = title_lc.find(t).or_else(|| excerpt_lc.find(t))?;
-        first = first.min(p);
+        match title_lc.find(t).or_else(|| excerpt_lc.find(t)) {
+            Some(p) => first = first.min(p),
+            None => every = false,
+        }
     }
-    Some((4, first))
+    if every {
+        return Some((4, 0, first));
+    }
+    // Partial match: needs at least half the tokens (1 for a single word).
+    let mut matched = 0usize;
+    let mut first_partial = usize::MAX;
+    for t in toks {
+        if let Some(p) = title_lc.find(t).or_else(|| excerpt_lc.find(t)) {
+            matched += 1;
+            first_partial = first_partial.min(p);
+        }
+    }
+    if matched * 2 < toks.len() || matched == 0 {
+        return None;
+    }
+    Some((5, 100 - matched, first_partial))
 }
 
 /// Shared ranker over lowercased `(doc, title, excerpt)` triples. Every
@@ -171,16 +192,16 @@ fn rank_matches<'a>(
     docs: impl Iterator<Item = (&'a DocEntry, &'a str, &'a str)>,
 ) -> Vec<DocHit> {
     let toks = query_tokens(q);
-    let mut scored: Vec<(u8, usize, &DocEntry)> = docs
+    let mut scored: Vec<(u8, usize, usize, &DocEntry)> = docs
         .filter_map(|(doc, title_lc, excerpt_lc)| {
-            score_doc(title_lc, excerpt_lc, q, &toks).map(|(tier, pos)| (tier, pos, doc))
+            score_doc(title_lc, excerpt_lc, q, &toks).map(|(tier, rank2, pos)| (tier, rank2, pos, doc))
         })
         .collect();
-    scored.sort_by(|a, b| (a.0, a.1, a.2.title).cmp(&(b.0, b.1, b.2.title)));
+    scored.sort_by(|a, b| (a.0, a.1, a.2, a.3.title).cmp(&(b.0, b.1, b.2, b.3.title)));
     scored
         .into_iter()
         .take(MAX_RESULTS)
-        .map(|(_, _, doc)| hit_of(doc))
+        .map(|(_, _, _, doc)| hit_of(doc))
         .collect()
 }
 
@@ -334,7 +355,7 @@ mod tests {
         // 13 Mintlify pages x sections + OpenAPI operations; the exact
         // count is owned by sync-docs (see generated_docs.meta.json).
         assert!(DOCS.len() >= 100, "corpus too small: {}", DOCS.len());
-        assert_eq!(DOCS.len(), 218);
+        assert_eq!(DOCS.len(), 219);
         for doc in &DOCS {
             assert!(
                 doc.url.starts_with("https://docs.peridot.id/"),
@@ -463,6 +484,25 @@ mod tests {
             "top hit for a phrase query should be the phrase page, got: {}",
             hits[0].title
         );
+    }
+
+    #[test]
+    fn partial_token_match_still_lands_somewhere() {
+        // An agent asks in wording the docs never use verbatim. Requiring every
+        // token returned zero hits; at least half must still resolve.
+        for probe in ["machine token scope", "webhook eventId signature", "escrow reconciliation"] {
+            assert!(
+                !search_docs(probe).is_empty(),
+                "partial-match query returned no hits: {probe}"
+            );
+        }
+    }
+
+    #[test]
+    fn nonsense_queries_stay_empty() {
+        // The partial tier must not turn garbage into results.
+        assert!(search_docs("zzz qqq xxx").is_empty());
+        assert!(search_docs("qqq xxx").is_empty());
     }
 
     #[test]

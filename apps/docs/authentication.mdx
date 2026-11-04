@@ -132,6 +132,30 @@ calls it from its own origin gets an idempotent `200` and nothing else — a sig
 another site can never log the user out of PeridotID. First-party apps with their own
 cookie namespace log out with `X-PID-Scope: <scope>`, which touches only that scope.
 
+## Machine tokens (server-to-server)
+
+A backend acts as its **app identity** (`<handle>@pid`) without a browser:
+
+```sh
+curl -X POST https://api.peridot.id/v1/auth/token \
+  -H 'content-type: application/json' \
+  -d '{"clientId":"pidapp_…","clientSecret":"pidsk_…"}'
+# → { "accessToken": "…", "tokenType": "Bearer", "expiresIn": … }
+```
+
+Send it as `Authorization: Bearer <token>` on subsequent calls. Notes:
+
+- **Scope** defaults to the app's own data. Pass `scope: "fiat:transfer"` for the
+  least-privilege form used by escrow releases; the scope is echoed in the token
+  claim. A machine token is never treated as a human payer.
+- **What it can read:** the app identity's own fiat balance, ledger, deposits and
+  fee quotes; transfers it initiates are attributed to the app.
+- **What it cannot do:** app configuration and fee schedules under `/v1/apps*`
+  require a user session cookie (`UserTokenGuard`) — read those from the
+  dashboard, not from a machine token.
+- Keep the `clientSecret` server-side only; it must never reach a browser or a
+  mobile app bundle.
+
 ## Security notes
 
 - Access tokens are short-lived; the real secret is the rotating refresh token.

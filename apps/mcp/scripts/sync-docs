@@ -305,6 +305,9 @@ SDK_SPECS = [
             ("wallet.getBalance", "function", "peridot.wallet.getBalance()", "SOL, on-chain RPC read"),
             ("fiat.balance", "function", "peridot.fiat.balance()", "covers top-up, balance, statement, and sends on the internal IDR ledger"),
             ("auth.loginPopup", "function", "peridot.auth.loginPopup()", "opens a popup (tab fallback)"),
+            ("cache.clear", "function", "peridot.cache.clear()", "drop the cache so the next read is real"),
+            ("cache.invalidate", "function", 'peridot.cache.invalidate("fiat.")', "one namespace"),
+            ("cache", "option", 'Peridot({ clientId, cache: { tier: "local" } })', "survives reload"),
         ],
     ),
     (

@@ -43,16 +43,23 @@ live2dev@pid --send Rp100.000--> streamer1@pid   (app → user: payout, ×5 on d
 - Any identity can send to any identity; `live2dev@pid` (the escrow account)
   needs no allowlist.
 - Live2Dev controls the funds once received and releases per its own business
-  logic. (Outbound callbacks are **deferred for now** — poll
-  `GET /v1/fiat/ledger` or rely on the machine-token balance below.)
+  logic. Outbound callbacks are **live**: register `POST /v1/apps/:id/webhook`
+  and PeridotID POSTs every ledger event to your URL with
+  `X-Pid-Event: fiat.transfer.posted`, `X-Pid-Signature: sha256=<hex>` (HMAC-SHA256
+  over the exact raw body, keyed with your app secret) and an `eventId` inside the
+  body. Verify the signature before acting, dedupe on `eventId`, and use
+  `GET /v1/apps/:id/webhook/deliveries` (+ `POST .../deliveries/:eventId/replay`)
+  to inspect or replay a delivery. Polling `GET /v1/fiat/ledger` stays available
+  as a fallback, not the primary path.
 - **Read the escrow balance from your backend** with a machine token:
   `POST /v1/auth/token { clientId, clientSecret }` → then `GET /v1/fiat/balance`
   with `Authorization: Bearer <token>` (the balance of `live2dev@pid`).
 - **Charge your own fee** (stacked on the global 0.1%): set it at
   `PUT /v1/apps/:id/fees/{topup|transaction|withdraw}` and pass the app's
   `clientId` when initiating a movement — the fee credits your account.
-- Developer tops up via DOKU Checkout first (NET ≥ Rp50.000, fee 5% quoted
-  upfront); the credited NET is what they can send.
+- Developer tops up via DOKU Checkout first (NET **≥ Rp10.000**, fee 5% quoted
+  upfront — the floor is `MIN_CHECKOUT_NET_IDR` in
+  `apps/api/src/fiat/fiat-limits.ts`); the credited NET is what they can send.
 - Live2Dev tracks which transfer belongs to which deal in its own database
   (PeridotID stores only `remark`/`entryGroup` references).
 
