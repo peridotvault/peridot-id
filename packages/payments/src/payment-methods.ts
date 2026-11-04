@@ -101,7 +101,8 @@ export function calcGatewayFee(amountIdr: bigint, rate: GatewayFeeRate): bigint 
 }
 
 // ponytail: self-check — `node dist/payment-methods.js` fails loudly if broken.
-if (require.main === module) {
+// Node ESM has no `require`: guard so the ESM build still evaluates.
+if (typeof require !== "undefined" && require.main === module) {
   const assert = require("node:assert");
   assert.ok(PAYMENT_METHODS.length === 21, "catalog size");
   assert.strictEqual(paymentMethod("EMONEY_OVO")?.category, "EWALLET", "known category");

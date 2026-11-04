@@ -1,6 +1,7 @@
 {
   "name": "@peridotvault/pid-stellar",
   "version": "0.1.0",
+  "private": true,
   "description": "PeridotID Stellar testnet helpers — canonical scope builder (T3 parity with contracts/stellar/phase0-experiments/src/rules.rs) and network pre-check (F1). Testnet-only, not audited.",
   "license": "MIT",
   "type": "module",

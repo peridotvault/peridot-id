@@ -1,16 +1,25 @@
 name: Publish packages
 
-# Publishes the public npm packages on a version tag (e.g. `v1.0.0`) or manual
+# Publishes the public npm packages on a version tag (e.g. `v1.10.0`) or manual
 # dispatch. Requires an NPM_TOKEN repo secret with publish access to the
 # @peridotvault scope. Leaves first: pid-types → pid-core → pid-solana →
 # pid-payments → pid-evm → pid-sdk-js → pid-react-embed. Packages already at
 # their current version on the registry are skipped, so a dispatch is safe
 # when only some were bumped.
+#
+# Release discipline: bump the versions, then push a tag `v<version of the
+# flagship pid-sdk-js release>`; one tag releases every bumped package, so a
+# published version always maps back to a commit. Published packages carry an
+# npm provenance attestation (sigstore, built from this workflow).
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # npm provenance attestation
 
 jobs:
   publish:
@@ -57,6 +66,6 @@ jobs:
               continue
             fi
             echo "publishing $pkg@$ver"
-            pnpm --filter "$pkg" publish --access public --no-git-checks || {
+            pnpm --filter "$pkg" publish --access public --no-git-checks --provenance || {
               echo "publish failed for $pkg@$ver"; exit 1; }
           done

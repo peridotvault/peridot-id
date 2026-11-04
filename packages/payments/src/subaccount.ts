@@ -625,7 +625,8 @@ export class DokuSubAccountProvider implements SubAccountProvider {
 }
 
 // ponytail: self-check — `node dist/subaccount.js` fails loudly if helpers break.
-if (require.main === module) {
+// Node ESM has no `require`: guard so the ESM build still evaluates.
+if (typeof require !== "undefined" && require.main === module) {
   const assert = require("node:assert");
   assert.ok(SAC_REGISTER_PATH === "/sub-account/v2.0/register", "register path");
   assert.ok(SAC_TRANSFER_PAYMENT_PATH === "/sub-account/v2.0/transfer-payment", "payment path");

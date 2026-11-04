@@ -338,7 +338,8 @@ export class DokuCheckoutClient {
 }
 
 // ponytail: self-check — `node dist/checkout.js` fails loudly if helpers break.
-if (require.main === module) {
+// Node ESM has no `require`: guard so the ESM build still evaluates.
+if (typeof require !== "undefined" && require.main === module) {
   const assert = require("node:assert");
   const sig = checkoutSignature({
     clientId: "C", requestId: "R", requestTimestamp: "2020-08-11T08:45:42Z",

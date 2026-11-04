@@ -1,7 +1,7 @@
 {
   "name": "@peridotvault/pid-core",
-  "version": "0.2.0",
-  "description": "PeridotID core primitives \u2014 encoding, domain-separated hashes, WebAuthn ceremonies, and client key custody. No redirects, no hosts, no app flow.",
+  "version": "0.2.1",
+  "description": "PeridotID core primitives — encoding, domain-separated hashes, WebAuthn ceremonies, and client key custody. No redirects, no hosts, no app flow.",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -36,11 +36,22 @@
       "default": "./dist/index.js"
     },
     "./dist/*": {
-      "types": "./dist/esm/*.d.ts",
-      "import": "./dist/esm/*.js",
-      "require": "./dist/*.js",
+      "import": {
+        "types": "./dist/esm/*.d.ts",
+        "default": "./dist/esm/*.js"
+      },
+      "require": {
+        "types": "./dist/*.d.ts",
+        "default": "./dist/*.js"
+      },
       "default": "./dist/*.js"
     },
     "./package.json": "./package.json"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peridotvault/peridot-id.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://docs.peridot.id"
 }

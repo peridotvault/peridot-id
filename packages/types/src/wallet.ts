@@ -1,4 +1,4 @@
-import type { IdentityStatus } from "./identity";
+import type { IdentityStatus } from "./identity.js";
 
 export interface Wallet {
   id: string;

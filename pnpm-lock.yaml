@@ -316,9 +316,6 @@ importers:
       '@peridotvault/pid-core':
         specifier: workspace:*
         version: link:../core
-      '@peridotvault/pid-payments':
-        specifier: workspace:*
-        version: link:../payments
       '@peridotvault/pid-solana':
         specifier: workspace:*
         version: link:../solana

@@ -1,6 +1,6 @@
 {
   "name": "@peridotvault/pid-types",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -23,11 +23,23 @@
       "default": "./dist/index.js"
     },
     "./dist/*": {
-      "types": "./dist/esm/*.d.ts",
-      "import": "./dist/esm/*.js",
-      "require": "./dist/*.js",
+      "import": {
+        "types": "./dist/esm/*.d.ts",
+        "default": "./dist/esm/*.js"
+      },
+      "require": {
+        "types": "./dist/*.d.ts",
+        "default": "./dist/*.js"
+      },
       "default": "./dist/*.js"
     },
     "./package.json": "./package.json"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peridotvault/peridot-id.git",
+    "directory": "packages/types"
+  },
+  "homepage": "https://docs.peridot.id"
 }
