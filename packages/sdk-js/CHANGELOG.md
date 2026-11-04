@@ -1,5 +1,13 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.11.1
+
+- **Fix packaging of 1.11.0.** That tarball was built with `npm publish`, which
+  does not rewrite pnpm's `workspace:*` protocol, so installing it failed with
+  `EUNSUPPORTEDPROTOCOL Unsupported URL Type "workspace:"`. 1.11.1 is the same
+  code published through `pnpm publish` (real version pins). 1.11.0 is
+  deprecated — do not use it.
+
 ## 1.11.0
 
 - **GET reads are cached by default.** `identity.me`, `profile.me`, `level.get`,
