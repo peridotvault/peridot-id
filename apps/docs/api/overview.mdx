@@ -28,6 +28,14 @@ Browsers handle these automatically; non-browser clients must send
 `Cookie: pid_access=<token>` on each request and call `/v1/auth/refresh` before the
 access token expires.
 
+## Caching and revalidation
+
+Every `GET` response carries a weak `ETag` plus `Cache-Control: private, no-cache`
+(and `Vary: Cookie, Authorization`). Send the tag back as `If-None-Match` and an
+unchanged resource answers `304 Not Modified` with no body — a cheap poll for
+dashboards and the SDK read cache. Public registry reads (`/v1/chains`,
+`/v1/tokens`, `/v1/env`, token logos) keep their own longer `Cache-Control`.
+
 Browse the endpoints in the sidebar, or read the raw
 [OpenAPI 3.0 specification](https://api.peridot.id/v1/openapi.yaml) (also served at
 `GET /v1/openapi.yaml` on either API host; a copy ships with these docs as `openapi.yaml`).

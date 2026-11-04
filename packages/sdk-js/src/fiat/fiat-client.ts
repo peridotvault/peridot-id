@@ -3,6 +3,7 @@
 // money-in only (no Sub-Account). No credentials touch this client.
 
 import type { ApiError } from "@peridotvault/pid-types";
+import { CACHE_TTL, cachedRead, invalidateCache } from "../internal/cache.js";
 
 /** Ledger balance (replayed server-side). */
 export interface FiatBalanceView {
@@ -252,18 +253,32 @@ export class PeridotFiat {
 
   // --- balance / statement ---
 
-  /** Spendable balance (internal fiat ledger). */
+  /** Spendable balance (internal fiat ledger). Cached for 5s, memory only. */
   async balance(): Promise<FiatBalanceView> {
-    return unwrap(await this.api.get<FiatBalanceView>(`${BASE}/balance`), "Failed to load balance");
+    return cachedRead(
+      "fiat.balance",
+      CACHE_TTL.money,
+      async () => unwrap(await this.api.get<FiatBalanceView>(`${BASE}/balance`), "Failed to load balance"),
+      "memory",
+    );
   }
 
   /** Immutable ledger statement + replay verdict for the caller. */
   async ledger(): Promise<FiatLedgerView> {
-    return unwrap(await this.api.get<FiatLedgerView>(`${BASE}/ledger`), "Failed to load statement");
+    return cachedRead(
+      "fiat.ledger",
+      CACHE_TTL.money,
+      async () => unwrap(await this.api.get<FiatLedgerView>(`${BASE}/ledger`), "Failed to load statement"),
+      "memory",
+    );
   }
 
   async feePolicy(): Promise<FeePolicyView> {
-    return unwrap(await this.api.get<FeePolicyView>(`${BASE}/fee-policy`), "Failed to load fee policy");
+    return cachedRead(
+      "fiat.feePolicy",
+      CACHE_TTL.static,
+      async () => unwrap(await this.api.get<FeePolicyView>(`${BASE}/fee-policy`), "Failed to load fee policy"),
+    );
   }
 
   // --- money-in (DOKU Checkout) ---
@@ -278,7 +293,9 @@ export class PeridotFiat {
   }
 
   async createPayment(input: { amountIdr: string; externalId: string; paymentMethod: string; clientId?: string; beneficiaryPid?: string; payerPid?: string; description?: string; metadata?: Record<string, unknown> }) {
-    return unwrap(await this.api.post<FiatPaymentView>(`${BASE}/payments`, input), "Payment request failed");
+    const payment = unwrap(await this.api.post<FiatPaymentView>(`${BASE}/payments`, input), "Payment request failed");
+    invalidateCache("fiat.payments");
+    return payment;
   }
 
   async getPayment(id: string) {
@@ -286,11 +303,15 @@ export class PeridotFiat {
   }
 
   async cancelPayment(id: string) {
-    return unwrap(await this.api.post<FiatPaymentView>(`${BASE}/payments/${encodeURIComponent(id)}/cancel`, {}), "Cancel payment failed");
+    const cancelled = unwrap(await this.api.post<FiatPaymentView>(`${BASE}/payments/${encodeURIComponent(id)}/cancel`, {}), "Cancel payment failed");
+    invalidateCache("fiat.payments");
+    return cancelled;
   }
 
   async refundPayment(id: string, input: { requestId: string; amountIdr?: string }) {
-    return unwrap(await this.api.post<{ refundId: string; amountIdr: string }>(`${BASE}/payments/${encodeURIComponent(id)}/refund`, input), "Payment request failed");
+    const refund = unwrap(await this.api.post<{ refundId: string; amountIdr: string }>(`${BASE}/payments/${encodeURIComponent(id)}/refund`, input), "Payment request failed");
+    invalidateCache("fiat.payments");
+    return refund;
   }
 
   async listPayments(query: { externalId?: string; status?: string; createdAfter?: string; clientId?: string } = {}) {
@@ -321,18 +342,31 @@ export class PeridotFiat {
   async checkoutDeposit(netAmountIdr: string, clientId?: string, paymentMethod?: string, opts?: { expectedPid?: string }): Promise<CheckoutDepositView> {
     const cid = this.appId(clientId);
     const payload = { netAmountIdr, clientId: cid, ...(paymentMethod ? { paymentMethod } : {}) };
-    if (this.delegated) return this.viaPopup<CheckoutDepositView>("fiat-checkout", payload, opts);
-    return unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, payload), "Checkout deposit failed");
+    if (this.delegated) {
+      const created = await this.viaPopup<CheckoutDepositView>("fiat-checkout", payload, opts);
+      invalidateCache("fiat.");
+      return created;
+    }
+    const created = unwrap(await this.api.post<CheckoutDepositView>(`${BASE}/deposits/checkout`, payload), "Checkout deposit failed");
+    invalidateCache("fiat.");
+    return created;
   }
 
   /** Recent deposit intents for the caller (money-in history). */
   async deposits(): Promise<FiatDepositView[]> {
-    return unwrap(await this.api.get<FiatDepositView[]>(`${BASE}/deposits`), "Failed to load deposits");
+    return cachedRead(
+      "fiat.deposits",
+      CACHE_TTL.money,
+      async () => unwrap(await this.api.get<FiatDepositView[]>(`${BASE}/deposits`), "Failed to load deposits"),
+      "memory",
+    );
   }
 
   /** Corroborate a pending deposit against DOKU and credit the ledger. */
   async syncTransaction(id: string): Promise<FiatDepositView> {
-    return unwrap(await this.api.post<FiatDepositView>(`${BASE}/deposits/${id}/sync`), "Sync failed");
+    const synced = unwrap(await this.api.post<FiatDepositView>(`${BASE}/deposits/${id}/sync`), "Sync failed");
+    invalidateCache("fiat.");
+    return synced;
   }
 
   // --- sandbox faucet (test money, FR-2) ---
@@ -344,7 +378,9 @@ export class PeridotFiat {
    * 10 calls/day — CTO to confirm per ANT-287 OQ-1).
    */
   async testCredit(amountMinor: number): Promise<TestCreditView> {
-    return unwrap(await this.api.post<TestCreditView>(`${BASE}/test-credit`, { amountMinor }), "Faucet request failed");
+    const credit = unwrap(await this.api.post<TestCreditView>(`${BASE}/test-credit`, { amountMinor }), "Faucet request failed");
+    invalidateCache("fiat.");
+    return credit;
   }
 
   // --- send / receive (internal ledger) ---
@@ -360,7 +396,9 @@ export class PeridotFiat {
   /** Send step 2: posts all legs atomically. First-party inline only. */
   async transferConfirm(id: string): Promise<FiatLedgerEntry> {
     this.inlineOnly("transferConfirm");
-    return unwrap(await this.api.post<FiatLedgerEntry>(`${BASE}/transfers/${id}/confirm`), "Transfer failed");
+    const posted = unwrap(await this.api.post<FiatLedgerEntry>(`${BASE}/transfers/${id}/confirm`), "Transfer failed");
+    invalidateCache("fiat.");
+    return posted;
   }
 
   /**
@@ -370,12 +408,16 @@ export class PeridotFiat {
    */
   async transferViaPopup(input: FiatTransferInput, opts?: { expectedPid?: string }): Promise<FiatLedgerEntry> {
     const clientId = this.appId(input.clientId);
-    return this.viaPopup<FiatLedgerEntry>("fiat-transfer", { ...input, ...(clientId ? { clientId } : {}) }, opts);
+    const entry = await this.viaPopup<FiatLedgerEntry>("fiat-transfer", { ...input, ...(clientId ? { clientId } : {}) }, opts);
+    invalidateCache("fiat.");
+    return entry;
   }
 
   /** Cancel a created (not yet posted) transfer intent. */
   async cancelTransaction(id: string): Promise<FiatLedgerEntry> {
-    return unwrap(await this.api.post<FiatLedgerEntry>(`${BASE}/transfers/${id}/cancel`), "Cancel failed");
+    const cancelled = unwrap(await this.api.post<FiatLedgerEntry>(`${BASE}/transfers/${id}/cancel`), "Cancel failed");
+    invalidateCache("fiat.");
+    return cancelled;
   }
 }
 

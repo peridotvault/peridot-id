@@ -10,10 +10,17 @@ import { PeridotIdentity } from "./identity-client.js";
 import { PeridotProfile } from "./profile-client.js";
 import { PeridotPasskey } from "./passkey-client.js";
 import { PeridotAdmin } from "./admin-client.js";
+import { clearCache, configureCache, invalidateCache, type CacheConfig } from "./internal/cache.js";
 
 export interface PeridotOptions {
   /** Registered app id (`pidapp_…`). Applied to login, exchange, and fiat calls. */
   clientId?: string;
+  /**
+   * Read cache for GET calls (on by default). `cache: false` disables it;
+   * `cache: { tier: "local" }` persists display reads across reloads. Never
+   * holds tokens: only display-grade reads, cleared on login/logout/bearer swap.
+   */
+  cache?: CacheConfig | false;
   /** Backend-only app secret (`pidsk_…`). NEVER ship in browser code — used by `auth.exchange`. */
   clientSecret?: string;
   /**
@@ -67,8 +74,10 @@ export class PeridotClient {
     private onUnauthorized?: () => void,
     readonly sessionScope?: string,
     private bearer?: string,
+    cache?: CacheConfig | false,
   ) {
     this.appOptions = appOptions;
+    configureCache(cache);
     this.auth = new PeridotAuth(this);
     this.identity = new PeridotIdentity(this);
     this.profile = new PeridotProfile(this);
@@ -95,8 +104,19 @@ export class PeridotClient {
    * client authenticates reads without cross-site cookies.
    */
   setBearer(token?: string): void {
+    if (this.bearer !== token) clearCache();
     this.bearer = token;
   }
+
+  /**
+   * Read cache (on by default): `clear()` drops every cached read, e.g. after
+   * a transfer made outside this client; `invalidate("fiat.")` drops one
+   * namespace.
+   */
+  readonly cache = {
+    clear: (): void => clearCache(),
+    invalidate: (match: string): void => invalidateCache(match),
+  };
 
   /** True when this client authenticates with a bearer token (no cookies). */
   get hasBearer(): boolean {
@@ -234,5 +254,6 @@ export function Peridot(options: PeridotOptions = {}): PeridotClient {
     options.onUnauthorized,
     options.sessionScope,
     options.bearer,
+    options.cache,
   );
 }

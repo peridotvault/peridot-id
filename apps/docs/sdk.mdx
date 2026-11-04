@@ -244,6 +244,53 @@ you need to force a refresh:
 const ok = await peridot.auth.refresh(); // true if a new session was issued
 ```
 
+## Read cache
+
+GET reads are cached for you, so repeated mounts and re-renders do not become
+API calls. Nothing to configure:
+
+```ts
+await peridot.fiat.balance(); // network
+await peridot.fiat.balance(); // cached (5s)
+```
+
+| Read | Fresh for |
+| --- | --- |
+| `fiat.balance()`, `fiat.ledger()`, `fiat.deposits()` | 5s (memory only) |
+| `identity.me()`, `profile.me()`, `level.get()`, `wallet.me()` | 60s |
+| `auth.accounts()`, `auth.sessions()`, `auth.grants()` | 30s |
+| `fiat.feePolicy()` | 10 min |
+
+Mutations invalidate the reads they affect (`fiat.send`, deposits, execute,
+profile update, session revoke, account switch), and login/logout,
+`setBearer()`, and account switches clear everything — a cache entry can never
+outlive the identity it belongs to. Error responses are never cached.
+
+Concurrent callers share one in-flight request, and other tabs on the same
+origin drop the same keys (via the browser `storage` event).
+
+Turn it off, or choose where it persists:
+
+```ts
+Peridot({ clientId, cache: false });                 // always hit the API
+Peridot({ clientId, cache: { tier: "local" } });     // survive reloads
+```
+
+Tiers: `memory` (default for money) → `session` (default; survives reload, dies
+with the tab) → `local` (across sessions; display-grade reads only). Storage is
+per origin by platform definition, and **bearers and secrets are never stored**.
+
+If your backend moves money outside this client (a webhook, another device),
+drop the cache so the next read is real:
+
+```ts
+peridot.cache.clear();            // everything
+peridot.cache.invalidate("fiat."); // one namespace
+```
+
+Server side, GET reads answer `304 Not Modified` when you send the `ETag` you
+already hold, so even an uncached read costs headers only.
+
 ## Errors
 
 Methods return the API error object instead of throwing for failed requests:

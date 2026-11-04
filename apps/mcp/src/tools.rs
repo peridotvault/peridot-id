@@ -334,7 +334,7 @@ mod tests {
         // 13 Mintlify pages x sections + OpenAPI operations; the exact
         // count is owned by sync-docs (see generated_docs.meta.json).
         assert!(DOCS.len() >= 100, "corpus too small: {}", DOCS.len());
-        assert_eq!(DOCS.len(), 216);
+        assert_eq!(DOCS.len(), 218);
         for doc in &DOCS {
             assert!(
                 doc.url.starts_with("https://docs.peridot.id/"),

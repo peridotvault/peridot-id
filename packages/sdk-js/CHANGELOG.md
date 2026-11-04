@@ -1,5 +1,22 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.11.0
+
+- **GET reads are cached by default.** `identity.me`, `profile.me`, `level.get`,
+  `wallet.me`, `fiat.balance/ledger/deposits`, `fiat.feePolicy` and
+  `auth.accounts/sessions/grants` are served from a read-through cache (5 s for
+  money, 30–60 s for identity/session reads, 10 min for fee policy), with
+  in-flight de-duplication and cross-tab invalidation. Mutations invalidate the
+  namespaces they touch; login, logout, `setBearer()` and account switches clear
+  everything. Errors are never cached and no token is ever stored.
+- **New options and escape hatch.** `Peridot({ cache: false })` disables it,
+  `cache: { tier: "memory" | "session" | "local" }` picks the persistence tier
+  (default `session`), and `peridot.cache.clear()` / `.invalidate("fiat.")`
+  force fresh reads when money moved outside this client.
+- **Server-side revalidation.** API GETs now carry a weak `ETag`, so an uncached
+  read costs headers only when nothing changed (`304 Not Modified`). Additive:
+  no existing call changed shape.
+
 ## 1.10.0
 
 - **Login popups close themselves.** `deliverLoginResult(targetOrigin, result,

@@ -1,8 +1,8 @@
 {
-  "builtAt": "2026-11-04T05:43:47Z",
-  "contentHash": "cd58bb4eb92a13cd47eb313594e5e6e1e6b1fe37ae11474b8d2e4eadcdd72efb",
+  "builtAt": "2026-11-04T07:50:15Z",
+  "contentHash": "21b120e73b8fed40a55c65ff3e01641f250c2ab137f50570d9f61f9a0f2afceb",
   "entryCounts": {
-    "docs": 216,
+    "docs": 218,
     "examples": 8,
     "guides": 15,
     "sdkModules": 3,
@@ -10,5 +10,5 @@
   },
   "generator": "apps/mcp/scripts/sync-docs",
   "llmsEntryCount": null,
-  "sourceSha": "6d92f4c61068a763ec8ef94a01f1114751311c4a"
+  "sourceSha": "a7c38a4e5767c10d72897bf40c5215ca6a685650"
 }

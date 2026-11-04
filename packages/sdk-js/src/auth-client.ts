@@ -10,6 +10,7 @@ import type {
 import { authenticatePasskey, PasskeyHostedRequiredError } from "@peridotvault/pid-core";
 import { openLoginPopup, openLoginTab, PopupClosedError, PopupUnavailableError } from "./popup.js";
 import type { PeridotClient } from "./client.js";
+import { CACHE_TTL, cachedRead, clearCache, invalidateCache } from "./internal/cache.js";
 
 export class PeridotAuth {
   constructor(private client: PeridotClient) {}
@@ -208,6 +209,7 @@ export class PeridotAuth {
    * when the bound app has a secret set.
    */
   async exchange(code: string, redirectUri: string, clientId?: string, clientSecret?: string): Promise<ExchangeResult | ApiError> {
+    clearCache();
     const cid = this.appId(clientId);
     const secret = this.appSecret(clientSecret);
     const res = await this.client.post<ExchangeResult>("/v1/auth/exchange", {
@@ -241,9 +243,11 @@ export class PeridotAuth {
     // itself — so that sign-out stays local.
     if (this.client.hasBearer && !this.client.sessionScope) {
       this.client.setBearer(undefined);
+      clearCache();
       return;
     }
     await this.client.post("/v1/auth/logout");
+    clearCache();
   }
 
   /** Check whether a PID handle is free (`ifal` → `ifal@pid`). */
@@ -281,6 +285,7 @@ export class PeridotAuth {
       const msg = (res.data as ApiError)?.message;
       throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Claim failed"));
     }
+    clearCache();
     return res.data as { ok: boolean; pid: string; pidCode?: string; redirectTo?: string };
   }
 
@@ -302,42 +307,53 @@ export class PeridotAuth {
   }
 
   async sessions(): Promise<Session[] | ApiError> {
-    const res = await this.client.get<Session[]>("/v1/auth/sessions");
-    return res.data;
+    return cachedRead("auth.sessions", CACHE_TTL.auth, async () => {
+      const res = await this.client.get<Session[]>("/v1/auth/sessions");
+      return res.data;
+    });
   }
 
   async revokeOtherSessions(): Promise<boolean> {
     const res = await this.client.delete("/v1/auth/sessions/revoke-others");
+    if (res.ok) invalidateCache("auth.");
     return res.ok;
   }
 
   async revokeSession(id: string): Promise<boolean> {
     const res = await this.client.delete(`/v1/auth/sessions/${id}`);
+    if (res.ok) invalidateCache("auth.");
     return res.ok;
   }
 
   /** Third-party sites this identity signed in to (active grants, newest first). */
   async grants(): Promise<SsoGrant[] | ApiError> {
-    const res = await this.client.get<SsoGrant[]>("/v1/auth/grants");
-    return res.data;
+    return cachedRead("auth.grants", CACHE_TTL.auth, async () => {
+      const res = await this.client.get<SsoGrant[]>("/v1/auth/grants");
+      return res.data;
+    });
   }
 
   /** Disconnect a site: stops future sign-ins there (the site's own session
    *  must still expire on its side). Idempotent. */
   async revokeGrant(id: string): Promise<boolean> {
     const res = await this.client.delete(`/v1/auth/grants/${id}`);
+    if (res.ok) invalidateCache("auth.");
     return res.ok;
   }
 
   /** Identities signed into this browser (wallet account switcher). */
   async accounts(): Promise<AccountView[] | ApiError> {
-    const res = await this.client.get<AccountView[]>("/v1/auth/accounts");
-    return res.data;
+    return cachedRead("auth.accounts", CACHE_TTL.auth, async () => {
+      const res = await this.client.get<AccountView[]>("/v1/auth/accounts");
+      return res.data;
+    });
   }
 
   /** Make a linked identity active without re-authenticating. */
   async switchAccount(pid: string): Promise<boolean> {
     const res = await this.client.post("/v1/auth/accounts/switch", { pid });
+    // Another identity is active now: every cached read belongs to the old one.
+    if (res.ok) clearCache();
     return res.ok;
   }
 

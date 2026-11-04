@@ -63,7 +63,7 @@ test("level.get passes the 404 envelope through for unknown/deleted users", asyn
 test("level.get sends the read-only bearer when set (embed mode)", async () => {
   const cap = captureFetch(async () => json(VIEW));
   try {
-    const peridot = Peridot({ baseUrl: "http://localhost:3301", bearer: "read-token" });
+    const peridot = Peridot({ baseUrl: "http://localhost:3301", bearer: "read-token", cache: false });
     await peridot.level.get("ifal@pid");
     assert.equal(cap.calls[0].init.headers.Authorization, "Bearer read-token");
     assert.equal(cap.calls[0].init.credentials, "omit");

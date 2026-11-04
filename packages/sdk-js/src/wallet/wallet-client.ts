@@ -6,6 +6,7 @@ import type { NftItem, ParsedTx, PasskeySigner, TokenBalance, TokenInfo, Transac
 import type { ApiError, Authority, Chain, ChainAccount, RegistryToken, WalletTransaction } from "@peridotvault/pid-types";
 import { FeePayerManager, type SecretStore } from "@peridotvault/pid-core";
 import { LocalHistoryStore, type HistoryStore } from "@peridotvault/pid-core";
+import { CACHE_TTL, cachedRead, invalidateCache } from "../internal/cache.js";
 import {
   FeeApprovalDeniedError,
   normalizeFeeQuote,
@@ -422,13 +423,16 @@ export class PeridotWallet {
 
   /** The wallet's chain rows (idempotent setup lives in createAccount). */
   async me(): Promise<ChainAccount[] | ApiError> {
-    const res = await this.api.get<ChainAccount[]>("/v1/account");
-    return res.data;
+    return cachedRead("wallet.me", CACHE_TTL.session, async () => {
+      const res = await this.api.get<ChainAccount[]>("/v1/account");
+      return res.data;
+    });
   }
 
   /** Ensure the wallet (idempotent) — returns its chain rows. */
   async createAccount(): Promise<ChainAccount[] | ApiError> {
     const res = await this.api.post<ChainAccount[]>("/v1/account");
+    if (res.ok) invalidateCache("wallet.me");
     return res.data;
   }
 

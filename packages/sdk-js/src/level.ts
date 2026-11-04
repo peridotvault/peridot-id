@@ -1,4 +1,5 @@
 import type { ApiError, LevelSummary } from "@peridotvault/pid-types";
+import { CACHE_TTL, cachedRead } from "./internal/cache.js";
 
 /** Minimal surface PeridotLevel needs — mirrors the pattern in wallet-client. */
 interface ApiLike {
@@ -23,7 +24,9 @@ export class PeridotLevel {
    * resolve to a 404 `ApiError`.
    */
   async get(pid: string): Promise<LevelSummary | ApiError> {
-    const res = await this.client.get<LevelSummary>(`/v1/users/${encodeURIComponent(pid)}/level`);
-    return res.data;
+    return cachedRead(`level.${pid}`, CACHE_TTL.session, async () => {
+      const res = await this.client.get<LevelSummary>(`/v1/users/${encodeURIComponent(pid)}/level`);
+      return res.data;
+    });
   }
 }

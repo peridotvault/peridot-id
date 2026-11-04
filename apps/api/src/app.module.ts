@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { EtagInterceptor } from "./common/etag.interceptor";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { skipIfAnon, skipIfAuthed, USER_THROTTLER, userThrottleTracker } from "./common/user-throttle";
 import { AccountModule } from "./account/account.module";
@@ -69,6 +70,9 @@ import { HealthModule } from "./health/health.module";
     // overrides (e.g. 10/min on OTP/auth) still apply. Least-privilege:
     // every route is rate-limited unless explicitly skipped.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // GET reads answer `304 Not Modified` when the caller already holds the
+    // body (ETag). Cheap bandwidth win for every client, no per-route work.
+    { provide: APP_INTERCEPTOR, useClass: EtagInterceptor },
   ],
 })
 export class AppModule {}
