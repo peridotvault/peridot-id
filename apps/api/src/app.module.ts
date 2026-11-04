@@ -32,12 +32,12 @@ import { HealthModule } from "./health/health.module";
     // per-app (60/min) and per-app+subject (30/min), keyed by rate-limit.ts
     // trackers (client_id from the body, IP fallback when absent).
     // Per-user vs anonymous buckets: a verified session/app token skips the
-    // per-IP bucket and counts against its own PID bucket (500/min) instead;
-    // anonymous requests keep the per-IP 100/min bucket. Page-flipping while
+    // per-IP bucket and counts against its own PID bucket (1500/min) instead;
+    // anonymous requests keep the per-IP 300/min bucket. Page-flipping while
     // logged in can never trip the anonymous budget, and a forged `sub`
     // falls back to the IP bucket (see user-throttle.ts).
     ThrottlerModule.forRoot([
-      { name: "default", ttl: 60000, limit: 100, skipIf: skipIfAuthed },
+      { name: "default", ttl: 60000, limit: 300, skipIf: skipIfAuthed },
       { ...USER_THROTTLER, skipIf: skipIfAnon, getTracker: userThrottleTracker },
       { ...XP_INTAKE_APP_THROTTLER, getTracker: xpIntakeAppTracker },
       { ...XP_INTAKE_APP_PID_THROTTLER, getTracker: xpIntakeAppPidTracker },
@@ -64,7 +64,7 @@ import { HealthModule } from "./health/health.module";
     OpenApiModule,
   ],
   providers: [
-    // ANT-285(a): the ThrottlerModule limit (100/min default) is inert without
+    // ANT-285(a): the ThrottlerModule limit (300/min default) is inert without
     // a guard. Global guard = secure by default; per-route @Throttle()
     // overrides (e.g. 10/min on OTP/auth) still apply. Least-privilege:
     // every route is rate-limited unless explicitly skipped.

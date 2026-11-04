@@ -36,7 +36,7 @@ export class AccountController {
 
   @Post()
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, UserTokenGuard)
   async create(
     @CurrentUser() user: AuthenticatedUser,
@@ -70,7 +70,7 @@ export class AccountController {
 
   @Post("activate")
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, UserTokenGuard)
   async activate(
     @CurrentUser() user: AuthenticatedUser,
@@ -92,7 +92,7 @@ export class AccountController {
 
   @Post("evm/:chainRef/activate")
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, UserTokenGuard)
   evmActivate(
     @CurrentUser() user: AuthenticatedUser,
@@ -110,7 +110,7 @@ export class AccountController {
    */
   @Post("evm/:chainRef/first-action")
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, UserTokenGuard)
   evmFirstAction(
     @CurrentUser() user: AuthenticatedUser,

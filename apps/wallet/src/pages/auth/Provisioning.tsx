@@ -5,6 +5,7 @@ import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../../shared/app/AppContext";
 import { styles as s } from "../../shared/styles/theme";
 import { UIButton } from "../../shared/components/ui/UIButton";
+import { ensureChainRows } from "../../feat/chain/utils/chainRows";
 
 type StepKey = "identity" | "wallet";
 type StepStatus = "pending" | "running" | "done" | "failed";
@@ -22,8 +23,7 @@ async function runOne(peridot: PeridotClient, key: StepKey): Promise<void> {
     }
     return;
   }
-  let acc = await peridot.wallet.me();
-  if (typeof acc === "object" && acc !== null && "statusCode" in acc) acc = await peridot.wallet.createAccount();
+  const acc = await ensureChainRows(peridot);
   if (typeof acc === "object" && acc !== null && "statusCode" in acc) {
     throw new Error("Could not set up the wallet — try again.");
   }

@@ -1,4 +1,4 @@
-// Tiered read cache for wallet API reads (per-IP 100/min budget).
+// Tiered read cache for wallet API reads (per-IP 300/min budget).
 //
 // Memory alone dies on every full reload, and a reload is the most expensive
 // wallet event (~15 requests cold). So reads persist one tier down:

@@ -1,5 +1,5 @@
-// Per-user throttle identity: verified-token PID gets the 500/min bucket,
-// anonymous stays on the per-IP 100/min bucket. No DI here — pure functions
+// Per-user throttle identity: verified-token PID gets the 1500/min bucket,
+// anonymous stays on the per-IP 300/min bucket. No DI here — pure functions
 // over a request-shaped object, signed with jsonwebtoken directly.
 import { sign } from "jsonwebtoken";
 import { ExecutionContext } from "@nestjs/common";

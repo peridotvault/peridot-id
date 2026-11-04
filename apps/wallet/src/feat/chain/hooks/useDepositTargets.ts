@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import type { ChainAccount } from "@peridotvault/pid-types";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { ApiError, ChainAccount } from "@peridotvault/pid-types";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { buildDepositTargets, type DepositTarget } from "../utils/depositTargets";
+import { buildDepositTargets } from "../utils/depositTargets";
+import { ensureChainRows } from "../utils/chainRows";
+import { API_BASE_URL } from "../../../shared/app/config";
 import {
   endNetworkTransition,
   getNetworkMode,
@@ -11,7 +13,10 @@ import {
 } from "../../../shared/data/networkMode";
 import {
   filterChainAccountsForSelection,
+  getCachedChains,
+  getChainsVersion,
   getSelection,
+  refreshRegistryChains,
   subscribeSelectedChains,
 } from "../../../shared/data/selectedChains";
 
@@ -24,23 +29,51 @@ import {
 // ANT-625 strict selection: chain accounts are filtered to the selected set
 // first (EVM deposit-target filtering only in v1 — no EVM RPC fan-out, OQ3).
 // All-mode returns every row (byte-identical to today).
+// Rows come from the ensure call (POST), not the read: a chain registered in
+// the dashboard after this wallet was provisioned only gets its row then.
 export function useDepositTargets(peridot: PeridotClient) {
-  const [targets, setTargets] = useState<DepositTarget[]>([]);
+  const [accounts, setAccounts] = useState<ChainAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const mode = useSyncExternalStore(subscribeNetworkMode, getNetworkMode, getNetworkMode);
   const solanaAvailable = useSyncExternalStore(
     subscribeNetworkMode,
     isSolanaAvailable,
     isSolanaAvailable,
   );
+  // Registry rows label the cards (name/symbol); re-render when they land.
+  const chainsVersion = useSyncExternalStore(
+    subscribeSelectedChains,
+    getChainsVersion,
+    getChainsVersion,
+  );
+  const selectionKey = useRef<string | null>(null);
 
   const load = useCallback(async () => {
-    let acc = await peridot.wallet.me();
-    if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
-    if ("statusCode" in acc) return;
-    const selected = filterChainAccountsForSelection(acc as ChainAccount[], getSelection());
-    const all = buildDepositTargets(selected);
-    setTargets(isSolanaAvailable() ? all : all.filter((t) => !t.key.startsWith("solana-")));
+    selectionKey.current = JSON.stringify(getSelection());
+    setLoading(true);
+    setError(null);
+    try {
+      const acc = await ensureChainRows(peridot);
+      if ("statusCode" in acc) {
+        const e = acc as ApiError;
+        setAccounts([]);
+        setError(Array.isArray(e.message) ? e.message.join(" ") : e.message);
+        return;
+      }
+      setAccounts(filterChainAccountsForSelection(acc as ChainAccount[], getSelection()));
+    } catch (e) {
+      setAccounts([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
   }, [peridot]);
+
+  useEffect(() => {
+    // Labels only — failure keeps the built-in fallback table.
+    void refreshRegistryChains(API_BASE_URL).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     // Retry on every screen load: fail-closed refresh re-runs when the
@@ -49,16 +82,29 @@ export function useDepositTargets(peridot: PeridotClient) {
   }, [mode]);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load, solanaAvailable]);
 
   // Re-filter on selection switch (same signing-block release as a network
-  // switch — idempotent when no switch is in flight).
+  // switch — idempotent when no switch is in flight). Registry refreshes also
+  // notify, so only a real selection change triggers another ensure call.
   useEffect(() => {
     return subscribeSelectedChains(() => {
+      if (JSON.stringify(getSelection()) === selectionKey.current) {
+        endNetworkTransition();
+        return;
+      }
       load().then(endNetworkTransition, endNetworkTransition);
     });
   }, [load]);
 
-  return { targets, reload: load };
+  const targets = useMemo(() => {
+    const visible = solanaAvailable
+      ? accounts
+      : accounts.filter((a) => a.chainNamespace !== "solana");
+    return buildDepositTargets(visible, getCachedChains() ?? []);
+    // chainsVersion is a render trigger: getCachedChains() is not reactive.
+  }, [accounts, solanaAvailable, chainsVersion]);
+
+  return { targets, reload: load, loading, error };
 }

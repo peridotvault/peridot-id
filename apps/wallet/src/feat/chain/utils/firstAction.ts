@@ -50,9 +50,11 @@ export const SETUP_PROGRESS_COPY = "Setting up your on-chain account…";
  * one back) so the caller can render it as a non-blocking notice.
  */
 export async function ensureAccountAndActivate(peridot: PeridotClient): Promise<string | null> {
-  let acc = await peridot.wallet.me();
+  // POST /v1/account is the per-chain row setup (GET only reads) — a chain
+  // registered after provisioning needs it before activation can target it.
+  let acc = await peridot.wallet.createAccount();
   if (acc != null && typeof acc === "object" && "statusCode" in acc) {
-    acc = await peridot.wallet.createAccount();
+    acc = await peridot.wallet.me();
   }
   if (acc != null && typeof acc === "object" && "statusCode" in acc) {
     throw new Error("Could not prepare your account — try again. Nothing was charged.");

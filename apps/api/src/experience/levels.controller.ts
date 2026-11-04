@@ -10,7 +10,7 @@ import { LevelsService, LevelView } from "./levels.service";
  * no Verified/XP-permission check; those gate the M3 intake path, never
  * reads). Privacy: only live (non-deleted) identities resolve; anything
  * else is 404. Rate limiting comes from the global ThrottlerGuard default
- * (100/min), same as other reads.
+ * (300/min), same as other reads.
  *
  * F1 read-authz rule (ANT-430 / plan rev 5 §13) — MVP-OPEN BY DESIGN, NOT
  * AN OVERSIGHT: unverified reads stay open through M1/M2. The GA decision

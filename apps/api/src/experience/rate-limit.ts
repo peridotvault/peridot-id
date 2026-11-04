@@ -1,7 +1,7 @@
 /**
  * ANT-89 M3 (ANT-441) — intake throttle tiers (Tobias F5).
  *
- * The global default (100/min, IP-keyed) stays as the outer bound. Intake
+ * The global default (300/min, IP-keyed) stays as the outer bound. Intake
  * adds two INNER tiers keyed below it:
  * - `xp-intake-app` (60/min per client_id): bounds one app's total pressure.
  * - `xp-intake-app-pid` (30/min per client_id + user_id): bounds per-subject

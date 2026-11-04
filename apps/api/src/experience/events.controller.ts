@@ -16,7 +16,7 @@ import { XP_INTAKE_APP_PID_THROTTLER, XP_INTAKE_APP_THROTTLER } from "./rate-lim
  * allowlist entry in app-token-surface.spec.ts documents why this write
  * route is exempt from the user-token rule).
  *
- * Throttle tiers (Tobias F5): global default (100/min IP) outer bound,
+ * Throttle tiers (Tobias F5): global default (300/min IP) outer bound,
  * per-app (60/min) and per-app+subject (30/min) inner tiers. 429s keep the
  * standard envelope and feed the suspicious-activity alert hook (F7).
  *

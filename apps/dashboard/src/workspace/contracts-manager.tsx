@@ -8,6 +8,8 @@ import { PageHeader } from "./page-header";
 import { useWorkspace } from "./workspace-provider";
 import { CutButton } from "./cut-button";
 
+// EVM rows stay off until BOTH are active (the API derives a deposit address
+// from the pair), so the UI has to say which one is missing.
 const CONTRACT_TYPES = ["factory", "account_implementation"] as const;
 
 /** Admin smart-contract registry: typed contracts per chain (factory, implementation, …). */
@@ -50,6 +52,10 @@ export function ContractsManager({ client }: { client: PeridotClient }) {
   }, [contractChainId, chains, selectedId, clearContractChainId]);
 
   const chain = chains.find((c) => c.id === selectedId) ?? null;
+  const activeTypes = new Set(
+    (chain?.contracts ?? []).filter((k) => k.isActive).map((k) => k.type),
+  );
+  const missingContracts = CONTRACT_TYPES.filter((t) => !activeTypes.has(t));
 
   return (
     <section className="mt-8">
@@ -97,7 +103,13 @@ export function ContractsManager({ client }: { client: PeridotClient }) {
                   </div>
                 ))}
                 {(chain.contracts ?? []).length === 0 && (
-                  <p className={`text-sm ${MUTED}`}>No contracts yet — set the factory below to enable this chain.</p>
+                  <p className={`text-sm ${MUTED}`}>No contracts yet — set both factory and account_implementation below.</p>
+                )}
+                {(chain.contracts ?? []).length > 0 && missingContracts.length > 0 && (
+                  <p className={`text-sm ${MUTED}`}>
+                    Wallets show no deposit address for this chain until both are set — missing{" "}
+                    {missingContracts.join(" + ")}.
+                  </p>
                 )}
               </div>
               <div className={`mt-3 pt-3 ${DIVIDER}`}>

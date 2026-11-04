@@ -65,7 +65,7 @@ export class WalletController {
   /** Relayer-sponsored withdraw (V3): the SDK signs intent + fee policy; Peridot's relayer pays the fee. */
   @Post("withdraw")
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, UserTokenGuard)
   async withdraw(
     @CurrentUser() user: AuthenticatedUser,
@@ -94,7 +94,7 @@ export class WalletController {
   /** Relayer-sponsored generic execute (V3): the SDK signs call_hash + fee policy; Peridot's relayer pays the fee. */
   @Post("execute")
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, UserTokenGuard)
   async execute(
     @CurrentUser() user: AuthenticatedUser,
@@ -150,7 +150,7 @@ export class WalletController {
    */
   @Post("rotate")
   @HttpCode(HttpStatus.OK)
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle({ default: { limit: 15, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, UserTokenGuard)
   async rotate(
     @CurrentUser() user: AuthenticatedUser,

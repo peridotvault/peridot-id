@@ -62,7 +62,7 @@ describe("review copy", () => {
 describe("ensureAccountAndActivate", () => {
   const rows = [{ address: "A" }];
 
-  it("activates directly when rows exist", async () => {
+  it("ensures chain rows (POST) then activates — never a separate setup step", async () => {
     const calls = [];
     const peridot = {
       wallet: {
@@ -72,20 +72,20 @@ describe("ensureAccountAndActivate", () => {
       },
     };
     await ensureAccountAndActivate(peridot);
-    assert.deepEqual(calls, ["me", "activate"]);
+    assert.deepEqual(calls, ["createAccount", "activate"]);
   });
 
-  it("creates rows first when the account is missing, then activates", async () => {
+  it("falls back to the read when the ensure write fails, then activates", async () => {
     const calls = [];
     const peridot = {
       wallet: {
-        me: async () => ({ statusCode: 404, message: "missing" }),
-        createAccount: async () => { calls.push("createAccount"); return rows; },
+        me: async () => { calls.push("me"); return rows; },
+        createAccount: async () => ({ statusCode: 429, message: "slow down" }),
         activate: async () => { calls.push("activate"); return { status: "activating" }; },
       },
     };
     await ensureAccountAndActivate(peridot);
-    assert.deepEqual(calls, ["createAccount", "activate"]);
+    assert.deepEqual(calls, ["me", "activate"]);
   });
 
   it("throws user-facing copy when setup fails (deposit untouched)", async () => {

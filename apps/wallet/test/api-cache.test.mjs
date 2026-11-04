@@ -1,5 +1,5 @@
 // Request-budget guard: the wallet must not refetch slow-changing reads on
-// every Home mount (per-IP 100/min 429s).
+// every Home mount (per-IP 300/min 429s).
 // Run: `node --test test/` from apps/wallet.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";

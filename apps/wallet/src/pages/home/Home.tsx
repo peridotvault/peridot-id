@@ -27,6 +27,7 @@ import {
   subscribeSelectedChains,
 } from "../../shared/data/selectedChains";
 import { buildCoins } from "../../feat/chain/utils/coins";
+import { ensureChainRows } from "../../feat/chain/utils/chainRows";
 import { FiatSection } from "../../feat/fiat/components/FiatSection";
 import { AssetSection } from "../../feat/chain/components/AssetSection";
 
@@ -155,7 +156,7 @@ export function Home({
 // fetch is selection-scoped server-side, so a reload is all it takes to keep
 // balances separate (never merged client-side).
 //
-// Request budget (per-IP 100/min): slow-changing reads go through cachedRead
+// Request budget (per-IP 300/min): slow-changing reads go through cachedRead
 // (see shared/apiCache.ts) and NTFs load only when the Items tab is opened,
 // so revisiting Home costs 3 requests (balance, tokens, fiat) instead of 9.
 function useHomeData(peridot: PeridotClient) {
@@ -192,8 +193,9 @@ function useHomeData(peridot: PeridotClient) {
     const sel = getSelection();
     const solanaOn = isSolanaSelected(sel);
     try {
-      let acc = await cachedRead("wallet.me", { ttlMs: 10_000, tier: "session" }, () => peridot.wallet.me());
-      if ("statusCode" in acc) acc = await peridot.wallet.createAccount();
+      // POST /v1/account is the per-chain row setup; a chain registered in the
+      // dashboard after provisioning only gets its row through it.
+      const acc = await cachedRead("wallet.me", { ttlMs: 10_000, tier: "session" }, () => ensureChainRows(peridot));
       if ("statusCode" in acc) {
         const detail = Array.isArray(acc.message) ? acc.message.join(" ") : acc.message;
         throw new Error(`Failed to create account (${acc.statusCode}${detail ? `: ${detail}` : ""})`);

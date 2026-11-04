@@ -5,7 +5,7 @@ import { JWT_ACCESS_AUDIENCES, JWT_ISSUER } from "./app-config";
 import { ACCESS_COOKIE, normalizeScope, scopeAccessCookie } from "./cookies";
 
 /**
- * Per-user throttle identity (authed 500/min vs anonymous 100/min per IP).
+ * Per-user throttle identity (authed 1500/min vs anonymous 300/min per IP).
  *
  * `skipIf`/`getTracker` are plain functions (no DI — the guard calls them per
  * request), so the secret is read lazily from `process.env` at request time,
@@ -91,5 +91,5 @@ export function userThrottleTracker(req: Record<string, unknown>): string {
   return `user:ip:${typeof ip === "string" && ip ? ip : "unknown"}`;
 }
 
-/** Per-user bucket: 500/min for verified sessions, skipped for anonymous. */
-export const USER_THROTTLER = { name: "user", ttl: 60000, limit: 500 } as const;
+/** Per-user bucket: 1500/min for verified sessions, skipped for anonymous. */
+export const USER_THROTTLER = { name: "user", ttl: 60000, limit: 1500 } as const;
