@@ -66,6 +66,17 @@ jobs:
               continue
             fi
             echo "publishing $pkg@$ver"
+            # Guard: the tarball must carry real version pins, never pnpm's
+            # `workspace:` protocol. `npm publish` leaves it in (uninstallable:
+            # EUNSUPPORTEDPROTOCOL), `pnpm publish` rewrites it.
+            packdir=$(mktemp -d)
+            pnpm --filter "$pkg" pack --pack-destination "$packdir" >/dev/null
+            tarball=$(ls "$packdir"/*.tgz | head -1)
+            if tar -xzOf "$tarball" package/package.json | grep -q 'workspace:'; then
+              echo "::error::$pkg@$ver still declares workspace: dependencies — publish through pnpm, never npm publish"
+              exit 1
+            fi
+            rm -rf "$packdir"
             pnpm --filter "$pkg" publish --access public --no-git-checks --provenance || {
               echo "publish failed for $pkg@$ver"; exit 1; }
             # A 2FA-staged publish "succeeds" but never reaches the registry, so
