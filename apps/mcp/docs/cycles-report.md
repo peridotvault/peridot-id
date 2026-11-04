@@ -55,7 +55,8 @@ consensus + certification. Only `search_docs` rises materially above it
   1500 ms** holds. Wall time is gateway update-polling dominated, not
   execution (host execution is µs–ms; see §4).
 - Idle burn (baseline, fresh deploy, no traffic): **24,951,596 cycles/day**,
-  memory 2,441,635 B.
+  memory 2,441,635 B. Local replica only — mainnet reports 932.7M/day for the
+  same wasm, see §5.
 - Storage: `src/generated_docs.rs` 98,728 B; wasm
   `target/wasm32-unknown-unknown/release/peridot_id_mcp.wasm` **1,184,289 B**
   (+77,001 B vs Phase 1, per ticket baseline).
@@ -108,18 +109,21 @@ marginal gain did not justify wire-visible churn.
 Blended planning rate (assumed mix: 40% search, 20% guide, 20% example,
 20% sdk — adjust with real traffic): **≈ 7.9M cycles/call**.
 
-## 5. Monthly burn at 3 usage levels (blended 7.9M/call + idle ~26M/day)
+## 5. Monthly burn at 3 usage levels (blended 7.9M/call + idle 0.93B/day)
 
 | Traffic | Call burn/month | Idle/month | Total/month | vs 20T budget |
 | --- | --- | --- | --- | --- |
-| 1K calls/day | 0.24T | 0.0008T | **~0.24T** | 1.2% |
-| 10K calls/day | 2.37T | 0.0008T | **~2.37T** | 12% |
-| 100K calls/day | 23.7T | 0.0008T | **~23.7T** | **119% — exceeds budget** |
+| 1K calls/day | 0.24T | 0.028T | **~0.27T** | 1.3% |
+| 10K calls/day | 2.37T | 0.028T | **~2.40T** | 12% |
+| 100K calls/day | 23.7T | 0.028T | **~23.73T** | **119% — exceeds budget** |
 
-Idle is negligible at every level (0.78B/month). Storage check: at
-$5/GB/year (≈3,760 cycles/byte/year), the ~2.6 MB footprint costs
-≈ 9.8B cycles/year ≈ 27M/day — matches the replica's idle figure, so the
-idle burn IS the storage cost; no separate storage line item is needed.
+Idle stays negligible against traffic at every level. **Mainnet correction
+(2026-11-04, post-launch audit):** the deployed canister reports
+**932,704,098 cycles/day** idle (28B/month), 37× the 24.95M/day measured on
+the local replica (§2), so the replica's idle figure does not carry over —
+budget the 0.028T/month line, not 0.0008T. At 3T that idle alone lasts
+~3,200 days; the report's storage estimate (2.6 MB ≈ 27M/day) does not
+describe mainnet behaviour and should not be used for alerting.
 
 ## 6. Initial-allocation recommendation (out of 20T, per ANT-841 strategy)
 
