@@ -25,6 +25,13 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   the ecosystem namespace in identifiers (cookies `pid_access`/`pid_refresh`, env
   `PID_*`, codes `pid_code`/`pidapp_`/`pidsk_`).
 
+## Branch flow (this repo)
+
+Everything flows **branch → `dev` → `test` → `main`**. No pull requests: merge
+locally, push `dev`, fast-forward `test` from `dev`, then promote `test` to
+`main` (`git push origin test:main`). Feature branches are short-lived and land
+in `dev` — never open a PR unless the owner asks for one.
+
 ## Environment
 
 - **Secrets (Infisical Cloud, project `peridot-id-uf-w9`):** envs `dev` / `test` /
