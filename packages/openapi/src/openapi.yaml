@@ -82,6 +82,9 @@ tags:
   - name: openapi
     description: Machine-readable API specification
 
+  - name: chains
+    description: Public chain + token registry (references, RPC endpoints, mainnet availability signals)
+
 paths:
   /fiat/payments:
     post:
@@ -3011,6 +3014,729 @@ paths:
               schema:
                 type: string
 
+  /auth/app-info:
+    get:
+      tags: [auth]
+      summary: Public app display name + verified flag for consent screens
+      description: |
+        Lookup by `clientId`. Returns only `{name, isVerified}` — no secrets,
+        no scopes. 404 for an unknown or disabled app. Rate limited (30/min).
+      parameters:
+        - name: clientId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: App identity for the consent screen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  isVerified: { type: boolean }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/passkey/start:
+    post:
+      tags: [auth]
+      summary: Start a passkey (WebAuthn) sign-in
+      description: |
+        No body. Returns the WebAuthn challenge (`authenticationId` + public-key
+        options) to hand to `navigator.credentials.get`. Rate limited (20/min).
+      responses:
+        "200":
+          description: "$ref AuthenticateStart plus the server-side authenticationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticateStart"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/passkey/finish:
+    post:
+      tags: [auth]
+      summary: Finish a passkey sign-in (sets the session cookies)
+      description: |
+        Verifies the assertion, then issues the same session cookies as the
+        Google flow. With `returnTo` (an allowed, verified origin) it also mints
+        a `pidCode` for SSO; unverified apps must go through `POST /auth/authorize`
+        instead so the user sees the consent screen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthenticateFinish"
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  pidCode: { type: string, description: Present only when returnTo was supplied }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/accounts:
+    get:
+      tags: [auth]
+      summary: Identities signed into this browser (account switcher)
+      description: |
+        Resolved from the httpOnly per-identity refresh cookies, so it works with
+        an expired access token. Returns only identities this browser holds.
+      responses:
+        "200":
+          description: Array of `{pid, handle, avatarUrl?, lastUsedAt}` for this browser
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/accounts/switch:
+    post:
+      tags: [auth]
+      summary: Make a linked identity active (rotates the access cookie)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pid]
+              properties:
+                pid: { type: string }
+      responses:
+        "200":
+          description: Switched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  pid: { type: string }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/accounts/signout:
+    post:
+      tags: [auth]
+      summary: Forget one identity in this browser (others stay signed in)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pid]
+              properties:
+                pid: { type: string }
+      responses:
+        "200":
+          description: Signed out for that identity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/grants:
+    get:
+      tags: [auth]
+      summary: List SSO grants (apps this identity approved)
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Array of grants `{id, clientId, appName, scopes, createdAt, lastUsedAt}`
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/grants/{id}:
+    delete:
+      tags: [auth]
+      summary: Revoke one SSO grant
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /auth/session/scope:
+    post:
+      tags: [auth]
+      summary: Mint an independent session for a first-party app scope
+      description: |
+        Sets that app's own `pid_access_<scope>` cookies from the wallet session.
+        The wallet session is untouched, so app and wallet log out independently.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scope]
+              properties:
+                scope: { type: string, description: First-party app scope label }
+      responses:
+        "200":
+          description: Scoped session issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  scope: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/sessions/{id}:
+    delete:
+      tags: [auth]
+      summary: Revoke one session by id
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /auth/sessions/revoke-others:
+    delete:
+      tags: [auth]
+      summary: Revoke every session except the calling browser
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /chains:
+    get:
+      tags: [chains]
+      summary: Active chain registry (references, RPC endpoints, programs)
+      description: |
+        Public discovery endpoint — the SDK and clients resolve chain references
+        from here instead of hardcoding them. Rate limited (120/min).
+      responses:
+        "200":
+          description: Array of registry rows `{reference, kind, network, rpcUrl, program?, tokens?, ...}`
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /chains/solana-availability:
+    get:
+      tags: [chains]
+      summary: Mainnet Solana presence signal (pre-login feature gate)
+      description: |
+        Contract `{available, reference, program, rpcUrl}`; all four null-valued
+        with `available: false` while no mainnet Solana program row exists. The
+        wallet calls this pre-login to decide whether to offer Solana UI.
+      responses:
+        "200":
+          description: Availability signal
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available: { type: boolean }
+                  reference: { type: string, nullable: true }
+                  program: { type: string, nullable: true }
+                  rpcUrl: { type: string, nullable: true }
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /tokens:
+    get:
+      tags: [chains]
+      summary: Supported token list (registry, public)
+      responses:
+        "200":
+          description: Array of `{symbol, name, mint, decimals, logoUrl?}`
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /tokens/logo:
+    get:
+      tags: [chains]
+      summary: Token logo image (proxied, cacheable)
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Image bytes
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /account/evm/{chainRef}/first-action:
+    post:
+      tags: [account]
+      summary: EVM lazy first action (deploy+init then execute in one approval)
+      description: |
+        One passkey approval runs `deployAndInit` → `execute` back-to-back through
+        the relayer. Idempotent on `firstActionId`: in-flight returns 409
+        `ActivationInProgress`, completed returns the same hashes without a
+        second deploy. Response is the activation view plus the execute hash.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: chainRef
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstActionId]
+              properties:
+                firstActionId: { type: string, description: Client-generated idempotency id }
+                call: { type: object, description: "EVM call `{to, value, data}` run after deploy+init" }
+      responses:
+        "200":
+          description: Activation view + execute hash
+        "409":
+          description: ActivationInProgress — the same firstActionId is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /wallet/transactions:
+    get:
+      tags: [wallet]
+      summary: Recent wallet activity for the caller
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Wallet activity rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WalletTransaction"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [wallet]
+      summary: Record a wallet activity entry
+      description: |
+        Client-side record of an executed action (the relayer path already writes
+        its own rows). Idempotent per signature.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletTransaction"
+      responses:
+        "200":
+          description: Recorded
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /fiat/admin/journal/{pid}:
+    get:
+      tags: [fiat]
+      summary: Admin — full ledger journal for one identity
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: pid
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Ledger entries for the identity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FiatLedgerEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /fiat/admin/adjust:
+    post:
+      tags: [fiat]
+      summary: Admin — signed correction between two real identities
+      description: |
+        Writes a balanced `fiat_adjust` pair (out + in, same amount, one
+        entryGroup) atomically. Transfer corrections live here; issuance clawbacks
+        stay on the propose→approve path. Idempotent via `Idempotency-Key`.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              properties:
+                requestId: { type: string }
+                amountIdr: { type: integer, description: Whole IDR, positive }
+                fromPid: { type: string }
+                toPid: { type: string }
+                note: { type: string }
+      responses:
+        "200":
+          description: Posted entry group
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /pids/claim:
+    post:
+      tags: [identity]
+      summary: Claim a PID handle (requires the claim cookie)
+      description: |
+        201 `{handle, normalizedHandle, claimedAt}`. 409 `HANDLE_TAKEN`, 400
+        `HANDLE_INVALID`, 429 with `Retry-After`. Same trust boundary as
+        `POST /v1/auth/claim`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle]
+              properties:
+                handle: { type: string, description: 3-20 chars, lowercase letters/numbers/underscore }
+      responses:
+        "201":
+          description: Claimed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  handle: { type: string }
+                  normalizedHandle: { type: string }
+                  claimedAt: { type: string, format: date-time }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: HANDLE_TAKEN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /pids/{handle}/status:
+    get:
+      tags: [identity]
+      summary: Handle state — available | claimed | under_review (public)
+      parameters:
+        - name: handle
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Handle state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  handle: { type: string }
+                  status: { type: string, enum: [available, claimed, under_review] }
+  /pids/reports:
+    post:
+      tags: [identity]
+      summary: File a handle takedown report
+      description: |
+        202 `{reportId, slaRespondBy}`. The reporter must hold a session; the
+        report enters the 14-day appeal window after a decision.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [handle]
+              properties:
+                handle: { type: string }
+                reason: { type: string }
+                evidence: { type: string }
+      responses:
+        "202":
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reportId: { type: string }
+                  slaRespondBy: { type: string, format: date-time }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /pids/reports/{id}:
+    get:
+      tags: [identity]
+      summary: Report detail (reporter, holder, or admin)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Report + decision history
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /pids/reports/{id}/appeal:
+    post:
+      tags: [identity]
+      summary: Appeal a decided report (once, within 14 days)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Appeal registered
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /pids/reports/{id}/decision:
+    post:
+      tags: [identity]
+      summary: Admin decision — keep | release | transfer
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [keep, release, transfer] }
+                note: { type: string }
+      responses:
+        "200":
+          description: Decision recorded
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /wallet/execute/batch/quote:
+    post:
+      tags: [wallet]
+      summary: Locked pass-through quote for a sequential call batch
+      description: |
+        Phase-1a intent queue (ERC-5792-shaped call objects, executed as
+        sequential single calls — no bundler/paymaster). `quoteId` binds the exact
+        op list; quote expiry returns 410 `StaleQuote`.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [calls]
+              properties:
+                calls:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      to: { type: string }
+                      value: { type: string }
+                      data: { type: string }
+      responses:
+        "200":
+          description: "BatchQuoteView `{quoteId, chain, calls, networkFee, protocolFee, totalFee, expiresAt}`"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "410":
+          $ref: "#/components/responses/StaleQuote"
+  /wallet/execute/batch/submit:
+    post:
+      tags: [wallet]
+      summary: Submit a quoted batch (relayer executes the calls in order)
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quoteId, signature]
+              properties:
+                quoteId: { type: string }
+                signature: { type: string, description: Base64 passkey signature over the quote }
+      responses:
+        "200":
+          description: "BatchStatusView `{batchId, status, calls, signatures}`"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "410":
+          $ref: "#/components/responses/StaleQuote"
+  /wallet/execute/batch/flush:
+    post:
+      tags: [wallet]
+      summary: Flush queued batches now
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Array of `BatchStatusView` that changed state
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /wallet/execute/batch/metrics/summary:
+    get:
+      tags: [wallet]
+      summary: Batch queue metrics (last N days)
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 90, default: 7 }
+      responses:
+        "200":
+          description: "BatchMetrics `{submitted, landed, failed, cancelled, medianLandMs}`"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /wallet/execute/batch/{id}:
+    get:
+      tags: [wallet]
+      summary: Batch status by id
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: "BatchStatusView `{batchId, status, calls, signatures}`"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /wallet/execute/batch/{id}/cancel:
+    post:
+      tags: [wallet]
+      summary: Cancel a batch that has not started executing
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Cancelled
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 components:
   securitySchemes:
     bearerAuth:

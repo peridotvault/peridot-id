@@ -80,36 +80,6 @@ pub struct DocHit {
     pub excerpt: String,
 }
 
-/// Rank `docs` against `query` (already validated non-empty).
-///
-/// Sort key: title matches before excerpt-only matches, then earliest match
-/// position, then title lexicographically. Truncated to [`MAX_RESULTS`].
-pub fn rank(query: &str, docs: &[DocEntry]) -> Vec<DocHit> {
-    let q = query.to_lowercase();
-    let mut scored: Vec<(u8, usize, &DocEntry)> = Vec::new();
-    for doc in docs {
-        let title_lc = doc.title.to_lowercase();
-        let excerpt_lc = doc.excerpt.to_lowercase();
-        let title_pos = title_lc.find(q.as_str());
-        let excerpt_pos = excerpt_lc.find(q.as_str());
-        match (title_pos, excerpt_pos) {
-            (Some(tp), _) => scored.push((0, tp, doc)),
-            (None, Some(ep)) => scored.push((1, ep, doc)),
-            (None, None) => {}
-        }
-    }
-    scored.sort_by(|a, b| (a.0, a.1, a.2.title).cmp(&(b.0, b.1, b.2.title)));
-    scored
-        .into_iter()
-        .take(MAX_RESULTS)
-        .map(|(_, _, doc)| DocHit {
-            title: doc.title.to_string(),
-            url: doc.url.to_string(),
-            excerpt: doc.excerpt.to_string(),
-        })
-        .collect()
-}
-
 /// Search the generated Mintlify corpus.
 ///
 /// Fast path over the baked index: lowercase title/excerpt pairs are computed
@@ -139,27 +109,106 @@ fn hit_of(doc: &DocEntry) -> DocHit {
     }
 }
 
-/// Rank the generated corpus with the cached lowercase index. Identical
-/// output to [`rank`] called with `&DOCS`.
-fn rank_generated(query: &str) -> Vec<DocHit> {
-    let q = query.to_lowercase();
-    let corpus = lower_corpus();
-    let mut scored: Vec<(u8, usize, &DocEntry)> = Vec::new();
-    for (doc, (title_lc, excerpt_lc)) in DOCS.iter().zip(corpus.iter()) {
-        let title_pos = title_lc.find(q.as_str());
-        let excerpt_pos = excerpt_lc.find(q.as_str());
-        match (title_pos, excerpt_pos) {
-            (Some(tp), _) => scored.push((0, tp, doc)),
-            (None, Some(ep)) => scored.push((1, ep, doc)),
-            (None, None) => {}
-        }
+/// Words dropped from multi-word queries so a natural-language question
+/// ("how do I deposit") still matches the corpus.
+const STOPWORDS: [&str; 11] = [
+    "a", "an", "and", "do", "does", "how", "i", "is", "the", "to", "what",
+];
+
+/// Lowercase whitespace tokens, minus stopwords (never empty: a query made
+/// only of stopwords keeps its raw tokens).
+fn query_tokens(q: &str) -> Vec<&str> {
+    let kept: Vec<&str> = q
+        .split_whitespace()
+        .filter(|t| !STOPWORDS.contains(t))
+        .collect();
+    if kept.is_empty() {
+        q.split_whitespace().collect()
+    } else {
+        kept
     }
+}
+
+/// Position of the first token found in `hay`, requiring every token present.
+fn all_tokens_at(hay: &str, toks: &[&str]) -> Option<usize> {
+    let mut first = usize::MAX;
+    for t in toks {
+        first = first.min(hay.find(t)?);
+    }
+    Some(first)
+}
+
+/// Score one document against the lowercased query.
+///
+/// Tier 0/1 = the whole query appears as a phrase (title first). Tier 2/3/4 =
+/// every token appears (title, excerpt, or spread across both) — this is what
+/// keeps multi-word questions from returning nothing.
+fn score_doc(title_lc: &str, excerpt_lc: &str, q: &str, toks: &[&str]) -> Option<(u8, usize)> {
+    if let Some(p) = title_lc.find(q) {
+        return Some((0, p));
+    }
+    if let Some(p) = excerpt_lc.find(q) {
+        return Some((1, p));
+    }
+    if let Some(p) = all_tokens_at(title_lc, toks) {
+        return Some((2, p));
+    }
+    if let Some(p) = all_tokens_at(excerpt_lc, toks) {
+        return Some((3, p));
+    }
+    let mut first = usize::MAX;
+    for t in toks {
+        let p = title_lc.find(t).or_else(|| excerpt_lc.find(t))?;
+        first = first.min(p);
+    }
+    Some((4, first))
+}
+
+/// Shared ranker over lowercased `(doc, title, excerpt)` triples. Every
+/// caller keeps identical ordering because there is exactly one scorer.
+fn rank_matches<'a>(
+    q: &str,
+    docs: impl Iterator<Item = (&'a DocEntry, &'a str, &'a str)>,
+) -> Vec<DocHit> {
+    let toks = query_tokens(q);
+    let mut scored: Vec<(u8, usize, &DocEntry)> = docs
+        .filter_map(|(doc, title_lc, excerpt_lc)| {
+            score_doc(title_lc, excerpt_lc, q, &toks).map(|(tier, pos)| (tier, pos, doc))
+        })
+        .collect();
     scored.sort_by(|a, b| (a.0, a.1, a.2.title).cmp(&(b.0, b.1, b.2.title)));
     scored
         .into_iter()
         .take(MAX_RESULTS)
         .map(|(_, _, doc)| hit_of(doc))
         .collect()
+}
+
+/// Rank the corpus (lowercases on the fly; kept for the equivalence test).
+pub fn rank(query: &str, docs: &[DocEntry]) -> Vec<DocHit> {
+    let q = query.to_lowercase();
+    let lower: Vec<(String, String)> = docs
+        .iter()
+        .map(|d| (d.title.to_lowercase(), d.excerpt.to_lowercase()))
+        .collect();
+    rank_matches(
+        &q,
+        docs.iter()
+            .zip(lower.iter())
+            .map(|(d, (t, e))| (d, t.as_str(), e.as_str())),
+    )
+}
+
+/// Rank the generated corpus with the cached lowercase index (same scorer as
+/// [`rank`], so the two stay identical by construction).
+fn rank_generated(query: &str) -> Vec<DocHit> {
+    let q = query.to_lowercase();
+    rank_matches(
+        &q,
+        DOCS.iter()
+            .zip(lower_corpus().iter())
+            .map(|(d, (t, e))| (d, t.as_str(), e.as_str())),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +334,7 @@ mod tests {
         // 13 Mintlify pages x sections + OpenAPI operations; the exact
         // count is owned by sync-docs (see generated_docs.meta.json).
         assert!(DOCS.len() >= 100, "corpus too small: {}", DOCS.len());
-        assert_eq!(DOCS.len(), 176);
+        assert_eq!(DOCS.len(), 216);
         for doc in &DOCS {
             assert!(
                 doc.url.starts_with("https://docs.peridot.id/"),
@@ -382,6 +431,38 @@ mod tests {
                 "cached rank diverged for probe: {probe}"
             );
         }
+    }
+
+    #[test]
+    fn multiword_queries_still_match() {
+        // Regression: matching used to require the WHOLE query as a substring,
+        // so natural questions returned nothing and agents were told the docs
+        // had no answer.
+        for probe in [
+            "fiat deposit",
+            "fiat checkout",
+            "how do I deposit",
+            "deposit money",
+            "wallet transaction",
+            "session revoke",
+        ] {
+            assert!(
+                !search_docs(probe).is_empty(),
+                "multi-word query returned no hits: {probe}"
+            );
+        }
+    }
+
+    #[test]
+    fn phrase_matches_outrank_scattered_tokens() {
+        // A phrase hit must rank above the looser all-tokens tier.
+        let hits = search_docs("checkout deposit");
+        assert!(!hits.is_empty(), "phrase query lost its hits");
+        assert!(
+            hits[0].title.to_lowercase().contains("checkout"),
+            "top hit for a phrase query should be the phrase page, got: {}",
+            hits[0].title
+        );
     }
 
     #[test]

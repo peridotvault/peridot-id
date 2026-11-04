@@ -9,6 +9,13 @@ stdlib only. Deterministic: byte-identical regeneration (`sync-docs --check`).
 Usage (from `apps/mcp/`):
     ./scripts/sync-docs           # regenerate generated_docs.rs + meta
     ./scripts/sync-docs --check   # exit 0 iff regeneration is byte-identical
+
+The recorded `sourceSha` is the git tree SHA of `apps/docs` at HEAD, so a docs
+edit needs two steps: commit the `apps/docs` change, re-run `sync-docs`, then
+commit the regenerated Rust. Editing the Mintlify tree alone fails `--check`.
+`apps/docs/openapi.yaml` is a copy of `packages/openapi/src/openapi.yaml`: this
+script writes it, so the spec the SDK ships and the spec agents read cannot
+drift apart.
 """
 from __future__ import annotations
 
@@ -23,6 +30,11 @@ from pathlib import Path
 MCP_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = MCP_DIR.parent.parent
 DOCS_DIR = REPO_ROOT / "apps" / "docs"
+# Canonical API spec: the published spec package owns it, the Mintlify tree only
+# carries a copy for the docs site — so a new endpoint can never be documented
+# for the SDK but invisible to the MCP index.
+OPENAPI_SRC = REPO_ROOT / "packages" / "openapi" / "src" / "openapi.yaml"
+OPENAPI_DOCS = DOCS_DIR / "openapi.yaml"
 OUT_RS = MCP_DIR / "src" / "generated_docs.rs"
 OUT_META = MCP_DIR / "src" / "generated_docs.meta.json"
 
@@ -379,8 +391,18 @@ def main(check: bool) -> None:
             "rel": rel,
         }
 
-    openapi_text = read_text(DOCS_DIR / "openapi.yaml")
+    openapi_text = read_text(OPENAPI_SRC)
     ops = parse_openapi_ops(openapi_text)
+    # Keep the Mintlify copy byte-identical (the docs site serves it). In check
+    # mode a stale copy is a hard failure, exactly like stale generated Rust.
+    docs_openapi = read_text(OPENAPI_DOCS)
+    if docs_openapi != openapi_text:
+        if check:
+            fail(
+                "apps/docs/openapi.yaml drifted from packages/openapi/src/openapi.yaml: "
+                "run ./scripts/sync-docs"
+            )
+        OPENAPI_DOCS.write_text(openapi_text, encoding="utf-8")
 
     norm_sources: dict[str, str] = {
         slug: collapse_ws(strip_fences(p["body"])) for slug, p in pages.items()

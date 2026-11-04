@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "echo 'static spec, nothing to build'",
-    "typecheck": "echo 'no types'"
+    "typecheck": "echo 'no types'",
+    "check:coverage": "node scripts/check-coverage.mjs"
   }
 }

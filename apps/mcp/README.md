@@ -28,8 +28,8 @@ cargo test -p peridot_id_mcp    # 55 tests, must be green
 
 Inputs: `apps/docs/*.mdx` (12 guides) + `apps/docs/api/overview.mdx` +
 `apps/docs/openapi.yaml` + `apps/docs/docs.json` (canonical slug list).
-Output: `src/generated_docs.rs` (176 search entries + 15 guides +
-8 verbatim examples + 3 SDK modules, ~96 KiB; budget ≤ 160 KiB) plus
+Output: `src/generated_docs.rs` (216 search entries + 15 guides +
+8 verbatim examples + 3 SDK modules, ~107 KiB; budget ≤ 160 KiB) plus
 `src/generated_docs.meta.json` (`sourceSha`, `contentHash`, `entryCounts`,
 `builtAt`). Regeneration is deterministic and byte-identical; `--check`
 compares the `.rs` bytes plus the meta hash/counts (only `builtAt` differs).

@@ -234,6 +234,9 @@ jobs:
             exit 1
           fi
 
+      - name: API docs coverage (report-only)
+        run: pnpm --filter @peridotvault/pid-openapi check:coverage
+
       - name: Foundry tests
         uses: foundry-rs/foundry-toolchain@v1
         with:
