@@ -67,7 +67,8 @@ a child of `Users`. Never hierarchy-by-product.
 ### 3.2 Money — (done) except Treasury payout execution (skipped, §4)
 
 - **Spendable Saldo = live `DOKU_MERCHANT_POINT` available, 1:1 IDR peg.**
-- Checkout deposits are **NET-in** (min Rp50.000 NET, API-enforced):
+- Checkout deposits are **NET-in** (min ~~Rp50.000~~ **Rp10.000** NET, API-enforced —
+  superseded value lives in `apps/api/src/fiat/fiat-limits.ts`):
   `fee = 0.1% of net` min `Rp100`, no cap (half-up),
   `gross = net + fee`. This is the PeridotID fee only — DOKU charges its own
   provider fee separately (not part of the quote).
@@ -345,7 +346,8 @@ PROVIDER-DEP-02. **DOKU refund/chargeback lifecycle (UNVERIFIED).**
 5. **BRI VA response field** — promised per sub-account, unnamed in
     responses; client reads `vaNumber`/`virtualAccountNo` defensively.
 6. **Limits, PG fees, settlement delay, rate limits, capacity** — no public
-    numbers; enforce only our fee policy + Rp50.000 NET minimum; surface
+    numbers; enforce only our fee policy + Rp10.000 NET minimum (superseded from
+    Rp50.000 — see `fiat-limits.ts`); surface
     DOKU errors verbatim. Settlement can lag > a day. 100K–1M PID needs
     DOKU confirmation.
 7. **Bank-code list / channel default** — `BI_FAST` default; full list
