@@ -1,5 +1,14 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.11.2
+
+- **Switching accounts no longer serves the previous identity from cache.**
+  Starting a login (`auth.login`, `loginPopup`, `loginTab`,
+  `loginWithPasskey`) now clears the read cache before the redirect, so
+  `identity.me()` / `profile.me()` after "use a different account" return the
+  account that actually signed in instead of a ≤60s stale entry. Additive;
+  same cache semantics otherwise.
+
 ## 1.11.1
 
 - **Fix packaging of 1.11.0.** That tarball was built with `npm publish`, which

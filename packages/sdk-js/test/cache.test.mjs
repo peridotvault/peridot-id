@@ -195,3 +195,18 @@ test("persisted entries carry no credentials", async () => {
     cap.restore();
   }
 });
+
+test("starting a login drops the cached identity", async () => {
+  withBrowserGlobals();
+  const cap = jsonFetch({ pid: "ifal@pid" });
+  try {
+    const peridot = freshClient({ baseUrl: "http://localhost:3301", clientId: "pidapp_test" });
+    await peridot.identity.me();
+    await peridot.auth.login(); // a different identity may come back
+    await peridot.identity.me();
+    const meCalls = cap.calls.filter((c) => String(c.url).endsWith("/v1/identity/me")).length;
+    assert.equal(meCalls, 2, "login must not leave the previous identity cached");
+  } finally {
+    cap.restore();
+  }
+});

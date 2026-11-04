@@ -25,6 +25,9 @@ export class PeridotAuth {
    * navigates itself), or null when the login URL could not be obtained.
    */
   async login(opts?: { returnTo?: string; clientId?: string }): Promise<string | null> {
+    // The round-trip may land a different identity: never serve cached reads
+    // (identity/profile/balance) from the account that was active before.
+    clearCache();
     const clientId = this.appId(opts?.clientId);
     const body =
       opts?.returnTo || clientId
@@ -72,6 +75,8 @@ export class PeridotAuth {
     opener: (opts: { popupBaseUrl: string; params: Record<string, string | undefined> }) => Promise<{ pidCode?: string }>,
     opts?: { clientId?: string; returnTo?: string; method?: string; firstParty?: boolean; sessionScope?: string },
   ): Promise<{ pidCode?: string }> {
+    // Same rule as login(): the popup may sign in as another account.
+    clearCache();
     if (!this.client.popupBaseUrl) {
       throw new PopupUnavailableError("No popup host configured — omit baseUrl so the env preset applies, or pass popupBaseUrl.");
     }
@@ -132,6 +137,7 @@ export class PeridotAuth {
    * delegates to the PeridotID popup instead of failing cryptically.
    */
   async loginWithPasskey(opts?: { returnTo?: string; clientId?: string }): Promise<{ ok: boolean; pidCode?: string }> {
+    clearCache();
     const clientId = this.appId(opts?.clientId);
     try {
       const finish = await authenticatePasskey({

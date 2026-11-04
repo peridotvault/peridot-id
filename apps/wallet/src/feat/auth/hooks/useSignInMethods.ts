@@ -2,6 +2,7 @@ import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
 import { finishSso, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "./useLoginSession";
+import { clearApiCache } from "../../../shared/data/apiCache";
 
 export function useSignInMethods(
   peridot: PeridotClient,
@@ -21,6 +22,9 @@ export function useSignInMethods(
   const signInWithPasskey = async () => {
     setBusy(true);
     setError(null);
+    // A different identity may come back from the ceremony — drop the wallet's
+    // read cache (the SDK clears its own inside auth.login*).
+    clearApiCache();
     try {
       const res = await peridot.auth.loginWithPasskey(
         ctx ? undefined : sso ? { returnTo: sso.redirectUri, clientId: sso.clientId } : undefined,
@@ -61,6 +65,7 @@ export function useSignInMethods(
       // Auth-in-a-new-tab: no returnTo — the Google callback returns to this
       // wallet (CLIENT_SUCCESS_URL) so the tab can mint the app's pid_code and
       // post it to the opener. Non-tab SSO keeps the cross-origin returnTo.
+      clearApiCache();
       const url = await peridot.auth.login(
         ctx
           ? undefined

@@ -4,6 +4,7 @@ import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, rejectLogin, type LoginContext } from "../utils/popupLogin";
 import { withDenied, withPidCode, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "./useLoginSession";
+import { clearApiCache } from "../../../shared/data/apiCache";
 
 export function useConsentActions(
   peridot: PeridotClient,
@@ -72,24 +73,27 @@ export function useConsentActions(
     }
   };
 
-  /** "Use a different account": pick another linked identity (client login) or
-   *  restart the login form (third-party SSO). Never signs the wallet out of
-   *  PeridotID — an app's login must not end the user's wallet session. */
+  /** "Use a different account": pick another linked identity (both client login
+   *  and third-party SSO), falling back to the login form when this browser
+   *  holds only one. Never signs the wallet out of PeridotID — an app's login
+   *  must not end the user's wallet session. */
   const useDifferentCtx = async () => {
-    if (ctx?.firstParty) {
-      setBusy(true);
-      setPickerError(null);
-      try {
-        const res = await peridot.auth.accounts();
-        setPicker(Array.isArray(res) ? (res as AccountView[]) : []);
-      } catch (e) {
-        setPickerError(e instanceof Error ? e.message : String(e));
-        setPicker([]);
-      } finally {
-        setBusy(false);
-      }
+    setBusy(true);
+    setPickerError(null);
+    let accounts: AccountView[] = [];
+    try {
+      const res = await peridot.auth.accounts();
+      if (Array.isArray(res)) accounts = res as AccountView[];
+    } catch (e) {
+      setPickerError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+    if (accounts.length > 0) {
+      setPicker(accounts);
       return;
     }
+    // No other identity on this browser: start a real login instead.
     flags.delivered = false;
     setSession(null);
     setShowLogin(true);
@@ -101,6 +105,7 @@ export function useConsentActions(
     setPickerError(null);
     try {
       if (!(await peridot.auth.switchAccount(pid))) throw new Error("Couldn't switch account.");
+      clearApiCache();
       const account = picker?.find((a) => a.pid === pid);
       flags.delivered = false;
       setPicker(null);
