@@ -68,4 +68,16 @@ jobs:
             echo "publishing $pkg@$ver"
             pnpm --filter "$pkg" publish --access public --no-git-checks --provenance || {
               echo "publish failed for $pkg@$ver"; exit 1; }
+            # A 2FA-staged publish "succeeds" but never reaches the registry, so
+            # verify the version is actually live (registry propagation lags a
+            # few seconds). Without this, a token lacking "bypass 2FA" fails
+            # silently and the tag looks green.
+            for _ in 1 2 3 4 5 6; do
+              npm view "$pkg@$ver" version >/dev/null 2>&1 && break
+              sleep 5
+            done
+            if ! npm view "$pkg@$ver" version >/dev/null 2>&1; then
+              echo "::error::$pkg@$ver is not on the registry after publish — staged for 2FA? The token needs 'bypass 2FA' for automation."
+              exit 1
+            fi
           done
