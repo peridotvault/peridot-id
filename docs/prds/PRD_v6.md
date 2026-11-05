@@ -181,6 +181,19 @@ exists while `PID_REDEMPTION_ENABLED=false`; the minimal Withdraw flow
 enablement. Bank-account management, limits education, and advanced UX are
 a later phase after the rail is proven.
 
+> **Amendment — 2026-11-05 (ANT-990, additive; this section's history is not rewritten).**
+> For the **withdrawal surface only**, the [ANT-990 withdrawal PRD](/ANT/issues/ANT-990)
+> supersedes the ban above: withdrawals may expose the user-visible statuses
+> `PENDING`, `APPROVED`, `BATCHED`, `PROCESSING`, `SUCCESS`, `FAILED`,
+> `RECONCILIATION`, `REJECTED`, `CANCELLED`, and must distinguish **available**
+> from **reserved** balance (`availableIdr = balanceIdr − reservedIdr`; see PRD
+> decisions D1, D3 and §4.5). The status-vocabulary ban above continues to apply
+> to every other surface (Balance, Deposit, Transfer and all admin/debug
+> interfaces). The withdrawal surface remains **flagged off** (`PID_WITHDRAWALS_ENABLED=false`
+> plus settings `featureEnabled=false`) and no public withdrawal copy exists
+> before the launch gates; this note authorises no enablement. Decision
+> reference: ANT-990 PRD D9 and §11.3.
+
 ## 6. Requirements (acceptance — all boxes ticked with evidence)
 
 Live-verification rows stay `☐` until proven against real DOKU behavior

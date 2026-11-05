@@ -15,7 +15,8 @@
 - Economics (locked): global PeridotID fee = **0.1% (10 bps), min Rp100, no cap**
   (`calcServiceFee`, active `FiatFeePolicy`), snapshotted per movement
   (`feePolicyVersion`). Applies to every fiat movement (user↔user, escrow,
-  topup, withdraw). Minimum top-up **Rp10.000 NET**.
+  topup) **except withdrawals**, which use their own dedicated policy — see
+  **Withdrawals (flagged off)** below. Minimum top-up **Rp10.000 NET**.
 - **PPN (VAT), configurable, never hardcoded**: `FiatFeePolicy.taxBps` (PeridotID
   PPN on its fee, default 1100 = 11%) and the singleton `FiatTaxSetting.dokuTaxBps`
   (DOKU PPN on the gateway fee, default 1100). Tax is computed on the **fee**, not
@@ -35,11 +36,59 @@
   unchecked (or no row) = hidden from the wallet picker and not charged** (a
   disabled row shadows the `"*"` fallback). Default is off, so the wallet blocks
   top-ups until at least one method is enabled. See below.
-- No withdrawal/cash-out (redemption disabled). Any identity can send to any
-  identity (escrow is a normal app account; release logic lives in the app).
+- No withdrawal/cash-out in production today: redemption is disabled and the
+  withdrawal surface is **flagged off** (see **Withdrawals (flagged off)** below).
+  Any identity can send to any identity (escrow is a normal app account; release
+  logic lives in the app).
 - Treasury: the global fee credits a synthetic `treasury` owner in replay; PPN
   credits a synthetic `tax` owner. The PID in `PID_FIAT_LEDGER_TREASURY_PID` is an
   ops label (env, never hardcoded).
+
+## Withdrawals (flagged off)
+
+The withdrawal surface is **not enabled** and must not be enabled in any real
+environment until the ANT-990 launch gates close: env `PID_WITHDRAWALS_ENABLED=true`
+**and** settings `featureEnabled=true`, plus G1–G10 and an explicit board go/no-go.
+Both flags stay `false` in real environments; synthetic/staging may run seeded users
+and a fake provider only. Design and contract live in the
+[ANT-990 PRD](/ANT/issues/ANT-990) (decisions D1–D10, §4.4–§4.5, §7.1).
+
+**Reservation and available balance.** Creating a withdrawal writes an **active
+reservation** for the **gross** amount (`grossAmountIdr`), atomically with the
+request under the identity lock. The reservation is an **encumbrance only**: it
+writes **no** journal entry and no ledger statement line before verified
+settlement. It is released on user cancel before export and on expiry, and it is
+held while the request is in `RECONCILIATION`.
+
+```
+reservedIdr  = SUM(amount_idr) over the user's active reservations
+availableIdr = balanceIdr - reservedIdr      (never negative)
+```
+
+`balanceIdr` remains the replayed posted balance; every spending path must check
+`availableIdr`. The journal is posted only at **verified settlement**
+(provider/bank result), and its group must satisfy
+`gross == net + fee + tax + appFee` exactly.
+
+**Fee policy — the generic 0.1% does not apply.** The locked global policy above
+(**0.1%, min Rp100, no cap** — `DEFAULT_FEE_POLICY` / active `FiatFeePolicy`) does
+**not** apply to withdrawals, and neither do the `FiatFeePolicy` row defaults
+(500 bps, cap Rp25.000). Withdrawals resolve **only** the dedicated, versioned
+withdrawal fee policy (`withdrawalFeePolicyVersion`, ANT-990 §5.12/§7.1.1):
+
+- `feeEnabled=false` (the default) ⇒ `feeIdr=0`, `taxIdr=0`, and no "free"/"gratis" claim.
+- `feeEnabled=true` and the dedicated policy missing/unreadable ⇒
+  `503 FEE_POLICY_UNSET`; no quote is issued and there is **no fallback** to either
+  default (ANT-990 AC-31). Quote and receipt return the resolved
+  `withdrawalFeePolicyVersion` so QA can prove which numbers were used.
+- `netIdr = grossIdr - feeIdr - taxIdr - appFeeIdr` must be `> 0`; otherwise reject
+  `NET_NOT_POSITIVE`.
+- No fee percentage is set here. Enabling a fee requires counsel confirmation that
+  it is not a prohibited redemption fee, then a settings change with
+  `counselReference`.
+
+No public/user-visible withdrawal copy exists before the launch gates; it is
+counsel-gated (ANT-990 G6, `[OPEN-COUNSEL]`).
 
 ## Journal (`fiat_ledger_entries`)
 
@@ -131,7 +180,10 @@ Operations: `topup`, `transaction`, `withdraw`. Body: `{ percentBps, minIdr,
 maxIdr, enabled }` (`minIdr/maxIdr` 0 = unbounded; `minIdr ≤ maxIdr`). The fee
 stacks on the global fee and credits the app's account. Apply it by passing
 `clientId` on `deposits/checkout` / `transfers/inquiry` (or automatically when
-the caller is the app's machine token).
+the caller is the app's machine token). For **withdrawals** (flagged off) the
+app fee is part of the withdrawal fee model and is disabled together with
+`feeEnabled`; it never stacks on the global 0.1% fee — see
+**Withdrawals (flagged off)** above.
 
 ## Top-up fees & checkout summary
 
