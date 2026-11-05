@@ -73,6 +73,42 @@ is regenerated:
   XP-policy and settings admin (`/v1/admin/experience/*`, `/v1/admin/settings/*`,
   `/v1/admin/xp/*`), `POST /v1/experience/events` (S2S app-credential auth)
 
+## Withdrawals `[FLAGGED OFF]`
+
+**Not available in any real environment.** These endpoints are specified by the
+[ANT-990 withdrawal PRD](/ANT/issues/ANT-990) (§6) but are **not implemented**
+and must remain unreachable while either `PID_WITHDRAWALS_ENABLED=false` or
+settings `featureEnabled=false`; user routes then return
+`404`/`WITHDRAWALS_DISABLED` (ANT-990 AC-25). No production client may depend on
+them. Contract shapes: ANT-990 §6.2 (user) and §6.3 (admin).
+
+User (`[FLAGGED OFF]`):
+
+- `GET /v1/fiat/balance` — extended additively with `reservedIdr`/`availableIdr`
+- `GET /v1/fiat/withdrawal-config`
+- `POST /v1/fiat/withdrawals/quote`
+- `POST /v1/fiat/withdrawals` (`Idempotency-Key` required)
+- `GET /v1/fiat/withdrawals` · `GET /v1/fiat/withdrawals/:ref`
+- `POST /v1/fiat/withdrawals/:ref/cancel`
+- `GET /v1/fiat/withdrawal-bank-accounts` · `POST /v1/fiat/withdrawal-bank-accounts`
+  · `POST /v1/fiat/withdrawal-bank-accounts/:id/deactivate`
+- `POST /v1/support/complaints` · `GET /v1/support/complaints/:caseNumber`
+
+Admin (`[FLAGGED OFF]`; capability + step-up, ANT-989):
+`GET /v1/fiat/admin/withdrawals` · `GET /v1/fiat/admin/withdrawals/:ref` ·
+`POST /v1/fiat/admin/withdrawals/:ref/decision` ·
+`POST /v1/fiat/admin/withdrawals/bulk-decisions` ·
+`POST /v1/fiat/admin/withdrawals/:ref/reveal-bank-account` ·
+`GET /v1/fiat/admin/withdrawals/:ref/timeline` ·
+`POST /v1/fiat/admin/withdrawal-batches` ·
+`POST /v1/fiat/admin/withdrawal-batches/:ref/{export,submissions,results}` ·
+`GET /v1/fiat/admin/withdrawal-results/:id/preview` ·
+`POST /v1/fiat/admin/withdrawal-results/:id/apply` ·
+`GET /v1/fiat/admin/withdrawal-exceptions` ·
+`POST /v1/fiat/admin/withdrawal-exceptions/:id/resolve` ·
+`GET /v1/fiat/admin/withdrawal-stats` · `GET /v1/fiat/admin/withdrawal-float` ·
+`GET/PUT /v1/fiat/admin/withdrawal-settings`
+
 ## Client
 
 The SDK (`@peridotvault/pid-sdk-js`) wraps these:
