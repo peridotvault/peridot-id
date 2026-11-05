@@ -76,11 +76,11 @@ is regenerated:
 ## Withdrawals `[FLAGGED OFF]`
 
 **Not available in any real environment.** These endpoints are specified by the
-[ANT-990 withdrawal PRD](/ANT/issues/ANT-990) (§6) but are **not implemented**
-and must remain unreachable while either `PID_WITHDRAWALS_ENABLED=false` or
-settings `featureEnabled=false`; user routes then return
-`404`/`WITHDRAWALS_DISABLED` (ANT-990 AC-25). No production client may depend on
-them. Contract shapes: ANT-990 §6.2 (user) and §6.3 (admin).
+[ANT-990 withdrawal PRD](/ANT/issues/ANT-990) (§6) but are **not part of the
+implemented or `openapi.yaml` surface**, and must remain unreachable while either
+`PID_WITHDRAWALS_ENABLED=false` or settings `featureEnabled=false`; user routes
+then return `404`/`WITHDRAWALS_DISABLED` (ANT-990 AC-25). No production client may
+depend on them. Contract shapes: ANT-990 §6.2 (user) and §6.3 (admin).
 
 User (`[FLAGGED OFF]`):
 
