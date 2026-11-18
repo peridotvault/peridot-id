@@ -16,6 +16,7 @@
 
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { ProviderError } from "./provider.js";
+import type { CheckoutAdapter, CheckoutNotification } from "./checkout-adapter.js";
 import { DOKU_PROD_URL, DOKU_SANDBOX_URL } from "./subaccount.js";
 
 export const CHECKOUT_PAYMENT_PATH = "/checkout/v1/payment";
@@ -171,7 +172,7 @@ function checkoutGetSignature(opts: {
   return `HMACSHA256=${createHmac("sha256", opts.secretKey).update(raw).digest("base64")}`;
 }
 
-export class DokuCheckoutClient {
+export class DokuCheckoutClient implements CheckoutAdapter {
   readonly name = "doku-checkout";
 
   constructor(private readonly config: DokuCheckoutConfig) {}
@@ -334,6 +335,11 @@ export class DokuCheckoutClient {
    */
   async transactionFee(_methodCode: string, _amountIdr: bigint): Promise<bigint | null> {
     return null;
+  }
+
+  /** DOKU Checkout notification body → normalized facts (documented fields only). */
+  parseNotification(body: unknown): CheckoutNotification | null {
+    return parseCheckoutNotify(body);
   }
 }
 

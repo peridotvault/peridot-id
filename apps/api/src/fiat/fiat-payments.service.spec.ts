@@ -29,9 +29,18 @@ function setup() {
   };
   const quote = { amountIdr: "10000", netIdr: "10000", totalIdr: "10100", minimumIdr: "10000", peridotFeeIdr: "100", peridotTaxIdr: "0", appFeeIdr: "0" };
   const fiat: any = { quoteDeposit: jest.fn(async () => quote) };
-  const checkout: any = { createPayment: jest.fn(async () => ({ paymentUrl: "https://pay.example" })), checkOrderStatus: jest.fn(async () => ({ paid: true, paidAmount: 10100n })) };
-  const service = new FiatPaymentsService(prisma, { get: (_k: string, d: string) => d } as never, ledger, fiat, checkout);
-  return { service, prisma, ledger, checkout, entries, events, current: () => payment };
+  const checkout: any = {
+    name: "doku-checkout",
+    createPayment: jest.fn(async () => ({ paymentUrl: "https://pay.example" })),
+    checkOrderStatus: jest.fn(async () => ({ paid: true, paidAmount: 10100n })),
+    parseNotification: (body: any) =>
+      typeof body?.order?.invoice_number === "string"
+        ? { invoiceNumber: body.order.invoice_number, amountRaw: body.order.amount, txStatus: body.transaction?.status }
+        : null,
+  };
+  const adapters = { [checkout.name]: checkout };
+  const service = new FiatPaymentsService(prisma, { get: (_k: string, d: string) => d } as never, ledger, fiat, checkout, adapters);
+  return { service, prisma, ledger, checkout, adapters, entries, events, current: () => payment };
 }
 const user = { pid: "kinno@pid", app: "pidapp_kinno", scope: "fiat:payment" };
 const input = { amountIdr: "10000", externalId: "ORDER-1", payerPid: "alice@pid", metadata: { plan: "pro" }, paymentMethod: "QRIS" };

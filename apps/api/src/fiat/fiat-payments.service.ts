@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, type FiatPayment } from "@prisma/client";
-import { codesForCategory, type DokuCheckoutClient, isPaymentMethodCategory, parseCheckoutNotify } from "@peridotvault/pid-payments";
+import { codesForCategory, isPaymentMethodCategory } from "@peridotvault/pid-payments";
 import { AuthenticatedUser } from "../common/current-user.decorator";
 import { PrismaService } from "../prisma/prisma.service";
-import { CHECKOUT_CLIENT } from "./checkout-client.token";
+import { CHECKOUT_ADAPTERS, CHECKOUT_CLIENT, type CheckoutAdapter, type CheckoutAdapters } from "./checkout-client.token";
 import { FiatLedgerService } from "./fiat-ledger.service";
 import { FiatSubAccountService } from "./fiat-subaccount.service";
 import { CreatePaymentDto, ListPaymentsDto, PaymentQuoteDto, RefundPaymentDto } from "./dto/payment.dto";
@@ -18,7 +18,8 @@ export class FiatPaymentsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FiatPaymentsService.name);
   constructor(private readonly prisma: PrismaService, private readonly config: ConfigService,
     private readonly ledger: FiatLedgerService, private readonly fiat: FiatSubAccountService,
-    @Inject(CHECKOUT_CLIENT) private readonly checkout: DokuCheckoutClient) {}
+    @Inject(CHECKOUT_CLIENT) private readonly checkout: CheckoutAdapter,
+    @Inject(CHECKOUT_ADAPTERS) private readonly adapters: CheckoutAdapters) {}
 
   onModuleInit() {
     this.timer = setInterval(() => { void this.reconcile().catch(e => this.fail(e)); }, 3000);
@@ -94,7 +95,8 @@ export class FiatPaymentsService implements OnModuleInit, OnModuleDestroy {
         id, appClientId: app.clientId, payerPid, beneficiaryPid, externalId: input.externalId,
         description: input.description, metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
         amountIdr: BigInt(input.amountIdr), feeIdr: BigInt(q.feeIdr), totalIdr: BigInt(q.totalIdr),
-        quote: q as unknown as Prisma.InputJsonValue, providerRef: `FP${randomUUID().replace(/-/g, "").slice(0, 28)}`,
+        quote: q as unknown as Prisma.InputJsonValue, provider: this.checkout.name,
+        providerRef: `FP${randomUUID().replace(/-/g, "").slice(0, 28)}`,
         expiresAt: new Date(Date.now() + 30 * 60_000),
       } });
     } catch (e) {
@@ -134,9 +136,16 @@ export class FiatPaymentsService implements OnModuleInit, OnModuleDestroy {
   async notify(rawBody: string) {
     let body: unknown;
     try { body = JSON.parse(rawBody); } catch { return; }
-    const notification = parseCheckoutNotify(body);
-    if (!notification) return;
-    const p = await this.prisma.fiatPayment.findUnique({ where: { providerRef: notification.invoiceNumber } });
+    let invoiceNumber: string | null = null;
+    for (const adapter of Object.values(this.adapters)) {
+      const parsed = adapter.parseNotification(body);
+      if (parsed) {
+        invoiceNumber = parsed.invoiceNumber;
+        break;
+      }
+    }
+    if (!invoiceNumber) return;
+    const p = await this.prisma.fiatPayment.findUnique({ where: { providerRef: invoiceNumber } });
     if (p) await this.sync(p);
   }
   async reconcile() {
@@ -153,6 +162,13 @@ export class FiatPaymentsService implements OnModuleInit, OnModuleDestroy {
       }));
     } finally { this.busy = false; }
   }
+  /** The adapter that created this intent; the active one only as a last resort. */
+  private adapterFor(provider: string): CheckoutAdapter {
+    const adapter = this.adapters[provider];
+    if (adapter) return adapter;
+    this.logger.warn(`Payment routed to unknown provider "${provider}" — using ${this.checkout.name}`);
+    return this.checkout;
+  }
   private async event(tx: Prisma.TransactionClient, p: FiatPayment, type: string) {
     const app = await tx.pidApp.findUnique({ where: { clientId: p.appClientId } });
     if (!app?.isActive || !app.webhookUrl) return;
@@ -164,7 +180,7 @@ export class FiatPaymentsService implements OnModuleInit, OnModuleDestroy {
   }
   async sync(p: FiatPayment) {
     if (p.status === "paid") return;
-    const st = await this.checkout.checkOrderStatus(p.providerRef);
+    const st = await this.adapterFor(p.provider).checkOrderStatus(p.providerRef);
     // A mismatch can never resolve itself: close it so it stops being polled
     // and the app is told, instead of dangling until the 24h sweep drops it.
     if (st.paid && st.paidAmount !== p.totalIdr) {

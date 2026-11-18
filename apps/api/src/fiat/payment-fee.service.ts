@@ -10,10 +10,9 @@ import {
   PAYMENT_CATEGORIES,
   paymentMethodCategory,
   type GatewayFeeRate,
-  type DokuCheckoutClient,
 } from "@peridotvault/pid-payments";
 import { PrismaService } from "../prisma/prisma.service";
-import { CHECKOUT_CLIENT } from "./checkout-client.token";
+import { CHECKOUT_CLIENT, type CheckoutAdapter } from "./checkout-client.token";
 
 /** Rate resolution order: exact method code → category → "*". */
 function rateKeys(methodKey: string): string[] {
@@ -47,7 +46,7 @@ export class PaymentFeeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
-    @Inject(CHECKOUT_CLIENT) private readonly checkout: DokuCheckoutClient,
+    @Inject(CHECKOUT_CLIENT) private readonly checkout: CheckoutAdapter,
   ) {}
 
   /** True only when ops opted into the (currently non-existent) DOKU fee API. */

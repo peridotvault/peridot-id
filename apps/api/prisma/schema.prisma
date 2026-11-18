@@ -1381,6 +1381,10 @@ model FiatPayment {
   feeIdr BigInt
   totalIdr BigInt
   quote Json
+  // Which checkout adapter created this intent (`CheckoutAdapter.name`).
+  // Reconciliation ALWAYS uses this, so switching the active provider never
+  // abandons outstanding payments.
+  provider String @default("doku-checkout")
   providerRef String @unique
   paymentUrl String?
   status String @default("created")

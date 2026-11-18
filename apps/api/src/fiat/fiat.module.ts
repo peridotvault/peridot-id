@@ -3,9 +3,10 @@ import { FiatPaymentsService } from "./fiat-payments.service";
 import { FiatPaymentsController } from "./fiat-payments.controller";
 import { Module } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { DokuCheckoutClient, DokuSubAccountProvider } from "@peridotvault/pid-payments";
+import { DokuSubAccountProvider } from "@peridotvault/pid-payments";
 import { SecurityModule } from "../security/security-event.module";
-import { CHECKOUT_CLIENT } from "./checkout-client.token";
+import { CHECKOUT_ADAPTERS, CHECKOUT_CLIENT } from "./checkout-client.token";
+import { createCheckoutAdapters, type CheckoutAdapterConfig } from "./checkout-adapters";
 import { FaucetController } from "./faucet.controller";
 import { FiatController } from "./fiat.controller";
 import { FiatLedgerController } from "./fiat-ledger.controller";
@@ -27,6 +28,16 @@ import { SUBACCOUNT_PROVIDER } from "./subaccount-provider.token";
  */
 const FAUCET_ENABLED = process.env.PID_FAUCET_ENABLED === "true";
 
+/** Env → adapter config (same DOKU credentials as the legacy Sub-Account). */
+function checkoutConfig(config: ConfigService): CheckoutAdapterConfig {
+  return {
+    provider: config.get<string>("PAYMENT_CHECKOUT_PROVIDER"),
+    mode: config.get<string>("DOKU_MODE", "sandbox") === "production" ? "production" : "sandbox",
+    clientId: config.get<string>("DOKU_CLIENT_ID", ""),
+    secretKey: config.get<string>("DOKU_SECRET_KEY", ""),
+  };
+}
+
 @Module({
   imports: [SecurityModule],
   controllers: [FiatDeliveriesController, FiatPaymentsController, FiatController, FiatLedgerController, ...(FAUCET_ENABLED ? [FaucetController] : [])],
@@ -47,16 +58,18 @@ const FAUCET_ENABLED = process.env.PID_FAUCET_ENABLED === "true";
     },
     // DOKU Checkout (money-in) client. Same merchant credentials, non-SNAP
     // HMAC-SHA256 request signing. Missing keys fail at call time.
+    // `PAYMENT_CHECKOUT_PROVIDER` picks the active adapter; an unknown name
+    // throws at boot rather than falling back silently.
+    {
+      provide: CHECKOUT_ADAPTERS,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        createCheckoutAdapters(checkoutConfig(config)).adapters,
+    },
     {
       provide: CHECKOUT_CLIENT,
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        return new DokuCheckoutClient({
-          mode: config.get<string>("DOKU_MODE", "sandbox") === "production" ? "production" : "sandbox",
-          clientId: config.get<string>("DOKU_CLIENT_ID", ""),
-          secretKey: config.get<string>("DOKU_SECRET_KEY", ""),
-        });
-      },
+      useFactory: (config: ConfigService) => createCheckoutAdapters(checkoutConfig(config)).active,
     },
     FiatPaymentsService,
     FiatSubAccountService,
