@@ -105,7 +105,8 @@ function setup(apps?: {
     clientSecretValid: jest.fn(() => true),
     ...apps,
   };
-  const service = new SsoService(prisma as never, config as never, security as never, pidApps as never, jwt as never);
+  const usage: any = { recordAppLogin: jest.fn(async () => undefined) };
+  const service = new SsoService(prisma as never, config as never, security as never, pidApps as never, jwt as never, usage as never);
   return { service, rows, security };
 }
 

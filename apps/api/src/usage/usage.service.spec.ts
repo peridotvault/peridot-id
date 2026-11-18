@@ -38,6 +38,7 @@ function setup(allowance?: string) {
           (row) =>
             row.appClientId === where.appClientId &&
             row.month === where.month &&
+            (where.web3 === undefined || row.web3 === where.web3) &&
             (where.firstParty === undefined || row.firstParty === where.firstParty),
         ).length;
       }),
@@ -70,31 +71,40 @@ describe("isFirstPartyApp", () => {
 });
 
 describe("recordWalletLogin", () => {
-  it("is idempotent: retries and a second wallet for the same PID collapse to one row", async () => {
-    const { service, events, monthly } = setup();
+  it("is idempotent: retries, a second wallet and a mixed login collapse to one PID row", async () => {
+    const { service, monthly } = setup();
     await service.recordWalletLogin("pidapp_third", "ifal@pid");
+    await service.recordAppLogin("pidapp_third", "ifal@pid");
     await service.recordWalletLogin("pidapp_third", "ifal@pid");
     await Promise.all([
       service.recordWalletLogin("pidapp_third", "ifal@pid"),
-      service.recordWalletLogin("pidapp_third", "ifal@pid"),
+      service.recordAppLogin("pidapp_third", "ifal@pid"),
     ]);
-    expect(events.size).toBe(1);
     expect(monthly.size).toBe(1);
+    expect(monthly.get(`pidapp_third:ifal@pid:${utcMonth()}`).web3).toBe(true);
   });
 
-  it("counts separately per app and per month", async () => {
-    const { service, events } = setup();
+  it("counts the same PID separately in two apps", async () => {
+    const { service, monthly } = setup();
     await service.recordWalletLogin("pidapp_third", "ifal@pid");
     await service.recordWalletLogin("pidapp_other", "ifal@pid");
-    const months = new Set([...events.values()].map((row) => row.month));
-    expect(events.size).toBe(2);
-    expect([...months]).toEqual([utcMonth()]);
+    expect(monthly.size).toBe(2);
+  });
+
+  it("upgrades a Web2 PID to Web3 when it later proves a wallet", async () => {
+    const { service, monthly } = setup();
+    await service.recordAppLogin("pidapp_third", "ifal@pid");
+    const key = `pidapp_third:ifal@pid:${utcMonth()}`;
+    expect(monthly.get(key).web3).toBe(false);
+    await service.recordWalletLogin("pidapp_third", "ifal@pid");
+    expect(monthly.get(key).web3).toBe(true);
+    expect(monthly.size).toBe(1);
   });
 
   it("stores the server-side first-party classification with the event", async () => {
     const { service, events } = setup();
     await service.recordWalletLogin("pidapp_own", "ifal@pid");
-    await service.recordWalletLogin("pidapp_third", "budi@pid");
+    await service.recordAppLogin("pidapp_third", "budi@pid");
     expect([...events.values()].map((row) => [row.appClientId, row.firstParty])).toEqual([
       ["pidapp_own", true],
       ["pidapp_third", false],
@@ -102,9 +112,10 @@ describe("recordWalletLogin", () => {
   });
 
   it("ignores an unregistered app instead of inventing attribution", async () => {
-    const { service, events } = setup();
+    const { service, monthly } = setup();
     await service.recordWalletLogin("pidapp_unknown", "ifal@pid");
-    expect(events.size).toBe(0);
+    await service.recordAppLogin("pidapp_unknown", "ifal@pid");
+    expect(monthly.size).toBe(0);
   });
 
   it("never throws — metering cannot fail a completed login", async () => {
@@ -115,25 +126,46 @@ describe("recordWalletLogin", () => {
 });
 
 describe("report", () => {
-  it("separates billable usage and reports overage without charging", async () => {
+  it("reports total MAU apart from Web3 MAU, and bills only Web3", async () => {
     const { service } = setup("2");
+    // three Web3 PIDs + one Web2-only PID in the same app/month.
     for (const pid of ["a@pid", "b@pid", "c@pid"]) await service.recordWalletLogin("pidapp_third", pid);
-    await service.recordWalletLogin("pidapp_own", "d@pid");
+    await service.recordAppLogin("pidapp_third", "d@pid");
 
-    const third = await service.report("pidapp_third", utcMonth());
-    expect(third).toEqual({
+    expect(await service.report("pidapp_third", utcMonth())).toEqual({
       appClientId: "pidapp_third",
       month: utcMonth(),
-      activePids: 3,
+      totalPids: 4,
+      web3Pids: 3,
       firstPartyPids: 0,
       billablePids: 3,
       freeAllowance: 2,
       overagePids: 1,
       billing: "reporting-only",
     });
+  });
 
-    const own = await service.report("pidapp_own", utcMonth());
-    expect(own).toMatchObject({ activePids: 1, firstPartyPids: 1, billablePids: 0, overagePids: 0 });
+  it("keeps Web2-only apps free: total MAU grows, Web3 MAU and overage stay 0", async () => {
+    const { service } = setup("0");
+    for (const pid of ["a@pid", "b@pid", "c@pid"]) await service.recordAppLogin("pidapp_third", pid);
+    expect(await service.report("pidapp_third", utcMonth())).toMatchObject({
+      totalPids: 3,
+      web3Pids: 0,
+      billablePids: 0,
+      overagePids: 0,
+    });
+  });
+
+  it("excludes first-party Web3 logins from the billable number", async () => {
+    const { service } = setup("0");
+    await service.recordWalletLogin("pidapp_own", "a@pid");
+    expect(await service.report("pidapp_own", utcMonth())).toMatchObject({
+      totalPids: 1,
+      web3Pids: 1,
+      firstPartyPids: 1,
+      billablePids: 0,
+      overagePids: 0,
+    });
   });
 
   it("defaults the allowance to 500 when unset or invalid", async () => {

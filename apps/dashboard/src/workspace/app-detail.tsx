@@ -589,14 +589,19 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           <Card className="border-t-0">
             <p className={SECTION_LABEL}>Web3 usage — {usage.month}</p>
             <p className={`mt-1 text-xs ${MUTED}`}>
-              Distinct PIDs that signed in with an external wallet this month, counted once per PID.
-              Web2 logins, cancelled signatures and first-party use are excluded. Reporting only —
-              nothing is charged and nothing is blocked.
+              Distinct PIDs per app per UTC month, counted once however often they sign in or however
+              many wallets they link. Total covers every login method; Web3 counts only PIDs that
+              proved an external wallet, and the free allowance applies to that number — Web2-only
+              usage stays unlimited. Reporting only: nothing is charged and nothing is blocked.
             </p>
             <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
               <div>
-                <dt className={`text-xs ${MUTED}`}>Counted PIDs</dt>
-                <dd className="font-mono tabular-nums">{usage.activePids.toLocaleString("en-US")}</dd>
+                <dt className={`text-xs ${MUTED}`}>Total PIDs</dt>
+                <dd className="font-mono tabular-nums">{usage.totalPids.toLocaleString("en-US")}</dd>
+              </div>
+              <div>
+                <dt className={`text-xs ${MUTED}`}>Web3 PIDs</dt>
+                <dd className="font-mono tabular-nums">{usage.web3Pids.toLocaleString("en-US")}</dd>
               </div>
               <div>
                 <dt className={`text-xs ${MUTED}`}>Billable</dt>
@@ -606,11 +611,10 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
                 <dt className={`text-xs ${MUTED}`}>Free allowance</dt>
                 <dd className="font-mono tabular-nums">{usage.freeAllowance.toLocaleString("en-US")}</dd>
               </div>
-              <div>
-                <dt className={`text-xs ${MUTED}`}>Over allowance</dt>
-                <dd className="font-mono tabular-nums">{usage.overagePids.toLocaleString("en-US")}</dd>
-              </div>
             </dl>
+            <p className={`mt-2 text-xs ${MUTED}`}>
+              Over allowance: <span className="font-mono tabular-nums">{usage.overagePids.toLocaleString("en-US")}</span>
+            </p>
           </Card>
         )}
         <Card className="border-t-0">

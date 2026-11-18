@@ -1401,6 +1401,9 @@ model UsageMonthly {
   appClientId String
   pid         String
   month       String
+  // True once this PID proved an external wallet for this app in this month —
+  // the only usage the allowance/overage applies to. Total MAU counts every row.
+  web3        Boolean  @default(false)
   firstParty  Boolean  @default(false)
   createdAt   DateTime @db.Timestamptz(3) @default(now())
 

@@ -117,17 +117,25 @@ the operation charges nothing.
 
 ## Web3 usage (reporting only)
 
-External-wallet logins are metered per app. One PID counts **once per UTC
-calendar month** after a successful app-bound wallet login — a second wallet
-address, a retry, or a refresh does not count again. Web2 logins, cancelled
-signatures, reads, fiat-only activity and first-party apps are excluded; the
-classification is made on the server from the app's registered origins, never
-from a client flag.
+Usage is counted per app per **UTC calendar month**. One PID counts once no matter
+how often it signs in, how many wallets it links, or which login method it uses;
+the same PID counts separately in another app, and existing and newly claimed
+PIDs follow the same rule.
+
+Two numbers are tracked separately:
+
+- **Total PIDs** — distinct PIDs with any app-bound login this month (Web2 or wallet).
+- **Web3 PIDs** — the subset that proved an external wallet. The free allowance
+  applies to this subset only, so Web2-only usage is unlimited and free.
+
+Cancelled signatures, reads and fiat-only activity never count. First-party apps
+are classified on the server from their registered origins — never from a client
+flag.
 
 ```ts
 const report = await peridot.usage.monthly(appId);        // current UTC month
 const november = await peridot.usage.monthly(appId, "2026-11");
-// { activePids, billablePids, firstPartyPids, freeAllowance, overagePids, billing: "reporting-only" }
+// { totalPids, web3Pids, billablePids, firstPartyPids, freeAllowance, overagePids, billing: "reporting-only" }
 ```
 
 The same numbers are shown on the app's dashboard page. The free allowance

@@ -25,10 +25,13 @@ It does not claim that planned capabilities are available in the current SDK.
   in the user's wallet. Provider authentication may still require its own browser
   interaction; do not promise that every authentication ceremony is popup-free.
 - First-party login at peridot.id is free and excluded from billable app MAU.
-- Third-party Web3 usage is metered per app on a UTC calendar month, counting only
-  successful app-bound external-wallet logins once per PID. The free allowance is
-  500 distinct active PIDs per app per month. Overage is reported only — paid rates
-  and enforcement behavior are still unspecified, so never charge or block at 501.
+- Usage is metered as distinct active PIDs per app per UTC calendar month: a PID
+  counts once per app however many logins or linked wallets it uses, and the same
+  PID counts separately in each app. Total MAU (all login methods) is tracked
+  apart from qualifying Web3 MAU (a proved external wallet). The 500 free PIDs per
+  app per month apply to Web3 MAU only; Web2-only usage is unlimited and free.
+  Overage is reported only — paid rates and enforcement are still unspecified, so
+  never charge or block at 501.
 - Payment providers are backend implementation details. Product copy uses
   PeridotID Checkout, payment methods, gateway fees, and fiat balance. Applications
   use PeridotID contracts, not provider credentials or provider-specific SDK calls.
@@ -53,7 +56,7 @@ It does not claim that planned capabilities are available in the current SDK.
 | 2 | [External wallet authentication and linking](02-external-wallet-auth.md) | Implemented (API, SDK, OpenAPI) |
 | 3 | [Fiat access and replaceable payment backend](03-fiat-and-payment-backend.md) | Implemented (adapter + routing, reporting-neutral) |
 | 4 | [Embedded modal and SDK](04-embedded-login-sdk.md) | Implemented (modal + wallet connectors) |
-| 5 | [Web3 usage reporting and free allowance](05-web3-mau.md) | Implemented as reporting only; counting rule agreed, pricing open |
+| 5 | [Web3 usage reporting and free allowance](05-web3-mau.md) | Implemented as reporting only; counting rule agreed (total vs Web3 MAU), pricing open |
 
 Complete and verify each stage before proceeding to its dependent stage. Each
 plan owns its task checklist, acceptance criteria and rollout notes. These files

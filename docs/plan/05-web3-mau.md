@@ -23,14 +23,25 @@ cutoff from this plan.
 
 ## Decisions (2026-11-18, agreed by the owner)
 
-- **Qualifying activity:** a successful *app-bound external-wallet login* only.
-  Web2 login, cancelled/failed signatures, reads, fiat-only activity and passive
-  provisioning never count. Authorized Web3 operations are **not** metered for now.
+- **Counting unit:** a distinct active PID per app per UTC month. A PID is global
+  and reusable: it counts once in App A and once in App B, but repeated logins or
+  extra linked wallets never raise that app's monthly count.
+- **Qualifying activity:** a successful *app-bound external-wallet login* for the
+  Web3 number. Web2 login, cancelled/failed signatures, reads, fiat-only activity
+  and passive provisioning never count toward it. Authorized Web3 operations are
+  **not** metered for now.
+- **Two figures, never blended:** total MAU (every app-bound login, Web2 or wallet)
+  and qualifying Web3 MAU. The free allowance applies to Web3 MAU only — Web2-only
+  usage is unlimited and free. Existing and newly claimed PIDs count identically.
 - **Calendar boundary:** UTC calendar month (`YYYY-MM`), matching the stored key.
 - **Free allowance:** 500 distinct active PIDs per app per month, configurable via
   `PID_USAGE_FREE_ALLOWANCE`.
 - **Overage behaviour:** reporting only — the report shows the overage and the app
   keeps working. No charge, no warning gate, no cutoff.
+- **Attribution points:** Web3 MAU is written where a wallet is verified for an
+  app (login or claim). Total MAU is written when an app-bound SSO code is issued,
+  which is the same moment the app receives the identity — an unverified app that
+  only reaches the consent screen has not completed the login and is not counted.
 - **Pricing:** deliberately undefined. Billing cannot be enabled until a rate and
   an enforcement policy are agreed; nothing in the code infers either.
 

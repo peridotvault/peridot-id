@@ -11,6 +11,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 import { SSO_EXCHANGE_TOKEN_TTL, resolveServiceUrls, serviceOrigins, JWT_AUD_SSO, JWT_ISSUER, ttlSeconds } from "../common/app-config";
 import { PidAppsService } from "./apps.service";
+import { UsageService } from "../usage/usage.service";
 
 // Single-use SSO exchange code TTL (ANT-368: 60s, was 5min — bounds the
 // window a leaked redirect URL carrying a pid_code stays usable).
@@ -173,6 +174,7 @@ export class SsoService {
     private readonly security: SecurityEventService,
     private readonly apps: PidAppsService,
     private readonly jwt: JwtService,
+    private readonly usage: UsageService,
   ) {}
 
   /**
@@ -324,6 +326,9 @@ export class SsoService {
       },
     });
     await this.security.log(pid, "sso.code.issued", { redirectTo });
+    // Total MAU: an app-bound login completed (Web2 or wallet). Wallet logins
+    // already recorded their Web3 event; this row just proves the month's PID.
+    if (opts?.clientId) await this.usage.recordAppLogin(opts.clientId, pid);
     return code;
   }
 

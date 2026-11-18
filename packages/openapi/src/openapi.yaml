@@ -975,10 +975,14 @@ paths:
       tags: [apps]
       summary: Monthly Web3 usage for one of my apps
       description: |
-        Distinct PIDs counted once per UTC month for app-bound external-wallet
-        logins. Web2 logins, cancelled signatures, reads, fiat-only activity and
-        first-party apps are excluded. Reporting only: the free allowance is
-        shown, nothing is charged and nothing is blocked at the limit.
+        Distinct active PIDs per app per UTC month. A PID counts once however
+        many logins, wallets or login methods it uses, and the same PID counts
+        separately in another app; existing and newly claimed PIDs follow the
+        same rule. `totalPids` covers every app-bound login, `web3Pids` only the
+        PIDs that proved an external wallet — the free allowance applies to that
+        subset, so Web2-only usage is unlimited and free. First-party logins are
+        classified on the server and never billable. Reporting only: nothing is
+        charged and nothing is blocked at the limit.
       security:
         - cookieAuth: []
       parameters:
@@ -4086,8 +4090,9 @@ components:
       properties:
         appClientId: {type: string}
         month: {type: string, example: '2026-11'}
-        activePids: {type: integer, description: Distinct PIDs counted this month}
-        firstPartyPids: {type: integer, description: First-party logins — never billable}
+        totalPids: {type: integer, description: Distinct PIDs with any app-bound login this month}
+        web3Pids: {type: integer, description: Distinct PIDs that proved an external wallet this month}
+        firstPartyPids: {type: integer, description: First-party Web3 PIDs — never billable}
         billablePids: {type: integer, description: PIDs that would count against the allowance}
         freeAllowance: {type: integer, description: Configurable free allowance per app per month}
         overagePids: {type: integer, description: Reported only — never charged or blocked}

@@ -1,9 +1,15 @@
 // Web3 usage metering (stage 5 of docs/plan/05-web3-mau.md).
 //
-// Counting rule (proposal, not agreed pricing): one PID counts once per
-// registered app per UTC calendar month, after a successful app-bound
-// external-wallet login. Everything else is unbilled by construction — only
-// `walletVerify` with a resolved `clientId` writes an event.
+// Counting rule (agreed 2026-11-18): a PID counts once per registered app per
+// UTC calendar month. A PID is global, so the same PID counts separately in two
+// apps; repeat logins, extra linked wallets and mixed login methods never add to
+// a month's count. Existing and newly claimed PIDs are treated identically.
+//
+// Two numbers per app/month, never blended:
+//   total MAU  — every PID that completed an app-bound login (Web2 or wallet)
+//   Web3 MAU   — the subset that proved an external wallet; the free allowance
+//                and the reported overage apply to THIS number only.
+// Web2-only usage is unlimited and free.
 //
 // Reporting-only: reaching the allowance never charges and never blocks.
 import { Injectable, Logger } from "@nestjs/common";
@@ -13,7 +19,10 @@ import { firstPartyOriginsFor } from "../common/cors";
 
 /** Suggested allowance; env-overridable until pricing is agreed. */
 export const DEFAULT_FREE_ALLOWANCE = 500;
+/** Qualifying Web3 event: the PID proved an external wallet for this app. */
 export const USAGE_REASON_WALLET_LOGIN = "wallet_login";
+/** Total-MAU event: any other app-bound login (Google, email OTP, passkey). */
+export const USAGE_REASON_APP_LOGIN = "app_login";
 
 /** `YYYY-MM` in UTC — the billing boundary is UTC, never the caller's zone. */
 export function utcMonth(at: Date = new Date()): string {
@@ -33,11 +42,13 @@ export function isFirstPartyApp(allowedOrigins: readonly string[], firstPartyOri
 export interface UsageReport {
   appClientId: string;
   month: string;
-  /** Distinct PIDs counted this month (all reasons). */
-  activePids: number;
-  /** Of those, logins classified first-party — never billable. */
+  /** Total MAU: distinct PIDs with any app-bound login this month. */
+  totalPids: number;
+  /** Web3 MAU: distinct PIDs that proved an external wallet this month. */
+  web3Pids: number;
+  /** Of the Web3 MAU, logins classified first-party — never billable. */
   firstPartyPids: number;
-  /** PIDs that would count against the allowance. */
+  /** Web3 PIDs that would count against the allowance. */
   billablePids: number;
   freeAllowance: number;
   /** Reported only. Nothing is charged and nothing is blocked. */
@@ -60,13 +71,22 @@ export class UsageService {
     return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_FREE_ALLOWANCE;
   }
 
-  /**
-   * Record one qualifying login. Never throws: metering must not fail a sign-in
-   * the user already performed. Both writes are idempotent, so a retried or
-   * concurrent verify collapses onto the same rows (and so does a second wallet
-   * address proving the same PID).
-   */
+  /** A PID proved an external wallet for this app — counts as Web3 MAU. */
   async recordWalletLogin(appClientId: string, pid: string): Promise<void> {
+    await this.record(appClientId, pid, USAGE_REASON_WALLET_LOGIN, true);
+  }
+
+  /** Any other app-bound login — counts toward total MAU only. */
+  async recordAppLogin(appClientId: string, pid: string): Promise<void> {
+    await this.record(appClientId, pid, USAGE_REASON_APP_LOGIN, false);
+  }
+
+  /**
+   * Never throws: metering must not fail a sign-in the user already performed.
+   * Both writes are idempotent, so a retried or concurrent login collapses onto
+   * the same rows, and the projection never adds a PID twice.
+   */
+  private async record(appClientId: string, pid: string, reason: string, web3: boolean): Promise<void> {
     try {
       const app = await this.prisma.pidApp.findUnique({
         where: { clientId: appClientId },
@@ -78,15 +98,16 @@ export class UsageService {
       const firstParty = isFirstPartyApp(app.allowedOrigins, firstPartyOriginsFor(this.config));
       await this.prisma.$transaction(async (tx) => {
         await tx.usageEvent.createMany({
-          data: [{ appClientId, pid, month, reason: USAGE_REASON_WALLET_LOGIN, firstParty }],
+          data: [{ appClientId, pid, month, reason, firstParty }],
           skipDuplicates: true,
         });
-        // `update: {}` keeps the FIRST classification: replaying an old event
-        // must not flip a PID's billability for a month already reported.
+        // `update` only ever upgrades web3 false→true and keeps the FIRST
+        // classification: replaying an old event must not flip a PID's
+        // billability, and a later wallet login must not create a second row.
         await tx.usageMonthly.upsert({
           where: { appClientId_pid_month: { appClientId, pid, month } },
-          create: { appClientId, pid, month, firstParty },
-          update: {},
+          create: { appClientId, pid, month, web3, firstParty },
+          update: web3 ? { web3: true } : {},
         });
       });
     } catch (err) {
@@ -96,16 +117,19 @@ export class UsageService {
 
   /** Owner-scoped monthly report for one app. */
   async report(appClientId: string, month: string): Promise<UsageReport> {
-    const [rows, firstPartyPids] = await Promise.all([
-      this.prisma.usageMonthly.count({ where: { appClientId, month } }),
-      this.prisma.usageMonthly.count({ where: { appClientId, month, firstParty: true } }),
+    const where = { appClientId, month };
+    const [totalPids, web3Pids, firstPartyPids] = await Promise.all([
+      this.prisma.usageMonthly.count({ where }),
+      this.prisma.usageMonthly.count({ where: { ...where, web3: true } }),
+      this.prisma.usageMonthly.count({ where: { ...where, web3: true, firstParty: true } }),
     ]);
-    const billablePids = rows - firstPartyPids;
+    const billablePids = web3Pids - firstPartyPids;
     const freeAllowance = this.freeAllowance();
     return {
       appClientId,
       month,
-      activePids: rows,
+      totalPids,
+      web3Pids,
       firstPartyPids,
       billablePids,
       freeAllowance,
