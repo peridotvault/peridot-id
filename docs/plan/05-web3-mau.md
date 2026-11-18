@@ -1,6 +1,6 @@
 # Stage 5: Web3 usage reporting and free allowance
 
-Status: **Reporting implemented; pricing decisions open**.
+Status: **Reporting implemented; counting rule agreed, rates still undefined**.
 Dependency: Stage 4; see [plan index](README.md).
 
 ## Scope and requirements
@@ -21,12 +21,25 @@ Make event insertion retry-safe, expose app-owner usage reports, and keep the
 500 allowance configurable. Do not infer paid rates, automatic charges, or a hard
 cutoff from this plan.
 
+## Decisions (2026-11-18, agreed by the owner)
+
+- **Qualifying activity:** a successful *app-bound external-wallet login* only.
+  Web2 login, cancelled/failed signatures, reads, fiat-only activity and passive
+  provisioning never count. Authorized Web3 operations are **not** metered for now.
+- **Calendar boundary:** UTC calendar month (`YYYY-MM`), matching the stored key.
+- **Free allowance:** 500 distinct active PIDs per app per month, configurable via
+  `PID_USAGE_FREE_ALLOWANCE`.
+- **Overage behaviour:** reporting only — the report shows the overage and the app
+  keeps working. No charge, no warning gate, no cutoff.
+- **Pricing:** deliberately undefined. Billing cannot be enabled until a rate and
+  an enforcement policy are agreed; nothing in the code infers either.
+
 ## Implementation locations
 `apps/api/prisma`, a dedicated API usage module, `apps/api/src/auth`,
 `apps/dashboard`, `packages/types`, and SDK/documentation usage surfaces as needed.
 
 ## Work items
-- [ ] Finalize qualifying activity and calendar boundary before billing activation.
+- [x] Finalize qualifying activity and calendar boundary before billing activation.
 - [x] Add durable, idempotent server-authored usage events with app/PID attribution.
 - [x] Add a unique app/PID/month projection and configurable free allowance (suggested 500).
 - [x] Classify first-party apps on the server and exclude their login activity from billing.
