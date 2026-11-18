@@ -1,4 +1,5 @@
-import type { PeridotClient } from "@peridotvault/pid-sdk-js";
+import type { PeridotClient, WalletConnector } from "@peridotvault/pid-sdk-js";
+import { detectWallets } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
 import { finishSso, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "./useLoginSession";
@@ -15,9 +16,11 @@ export function useSignInMethods(
     setError: (e: string | null) => void;
     /** Auth-in-a-new-tab code delivered while this window stayed open. */
     onCtxDone?: (denied: boolean) => void;
+    /** Re-read the pending claim after a wallet proves a brand-new address. */
+    refreshClaim?: () => Promise<void>;
   },
 ) {
-  const { sso, ctx, flags, onLoggedIn, setBusy, setError, onCtxDone } = opts;
+  const { sso, ctx, flags, onLoggedIn, setBusy, setError, onCtxDone, refreshClaim } = opts;
 
   const signInWithPasskey = async () => {
     setBusy(true);
@@ -88,5 +91,43 @@ export function useSignInMethods(
     }
   };
 
-  return { signInWithPasskey, continueWithGoogle };
+  /**
+   * External wallet sign-in (Phantom/MetaMask). The signature proves control of
+   * the address and is verified server-side; keys stay in the extension and no
+   * PeridotID window opens. Same sso/ctx delivery as email and passkey.
+   */
+  const signInWithWallet = async (wallet: WalletConnector) => {
+    setBusy(true);
+    setError(null);
+    clearApiCache();
+    try {
+      const address = await wallet.connect();
+      const challenge = await peridot.auth.walletChallenge({
+        namespace: wallet.namespace,
+        reference: wallet.reference,
+        address,
+        ...(ctx ? {} : sso ? { returnTo: sso.redirectUri, clientId: sso.clientId } : {}),
+      });
+      const signature = await wallet.signMessage(address, challenge.message);
+      const res = await peridot.auth.walletVerify(challenge.challengeId, signature);
+      if (res.pendingClaim) {
+        await refreshClaim?.();
+        return;
+      }
+      if (ctx) {
+        flags.delivered = true;
+        if (await deliverLoginCode(peridot, ctx)) onCtxDone?.(false);
+        return;
+      }
+      if (finishSso(sso, res.pidCode)) return;
+      onLoggedIn();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(/reject|denied|cancel|closed/i.test(message) ? "Wallet signature cancelled — try again." : message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return { signInWithPasskey, continueWithGoogle, signInWithWallet };
 }

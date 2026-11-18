@@ -4247,7 +4247,10 @@ components:
           format: uuid
         provider:
           type: string
-          description: "e.g. google, discord, apple, password, passkey"
+          description: "e.g. google, email, passkey, solana, evm"
+        providerUserId:
+          type: string
+          description: Provider-side subject — email for Google/email, normalized address for a linked external wallet
         email:
           type: string
           format: email

@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable } from "../../shared/components/ui/Pressable";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { Link2 } from "../../shared/components/icons";
 import type { IdentityCredential } from "@peridotvault/pid-types";
+import { detectWallets, type WalletConnector } from "@peridotvault/pid-sdk-js";
+import { UIButton } from "../../shared/components/ui/UIButton";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead, invalidate } from "../../shared/data/apiCache";
 import { styles as s } from "../../shared/styles/theme";
@@ -14,6 +16,9 @@ export function ConnectedAccounts({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [justUnlinked, setJustUnlinked] = useState(false);
+  // External wallets are ordinary credentials (provider solana/evm) — the same
+  // list, so one unlink path covers Google, email and wallets.
+  const wallets = useMemo(() => detectWallets(), []);
 
   const load = useCallback(async () => {
     const res = await cachedRead("identity.credentials", { ttlMs: 60_000, tier: "session" }, () => peridot.identity.credentials());
@@ -24,10 +29,36 @@ export function ConnectedAccounts({ onDone }: { onDone: () => void }) {
     load();
   }, [load]);
 
+  const walletLabel = (provider: string): string =>
+    provider === "google" ? "Google" : provider === "solana" ? "Solana wallet" : provider === "evm" ? "EVM wallet" : provider;
+
+  /** Link a discovered wallet to this PID. The signature proves control; keys never leave the extension. */
+  const link = async (wallet: WalletConnector) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const address = await wallet.connect();
+      const challenge = await peridot.auth.walletLinkChallenge({
+        namespace: wallet.namespace,
+        reference: wallet.reference,
+        address,
+      });
+      const signature = await wallet.signMessage(address, challenge.message);
+      await peridot.auth.walletLink(challenge.challengeId, signature);
+      invalidate("identity.credentials");
+      await load();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(/reject|denied|cancel|closed/i.test(message) ? "Signature cancelled — try again." : message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const unlink = async (id: string, provider: string) => {
     if (
       !window.confirm(
-        `Unlink ${provider}?\n\nGoogle works as a recovery login. Unlinking it means you rely on your passkeys to sign in.`,
+        `Unlink ${walletLabel(provider)}?\n\nGoogle works as a recovery login. Unlinking it means you rely on your passkeys to sign in.`,
       )
     )
       return;
@@ -65,6 +96,25 @@ export function ConnectedAccounts({ onDone }: { onDone: () => void }) {
         </Section>
       )}
 
+      {wallets.length > 0 && (
+        <Section>
+          <SectionHead className="flex flex-col gap-2 py-3">
+            <span className="font-sans text-xs text-muted-foreground">
+              Link a wallet as another way to sign in. The wallet keeps its keys — signing only proves you own the address.
+            </span>
+            {wallets.map((wallet) => (
+              <UIButton
+                key={wallet.kind}
+                title={`Link ${wallet.label}`}
+                onPress={() => link(wallet)}
+                disabled={busy}
+                align="left"
+              />
+            ))}
+          </SectionHead>
+        </Section>
+      )}
+
       <Section>
         {justUnlinked && <span className="block px-6 py-3 font-sans text-sm text-success">Account unlinked.</span>}
 
@@ -76,8 +126,13 @@ export function ConnectedAccounts({ onDone }: { onDone: () => void }) {
                   <Link2 size={16} className="text-foreground" />
                 </div>
                 <div className="flex flex-1 flex-col gap-0.5">
-                  <span className="font-sans text-base font-semibold text-foreground">{c.provider === "google" ? "Google" : c.provider}</span>
-                  <span className="font-sans text-xs text-muted-foreground">{c.email ?? "No email"}</span>
+                  <span className="font-sans text-base font-semibold text-foreground">{walletLabel(c.provider)}</span>
+                  <span className="font-sans text-xs text-muted-foreground">
+                    {c.email ??
+                      (c.providerUserId && c.providerUserId.length > 20
+                        ? `${c.providerUserId.slice(0, 6)}…${c.providerUserId.slice(-6)}`
+                        : (c.providerUserId ?? "No email"))}
+                  </span>
                   {c.lastLoginAt && <span className="font-sans text-xs text-muted-foreground">Last login {new Date(c.lastLoginAt).toLocaleString()}</span>}
                 </div>
                 {credentials.length > 1 && (

@@ -16,7 +16,7 @@ export class IdentityService {
   listCredentials(pid: string) {
     return this.prisma.identityCredential.findMany({
       where: { pid },
-      select: { id: true, provider: true, email: true, linkedAt: true, lastLoginAt: true },
+      select: { id: true, provider: true, providerUserId: true, email: true, linkedAt: true, lastLoginAt: true },
       orderBy: { linkedAt: "asc" },
     });
   }

@@ -66,6 +66,7 @@ export * from "./profile-client.js";
 export * from "./passkey-client.js";
 export * from "./admin-client.js";
 export * from "./usage-client.js";
+export * from "./wallet-login.js";
 export { Peridot, PeridotClient, type PeridotOptions } from "./client.js";
 export { Peridot as default } from "./client.js";
 export type {

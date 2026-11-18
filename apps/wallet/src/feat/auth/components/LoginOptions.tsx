@@ -6,6 +6,8 @@ import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
 import { BrandMark } from "../../../shared/components/ui/BrandMark";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import { ArrowRight, Mail } from "../../../shared/components/icons";
+import { detectWallets, type WalletConnector } from "@peridotvault/pid-sdk-js";
+import { useMemo } from "react";
 
 // Brand glyphs (Google "G", Apple logo) — inline SVG, the only two brand
 // marks in the wallet. lucide ships no brand icons; two tiny paths beat a
@@ -53,6 +55,7 @@ export function LoginOptions({
   onEmailChange,
   onSubmitEmail,
   onPasskey,
+  onWallet,
 }: {
   busy: boolean;
   error: string | null;
@@ -64,7 +67,11 @@ export function LoginOptions({
   onEmailChange: (t: string) => void;
   onSubmitEmail: () => void;
   onPasskey: () => void;
+  onWallet: (wallet: WalletConnector) => void;
 }) {
+  // Discovered once per mount: an extension injected after mount is picked up
+  // on the next visit, which is when the user would try again anyway.
+  const wallets = useMemo(() => detectWallets(), []);
   return (
     <div className="flex flex-col flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
@@ -140,6 +147,19 @@ export function LoginOptions({
                   disabled={busy}
                   variant="primary"
                 />
+                {wallets.length > 0 && (
+                  <div className="flex flex-col gap-2 pt-3 border-t border-border">
+                    {wallets.map((wallet) => (
+                      <UIButton
+                        key={wallet.kind}
+                        title={`Continue with ${wallet.label}`}
+                        onPress={() => onWallet(wallet)}
+                        disabled={busy}
+                        align="left"
+                      />
+                    ))}
+                  </div>
+                )}
                 <span className="text-center font-sans text-xs text-muted-foreground">By continuing, I agree to PeridotID Terms of Use and Privacy notice</span>
               </div>
             </div>

@@ -50,6 +50,8 @@ export interface ProfileUpdate {
 export interface IdentityCredential {
   id: string;
   provider: string;
+  /** Provider-side subject: email for Google/email, address for an external wallet. */
+  providerUserId?: string;
   email: string | null;
   linkedAt: string;
   lastLoginAt: string | null;

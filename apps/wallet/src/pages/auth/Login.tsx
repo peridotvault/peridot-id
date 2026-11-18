@@ -75,7 +75,16 @@ export function Login({
   });
   const { session, setSession, showLogin, setShowLogin } = useLoginSession(peridot, { sso, ctx, flags, claim: claim.claim, onCtxDone: finishCtx });
   const consent = useConsentActions(peridot, { sso, ctx, flags, setSession, setShowLogin, setBusy, setError, onCtxDone: finishCtx });
-  const signIn = useSignInMethods(peridot, { sso, ctx, flags, onLoggedIn, setBusy, setError, onCtxDone: finishCtx });
+  const signIn = useSignInMethods(peridot, {
+    sso,
+    ctx,
+    flags,
+    onLoggedIn,
+    setBusy,
+    setError,
+    onCtxDone: finishCtx,
+    refreshClaim: claim.refreshClaim,
+  });
 
   /** Retryable OAuth failure from the callback (?error=) — show inline, then strip. */
   useEffect(() => {
@@ -226,6 +235,7 @@ export function Login({
       }}
       onSubmitEmail={() => emailSignIn.start()}
       onPasskey={signIn.signInWithPasskey}
+      onWallet={signIn.signInWithWallet}
     />
   );
 }
