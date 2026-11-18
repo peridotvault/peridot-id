@@ -24,7 +24,11 @@ accounts/networks, refresh/logout, and first-party versus third-party sessions.
 - [x] Integrate new-user PID claim and explicit existing-user wallet linking.
 - [x] Preserve the current hosted flow for existing SDK consumers.
 - [x] Add accessible focus handling, keyboard navigation and error announcements.
-- [x] Test cross-origin app binding, session lifecycle and signature cancellation end to end.
+- [ ] Test cross-origin app binding, session lifecycle and signature cancellation end to end.
+      Unit-checked today: unallowlisted `returnTo` is refused, an app-bound verify
+      mints the SSO code, connectors normalize addresses and encodings, and a
+      cancelled signature maps to a retry message. A browser-level run against a
+      real extension still needs a manual/E2E pass.
 - [x] Publish examples only for implemented behavior; refresh generated documentation.
 
 ## Acceptance
@@ -32,6 +36,12 @@ A third-party app can complete external-wallet login from the embedded modal
 without opening a separate PeridotID login window. Wallet-controlled approval UI
 still appears. External keys never enter host-page code. Existing iframe and
 passkey integrations continue to respect their original trust boundaries.
+
+## Verified today
+`pnpm --filter @peridotvault/pid-react-embed test` (connectors, EVM hex round-trip,
+modal SSR/a11y, no-wallet state) and `jest src/auth` (challenge refuse/mint, claim
+ticket, link conflicts). Reconnecting a wallet per attempt means an accounts-changed
+switch is picked up on the next click rather than mid-ceremony.
 
 ## Rollout and rollback
 Ship an opt-in API first. Keep the existing popup integration available until
