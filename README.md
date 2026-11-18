@@ -17,7 +17,7 @@ every Peridot product.
 ```
 apps/api            NestJS API (auth, identity, profile, wallet, permissions)
 apps/dashboard      Developer dashboard (Vite + React, port :3303)
-apps/wallet         Expo wallet client (web + iOS + Android)
+apps/wallet         React + Vite web wallet
 apps/docs            Public docs site (Mintlify source; board user deploys manually to docs.peridot.id)
 contracts/svm       Pinocchio smart-account program (Rust)
 contracts/evm       Counterfactual smart accounts + V4 permission layer (Solidity/Foundry, WHITEPAPER.md §10)
@@ -73,11 +73,16 @@ const rows = await peridot.wallet.createAccount(); // wallet chain rows
 
 ## Documentation
 
+The approved next-stage product direction and implementation status are tracked in
+[`docs/plan/README.md`](docs/plan/README.md). External wallet login,
+the embedded login modal, and Web3 MAU metering are planned, not current SDK features.
+
+
 - [Docs site](https://docs.peridot.id) — getting started, authentication flow,
   API reference (generated from the OpenAPI spec), SDK guide, self-hosting/deployment.
   (Mintlify-hosted; source in `apps/docs`. Legacy `pid.peridotvault.com/docs*`
   paths are dead and do not redirect — update bookmarks to `docs.peridot.id`.)
-- `docs/` — product spec (PRD_v5), architecture, database, security, roadmap, ADRs.
+- `docs/` — active architecture, database, security, and operations references; implementation plans in `docs/plan/` and historical material in `docs/archive/`.
 - `AGENTS.md` — agent run book (naming, environment, login split, verification).
 
 ## Deploy

@@ -1,3 +1,15 @@
+> **Archived 2026-11-18:** Historical provider-ledger architecture; active fiat uses the internal ledger.
+> Start with the [active documentation](../../README.md); this file is historical context.
+
+# Historical fiat rail design — superseded for the active product
+
+> The provider-ledger architecture below is frozen historical material, not the
+> current user-facing implementation. Use [FIAT_LEDGER.md](../../FIAT_LEDGER.md)
+> for the active internal ledger, [FIAT_PAYMENTS.md](../../FIAT_PAYMENTS.md) for
+> app payments, and [IDENTITY_ACCESS_PLAN.md](../../plan/README.md) for
+> the approved identity/access direction. Historical completion claims below
+> do not establish current production availability.
+
 # PRD v6 — Fiat Money Layer (DOKU ledger-first)
 
 Status: **accounting foundation (done); UX minus Withdraw (done); financial

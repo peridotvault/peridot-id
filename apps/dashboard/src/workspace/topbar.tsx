@@ -52,14 +52,14 @@ export function Topbar({
         <div className="flex shrink-0 items-center gap-3 justify-self-end">
           {isSandbox ? (
             <span
-              title="Sandbox: DOKU test mode — no real money moves here."
+              title="Sandbox: test payments — no real money moves here."
               className="bg-amber-400/20 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300"
             >
               sandbox
             </span>
           ) : (
             <span
-              title="Production: real money via DOKU."
+              title="Production: real payments."
               className="bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"
             >
               production

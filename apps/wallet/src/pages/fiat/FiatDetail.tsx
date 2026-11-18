@@ -58,8 +58,8 @@ export function FiatDetail({ item: initial, onDone }: { item: FiatItem; onDone: 
             <span className="font-sans text-sm leading-[19px] text-muted-foreground">Waiting for payment — complete it, then come back and check status.</span>
             {tx.paymentUrl && (
               <UIButton
-                title="Open DOKU payment page"
-                onPress={() => openExternalUrl(tx.paymentUrl as string).catch(() => setError("Could not open the DOKU payment page."))}
+                title="Open payment page"
+                onPress={() => openExternalUrl(tx.paymentUrl as string).catch(() => setError("Could not open the payment page."))}
                 variant="primary"
               />
             )}

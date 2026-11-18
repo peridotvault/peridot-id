@@ -305,35 +305,23 @@ on-chain.
 
 ## 9. Client & SDK
 
-**One client codebase: Expo (React Native + Expo web) for both mobile and web.** There is
-no separate website to build — Expo web renders the same app to the browser.
+**Current client: React + Vite web SPA.** The earlier native mobile plan is superseded.
+`apps/wallet` uses React DOM and the browser SDK; native iOS/Android applications
+are not implemented in this workspace.
 
 ```text
-packages/sdk-js             ← pure TypeScript core SDK (existing package, extended)
+packages/sdk-js             ← TypeScript SDK
    │
-apps/wallet (Expo)          ← one codebase:
-   ├── iOS / Android        ← native via React Native
-   └── Web                  ← same code via Expo web (react-native-web)
-
-Chrome extension (future)   ← thin shell over the sdk-js core, not the Expo app
+apps/wallet                 ← React + Vite web wallet
+apps/dashboard              ← React + Vite developer dashboard
+packages/react-embed        ← iframe wallet component for developer apps
 ```
 
-- The SDK core stays pure TypeScript and runs everywhere; platform differences (passkey
-  APIs, secure storage) live behind small adapters.
-- **Expo, not Tauri** — Expo is mature, TypeScript-native (matches the team), and has
-  working passkey and Solana mobile tooling; and unlike Tauri it covers web + iOS +
-  Android from one codebase. Tauri is only reconsidered if a desktop-native app ever
-  becomes a real requirement (YAGNI).
-- A Chrome extension is a plain web environment: it consumes the sdk-js core directly
-  (WebAuthn works in extension pages). Deferred past V1 — designed for, not built.
-
-### Platform adapters
-
-| Concern | Expo web | Expo iOS/Android |
-|---|---|---|
-| Login | Google OAuth redirect, cookie session (existing flow) | Same OAuth flow via web browser session, cookie/token saved on device |
-| Passkey (authority) | WebAuthn API | React Native passkey module (platform authenticators) |
-| Fee-payer storage | Non-extractable WebCrypto where practical | Expo SecureStore / OS keystore |
+The existing embed delegates login and approval to the hosted PeridotID popup.
+The planned embedded login modal and external-wallet signatures are tracked in
+[Identity & access plan](../plan/README.md); they are not shipped features.
+Browser passkeys use WebAuthn. Native clients and a browser extension remain
+separate future work.
 
 ### Developer experience
 
@@ -362,7 +350,7 @@ for debugging and security audits (PRD_v4 §17).
 - SPL token withdrawals (`withdraw_token`, passkey-authorized)
 - secp256r1 passkey authority + Ed25519 device fee payer
 - Google OAuth login with device-saved sessions; multi-device login on one account
-- One Expo client serving web + iOS + Android, built on the `@peridotvault/pid-sdk-js` core
+- One React + Vite web client, built on the `@peridotvault/pid-sdk-js` core
 - Authorization and security validation
 - Devnet testing
 - Mainnet deployment
@@ -429,7 +417,7 @@ V1 is successful when:
 - The user pays their own fees through their device fee payer.
 - Peridot does not need to provide SOL for every new user.
 - All wallet operations are verifiable on-chain through the Peridot Program.
-- The same flow works on web and mobile from the single Expo client.
+- The current implementation targets the web wallet; native mobile parity is not implemented.
 
 ---
 

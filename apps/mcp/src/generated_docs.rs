@@ -8,7 +8,7 @@ use crate::tools::{DocEntry, ExampleEntry, GuideEntry, SdkModule, SymbolEntry};
 /// Git tree SHA of `apps/docs/` at sync time.
 pub const SOURCE_REV: &str = "eae197db621af301f794d26ee7f4b35fda28b134";
 /// SHA-256 over the normalized extracted content.
-pub const CONTENT_HASH: &str = "04a1a1b2666c7b68aa5d51f7c093201f56447200c3db9623f771594c08fe6378";
+pub const CONTENT_HASH: &str = "3143ac2691ef578b8f201a7e42c4812b2ff184262d506eeae71ccda7533792f6";
 
 /// Search corpus: 219 entries (guide sections + OpenAPI operations).
 pub const DOCS: [DocEntry; 219] = [
@@ -175,7 +175,7 @@ pub const DOCS: [DocEntry; 219] = [
     DocEntry {
         title: "Environments (production & sandbox) — What differs (everything that can move money)",
         url: "https://docs.peridot.id/environments#what-differs-everything-that-can-move-money",
-        excerpt: "- **DOKU mode**: production vs `sandbox`. Sandbox top-ups use DOKU's sandbox — no real money ever moves. - **Database** (users, identities, apps, ledger) is separate. - **JWT secrets**, cookie domain, and WebAuthn RP id are separate — a session or passkey from one env never works in the other. -…",
+        excerpt: "- **Payment mode**: production vs `sandbox`. Sandbox top-ups use test payment rails — no real money ever moves. - **Database** (users, identities, apps, ledger) is separate. - **JWT secrets**, cookie domain, and WebAuthn RP id are separate — a session or passkey from one env never works in the…",
     },
     DocEntry {
         title: "Errors — Authentication errors",
@@ -240,12 +240,12 @@ pub const DOCS: [DocEntry; 219] = [
     DocEntry {
         title: "Fiat & payments — Send / receive",
         url: "https://docs.peridot.id/fiat#send-receive",
-        excerpt: "Any identity can send to any identity. Amounts are **gross** (the sender is debited the amount; the recipient receives it minus fees). `transferInquiry`/`transferConfirm` are **first-party inline only**; in popup mode they throw and direct you to `transferViaPopup()` (the inquiry runs server-side…",
+        excerpt: "At least one party must own an active app or be explicitly eligible under the platform transfer policy. Ordinary user-to-user transfers are currently rejected. Amounts are **gross** (the sender is debited the amount; the recipient receives it minus fees). `transferInquiry`/`transferConfirm` are…",
     },
     DocEntry {
         title: "Fiat & payments — Top up (money in)",
         url: "https://docs.peridot.id/fiat#top-up-money-in",
-        excerpt: "`checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns the DOKU payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the fee is quoted on top. After the user pays, corroborate on demand (webhooks may lag): You can list recent intents with…",
+        excerpt: "`checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns a hosted payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the fee is quoted on top. After the user pays, corroborate on demand (webhooks may lag): You can list recent intents with…",
     },
     DocEntry {
         title: "Fiat & payments — What's next",
@@ -670,7 +670,7 @@ pub const DOCS: [DocEntry; 219] = [
     DocEntry {
         title: "Overview — Business model",
         url: "https://docs.peridot.id/index#business-model",
-        excerpt: "The on-chain business model (pricing policy, per-chain minimums, revenue scenarios) lives in the repo at [`docs/business_model-onchain.md`](https://github.com/peridotvault/peridot-id/blob/paperclip/docs/business_model-onchain.md) — the single source of truth for pricing. It is not duplicated here.",
+        excerpt: "The current identity and usage-pricing direction is tracked in the repository's `docs/plan/README.md`. External-wallet login and Web3 MAU metering remain planned; the historical transaction-only revenue model is archived and must not be used as the current product roadmap. Runtime transaction fees…",
     },
     DocEntry {
         title: "Overview — Key facts",
@@ -1053,9 +1053,9 @@ pub const DOCS: [DocEntry; 219] = [
         excerpt: "All configuration is loaded from `.env` in the API package. Copy `apps/api/.env.example` to `apps/api/.env` and fill it in: | Variable | Required | Description | |---|---|---| | `DATABASE_URL` | yes | PostgreSQL connection string. For Supabase, use the **transaction pooler** (port `6543`) with…",
     },
     DocEntry {
-        title: "Self-hosting — Fiat (DOKU Checkout + internal ledger)",
-        url: "https://docs.peridot.id/self-hosting#fiat-doku-checkout-internal-ledger",
-        excerpt: "Fiat is one namespace: **DOKU Checkout is money-in only** (no Sub-Account); every balance lives on the internal fiat ledger. See [Fiat & payments](/fiat). | Variable | Required | Description | |---|---|---| | `DOKU_MODE` | no | `sandbox` (default) or `production` | | `DOKU_CLIENT_ID` /…",
+        title: "Self-hosting — Fiat and payments",
+        url: "https://docs.peridot.id/self-hosting#fiat-and-payments",
+        excerpt: "PeridotID Checkout funds the internal fiat ledger. Applications integrate with `peridot.fiat` and PeridotID payment URLs, quotes, statuses, and webhooks. Payment-provider credentials and notification authentication belong to the backend. Operators must configure the selected adapter using the…",
     },
     DocEntry {
         title: "Self-hosting — Legacy-database migration notes",
@@ -1100,7 +1100,7 @@ pub const DOCS: [DocEntry; 219] = [
     DocEntry {
         title: "Sign in with PeridotID — Verified partners",
         url: "https://docs.peridot.id/sign-in-with-peridot-id#verified-partners",
-        excerpt: "Admins can mark your app as a **verified partner** (in the dashboard). Verified apps show a ✓ badge on the login consent screen — and your users skip the PeridotID fiat fee on top-ups, sends, and withdrawals (0%). Your own app fee, DOKU provider fees, and on-chain fees still apply. Interested? Talk…",
+        excerpt: "Admins can mark your app as a **verified partner** (in the dashboard). Verified apps show a ✓ badge on the login consent screen — and your users skip the PeridotID fiat fee on top-ups, sends, and withdrawals (0%). Your own app fee, payment gateway fees, and on-chain fees still apply. Interested?…",
     },
     DocEntry {
         title: "Sign in with PeridotID — Who owns what: auth vs session",
@@ -1139,7 +1139,7 @@ pub const GUIDES: [GuideEntry; 15] = [
         topic: "environments",
         title: "Environments (production & sandbox)",
         url: "https://docs.peridot.id/environments",
-        body: "PeridotID runs **two fully separate environments**. They share no database, credentials, or app registrations — only the same code and (for now) the same Google OAuth client. > **Separate deployments, not a path prefix.** Sandbox is the *same API* on > sandbox hosts — there is no `/sandbox/*` path on the production API and no > `?env=sandbox` query. If you can reach `GET /v1/env`, it tells you which > deployment you hit: `{ \"env\": \"sandbox\" }` vs `{ \"env\": \"production\" }`. > Pointing a sandbox build at the production host (or vice versa) is a > configuration bug — the SDK's `checkEnv()` startup check catches it. | | Production | Sandbox (test) | |---|---|---| | Docs (Mintlify) | `https://docs.peridot.id` | `https://docs.peridot.id` (single docs for all envs) | | Dashboard | `https://dashboard.peridot.id` | `https://sandbox-dashboard.peridot.id` | | Wallet app | `https://peridot.id` | `https://sandbox.peridot.id` | | API | `https://api.peridot.id` | `https://sandbox-api.peridot.id` | | Money | **real** (DOKU production) | **test** (DOKU sandbox) | | Database | `peridot_id` | `peridot_id_test` | | Deploy branch | `main` | `test` | - **DOKU mode**: production vs `sandbox`. Sandbox top-ups use DOKU's sandbox — no real money ever moves. - **Database** (users, identities, apps, ledger) is separate. - **JWT secrets**, cookie domain, and WebAuthn RP id are separate — a session or passkey from one env never works in the other. - **App registrations**: `client_id`, allowed origins,…",
+        body: "PeridotID runs **two fully separate environments**. They share no database, credentials, or app registrations — only the same code and (for now) the same Google OAuth client. > **Separate deployments, not a path prefix.** Sandbox is the *same API* on > sandbox hosts — there is no `/sandbox/*` path on the production API and no > `?env=sandbox` query. If you can reach `GET /v1/env`, it tells you which > deployment you hit: `{ \"env\": \"sandbox\" }` vs `{ \"env\": \"production\" }`. > Pointing a sandbox build at the production host (or vice versa) is a > configuration bug — the SDK's `checkEnv()` startup check catches it. | | Production | Sandbox (test) | |---|---|---| | Docs (Mintlify) | `https://docs.peridot.id` | `https://docs.peridot.id` (single docs for all envs) | | Dashboard | `https://dashboard.peridot.id` | `https://sandbox-dashboard.peridot.id` | | Wallet app | `https://peridot.id` | `https://sandbox.peridot.id` | | API | `https://api.peridot.id` | `https://sandbox-api.peridot.id` | | Money | **real payments** | **test funds** | | Database | `peridot_id` | `peridot_id_test` | | Deploy branch | `main` | `test` | - **Payment mode**: production vs `sandbox`. Sandbox top-ups use test payment rails — no real money ever moves. - **Database** (users, identities, apps, ledger) is separate. - **JWT secrets**, cookie domain, and WebAuthn RP id are separate — a session or passkey from one env never works in the other. - **App registrations**: `client_id`, allowed origins, backend…",
     },
     GuideEntry {
         topic: "errors",
@@ -1151,7 +1151,7 @@ pub const GUIDES: [GuideEntry; 15] = [
         topic: "fiat",
         title: "Fiat & payments",
         url: "https://docs.peridot.id/fiat",
-        body: "PeridotID provides an **IDR balance** for every identity (`<handle>@pid`), plus the ability to send it to any other identity — the building block for escrow, payouts, and platform fees. Money enters through a hosted **DOKU Checkout** page; everything else happens on the internal **fiat ledger**. - **Money in** — a user tops up via DOKU Checkout (any bank, QRIS, e-wallet, card). The **NET** amount is credited to their balance the moment payment is confirmed. - **Balance & statement** — read the spendable balance and the immutable ledger. - **Send / receive** — send to any PeridotID identity (e.g. an app's escrow account). - **Fees** — a global PeridotID fee plus any per-app fee (see [Fees](#fees)). - **No withdrawal yet** — bank payouts (redemption) are disabled. Balance is replayed from the immutable journal, never trusted from a cached number. `kind` is one of `fiat_issue`, `fiat_fee`, `fiat_app_fee`, `fiat_transfer_in`, `fiat_transfer_out`, `fiat_adjust`; `direction` is `in` or `out`; `status` is `created | posted | failed | cancelled` (only `posted` counts). `checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns the DOKU payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the fee is quoted on top. After the user pays, corroborate on demand (webhooks may lag): You can list recent intents with `peridot.fiat.deposits()`. `quoteDeposit` returns the full breakdown **without moving money** — use it to show the summary before creating the…",
+        body: "PeridotID provides an **IDR balance** for every identity (`<handle>@pid`), plus app-related transfers — the building block for escrow, payouts, and platform fees. Money enters through a hosted **PeridotID Checkout** page; everything else happens on the internal **fiat ledger**. - **Money in** — a user tops up via PeridotID Checkout using the payment methods available in the checkout quote. The **NET** amount is credited to their balance the moment payment is confirmed. - **Balance & statement** — read the spendable balance and the immutable ledger. - **Send / receive** — transfer between users and eligible app owners. - **Fees** — a global PeridotID fee plus any per-app fee (see [Fees](#fees)). - **No withdrawal yet** — bank payouts (redemption) are disabled. Balance is replayed from the immutable journal, never trusted from a cached number. `kind` is one of `fiat_issue`, `fiat_fee`, `fiat_app_fee`, `fiat_transfer_in`, `fiat_transfer_out`, `fiat_adjust`; `direction` is `in` or `out`; `status` is `created | posted | failed | cancelled` (only `posted` counts). `checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns a hosted payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the fee is quoted on top. After the user pays, corroborate on demand (webhooks may lag): You can list recent intents with `peridot.fiat.deposits()`. `quoteDeposit` returns the full breakdown **without moving money** — use it to show the summary before creating the…",
     },
     GuideEntry {
         topic: "getting-started",
@@ -1163,7 +1163,7 @@ pub const GUIDES: [GuideEntry; 15] = [
         topic: "index",
         title: "Overview",
         url: "https://docs.peridot.id/index",
-        body: "PeridotID is a **Gaming Identity Platform** for the Peridot ecosystem. It provides Authentication, Identity, and Profile so every Peridot product shares a single user account. - **Authentication** — provider sign-in with secure, rotating sessions - **Identity** — a permanent PID for each user across the Antigane ecosystem (`<handle>@pid`, e.g. `ifal@pid`) — user-chosen once, never changeable, reused, or reassigned - **Profile** — per-user mutable labels (`displayName`, `avatarUrl`, `locale`) - **Wallet** — one per PID; Solana smart account + EVM counterfactuals (non-custodial, no key material). Stellar is planned, not yet in the SDK — see [SDK](/sdk) for per-chain status - **Fiat** — an IDR balance per identity: DOKU Checkout top-up, internal fiat ledger, and sends to any identity (escrow/payouts) - **Apps** — third-party apps with their own `client_id`, origins, backend secret, fees, and escrow account | Fact | Value | |---|---| | API versioning | All endpoints are under `/v1` | | Identity ID | `<handle>@pid` (e.g. `ifal@pid`) — permanent, never changes, never reused | | Login credentials | `(provider, providerUserId)` is unique; a non-null email is unique per account | | Authentication | `HttpOnly` cookies (JWT access token + rotating refresh token) | | Access token lifetime | 15 minutes | | Refresh token lifetime | 30 days (rotated on every use) | | Wallet | One per PID; Solana smart account + EVM counterfactuals; no key material | | Fiat balance | Internal IDR ledger per…",
+        body: "PeridotID is a **Gaming Identity Platform** for the Peridot ecosystem. It provides Authentication, Identity, and Profile so every Peridot product shares a single user account. - **Authentication** — provider sign-in with secure, rotating sessions - **Identity** — a permanent PID for each user across the Antigane ecosystem (`<handle>@pid`, e.g. `ifal@pid`) — user-chosen once, never changeable, reused, or reassigned - **Profile** — per-user mutable labels (`displayName`, `avatarUrl`, `locale`) - **Wallet** — one per PID; Solana smart account + EVM counterfactuals (non-custodial, no key material). Stellar is planned, not yet in the SDK — see [SDK](/sdk) for per-chain status - **Fiat** — an IDR balance per identity: PeridotID Checkout top-up, internal fiat ledger, and app-related transfers (escrow/payouts) - **Apps** — third-party apps with their own `client_id`, origins, backend secret, fees, and escrow account | Fact | Value | |---|---| | API versioning | All endpoints are under `/v1` | | Identity ID | `<handle>@pid` (e.g. `ifal@pid`) — permanent, never changes, never reused | | Login credentials | `(provider, providerUserId)` is unique; a non-null email is unique per account | | Authentication | `HttpOnly` cookies (JWT access token + rotating refresh token) | | Access token lifetime | 15 minutes | | Refresh token lifetime | 30 days (rotated on every use) | | Wallet | One per PID; Solana smart account + EVM counterfactuals; no key material | | Fiat balance | Internal IDR…",
     },
     GuideEntry {
         topic: "leveling",
@@ -1175,7 +1175,7 @@ pub const GUIDES: [GuideEntry; 15] = [
         topic: "payments",
         title: "Fiat & payments",
         url: "https://docs.peridot.id/fiat",
-        body: "PeridotID provides an **IDR balance** for every identity (`<handle>@pid`), plus the ability to send it to any other identity — the building block for escrow, payouts, and platform fees. Money enters through a hosted **DOKU Checkout** page; everything else happens on the internal **fiat ledger**. - **Money in** — a user tops up via DOKU Checkout (any bank, QRIS, e-wallet, card). The **NET** amount is credited to their balance the moment payment is confirmed. - **Balance & statement** — read the spendable balance and the immutable ledger. - **Send / receive** — send to any PeridotID identity (e.g. an app's escrow account). - **Fees** — a global PeridotID fee plus any per-app fee (see [Fees](#fees)). - **No withdrawal yet** — bank payouts (redemption) are disabled. Balance is replayed from the immutable journal, never trusted from a cached number. `kind` is one of `fiat_issue`, `fiat_fee`, `fiat_app_fee`, `fiat_transfer_in`, `fiat_transfer_out`, `fiat_adjust`; `direction` is `in` or `out`; `status` is `created | posted | failed | cancelled` (only `posted` counts). `checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns the DOKU payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the fee is quoted on top. After the user pays, corroborate on demand (webhooks may lag): You can list recent intents with `peridot.fiat.deposits()`. `quoteDeposit` returns the full breakdown **without moving money** — use it to show the summary before creating the…",
+        body: "PeridotID provides an **IDR balance** for every identity (`<handle>@pid`), plus app-related transfers — the building block for escrow, payouts, and platform fees. Money enters through a hosted **PeridotID Checkout** page; everything else happens on the internal **fiat ledger**. - **Money in** — a user tops up via PeridotID Checkout using the payment methods available in the checkout quote. The **NET** amount is credited to their balance the moment payment is confirmed. - **Balance & statement** — read the spendable balance and the immutable ledger. - **Send / receive** — transfer between users and eligible app owners. - **Fees** — a global PeridotID fee plus any per-app fee (see [Fees](#fees)). - **No withdrawal yet** — bank payouts (redemption) are disabled. Balance is replayed from the immutable journal, never trusted from a cached number. `kind` is one of `fiat_issue`, `fiat_fee`, `fiat_app_fee`, `fiat_transfer_in`, `fiat_transfer_out`, `fiat_adjust`; `direction` is `in` or `out`; `status` is `created | posted | failed | cancelled` (only `posted` counts). `checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns a hosted payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the fee is quoted on top. After the user pays, corroborate on demand (webhooks may lag): You can list recent intents with `peridot.fiat.deposits()`. `quoteDeposit` returns the full breakdown **without moving money** — use it to show the summary before creating the…",
     },
     GuideEntry {
         topic: "sdk",
@@ -1245,7 +1245,7 @@ pub const EXAMPLES: [ExampleEntry; 8] = [
         title: "Top up via DOKU Checkout",
         language: "ts",
         code: "const deposit = await peridot.fiat.checkoutDeposit(\"100000\");\n// { paymentUrl, grossIdr, feeIdr, netIdr, providerRef, ... }\n// Navigate the user to deposit.paymentUrl.",
-        description: "`checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns the DOKU payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the fee is quoted on top. After the user…",
+        description: "`checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns a hosted payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the fee is quoted on top. After the user…",
         source_url: "https://docs.peridot.id/fiat",
     },
     ExampleEntry {
@@ -1285,7 +1285,7 @@ pub const EXAMPLES: [ExampleEntry; 8] = [
         title: "Send IDR on the fiat ledger",
         language: "ts",
         code: "// First-party inline (wallet): inquiry → confirm\nconst inq = await peridot.fiat.transferInquiry({\n  amountIdr: \"100000\",\n  beneficiaryPid: \"live2dev@pid\",\n  remark: \"campaign escrow\",\n});\nconst done = await peridot.fiat.transferConfirm(inq.id); // posted\n\n// Third-party (popup): one approved ceremony\nconst done2 = await peridot.fiat.transferViaPopup({\n  amountIdr: \"100000\",\n  beneficiaryPid: \"live2dev@pid\",\n});",
-        description: "Any identity can send to any identity. Amounts are **gross** (the sender is debited the amount; the recipient receives it minus fees). `transferInquiry`/`transferConfirm` are **first-party inline…",
+        description: "At least one party must own an active app or be explicitly eligible under the platform transfer policy. Ordinary user-to-user transfers are currently rejected. Amounts are **gross** (the sender is…",
         source_url: "https://docs.peridot.id/fiat",
     },
 ];

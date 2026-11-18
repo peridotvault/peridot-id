@@ -1,7 +1,7 @@
 // Immutable double-entry internal-credit journal replay (pure — no Nest,
 // no DB). Folds `posted` rows in replaySeq order into per-owner balances.
 // Modeled on fiat/ledger-replay.ts so the two rails stay comparable for the
-// migration back to the DOKU Unified Ledger (docs/FUTURE_UNIFIED_LEDGER.md).
+// migration back to the DOKU Unified Ledger (docs/archive/FUTURE_UNIFIED_LEDGER.md).
 //
 // Row kinds (anything else is an error — new kinds must register here):
 //   fiat_issue        credit pid (mint from a corroborated Checkout deposit)

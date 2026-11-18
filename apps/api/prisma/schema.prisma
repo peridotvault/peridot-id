@@ -79,8 +79,8 @@ model Identity {
   pidApps        PidApp[]
   // Relayer hardening (ANT-581 H2): at-most-once broadcast ledger.
   relayerBroadcasts RelayerBroadcast[]
-  // Money rails (journals; Postgres is journal+cache, DOKU is the ledger —
-  // internal credit excepted, see docs/INTERNAL_CREDIT.md).
+  // Money rails: the active fiat ledger is in Postgres. Provider account and
+  // transaction models also retain the frozen legacy rail (docs/FIAT_LEDGER.md).
   fiatProviderAccounts     FiatProviderAccount[]
   fiatProviderTransactions FiatProviderTransaction[]
   fiatLedgerEntries    FiatLedgerEntry[]

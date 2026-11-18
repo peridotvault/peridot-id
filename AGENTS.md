@@ -96,7 +96,7 @@ registration. Fiat minimum/maximum are code constants in
 `apps/api/src/fiat/fiat-limits.ts`, not env. On corroborated payment the
 API issues `fiat_issue` (NET) + `fiat_fee`; issuance runs only inside the API
 (CI-guarded — no route/SDK/wallet issuance). DOKU Sub-Account / Unified Ledger
-code stays frozen (docs/FUTURE_UNIFIED_LEDGER.md).
+code stays frozen (docs/archive/FUTURE_UNIFIED_LEDGER.md).
 
 Local fiat loop: DOKU webhooks cannot reach `localhost`, so deposits rely on
 explicit status checks, not pushes. TopupScreen auto-checks once per intent

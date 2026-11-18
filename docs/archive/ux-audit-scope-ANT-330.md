@@ -1,3 +1,6 @@
+> **Archived 2026-11-18:** Task-specific historical audit scope; retained for traceability.
+> Start with the [active documentation](../README.md); this file is historical context.
+
 # ANT-330 — Audit scope & acceptance criteria: public and developer UX
 
 Parent: ANT-219 (Audit Public & Developer UI/UX). This document is the Phase-0

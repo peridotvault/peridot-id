@@ -1,3 +1,6 @@
+> **Archived 2026-11-18:** Manual endpoint list superseded by canonical OpenAPI.
+> Start with the [active documentation](../README.md); this file is historical context.
+
 # API
 
 Source of truth: `packages/openapi/src/openapi.yaml` (served at `GET /v1/openapi.yaml`).

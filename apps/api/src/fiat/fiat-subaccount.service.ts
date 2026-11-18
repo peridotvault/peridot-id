@@ -644,7 +644,7 @@ export class FiatSubAccountService {
     const env = this.config.get<string>("DOKU_SYSTEM_POINT_ACCOUNT_NO", "");
     if (!env) {
       throw new ServiceUnavailableException(
-        "DOKU_SYSTEM_POINT_ACCOUNT_NO not configured — Unified Ledger top-ups need the merchant SYSTEM_POINT account (see docs/prds/PRD_v6.md §7)",
+        "DOKU_SYSTEM_POINT_ACCOUNT_NO not configured — Unified Ledger top-ups need the merchant SYSTEM_POINT account (see docs/archive/prds/PRD_v6.md §7)",
       );
     }
     return env;
@@ -2451,7 +2451,7 @@ export class FiatSubAccountService {
   }
 
   /**
-   * Invariant-2 enforcement (binding — see docs/prds/PRD_v6.md §3):
+   * Invariant-2 enforcement (binding — see docs/archive/prds/PRD_v6.md §3):
    * gap = outstanding − backing − adjustments must be zero after rounding.
    * The ONLY allowance is documented per-leg rounding: Rp1 per settled
    * points leg. No percentage tolerance exists anywhere — a percentage would

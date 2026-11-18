@@ -1,3 +1,6 @@
+> **Archived 2026-11-18:** Earlier roadmap; current delivery sequence is in docs/plan.
+> Start with the [active documentation](../README.md); this file is historical context.
+
 # Roadmap
 
 ## Foundation (V1 — implemented)
@@ -8,7 +11,7 @@ Authentication, Identity, Profile, Wallet
 - Solana adapter + RPC failover (`packages/solana`)
 - Withdrawal intents + policy (task 007)
 - Wallet SDK + fee-payer client (`@peridotvault/pid-sdk-js`)
-- Expo wallet client (web + iOS + Android)
+- React + Vite web wallet
 - Devnet E2E verified (task 011)
 
 ## Production (V1 gate — stakeholder)

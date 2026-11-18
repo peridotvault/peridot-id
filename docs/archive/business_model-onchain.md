@@ -1,3 +1,6 @@
+> **Archived 2026-11-18:** Earlier transaction-only revenue model; current identity/MAU direction is in docs/plan. Historical fee assumptions are not changed by this move.
+> Start with the [active documentation](../README.md); this file is historical context.
+
 # PeridotID — On-Chain Business Model
 
 Board-approved on-chain business model (parent: ANT-543). This file is the

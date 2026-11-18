@@ -68,7 +68,7 @@ live2dev@pid --send Rp100.000--> streamer1@pid   (app → user: payout, ×5 on d
 - No withdrawal/cash-out (redemption stays disabled).
 - No direct user→user sends (policy rejects with 403; full P2P = future flag flip).
 - Balances live on the internal fiat ledger (IDR), not yet DOKU POINT — migratable per
-  `docs/FUTURE_UNIFIED_LEDGER.md`.
+  `docs/archive/FUTURE_UNIFIED_LEDGER.md`.
 
 ## Verified-partner fee waiver (admin-only)
 

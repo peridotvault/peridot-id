@@ -411,7 +411,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
           <Card className="border-t-0">
             <p className={SECTION_LABEL}>Sandbox faucet — test credit</p>
             <p className={`mt-1 text-xs ${MUTED}`}>
-              Instant test money for this sandbox workspace. No DOKU checkout, no real funds.
+              Instant test money for this sandbox workspace. No checkout required, no real funds.
               {dailyRemaining !== null
                 ? ` ${fmtIdr(String(dailyRemaining))} remaining today.`
                 : " Daily cap Rp100.000 per identity."}

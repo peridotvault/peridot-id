@@ -1,7 +1,7 @@
 # Architecture
 
 ```text
-Clients (Expo web/iOS/Android) -> SDK (@peridotvault/pid-sdk-js) -> PeridotID API -> PostgreSQL
+Clients (React + Vite web wallet and developer apps) -> SDK (@peridotvault/pid-sdk-js) -> PeridotID API -> PostgreSQL
                                   |
                                   +-> Solana adapter (@peridotvault/pid-solana) -> Solana RPC(s)
                                   |     |
@@ -40,7 +40,7 @@ Repo:
 ```
 apps/api      NestJS (auth, identity, profile, account, credentials, intent, permissions, wallet)
 apps/docs      Mintlify docs source (deployed manually to docs.peridot.id)
-apps/wallet   Expo wallet client (web + iOS + Android, PRD_v5 §9)
+apps/wallet   React + Vite web wallet
 contracts/svm/smart-account   Pinocchio smart-account program
 contracts/evm                 Counterfactual smart accounts + permission executor (Solidity/Foundry)
 packages/openapi / types / sdk-js / solana / evm / core

@@ -4,14 +4,14 @@ description: Top up, hold, and send IDR balances with the PeridotID fiat ledger
 ---
 
 PeridotID provides an **IDR balance** for every identity (`<handle>@pid`), plus
-the ability to send it to any other identity — the building block for escrow,
-payouts, and platform fees. Money enters through a hosted **DOKU Checkout** page;
+app-related transfers — the building block for escrow,
+payouts, and platform fees. Money enters through a hosted **PeridotID Checkout** page;
 everything else happens on the internal **fiat ledger**.
 
-- **Money in** — a user tops up via DOKU Checkout (any bank, QRIS, e-wallet, card).
+- **Money in** — a user tops up via PeridotID Checkout using the payment methods available in the checkout quote.
   The **NET** amount is credited to their balance the moment payment is confirmed.
 - **Balance & statement** — read the spendable balance and the immutable ledger.
-- **Send / receive** — send to any PeridotID identity (e.g. an app's escrow account).
+- **Send / receive** — transfer between users and eligible app owners.
 - **Fees** — a global PeridotID fee plus any per-app fee (see [Fees](#fees)).
 - **No withdrawal yet** — bank payouts (redemption) are disabled.
 
@@ -33,7 +33,7 @@ Balance is replayed from the immutable journal, never trusted from a cached numb
 
 ## Top up (money in)
 
-`checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns the DOKU
+`checkoutDeposit(netAmountIdr)` creates a Checkout intent and returns a hosted
 payment URL. `netAmountIdr` is what you want **credited** (minimum Rp10.000); the
 fee is quoted on top.
 
@@ -60,7 +60,7 @@ show the summary before creating the intent:
 ```ts
 const q = await peridot.fiat.quoteDeposit({ netAmountIdr: "100000" });
 // q.amountIdr        → what the user is credited
-// q.transferFeeIdr   → ONE combined line: PeridotID fee + PPN + DOKU gateway fee + PPN
+// q.transferFeeIdr   → ONE combined line: PeridotID fee + PPN + gateway fee + PPN
 // q.appFeeIdr        → the initiating app's own fee (0 with no app context)
 // q.totalIdr         → Amount + Transfer Fee + App Fee
 // q.paymentMethods[] → each enabled method's gateway fee (empty ⇒ block checkout)
@@ -81,12 +81,14 @@ method key; the returned intent (`CheckoutDepositView`) also carries
 `transferFeeIdr`.
 
 > In third-party (popup) mode, `checkoutDeposit` opens the PeridotID popup
-> (`fiat-checkout`), shows the server quote, and navigates itself to the DOKU
+> (`fiat-checkout`), shows the server quote, and navigates itself to the hosted payment
 > page on Approve — the developer's page never touches the amounts.
 
 ## Send / receive
 
-Any identity can send to any identity. Amounts are **gross** (the sender is
+At least one party must own an active app or be explicitly eligible under the
+platform transfer policy. Ordinary user-to-user transfers are currently rejected.
+Amounts are **gross** (the sender is
 debited the amount; the recipient receives it minus fees).
 
 ```ts
@@ -192,6 +194,6 @@ Quotes return `minimumIdr`; below-minimum errors include
 every app (Rp10.000, hardcoded in the API — no env or per-app setting), and a
 single payment is capped at Rp10.000.000 (`PAYMENT_ABOVE_CEILING`).
 
-Cancellation hides the link locally; already issued DOKU URLs remain subject to
+Cancellation hides the link locally; already issued payment URLs remain subject to
 provider expiry. A confirmed late payment is accounted for. Bank withdrawals
 remain unavailable.

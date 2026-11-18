@@ -3,7 +3,7 @@
 // (+ integration-guide for per-endpoint OpenAPI).
 //
 // Only endpoints + fields documented there are implemented. Deliberately NOT
-// implemented (no V2 contract — see docs/prds/PRD_v6.md §9):
+// implemented (no V2 contract — see docs/archive/prds/PRD_v6.md §9):
 // per-channel Direct API schemas, split-rule list/get/update/delete,
 // KYC/tiers, limits/fees numbers, webhook signing, DOKU_WALLET specifics.
 // Bank-agnostic money-in runs through DOKU Checkout (see ./checkout.ts).
@@ -185,7 +185,7 @@ export function mapSacStatus(code: string | undefined | null): "settled" | "proc
  *  `minIdr = 0` = no floor, `maxIdr = 0` = uncapped. The PeridotID fee is
  *  SEPARATE from any provider (DOKU) fee, which DOKU charges on its own.
  *  Peridot computes the QUOTE only; the fee moves as Treasury POINTS at
- *  issuance, never as a post-settlement fiat debit. See docs/prds/PRD_v6.md §3. */
+ *  issuance, never as a post-settlement fiat debit. See docs/archive/prds/PRD_v6.md §3. */
 export interface FeePolicy {
   version: number;
   percentBps: number;

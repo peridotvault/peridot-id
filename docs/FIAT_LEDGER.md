@@ -1,9 +1,10 @@
 # Fiat ledger
 
 > Status: **ACTIVE** — the one balance rail. Postgres is the temporary truth.
-> DOKU Checkout is **money-in only** (no Sub-Account). `PID_FIAT_LEDGER_ENABLED`
-> defaults to `true`. Migrates back to the DOKU Unified Ledger per
-> `docs/FUTURE_UNIFIED_LEDGER.md`; journal rows are never deleted.
+> Hosted checkout is **money-in only**. `PID_FIAT_LEDGER_ENABLED` defaults
+> to `true`. The earlier provider-ledger migration proposal is archived in
+> `docs/archive/FUTURE_UNIFIED_LEDGER.md`, not a current migration commitment.
+> Journal rows are never deleted; new work follows `docs/plan/README.md`.
 
 ## Model
 

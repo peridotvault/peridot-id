@@ -157,7 +157,7 @@ const one = await peridot.wallet.activity(txs[0]?.id); // cache read only — no
   `submitTransaction({ intentId, txHash })` records an executed tx against a
   pending intent (`POST /v1/wallet/transactions/submit`). The IDR balance,
   statements, and sends live on the **internal fiat ledger**
-  (`peridot.fiat.*`, see [Fiat & payments](/fiat)) — money in via the DOKU
+  (`peridot.fiat.*`, see [Fiat & payments](/fiat)) — money in via hosted
   gateway, never on-chain. XP lives on its own ledger (see
   [Levels & XP](/leveling)).
 - Amounts are base-unit decimal strings (lamports/wei/raw units) — never

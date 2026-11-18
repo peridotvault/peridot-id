@@ -1,3 +1,6 @@
+> **Archived 2026-11-18:** SDK summary superseded by package documentation and public SDK guide.
+> Start with the [active documentation](../README.md); this file is historical context.
+
 # SDK
 
 Browser SDK (`@peridotvault/pid-sdk-js`). Full usage guide: see the public docs at `apps/docs`

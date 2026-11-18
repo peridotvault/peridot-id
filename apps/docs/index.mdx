@@ -13,7 +13,7 @@ account.
 - **Identity** — a permanent PID for each user across the Antigane ecosystem (`<handle>@pid`, e.g. `ifal@pid`) — user-chosen once, never changeable, reused, or reassigned
 - **Profile** — per-user mutable labels (`displayName`, `avatarUrl`, `locale`)
 - **Wallet** — one per PID; Solana smart account + EVM counterfactuals (non-custodial, no key material). Stellar is planned, not yet in the SDK — see [SDK](/sdk) for per-chain status
-- **Fiat** — an IDR balance per identity: DOKU Checkout top-up, internal fiat ledger, and sends to any identity (escrow/payouts)
+- **Fiat** — an IDR balance per identity: PeridotID Checkout top-up, internal fiat ledger, and app-related transfers (escrow/payouts)
 - **Apps** — third-party apps with their own `client_id`, origins, backend secret, fees, and escrow account
 
 ## Key facts
@@ -27,7 +27,7 @@ account.
 | Access token lifetime | 15 minutes |
 | Refresh token lifetime | 30 days (rotated on every use) |
 | Wallet | One per PID; Solana smart account + EVM counterfactuals; no key material |
-| Fiat balance | Internal IDR ledger per identity; money in via DOKU Checkout |
+| Fiat balance | Internal IDR ledger per identity; money in via PeridotID Checkout |
 | Fees | Global 0.1% (min Rp100, no cap) + optional per-app fee (stacks) |
 | Machine auth | `POST /v1/auth/token` (client credentials) for app backends |
 | Spec | [OpenAPI 3.0](/api/overview) — also served by the API at `GET /v1/openapi.yaml` |
@@ -43,7 +43,8 @@ account.
 
 ## Business model
 
-The on-chain business model (pricing policy, per-chain minimums, revenue
-scenarios) lives in the repo at
-[`docs/business_model-onchain.md`](https://github.com/peridotvault/peridot-id/blob/paperclip/docs/business_model-onchain.md) —
-the single source of truth for pricing. It is not duplicated here.
+The current identity and usage-pricing direction is tracked in the repository's
+`docs/plan/README.md`. External-wallet login and Web3 MAU metering remain planned;
+the historical transaction-only revenue model is archived and must not be used
+as the current product roadmap. Runtime transaction fees remain governed by the
+active fee configuration and quotes.

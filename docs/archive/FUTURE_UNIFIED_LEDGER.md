@@ -1,3 +1,6 @@
+> **Archived 2026-11-18:** Frozen provider-specific migration proposal, not an approved current migration.
+> Start with the [active documentation](../README.md); this file is historical context.
+
 # Future Unified Ledger (DOKU) — frozen, not removed
 
 > Status: **FROZEN**. `PID_UNIFIED_LEDGER_ACTIVE=false`.

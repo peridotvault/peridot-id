@@ -99,7 +99,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
       const r = unwrap(await client.get<PaymentFeeRate[]>("/v1/fiat/admin/payment-fee-rates"), "Loading gateway fees");
       setRates(r);
       setDrafts(Object.fromEntries(r.map((x) => [x.methodKey, toDraft(x)])));
-      const t = unwrap(await client.get<{ taxBps: number }>("/v1/fiat/admin/doku-tax"), "Loading DOKU tax");
+      const t = unwrap(await client.get<{ taxBps: number }>("/v1/fiat/admin/doku-tax"), "Loading gateway tax");
       setDokuTaxPercent(t.taxBps ? String(t.taxBps / 100) : "0");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load fees");
@@ -146,10 +146,10 @@ export function FeesManager({ client }: { client: PeridotClient }) {
     try {
       const saved = unwrap(
         await client.put<{ taxBps: number }>("/v1/fiat/admin/doku-tax", { taxBps: toBps(dokuTaxPercent) }),
-        "Save DOKU tax",
+        "Save gateway tax",
       );
       setDokuTaxPercent(saved.taxBps ? String(saved.taxBps / 100) : "0");
-      flash("DOKU PPN saved.");
+      flash("Gateway PPN saved.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed.");
     } finally {
@@ -200,7 +200,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
       <PageHeader
         eyebrow="Treasury"
         title="Fees"
-        description="The PeridotID platform fee, the DOKU payment-gateway fees and PPN charged on top-ups, and the pure-percentage chain fee-policy console."
+        description="The PeridotID platform fee, the payment-gateway fees and PPN charged on top-ups, and the pure-percentage chain fee-policy console."
       />
       {error && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -235,7 +235,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
               tab === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {k === "peridot" ? "PeridotID" : k === "doku" ? "DOKU" : "Chain"}
+            {k === "peridot" ? "PeridotID" : k === "doku" ? "Payment gateway" : "Chain"}
           </button>
         ))}
       </div>
@@ -309,16 +309,16 @@ export function FeesManager({ client }: { client: PeridotClient }) {
           </Card>
         ) : (
           <Card>
-            <p className={SECTION_LABEL}>DOKU payment methods</p>
+            <p className={SECTION_LABEL}>Payment methods</p>
             <p className={`mt-1 text-xs ${MUTED}`}>
               Tick the methods users can top up with. Checked = shown in the wallet and the gateway fee + PPN are
-              charged; unchecked = hidden and not charged. DOKU PPN applies on top of every method's fee and is
+              charged; unchecked = hidden and not charged. Gateway PPN applies on top of every method's fee and is
               shown to users as part of “Fee Transfer”.
             </p>
 
             <div className="mt-3 flex items-end gap-2">
               <label className="w-40 text-xs">
-                DOKU PPN (%)
+                Gateway PPN (%)
                 <input
                   value={dokuTaxPercent}
                   onChange={(e) => setDokuTaxPercent(pctOnly(e.target.value))}
@@ -336,7 +336,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
               {/* ANT-341 FR7: explicit empty state when no gateway rates exist. */}
               {rates.length === 0 && (
                 <p className={`text-sm ${MUTED}`}>
-                  No gateway rates configured yet — rates appear here once the backend registers DOKU payment
+                  No gateway rates configured yet — rates appear here once the backend registers payment
                   methods.
                 </p>
               )}

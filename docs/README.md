@@ -1,68 +1,50 @@
-# PeridotID
+# Documentation
 
-Gaming Identity Platform — Authentication, Identity, and Profile for the Peridot ecosystem.
-One Google sign-in, one permanent identity (`<handle>@pid`), one personal wallet across
-every Peridot product.
+Start with the [implementation plans](plan/README.md) for the approved identity,
+external-wallet login, fiat access, embedded modal and usage-pricing direction.
+Plans explicitly distinguish completed local work from unimplemented capabilities.
 
-## Public docs
+## Active references
 
-The developer documentation site lives in `apps/docs` (Mintlify source — the board
-user deploys it manually to `docs.peridot.id`) and renders the
-canonical OpenAPI spec in `packages/openapi/src/openapi.yaml`.
+| Document | Purpose |
+|---|---|
+| [Architecture](ARCHITECTURE.md) | System boundaries and repository layout |
+| [Technology stack](TECH_STACK.md) | Current technologies; web wallet uses React + Vite |
+| [Database](DATABASE.md) | Data model and identity invariants; verify against Prisma schema |
+| [Security](SECURITY.md) | Authentication, wallet trust boundaries and incident guidance |
+| [Fiat ledger](FIAT_LEDGER.md) | Active internal balance and accounting model |
+| [App payments](FIAT_PAYMENTS.md) | Checkout, payment events and refunds |
+| [Relying-party sessions](RP_SESSIONS.md) | App-backend session integration |
+| [Live2Dev integration](LIVE2DEV_INTEGRATION.md) | Existing app-specific integration reference |
+| [Smart wallet specification](prds/PRD_v5.md) | Wallet specification; current code and contract whitepaper settle implementation status |
+| [Contract whitepaper](../contracts/WHITEPAPER.md) | Canonical smart-account contract specification |
 
-- Docs (Mintlify): `https://docs.peridot.id` (the legacy
-  `pid.peridotvault.com/docs*` paths are dead — no redirect, update bookmarks)
-- API (VPS): `https://api.peridot.id/v1`
-- Preview locally: `cd apps/docs && mint dev` → `http://localhost:3000`
-- API also serves the raw spec at `GET /v1/openapi.yaml`
+## Operations
 
-## Repository layout
+- [Chain registry](CHAIN_REGISTRY.md)
+- [Relayer runbook](RELAYER_RUNBOOK.md)
+- [Relayer dashboards](RELAYER_DASHBOARDS.md)
+- [Payment provider operations — internal](PAYMENT_PROVIDER_OPERATIONS.md)
+- [Retired hosts](RETIRED_HOSTS.md)
+- [Security regression evidence](security/ant860-poc/README.md)
+- [Additional contract security evidence](security/ant868-b4-v5.md)
 
-```
-apps/api            NestJS API (auth, identity, profile, wallet) — VPS via deploy/compose.yaml
-apps/wallet         Expo wallet client (web + iOS + Android)
-apps/docs            Public docs site (Mintlify source)
-contracts/svm       Pinocchio smart-account program (Rust)
-contracts/evm       Counterfactual smart accounts (Solidity/Foundry)
-packages/sdk-js     Browser SDK
-packages/types      Shared TypeScript types
-packages/openapi    OpenAPI 3.0 specification (source of truth)
-packages/solana     Solana chain adapter (@solana/web3.js lives here only)
-packages/evm        EVM adapter
-packages/core       Browser-neutral primitives (hashes, WebAuthn, custody)
-```
+These references are retained because they support operation, recovery or security;
+cleanup does not certify every historical statement as current production behavior.
 
-## Core docs
+## Canonical developer documentation
 
-- [business_model-onchain.md](business_model-onchain.md) — on-chain business model (pricing, revenue scenarios)
-- [prds/PRD_v5.md](prds/PRD_v5.md) — current product spec (smart wallet)
-- [prds/PRD_v6.md](prds/PRD_v6.md) — fiat money layer (on-chain balances live in v5; fiat lives here)
-- [prds/PRD_v4(done).md](prds/PRD_v4(done).md) — architecture base (note: its `PidAccount` model is
-  superseded (1 identity = 1 personal wallet; see [WHITEPAPER.md §1](../contracts/WHITEPAPER.md)))
-- [ARCHITECTURE.md](ARCHITECTURE.md) — modules and repo layout
-- [TECH_STACK.md](TECH_STACK.md) — NestJS, PostgreSQL, Prisma, JWT, Passport
-- [DATABASE.md](DATABASE.md) — tables, ERD, invariants
-- [API_SPEC.md](API_SPEC.md) — endpoint list
-- [SECURITY.md](SECURITY.md) — auth, sessions, wallet threat model
-- [prds/PRD_v6.md](prds/PRD_v6.md) — fiat money layer: DOKU ledger-first PTS architecture, activation dossier, verification matrix, acceptance rows
-- [ROADMAP.md](ROADMAP.md) — Foundation → Social → Gaming → Ecosystem
-- [WHITEPAPER.md](../contracts/WHITEPAPER.md) — canonical contracts spec (§12 gates mainnet)
+- Public guides: [apps/docs](../apps/docs/README.md), including
+  [SDK usage](../apps/docs/sdk.mdx) and [authentication](../apps/docs/authentication.mdx).
+- API contract: [OpenAPI](../packages/openapi/src/openapi.yaml).
+- SDK package: [SDK README](../packages/sdk-js/README.md).
+- Local setup: [repository README](../README.md).
+- Deployment: [deployment runbook](../deploy/README.md).
 
-## Quick start
+Do not maintain a second manual endpoint list or copy the SDK guide here.
 
-```bash
-docker compose up -d        # Postgres (refresh-token state lives in Postgres — no Redis)
-pnpm install
-pnpm --filter @peridotvault/pid-api db:deploy  # apply Prisma migrations
-pnpm --filter @peridotvault/pid-api dev        # API on http://localhost:3300
-pnpm --filter @peridotvault/pid-wallet dev:web # wallet on http://localhost:3302
-```
+## Historical material
 
-Copy `apps/api/.env.example` to `apps/api/.env` and add Google OAuth credentials to test the
-login flow. Local chain: run `solana-test-validator` from `contracts/svm` (see AGENTS.md).
-
-## Deploy
-
-See the public docs' [Self-hosting](https://docs.peridot.id/self-hosting)
-guide. In short: the API on the VPS (`deploy/compose.yaml`); docs deploy via
-Mintlify (board user, manual — see `apps/docs/README.md`).
+Eight superseded or task-specific documents were moved to [archive](archive/README.md).
+Their content remains available for traceability but is excluded from the active
+reading list. New implementation plans belong in `docs/plan/` as `.md` files.

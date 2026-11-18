@@ -1,6 +1,6 @@
 ---
 title: Environments (production & sandbox)
-description: Production and sandbox stacks — real money vs DOKU sandbox
+description: Production and sandbox stacks — real payments and test funds
 ---
 
 PeridotID runs **two fully separate environments**. They share no database,
@@ -20,13 +20,13 @@ Google OAuth client.
 | Dashboard | `https://dashboard.peridot.id` | `https://sandbox-dashboard.peridot.id` |
 | Wallet app | `https://peridot.id` | `https://sandbox.peridot.id` |
 | API | `https://api.peridot.id` | `https://sandbox-api.peridot.id` |
-| Money | **real** (DOKU production) | **test** (DOKU sandbox) |
+| Money | **real payments** | **test funds** |
 | Database | `peridot_id` | `peridot_id_test` |
 | Deploy branch | `main` | `test` |
 
 ## What differs (everything that can move money)
 
-- **DOKU mode**: production vs `sandbox`. Sandbox top-ups use DOKU's sandbox —
+- **Payment mode**: production vs `sandbox`. Sandbox top-ups use test payment rails —
   no real money ever moves.
 - **Database** (users, identities, apps, ledger) is separate.
 - **JWT secrets**, cookie domain, and WebAuthn
@@ -55,8 +55,8 @@ with:
    const peridot = Peridot({ clientId: 'pidapp_…', env: 'sandbox' });
    // omit env on production; no URLs, no passkeySigner → popup/tab mode
    ```
-3. Top up / send with test flows — DOKU runs in sandbox, so nothing is real.
-   For instant test money skip DOKU entirely with the sandbox faucet:
+3. Top up / send with test flows — sandbox payments use test funds.
+   For instant test money skip checkout with the sandbox faucet:
    ```ts
    // Sandbox only. Production returns 404 (route absent).
    const credit = await peridot.fiat.testCredit(50000);
@@ -86,10 +86,10 @@ promote/export. When your sandbox integration works:
 3. Generate a fresh production **backend secret** (`pidsk_…`) — never reuse the
    sandbox secret.
 4. Re-create **fees** per operation and the **webhook** endpoint + signing secret.
-5. Re-run the DOKU onboarding against **production** (real money).
+5. Verify production payment access and the applicable onboarding requirements before accepting real money.
 6. Build with `NODE_ENV=production` and verify `GET /v1/env` →
    `{ "env": "production" }`.
 
 Fees, the fiat ledger, and webhooks behave identically in both environments; only
-the DOKU mode and data differ. See [Fiat & payments](/fiat) and
+payment mode and data differ. See [Fiat & payments](/fiat) and
 [Apps & workspace](/apps).

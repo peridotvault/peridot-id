@@ -1,9 +1,12 @@
+> **Archived 2026-11-18:** Completed historical architecture with superseded identity/account model.
+> Start with the [active documentation](../../README.md); this file is historical context.
+
 # PRD_v4(done).md — Peridot ID Non-Custodial Smart Wallet & Multi-Chain Account Platform
 
 > Reading note: the architecture base below still stands, with two supersessions —
 > identities are now user-chosen `<handle>@pid` (not generated), and the `PidAccount`
 > hub is removed (1 identity = 1 wallet, rows reference the PID directly) per
-> [WHITEPAPER.md §1](../../contracts/WHITEPAPER.md). PDA seeds are `sha256(pid)`.
+> [WHITEPAPER.md §1](../../../contracts/WHITEPAPER.md). PDA seeds are `sha256(pid)`.
 
 **Version:** 4.0  
 **Status:** Implementation PRD  

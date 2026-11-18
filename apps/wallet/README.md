@@ -22,7 +22,7 @@ follow-up work, not silently missing.
 
 ## Stack
 
-- Vite 8 / React 19 (semantic DOM + `src/shared/styles.ts` helpers)
+- Vite 8 / React 19 (semantic DOM + `src/shared/styles/stylesheet.ts` helpers)
 - `@peridotvault/pid-sdk-js`, `@peridotvault/pid-solana`, `@peridotvault/pid-types`
 
 ## Local
@@ -51,5 +51,5 @@ Dev and prod run the identical auth code paths — only credentials differ:
 - **Google** needs a dev OAuth client: create one at
   https://console.cloud.google.com/apis/credentials with redirect URI
   `http://localhost:3300/v1/auth/google/callback`, fill in
-  `GOOGLE_CLIENT_ID_DEV`/`GOOGLE_CLIENT_SECRET_DEV` in `apps/api/.env`, and
+  `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` in `apps/api/.env`, and
   restart the API. The prod client (prod callback only) lives in the deploy env.

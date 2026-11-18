@@ -29,23 +29,23 @@ PID can be a beneficiary (default: the app owner) — no operator registration o
 allowlist is involved; the app record the developer created in the dashboard is
 the onboarding.
 
-`paymentMethod` is required: it determines the DOKU gateway fee included in
+`paymentMethod` is required: it determines the the payment provider gateway fee included in
 `totalIdr`. Without it the platform would absorb the provider fee on every
 payment.
 
 `externalId` is unique per app. Only the request that inserts the intent calls
-DOKU. Retries return the same intent; conflicting payer/amount/beneficiary
-returns 409. If DOKU creation times out, the intent stays created for
+the payment provider. Retries return the same intent; conflicting payer/amount/beneficiary
+returns 409. If the payment provider creation times out, the intent stays created for
 reconciliation; retries never create another invoice. A created intent without
-a URL needs operational investigation if DOKU never returns its URL.
+a URL needs operational investigation if the payment provider never returns its URL.
 
-The default expiry is 30 minutes, sent to DOKU. The provider's returned expiry
+The default expiry is 30 minutes, sent to the payment provider. The provider's returned expiry
 is interpreted in WIB. Recovery of abandoned orders is explicitly disabled.
 The API suppresses URLs after expiry/cancellation. Cancellation is local: the
 Checkout API client has no provider cancellation operation. A previously copied
-DOKU link can still be paid until provider expiry; confirmed late payments are
+payment link can still be paid until provider expiry; confirmed late payments are
 accounted for and can be refunded. Do not interpret local cancellation as a
-bank reversal or a guarantee that DOKU revoked the URL.
+bank reversal or a guarantee that the payment provider revoked the URL.
 
 ## Limits
 
@@ -81,7 +81,7 @@ Ledger posting and outbox insertion are atomic. The API worker checks every two
 seconds, with per-event leases across replicas, five-second request timeouts,
 and exponential retry capped at one hour. Forty attempts provide a retry
 window longer than 24 hours. The worker cadence is not an end-to-end latency SLA;
-DOKU notification timing, provider availability and queue size still matter.
+the payment provider notification timing, provider availability and queue size still matter.
 
 Owners can inspect the latest 100 deliveries using
 `GET /v1/apps/:id/webhook/deliveries` and replay using
@@ -92,14 +92,14 @@ records latest status/error and attempt count, not a separate history per attemp
 ## Rollout and verification
 
 Apply the Prisma migration before starting the API. Use the existing sandbox
-DOKU credentials (`DOKU_MODE=sandbox`) and a public notification URL. No mock
-PAID endpoint is exposed. DOKU sandbox payments must be simulated through the
+the payment provider credentials (`the payment provider_MODE=sandbox`) and a public notification URL. No mock
+PAID endpoint is exposed. the payment provider sandbox payments must be simulated through the
 provider's supported sandbox flow; the API corroborates order status and exact
 total before posting.
 
 Local automated tests cover no-balance creation, replay, duplicate settlement,
 amount mismatch, expiry, refund limits, authorization, metadata byte limits,
 minimums and webhook signatures/retries. Before deployment acceptance, run the
-actual DOKU sandbox loop including simultaneous duplicate requests, expiry of
+actual the payment provider sandbox loop including simultaneous duplicate requests, expiry of
 a copied payment URL, HTTP 500 retries, dashboard replay and delivery latency.
 Bank withdrawal remains disabled; this change does not provide cash-out.
