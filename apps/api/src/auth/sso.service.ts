@@ -428,6 +428,8 @@ export class SsoService {
       },
     );
 
+    if (row.clientId) await this.usage.recordSuccessfulLogin(row.clientId, row.pid);
+
     return {
       pid: row.pid,
       identityId: row.pid,

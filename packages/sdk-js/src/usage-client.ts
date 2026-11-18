@@ -1,4 +1,4 @@
-import type { ApiError, UsageReport } from "@peridotvault/pid-types";
+import type { ApiError, UsageReport, AppUsersPage } from "@peridotvault/pid-types";
 
 /** Minimal surface PeridotUsage needs — same shape as PeridotLevel. */
 interface ApiLike {
@@ -12,6 +12,15 @@ interface ApiLike {
  */
 export class PeridotUsage {
   constructor(private readonly client: ApiLike) {}
+
+  /** App-owner user directory; q searches PID, pages contain 25 users. */
+  async users(appId: string, options: { q?: string; page?: number } = {}): Promise<AppUsersPage | ApiError> {
+    const query = new URLSearchParams();
+    if (options.q) query.set("q", options.q);
+    if (options.page !== undefined) query.set("page", String(options.page));
+    const res = await this.client.get<AppUsersPage>(`/v1/apps/${encodeURIComponent(appId)}/users?${query}`);
+    return res.data;
+  }
 
   /** Monthly usage for one app the caller owns. `month` is `YYYY-MM` (UTC); default: this month. */
   async monthly(appId: string, month?: string): Promise<UsageReport | ApiError> {

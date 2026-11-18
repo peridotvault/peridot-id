@@ -105,9 +105,9 @@ function setup(apps?: {
     clientSecretValid: jest.fn(() => true),
     ...apps,
   };
-  const usage: any = { recordAppLogin: jest.fn(async () => undefined) };
+  const usage: any = { recordSuccessfulLogin: jest.fn(async () => undefined), recordAppLogin: jest.fn(async () => undefined) };
   const service = new SsoService(prisma as never, config as never, security as never, pidApps as never, jwt as never, usage as never);
-  return { service, rows, security };
+  return { service, rows, security, usage };
 }
 
 const DEV_SECRET = "pidsk_testsecret000000000000000000000000000001";
@@ -603,5 +603,21 @@ describe("SsoService", () => {
       clientId: "pidapp_abc",
       codeChallenge: undefined,
     });
+  });
+});
+
+
+describe("app user login recording", () => {
+  it("records only successful exchanges, never issue, failed exchange or replay", async () => {
+    const { service, usage } = setup({ findActive: async () => DEV_APP,
+      clientSecretValid: (app, secret) => PidAppsService.secretMatches(secret, (app as any).clientSecretHash) });
+    const code = await service.issue("user@pid", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    expect(usage.recordSuccessfulLogin).not.toHaveBeenCalled();
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "wrong")).rejects.toThrow();
+    expect(usage.recordSuccessfulLogin).not.toHaveBeenCalled();
+    await service.consume(code, "https://mygame.dev/callback", "pidapp_abc", DEV_SECRET);
+    expect(usage.recordSuccessfulLogin).toHaveBeenCalledWith("pidapp_abc", "user@pid");
+    await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", DEV_SECRET)).rejects.toThrow();
+    expect(usage.recordSuccessfulLogin).toHaveBeenCalledTimes(1);
   });
 });

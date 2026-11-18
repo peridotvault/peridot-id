@@ -98,6 +98,7 @@ export type {
   UpdateTokenInput,
   UpsertContractInput,
   UsageReport,
+  AppUsersPage,
   WalletChallenge,
   WalletNamespace,
 } from "@peridotvault/pid-types";

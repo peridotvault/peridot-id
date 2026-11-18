@@ -970,6 +970,37 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /apps/{id}/users:
+    get:
+      tags: [apps]
+      summary: List users who completed login to my app
+      description: |
+        Owner-only directory, one row per app/PID. Records successful SSO
+        exchanges from enablement onward; historical logins are not backfilled.
+        PID search, alphabetical ordering and 25 users per page. Does not expose
+        email, wallet addresses, balances or activity in other apps.
+      security:
+        - cookieAuth: []
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: q, in: query, schema: {type: string, maxLength: 100}, description: Case-insensitive PID substring}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, maximum: 100000, default: 1}}
+      responses:
+        "200":
+          description: App users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppUsersPage"
+        "400":
+          description: Invalid search or page
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: User session required
+        "404":
+          description: App not found or not owned by caller
+
   /apps/{id}/usage:
     get:
       tags: [apps]
@@ -4084,6 +4115,24 @@ components:
             message: "XP intake is disabled"
 
   schemas:
+    AppUsersPage:
+      type: object
+      required: [users, total, page, pageSize]
+      properties:
+        total: {type: integer}
+        page: {type: integer}
+        pageSize: {type: integer, enum: [25]}
+        users:
+          type: array
+          items:
+            type: object
+            required: [pid, displayName, firstLoginAt, lastLoginAt]
+            properties:
+              pid: {type: string}
+              displayName: {type: string, nullable: true}
+              firstLoginAt: {type: string, format: date-time}
+              lastLoginAt: {type: string, format: date-time}
+
     UsageReport:
       type: object
       description: Web3 usage for one app in one UTC month. Reporting-only — no charges, no cutoff.

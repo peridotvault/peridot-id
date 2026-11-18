@@ -25,3 +25,16 @@ export interface UsageReport {
   overagePids: number;
   billing: "reporting-only";
 }
+
+/** Successful app logins recorded since the app-user directory was enabled. */
+export interface AppUsersPage {
+  users: Array<{
+    pid: string;
+    displayName: string | null;
+    firstLoginAt: string;
+    lastLoginAt: string;
+  }>;
+  total: number;
+  page: number;
+  pageSize: number;
+}

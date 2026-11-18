@@ -2,6 +2,7 @@
 // can register an app and get a public client_id; PeridotID only returns pid_codes to
 // the app's registered redirect URIs. CORS origins are derived from those URIs.
 
+import type { AppUsersPage } from "@peridotvault/pid-types";
 import { BadRequestException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
@@ -36,6 +37,28 @@ export class PidAppsService {
     @Optional() private readonly config?: ConfigService,
     @Optional() private readonly security?: SecurityEventService,
   ) {}
+
+  /** Ownership is checked before reading any user rows, including search/count. */
+  async users(ownerPid: string, id: string, q = "", page = 1): Promise<AppUsersPage> {
+    if (!Number.isSafeInteger(page) || page < 1 || page > 100000 || q.length > 100) {
+      throw new BadRequestException("Invalid user search or page");
+    }
+    const app = await this.get(ownerPid, id);
+    const where = { appClientId: app.clientId, ...(q.trim() ? { pid: { contains: q.trim().toLowerCase() } } : {}) };
+    const pageSize = 25;
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.appUser.findMany({ where, orderBy: { pid: "asc" }, skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.appUser.count({ where }),
+    ]);
+    const profiles = await this.prisma.profile.findMany({
+      where: { pid: { in: rows.map(row => row.pid) } }, select: { pid: true, displayName: true },
+    });
+    const names = new Map(profiles.map(profile => [profile.pid, profile.displayName]));
+    return { total, page, pageSize, users: rows.map(row => ({
+      pid: row.pid, displayName: names.get(row.pid) ?? null,
+      firstLoginAt: row.firstLoginAt.toISOString(), lastLoginAt: row.lastLoginAt.toISOString(),
+    })) };
+  }
 
   /**
    * Immutable verification-audit write. Tolerant of delegates that lack the

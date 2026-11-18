@@ -59,6 +59,22 @@ export class PidAppsController {
     return this.usage.report(app.clientId, month ?? utcMonth());
   }
 
+  @Get(":id/users")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
+  users(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Query("q") q?: string,
+    @Query("page") page?: string,
+  ) {
+    if ((q !== undefined && typeof q !== "string") ||
+        (page !== undefined && (typeof page !== "string" || !/^[1-9]\d{0,5}$/.test(page)))) {
+      throw new BadRequestException("Invalid user search or page");
+    }
+    return this.apps.users(user.pid, id, q ?? "", page === undefined ? 1 : Number(page));
+  }
+
   /** Rename, change redirect URIs, or disable one of my apps. */
   @Patch(":id")
   @HttpCode(HttpStatus.OK)

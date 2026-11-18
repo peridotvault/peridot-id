@@ -65,6 +65,22 @@ export class UsageService {
     private readonly config: ConfigService,
   ) {}
 
+  /** Called only after a successful SSO exchange. Never creates a global-user listing. */
+  async recordSuccessfulLogin(appClientId: string, pid: string): Promise<void> {
+    try {
+      const at = new Date();
+      // Atomic upsert; GREATEST prevents a slower concurrent login moving time backwards.
+      await this.prisma.$executeRaw`
+        INSERT INTO app_users ("appClientId", pid, "firstLoginAt", "lastLoginAt")
+        VALUES (${appClientId}, ${pid}, ${at}, ${at})
+        ON CONFLICT ("appClientId", pid) DO UPDATE
+        SET "firstLoginAt" = LEAST(app_users."firstLoginAt", EXCLUDED."firstLoginAt"),
+            "lastLoginAt" = GREATEST(app_users."lastLoginAt", EXCLUDED."lastLoginAt")`;
+    } catch (err) {
+      this.logger.warn(`App user login history unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   /** Configured free allowance per app per month (`PID_USAGE_FREE_ALLOWANCE`). */
   freeAllowance(): number {
     const raw = Number.parseInt(this.config.get<string>("PID_USAGE_FREE_ALLOWANCE", "") || "", 10);

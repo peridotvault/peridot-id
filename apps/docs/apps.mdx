@@ -160,3 +160,23 @@ the outbox (`POST /v1/fiat/admin/dispatch-events` triggers a dispatch run),
 with backoff and admin review after repeated failures. The ledger remains the source of truth:
 poll `GET /v1/fiat/ledger` / `balance` as the primary read path and treat
 callbacks as a notification aid.
+
+
+## App users
+
+Open an app in the dashboard to view **Users**: PID, display name, first recorded
+login and latest login. Search by PID and page through 25 users at a time.
+Only the app owner can access this directory. Each PID appears once per app,
+regardless of login method or linked wallets. Times in the dashboard use your
+local timezone. This is login history, not an online-status or session-duration tracker.
+
+```ts
+const users = await peridot.usage.users(appId, { q: "andi", page: 1 });
+```
+
+The API is `GET /v1/apps/:id/users`. Recording starts after the directory is enabled
+and a user successfully exchanges an app-bound SSO code. Historical usage rows and
+origin-level grants are not backfilled because they do not prove per-app login times.
+Recording failures are logged without blocking login, so this is an operational
+directory rather than a guaranteed audit ledger. Email, external wallet addresses,
+balances and activity in other apps are not exposed.

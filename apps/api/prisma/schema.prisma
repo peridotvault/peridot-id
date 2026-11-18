@@ -1441,3 +1441,15 @@ model FiatPayment {
   @@index([status, createdAt])
   @@map("fiat_payments")
 }
+
+// Per-app login history, independent of monthly usage and origin-scoped grants.
+model AppUser {
+  appClientId String
+  pid String
+  firstLoginAt DateTime @default(now()) @db.Timestamptz(3)
+  lastLoginAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@id([appClientId, pid])
+  @@index([appClientId, lastLoginAt])
+  @@map("app_users")
+}
