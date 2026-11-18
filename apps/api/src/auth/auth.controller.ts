@@ -53,6 +53,13 @@ function withErrorFlag(successUrl: string, code: string): string {
   return `${successUrl}${sep}error=${encodeURIComponent(code)}`;
 }
 
+/** Session auth method for a credential provider (claim path). */
+function authMethodFor(provider: string): "google" | "email" | "wallet" {
+  if (provider === "email") return "email";
+  if (provider === "solana" || provider === "evm") return "wallet";
+  return "google";
+}
+
 @Controller("v1/auth")
 @UseGuards(ThrottlerGuard, CsrfOriginGuard)
 export class AuthController {
@@ -498,7 +505,7 @@ export class AuthController {
     const ticketId = (req as Request & { cookies?: Record<string, string> }).cookies?.[CLAIM_COOKIE];
     if (!ticketId) throw new BadRequestException("No pending claim — sign in again to get a fresh one.");
     const { pid, redirectTo, clientId, provider } = await this.claimService.claim(ticketId, dto.handle);
-    await this.authService.issueSession(res, pid, req.headers["user-agent"], undefined, provider === "email" ? "email" : "google");
+    await this.authService.issueSession(res, pid, req.headers["user-agent"], undefined, authMethodFor(provider));
     clearClaimCookie(res, this.config);
     if (redirectTo) {
       const resolved = await this.ssoService.resolveReturnTo(redirectTo, clientId);

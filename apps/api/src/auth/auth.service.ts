@@ -171,7 +171,7 @@ export class AuthService {
     pid: string,
     userAgent: string | undefined,
     rotatedFrom?: string,
-    authMethod?: "google" | "email" | "passkey",
+    authMethod?: "google" | "email" | "passkey" | "wallet",
     scope?: string | null,
   ): Promise<{ accessToken: string; refreshToken: string }> {
     // Defense-in-depth (ANT-307 F3): sole caller today is DTO-validated, but any

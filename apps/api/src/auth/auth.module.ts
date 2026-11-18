@@ -15,6 +15,8 @@ import { GoogleGuard } from "./google.guard";
 import { GOOGLE_OAUTH_OPTIONS, googleOAuthOptionsFactory, GoogleStrategy } from "./google.strategy";
 import { JwtStrategy } from "./jwt.strategy";
 import { SsoService } from "./sso.service";
+import { WalletAuthController } from "./wallet/wallet-auth.controller";
+import { WalletAuthService } from "./wallet/wallet-auth.service";
 
 @Module({
   imports: [
@@ -23,10 +25,11 @@ import { SsoService } from "./sso.service";
     CredentialModule,
     SecurityModule,
   ],
-  controllers: [AuthController, PidAppsController],
+  controllers: [AuthController, PidAppsController, WalletAuthController],
   providers: [
     AuthService,
     ClaimService,
+    WalletAuthService,
     EmailOtpService,
     EmailService,
     PidAppsService,

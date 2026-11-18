@@ -52,3 +52,26 @@ export interface AuthenticateStart {
   authenticationId: string;
   options: Record<string, unknown>;
 }
+
+/** Chain namespace an external wallet login can prove. */
+export type WalletNamespace = "solana" | "evm";
+
+/** Short-lived proof-of-ownership challenge for an external wallet. */
+export interface WalletChallenge {
+  challengeId: string;
+  /** Exact UTF-8 message the wallet must sign. */
+  message: string;
+  expiresAt: string;
+  namespace: WalletNamespace;
+  /** Normalized address: EVM lowercase, Solana base58 verbatim. */
+  address: string;
+}
+
+/** One external wallet linked as a login credential. */
+export interface LinkedWallet {
+  id: string;
+  namespace: WalletNamespace;
+  address: string;
+  linkedAt: string;
+  lastLoginAt: string | null;
+}

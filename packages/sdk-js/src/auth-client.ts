@@ -3,9 +3,12 @@ import type {
   ApiError,
   AuthenticateStart,
   ExchangeResult,
+  LinkedWallet,
   LoginResponse,
   Session,
   SsoGrant,
+  WalletChallenge,
+  WalletNamespace,
 } from "@peridotvault/pid-types";
 import { authenticatePasskey, PasskeyHostedRequiredError } from "@peridotvault/pid-core";
 import { openLoginPopup, openLoginTab, PopupClosedError, PopupUnavailableError } from "./popup.js";
@@ -164,6 +167,87 @@ export class PeridotAuth {
       if (e instanceof Error && /cancelled/i.test(e.message)) return { ok: false };
       throw e;
     }
+  }
+
+  /**
+   * Start external-wallet login (Phantom/Solana, MetaMask/EVM). Returns the
+   * exact message the wallet must sign — the server verifies the signature
+   * against the address, so nothing here trusts a client claim. Proof of
+   * ownership only: no funds move and no spending is approved.
+   */
+  async walletChallenge(input: {
+    namespace: WalletNamespace;
+    reference: string;
+    address: string;
+  }): Promise<WalletChallenge> {
+    const res = await this.client.post<WalletChallenge>("/v1/auth/wallet/challenge", input);
+    if (!res.ok) {
+      const msg = (res.data as ApiError)?.message;
+      throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Couldn't start wallet sign-in"));
+    }
+    return res.data as WalletChallenge;
+  }
+
+  /**
+   * Finish external-wallet login with the wallet's signature over the issued
+   * message (base64 for Solana, hex for EVM). A returning wallet gets a session
+   * (`pid`); an unknown wallet gets `{ pendingClaim: true }` — then
+   * `claimStatus()` → `claim(handle)`.
+   */
+  async walletVerify(
+    challengeId: string,
+    signature: string,
+  ): Promise<{ ok: boolean; pid?: string; pendingClaim?: boolean }> {
+    const res = await this.client.post<{ ok: boolean; pid?: string; pendingClaim?: boolean }>(
+      "/v1/auth/wallet/verify",
+      { challengeId, signature },
+    );
+    if (!res.ok) {
+      const msg = (res.data as ApiError)?.message;
+      throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Wallet sign-in failed"));
+    }
+    clearCache();
+    return res.data as { ok: boolean; pid?: string; pendingClaim?: boolean };
+  }
+
+  /** Start linking an external wallet to the CURRENT session's PID. */
+  async walletLinkChallenge(input: {
+    namespace: WalletNamespace;
+    reference: string;
+    address: string;
+  }): Promise<WalletChallenge> {
+    const res = await this.client.post<WalletChallenge>("/v1/auth/wallet/link/challenge", input);
+    if (!res.ok) {
+      const msg = (res.data as ApiError)?.message;
+      throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Couldn't start wallet linking"));
+    }
+    return res.data as WalletChallenge;
+  }
+
+  /** Attach the proven wallet to this PID. Throws when the address belongs to another PID. */
+  async walletLink(challengeId: string, signature: string): Promise<LinkedWallet> {
+    const res = await this.client.post<LinkedWallet>("/v1/auth/wallet/link", { challengeId, signature });
+    if (!res.ok) {
+      const msg = (res.data as ApiError)?.message;
+      throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Wallet linking failed"));
+    }
+    invalidateCache("identity.");
+    return res.data as LinkedWallet;
+  }
+
+  /** External wallets linked as login credentials for this PID. */
+  async wallets(): Promise<LinkedWallet[] | ApiError> {
+    return cachedRead("auth.wallets", CACHE_TTL.auth, async () => {
+      const res = await this.client.get<LinkedWallet[]>("/v1/auth/wallet");
+      return res.data;
+    });
+  }
+
+  /** Unlink a wallet. The server refuses to remove the last login method. */
+  async unlinkWallet(id: string): Promise<boolean> {
+    const res = await this.client.delete(`/v1/auth/wallet/${id}`);
+    if (res.ok) invalidateCache("auth.");
+    return res.ok;
   }
 
   /**

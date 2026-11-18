@@ -3085,6 +3085,188 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "429":
           $ref: "#/components/responses/RateLimited"
+  /auth/wallet/challenge:
+    post:
+      tags: [auth]
+      summary: Start external-wallet login (Phantom/Solana, MetaMask/EVM)
+      description: |
+        Issues a short-lived (5 min), single-use challenge bound to the chain,
+        address and requesting origin. The `message` is stored server-side and
+        must be signed byte-for-byte by the wallet. Proof of ownership only — it
+        never moves funds or authorizes spending. Rate limited (20/min).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [namespace, reference, address]
+              properties:
+                namespace: { type: string, enum: [solana, evm] }
+                reference: { type: string, description: "Chain reference, e.g. mainnet-beta or 1" }
+                address: { type: string }
+      responses:
+        "200":
+          description: Challenge to sign
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challengeId: { type: string, format: uuid }
+                  message: { type: string }
+                  expiresAt: { type: string, format: date-time }
+                  namespace: { type: string, enum: [solana, evm] }
+                  address: { type: string, description: "Normalized: EVM lowercase, Solana base58 verbatim" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/wallet/verify:
+    post:
+      tags: [auth]
+      summary: Finish external-wallet login (signature proves the address)
+      description: |
+        Verifies the signature server-side and consumes the challenge atomically
+        (a replay is rejected). A known address gets the standard session
+        cookies; an unknown address gets a claim ticket (`pendingClaim: true`) —
+        no identity is created until the user claims a handle. Signature encoding
+        is base64 for Solana, hex for EVM. Rate limited (20/min).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeId, signature]
+              properties:
+                challengeId: { type: string, format: uuid }
+                signature: { type: string }
+      responses:
+        "200":
+          description: Signed in, or pending PID claim
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  pid: { type: string, description: Present for a returning wallet }
+                  pendingClaim: { type: boolean, description: Present for an unknown wallet }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/wallet/link/challenge:
+    post:
+      tags: [auth]
+      summary: Start linking an external wallet to the current PID
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      description: |
+        Same challenge shape as login, bound to the caller's pid and action
+        `link`. The verified proof can only attach the address to that pid.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [namespace, reference, address]
+              properties:
+                namespace: { type: string, enum: [solana, evm] }
+                reference: { type: string }
+                address: { type: string }
+      responses:
+        "200":
+          description: Challenge to sign
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  challengeId: { type: string, format: uuid }
+                  message: { type: string }
+                  expiresAt: { type: string, format: date-time }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/wallet/link:
+    post:
+      tags: [auth]
+      summary: Attach the proven wallet to the current PID
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      description: |
+        Requires a `link` challenge issued for the same pid. An address already
+        linked to another PID is never reassigned or merged — that is a 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challengeId, signature]
+              properties:
+                challengeId: { type: string, format: uuid }
+                signature: { type: string }
+      responses:
+        "200":
+          description: Linked wallet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkedWallet"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /auth/wallet:
+    get:
+      tags: [auth]
+      summary: Wallets linked to this PID
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      responses:
+        "200":
+          description: Linked wallets, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LinkedWallet"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/wallet/{id}:
+    delete:
+      tags: [auth]
+      summary: Unlink a wallet (refuses when it is the last login method)
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Unlinked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /auth/accounts:
     get:
       tags: [auth]
@@ -3851,6 +4033,15 @@ components:
             message: "XP intake is disabled"
 
   schemas:
+    LinkedWallet:
+      type: object
+      description: One external wallet linked as a login credential (not the identity's own smart account).
+      properties:
+        id: {type: string, format: uuid}
+        namespace: {type: string, enum: [solana, evm]}
+        address: {type: string, description: Normalized — EVM lowercase, Solana base58 verbatim}
+        linkedAt: {type: string, format: date-time}
+        lastLoginAt: {type: string, format: date-time, nullable: true}
     FiatPaymentQuoteInput:
       type: object
       required: [amountIdr]

@@ -134,7 +134,8 @@ model Device {
   pid        String
   identity   Identity  @relation(fields: [pid], references: [pid], onDelete: Cascade)
   userAgent  String?
-  // How this session family authenticated ("google" | "email" | "passkey"). Null on
+  // How this session family authenticated ("google" | "email" | "passkey" |
+  // "wallet"). Null on
   // pre-existing rows, treated as "google" (shorter cap). Preserved across
   // refresh rotations, which keep the same device.
   authMethod String?
@@ -183,6 +184,31 @@ model CredentialChallenge {
 
   @@index([pid])
   @@map("credential_challenges")
+}
+
+// Short-lived, single-use proof-of-ownership challenge for an EXTERNAL wallet
+// (Phantom/Solana, MetaMask/EVM). The message is built server-side and stored
+// verbatim; the client signs exactly those bytes and the server verifies the
+// signature against `address` for `namespace`. Consumed atomically on verify,
+// so a replay of the same signature can never mint a second result.
+// Deliberately separate from CredentialChallenge (WebAuthn ceremony state) and
+// from ChainAccount (the identity's own on-chain smart account — an external
+// wallet is a login credential, never the authority of that account).
+model WalletAuthChallenge {
+  id         String    @id @default(uuid())
+  namespace  String // "solana" | "evm"
+  reference  String // chain reference: "mainnet-beta" | "1"
+  address    String // normalized: EVM lowercase, Solana base58 verbatim (case-sensitive)
+  action     String // "login" | "link"
+  pid        String? // link target — the authenticated session's pid
+  origin     String? // requesting first-party/dapp origin, when the browser sent one
+  message    String // exact UTF-8 text the wallet must sign
+  expiresAt  DateTime  @db.Timestamptz(3)
+  consumedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @db.Timestamptz(3) @default(now())
+
+  @@index([expiresAt])
+  @@map("wallet_auth_challenges")
 }
 
 // One row per chain account of the identity's single personal wallet.
