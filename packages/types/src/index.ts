@@ -5,3 +5,4 @@ export * from "./wallet.js";
 export * from "./auth.js";
 export * from "./permissions.js";
 export * from "./api.js";
+export * from "./usage.js";

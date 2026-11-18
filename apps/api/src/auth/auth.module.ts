@@ -4,6 +4,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { CredentialModule } from "../credentials/credential.module";
 import { SecurityModule } from "../security/security-event.module";
+import { UsageModule } from "../usage/usage.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { ClaimService } from "./claim.service";
@@ -24,6 +25,7 @@ import { WalletAuthService } from "./wallet/wallet-auth.service";
     JwtModule.register({}),
     CredentialModule,
     SecurityModule,
+    UsageModule,
   ],
   controllers: [AuthController, PidAppsController, WalletAuthController],
   providers: [

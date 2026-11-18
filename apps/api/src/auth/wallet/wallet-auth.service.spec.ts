@@ -3,6 +3,8 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { SecurityEventService } from "../../security/security-event.service";
 import { ClaimService } from "../claim.service";
+import { SsoService } from "../sso.service";
+import { UsageService } from "../../usage/usage.service";
 import { WalletAuthService } from "./wallet-auth.service";
 import { verifyWalletSignature } from "./wallet-signature";
 
@@ -48,12 +50,22 @@ function setup() {
   };
   const security = { log: jest.fn(async () => undefined) };
   const claim = { mintCredential: jest.fn(async () => "ct_1") };
+  const sso = {
+    resolveReturnTo: jest.fn(async (returnTo?: string, clientId?: string) =>
+      returnTo ? { redirectTo: returnTo, clientId: clientId ?? "pidapp_x", isVerified: true } : null,
+    ),
+    requireVerifiedForAutoIssue: jest.fn(),
+    issue: jest.fn(async () => "code_1"),
+  };
+  const usage = { recordWalletLogin: jest.fn(async () => undefined) };
   const service = new WalletAuthService(
     prisma as unknown as PrismaService,
     security as unknown as SecurityEventService,
     claim as unknown as ClaimService,
+    sso as unknown as SsoService,
+    usage as unknown as UsageService,
   );
-  return { prisma, security, claim, service };
+  return { prisma, security, claim, sso, usage, service };
 }
 
 beforeEach(() => verifyMock.mockReset());
@@ -78,6 +90,17 @@ describe("challenge", () => {
     expect(prisma.walletAuthChallenge.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: "login", address: "SoLanaAddress" }) }),
     );
+  });
+
+  it("refuses an unallowlisted returnTo", async () => {
+    const { sso, service } = setup();
+    sso.resolveReturnTo.mockResolvedValue(null as never);
+    await expect(
+      service.challenge(
+        { namespace: "solana", reference: "mainnet-beta", address: "SoLanaAddress", returnTo: "https://evil.example" },
+        {},
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it("refuses a link challenge without a session", async () => {
@@ -116,11 +139,11 @@ describe("verifyLogin", () => {
     const { claim, service } = setup();
     verifyMock.mockResolvedValue(true);
     await expect(service.verifyLogin("ch-1", "sig")).resolves.toEqual({ kind: "claim", ticketId: "ct_1" });
-    expect(claim.mintCredential).toHaveBeenCalledWith({
-      provider: "solana",
-      providerUserId: "SoLanaAddress",
-      email: null,
-    });
+    expect(claim.mintCredential).toHaveBeenCalledWith(
+      { provider: "solana", providerUserId: "SoLanaAddress", email: null },
+      undefined,
+      undefined,
+    );
   });
 
   it("returns the owning pid for a known address and rejects a suspended identity", async () => {
@@ -131,7 +154,11 @@ describe("verifyLogin", () => {
       pid: "ifal@pid",
       identity: { status: "active" },
     } as any);
-    await expect(service.verifyLogin("ch-1", "sig")).resolves.toEqual({ kind: "session", pid: "ifal@pid" });
+    await expect(service.verifyLogin("ch-1", "sig")).resolves.toEqual({
+      kind: "session",
+      pid: "ifal@pid",
+      pidCode: undefined,
+    });
 
     prisma.identityCredential.findUnique.mockResolvedValue({
       id: "cred-1",
@@ -145,6 +172,52 @@ describe("verifyLogin", () => {
     const { prisma, service } = setup();
     prisma.walletAuthChallenge.findUnique.mockResolvedValue(challengeRow({ action: "link", pid: "ifal@pid" }) as any);
     await expect(service.verifyLogin("ch-1", "sig")).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+it("meters only app-bound logins (no clientId, no usage event)", async () => {
+  const { prisma, usage, service } = setup();
+  verifyMock.mockResolvedValue(true);
+  prisma.identityCredential.findUnique.mockResolvedValue({
+    id: "cred-1",
+    pid: "ifal@pid",
+    identity: { status: "active" },
+  } as any);
+  await service.verifyLogin("ch-1", "sig");
+  expect(usage.recordWalletLogin).not.toHaveBeenCalled();
+
+  const bound = setup();  verifyMock.mockResolvedValue(true);
+  bound.prisma.walletAuthChallenge.findUnique.mockResolvedValue(
+    challengeRow({ redirectTo: "https://app.example", clientId: "pidapp_x" }) as any,
+  );
+  bound.prisma.identityCredential.findUnique.mockResolvedValue({
+    id: "cred-1",
+    pid: "ifal@pid",
+    identity: { status: "active" },
+  } as any);
+  await bound.service.verifyLogin("ch-1", "sig");
+  expect(bound.usage.recordWalletLogin).toHaveBeenCalledWith("pidapp_x", "ifal@pid");
+});
+
+it("mints the SSO code for the app bound at challenge time", async () => {
+  const { prisma, sso, service } = setup();
+  verifyMock.mockResolvedValue(true);
+  prisma.walletAuthChallenge.findUnique.mockResolvedValue(
+    challengeRow({ redirectTo: "https://app.example", clientId: "pidapp_x", codeChallenge: "c".repeat(43) }) as any,
+  );
+  prisma.identityCredential.findUnique.mockResolvedValue({
+    id: "cred-1",
+    pid: "ifal@pid",
+    identity: { status: "active" },
+  } as any);
+  await expect(service.verifyLogin("ch-1", "sig")).resolves.toEqual({
+    kind: "session",
+    pid: "ifal@pid",
+    pidCode: "code_1",
+  });
+  expect(sso.issue).toHaveBeenCalledWith("ifal@pid", "https://app.example", {
+    clientId: "pidapp_x",
+    codeChallenge: "c".repeat(43),
   });
 });
 

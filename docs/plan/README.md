@@ -38,21 +38,21 @@ It does not claim that planned capabilities are available in the current SDK.
 |---|---|---|
 | Universal PID | Identity primary key and provider credential uniqueness | External wallet proof and linking lifecycle |
 | Web2 login | Google OAuth, email OTP, passkey, sessions and SSO | Document free-MAU policy; protect it when metering is added |
-| External login | No verified external-wallet login flow | Challenge/verify, connectors, claim/link/unlink, session auth method |
-| Fiat | PID-scoped internal ledger and app payment API | Eligibility and authorization for the new auth method |
-| Embed | iframe with hosted login/approval popup | Modal, external signer integration and session handoff |
-| App usage | App registry and SSO app context | Durable usage events, monthly dedupe, reporting and allowance |
-| Provider replacement | Backend injection token and a concrete checkout adapter | Provider-neutral interface, notification normalization and adapter contract tests |
+| External login | Challenge/verify, Phantom + MetaMask connectors, claim/link/unlink, session `authMethod: wallet` | Provider authentication may still need its own browser interaction |
+| Fiat | PID-scoped internal ledger, provider-neutral checkout adapter with per-intent routing, documented eligibility | Paid overage pricing only |
+| Embed | iframe with hosted popup (unchanged) + `PeridotLoginModal` with Phantom/MetaMask signers, claim and link modes | — |
+| App usage | `usage_events` + `usage_monthly` projection, UTC month dedupe, owner report, configurable allowance, dashboard card | Qualifying activity and rates need sign-off before billing |
+| Provider replacement | `CheckoutAdapter` interface in `packages/payments`, DOKU behind it, persisted intent routing, contract tests | Add the next adapter when a second provider is chosen |
 
 ## Execution order
 
 | Stage | Plan | Status |
 |---|---|---|
 | 1 | [Align product documentation and copy](01-product-documentation.md) | Prepared locally, not deployed |
-| 2 | [External wallet authentication and linking](02-external-wallet-auth.md) | Not implemented |
-| 3 | [Fiat access and replaceable payment backend](03-fiat-and-payment-backend.md) | Not implemented |
-| 4 | [Embedded modal and SDK](04-embedded-login-sdk.md) | Not implemented |
-| 5 | [Web3 usage reporting and free allowance](05-web3-mau.md) | Not implemented |
+| 2 | [External wallet authentication and linking](02-external-wallet-auth.md) | Implemented (API, SDK, OpenAPI) |
+| 3 | [Fiat access and replaceable payment backend](03-fiat-and-payment-backend.md) | Implemented (adapter + routing, reporting-neutral) |
+| 4 | [Embedded modal and SDK](04-embedded-login-sdk.md) | Implemented (modal + wallet connectors) |
+| 5 | [Web3 usage reporting and free allowance](05-web3-mau.md) | Implemented as reporting only; pricing inputs open |
 
 Complete and verify each stage before proceeding to its dependent stage. Each
 plan owns its task checklist, acceptance criteria and rollout notes. These files

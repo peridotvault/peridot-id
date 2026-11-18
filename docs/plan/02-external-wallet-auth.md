@@ -1,6 +1,6 @@
 # Stage 2: External wallet authentication and linking
 
-Status: **Not implemented**.
+Status: **Implemented**.
 Dependency: Stage 1; see [plan index](README.md).
 
 ## Scope and requirements
@@ -23,13 +23,13 @@ Dependency: Stage 1; see [plan index](README.md).
 `apps/api/prisma`, `packages/types`, and `packages/sdk-js/src/auth-client.ts`.
 
 ## Work items
-- [ ] Define chain-aware credential identity and normalization (never lowercase Solana addresses).
-- [ ] Add additive challenge storage, expiry, atomic consumption and uniqueness constraints.
-- [ ] Implement server challenge/verify and authenticated link/unlink endpoints.
-- [ ] Integrate PID claim, session rotation, auth method persistence and audit events.
-- [ ] Add SDK types and methods; update canonical OpenAPI from implemented routes.
-- [ ] Verify valid signatures, invalid/replayed signatures, concurrent requests and linking conflicts.
-- [ ] Verify existing Google, email and passkey flows still work.
+- [x] Define chain-aware credential identity and normalization (never lowercase Solana addresses).
+- [x] Add additive challenge storage, expiry, atomic consumption and uniqueness constraints.
+- [x] Implement server challenge/verify and authenticated link/unlink endpoints.
+- [x] Integrate PID claim, session rotation, auth method persistence and audit events.
+- [x] Add SDK types and methods; update canonical OpenAPI from implemented routes.
+- [x] Verify valid signatures, invalid/replayed signatures, concurrent requests and linking conflicts.
+- [x] Verify existing Google, email and passkey flows still work.
 
 ## Decisions before implementation
 Specify message formats and supported chain/account types, including whether EVM

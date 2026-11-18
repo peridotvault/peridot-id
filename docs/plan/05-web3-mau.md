@@ -1,6 +1,6 @@
 # Stage 5: Web3 usage reporting and free allowance
 
-Status: **Not implemented**.
+Status: **Reporting implemented; pricing decisions open**.
 Dependency: Stage 4; see [plan index](README.md).
 
 ## Scope and requirements
@@ -27,13 +27,13 @@ cutoff from this plan.
 
 ## Work items
 - [ ] Finalize qualifying activity and calendar boundary before billing activation.
-- [ ] Add durable, idempotent server-authored usage events with app/PID attribution.
-- [ ] Add a unique app/PID/month projection and configurable free allowance (suggested 500).
-- [ ] Classify first-party apps on the server and exclude their login activity from billing.
-- [ ] Expose owner-scoped monthly usage and allowance reports in the dashboard.
-- [ ] Test retries, concurrent events, multiple wallets, mixed login methods and month boundaries.
-- [ ] Test that Web2-only, fiat-only and first-party login remain unbilled.
-- [ ] Keep paid billing disabled until rates and overage behavior are explicitly defined.
+- [x] Add durable, idempotent server-authored usage events with app/PID attribution.
+- [x] Add a unique app/PID/month projection and configurable free allowance (suggested 500).
+- [x] Classify first-party apps on the server and exclude their login activity from billing.
+- [x] Expose owner-scoped monthly usage and allowance reports in the dashboard.
+- [x] Test retries, concurrent events, multiple wallets, mixed login methods and month boundaries.
+- [x] Test that Web2-only, fiat-only and first-party login remain unbilled.
+- [x] Keep paid billing disabled until rates and overage behavior are explicitly defined.
 
 ## Acceptance
 One PID is counted at most once per app/month. The same PID may count separately

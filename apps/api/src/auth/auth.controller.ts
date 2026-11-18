@@ -16,6 +16,7 @@ import { isPidHandle, normalizePidHandle } from "../common/pid";
 import { ClaimService, isUnverifiedEmailError } from "./claim.service";
 import { EmailStartDto, EmailVerifyDto } from "./email/dto/email.dto";
 import { EmailOtpService } from "./email/email-otp.service";
+import { UsageService } from "../usage/usage.service";
 import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { isPendingGoogleClaim } from "./google.strategy";
 import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto, GrantScopeDto } from "./dto/auth.dto";
@@ -72,6 +73,7 @@ export class AuthController {
     private readonly claimService: ClaimService,
     private readonly emailOtp: EmailOtpService,
     private readonly apps: PidAppsService,
+    private readonly usage: UsageService,
     private readonly config: ConfigService,
   ) {}
 
@@ -502,9 +504,11 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
     @Body() dto: ClaimDto,
   ): Promise<{ ok: true; pid: string; pidCode?: string; redirectTo?: string }> {
-    const ticketId = (req as Request & { cookies?: Record<string, string> }).cookies?.[CLAIM_COOKIE];
+    const ticketId = dto.ticket ?? (req as Request & { cookies?: Record<string, string> }).cookies?.[CLAIM_COOKIE];
     if (!ticketId) throw new BadRequestException("No pending claim — sign in again to get a fresh one.");
     const { pid, redirectTo, clientId, provider } = await this.claimService.claim(ticketId, dto.handle);
+    // A wallet that just claimed a PID inside an app is one metered login.
+    if (clientId && authMethodFor(provider) === "wallet") await this.usage.recordWalletLogin(clientId, pid);
     await this.authService.issueSession(res, pid, req.headers["user-agent"], undefined, authMethodFor(provider));
     clearClaimCookie(res, this.config);
     if (redirectTo) {

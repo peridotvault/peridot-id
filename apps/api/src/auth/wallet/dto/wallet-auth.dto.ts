@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, IsUUID, Length } from "class-validator";
+import { IsIn, IsOptional, IsString, IsUUID, Length, Matches } from "class-validator";
 import type { WalletNamespace } from "../wallet-signature";
 
 /**
@@ -21,6 +21,21 @@ export class WalletChallengeDto {
   @IsOptional()
   @IsIn(["login", "link"])
   action?: "login" | "link";
+
+  /** Cross-origin success origin (allowlisted / registered to `clientId`). */
+  @IsOptional()
+  @IsString()
+  returnTo?: string;
+
+  /** Registered third-party app this login is for (binds the pid_code to it). */
+  @IsOptional()
+  @IsString()
+  clientId?: string;
+
+  /** PKCE S256 challenge — required for public clients (same rule as Google/passkey). */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9_-]{43,128}$/, { message: "Invalid code_challenge" })
+  codeChallenge?: string;
 }
 
 /**

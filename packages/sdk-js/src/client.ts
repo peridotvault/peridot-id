@@ -10,6 +10,7 @@ import { PeridotIdentity } from "./identity-client.js";
 import { PeridotProfile } from "./profile-client.js";
 import { PeridotPasskey } from "./passkey-client.js";
 import { PeridotAdmin } from "./admin-client.js";
+import { PeridotUsage } from "./usage-client.js";
 import { clearCache, configureCache, invalidateCache, type CacheConfig } from "./internal/cache.js";
 
 export interface PeridotOptions {
@@ -64,6 +65,7 @@ export class PeridotClient {
   readonly fiat: PeridotFiat;
   readonly admin: PeridotAdmin;
   readonly level: PeridotLevel;
+  readonly usage: PeridotUsage;
 
   private readonly appOptions: { clientId?: string; clientSecret?: string };
 
@@ -86,6 +88,7 @@ export class PeridotClient {
     this.fiat = new PeridotFiat(this, appOptions.clientId);
     this.admin = new PeridotAdmin(this);
     this.level = new PeridotLevel(this);
+    this.usage = new PeridotUsage(this);
   }
 
   /** Registered app id applied by default (login/exchange/fiat). */

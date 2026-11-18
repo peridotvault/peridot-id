@@ -32,7 +32,15 @@ export class WalletAuthController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   challenge(@Req() req: Request, @Body() dto: WalletChallengeDto): Promise<WalletChallengeView> {
     return this.wallet.challenge(
-      { namespace: dto.namespace, reference: dto.reference, address: dto.address, action: "login" },
+      {
+        namespace: dto.namespace,
+        reference: dto.reference,
+        address: dto.address,
+        action: "login",
+        returnTo: dto.returnTo,
+        clientId: dto.clientId,
+        codeChallenge: dto.codeChallenge,
+      },
       { origin: extractRequestOrigin(req) },
     );
   }
@@ -48,14 +56,16 @@ export class WalletAuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
     @Body() dto: WalletVerifyDto,
-  ): Promise<{ ok: true; pid?: string; pendingClaim?: boolean }> {
+  ): Promise<{ ok: true; pid?: string; pidCode?: string; pendingClaim?: boolean; claimTicket?: string }> {
     const result = await this.wallet.verifyLogin(dto.challengeId, dto.signature);
     if (result.kind === "claim") {
       setClaimCookie(res, this.config, result.ticketId);
-      return { ok: true, pendingClaim: true };
+      // The ticket also travels in the body: a cross-origin dapp has no
+      // first-party cookie to carry it to the claim step.
+      return { ok: true, pendingClaim: true, claimTicket: result.ticketId };
     }
     await this.authService.issueSession(res, result.pid, req.headers["user-agent"], undefined, "wallet");
-    return { ok: true, pid: result.pid };
+    return { ok: true, pid: result.pid, ...(result.pidCode ? { pidCode: result.pidCode } : {}) };
   }
 
   /** Issue a challenge bound to the caller's pid for linking an address. */

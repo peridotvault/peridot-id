@@ -542,6 +542,9 @@ paths:
                 codeChallenge:
                   type: string
                   description: PKCE S256 challenge (43-128 base64url chars). REQUIRED when the ticket's clientId names a public client; the wallet resends the challenge generated at login start.
+                ticket:
+                  type: string
+                  description: Claim ticket from a cross-origin wallet login (`claimTicket`). Cookie-authenticated callers omit it.
             example:
               handle: "ifal"
       responses:
@@ -966,6 +969,45 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /apps/{id}/usage:
+    get:
+      tags: [apps]
+      summary: Monthly Web3 usage for one of my apps
+      description: |
+        Distinct PIDs counted once per UTC month for app-bound external-wallet
+        logins. Web2 logins, cancelled signatures, reads, fiat-only activity and
+        first-party apps are excluded. Reporting only: the free allowance is
+        shown, nothing is charged and nothing is blocked at the limit.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: month
+          in: query
+          required: false
+          description: "`YYYY-MM` (UTC). Default: the current month."
+          schema:
+            type: string
+            pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+      responses:
+        "200":
+          description: Usage report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /apps/{id}:
     patch:
@@ -3105,6 +3147,9 @@ paths:
                 namespace: { type: string, enum: [solana, evm] }
                 reference: { type: string, description: "Chain reference, e.g. mainnet-beta or 1" }
                 address: { type: string }
+                returnTo: { type: string, description: Cross-origin success origin, bound at challenge time }
+                clientId: { type: string, description: Registered app id — binds the issued pid_code to it }
+                codeChallenge: { type: string, description: PKCE S256 challenge; required by public clients }
       responses:
         "200":
           description: Challenge to sign
@@ -3152,7 +3197,9 @@ paths:
                 properties:
                   ok: { type: boolean }
                   pid: { type: string, description: Present for a returning wallet }
+                  pidCode: { type: string, description: One-time SSO code when the challenge was app-bound and the app is verified }
                   pendingClaim: { type: boolean, description: Present for an unknown wallet }
+                  claimTicket: { type: string, description: Ticket for POST /auth/claim when the caller has no first-party cookie }
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -4033,6 +4080,18 @@ components:
             message: "XP intake is disabled"
 
   schemas:
+    UsageReport:
+      type: object
+      description: Web3 usage for one app in one UTC month. Reporting-only — no charges, no cutoff.
+      properties:
+        appClientId: {type: string}
+        month: {type: string, example: '2026-11'}
+        activePids: {type: integer, description: Distinct PIDs counted this month}
+        firstPartyPids: {type: integer, description: First-party logins — never billable}
+        billablePids: {type: integer, description: PIDs that would count against the allowance}
+        freeAllowance: {type: integer, description: Configurable free allowance per app per month}
+        overagePids: {type: integer, description: Reported only — never charged or blocked}
+        billing: {type: string, enum: [reporting-only]}
     LinkedWallet:
       type: object
       description: One external wallet linked as a login credential (not the identity's own smart account).

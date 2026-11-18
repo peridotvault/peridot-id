@@ -65,6 +65,7 @@ export * from "./identity-client.js";
 export * from "./profile-client.js";
 export * from "./passkey-client.js";
 export * from "./admin-client.js";
+export * from "./usage-client.js";
 export { Peridot, PeridotClient, type PeridotOptions } from "./client.js";
 export { Peridot as default } from "./client.js";
 export type {
@@ -79,6 +80,7 @@ export type {
   Identity,
   IdentityCredential,
   LevelSummary,
+  LinkedWallet,
   LoginResponse,
   Profile,
   ProfileUpdate,
@@ -94,4 +96,7 @@ export type {
   UpdateTokenDeploymentInput,
   UpdateTokenInput,
   UpsertContractInput,
+  UsageReport,
+  WalletChallenge,
+  WalletNamespace,
 } from "@peridotvault/pid-types";

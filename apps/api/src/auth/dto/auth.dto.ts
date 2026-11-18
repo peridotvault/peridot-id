@@ -66,6 +66,15 @@ export class ClaimDto {
   handle!: string;
 
   /**
+   * The claim ticket returned by a cross-origin login (external-wallet verify).
+   * Cookie-authenticated callers omit it; a bearer client has no cookie to
+   * carry the ticket, so it presents the ticket it already holds.
+   */
+  @IsOptional()
+  @Matches(/^ct_[A-Za-z0-9_-]{20,}$/, { message: "Invalid claim ticket" })
+  ticket?: string;
+
+  /**
    * PKCE S256 challenge (H4/ANT-799): the claim UI re-supplies the challenge
    * the login started with, so the minted pid_code binds to the public
    * client's verifier. Required when the ticket's app is a public client.

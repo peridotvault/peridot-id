@@ -7,6 +7,7 @@ import { WebhookDeliveries } from "./webhook-deliveries";
 import { unwrap } from "./api";
 import { normalizeOriginInput } from "./origins";
 import type { AppFee, PidApp } from "./app-types";
+import type { UsageReport } from "@peridotvault/pid-sdk-js";
 import { Card, DIVIDER, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "./ui";
 
 /** Sandbox MVP faucet (FR-3): visibility driven ONLY by GET /v1/env
@@ -84,6 +85,7 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
   const [app, setApp] = useState<PidApp | null>(null);
   const [fees, setFees] = useState<Record<string, AppFee>>({});
   const [balance, setBalance] = useState<string | null>(null);
+  const [usage, setUsage] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -146,6 +148,13 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         setEnvInfo(env);
       } catch {
         setEnvInfo(null);
+      }
+      // Web3 usage is reported, never charged — a failure must not hide the app.
+      try {
+        const u = await client.usage.monthly(appId);
+        setUsage("month" in u ? u : null);
+      } catch {
+        setUsage(null);
       }
     } catch (e) {
       const m = e instanceof Error ? e.message : "Failed to load app";
@@ -576,6 +585,34 @@ export function AppDetail({ client, appId }: { client: PeridotClient; appId: str
         </Card>
 
         <WebhookDeliveries key={appId} client={client} appId={appId} />
+        {usage && (
+          <Card className="border-t-0">
+            <p className={SECTION_LABEL}>Web3 usage — {usage.month}</p>
+            <p className={`mt-1 text-xs ${MUTED}`}>
+              Distinct PIDs that signed in with an external wallet this month, counted once per PID.
+              Web2 logins, cancelled signatures and first-party use are excluded. Reporting only —
+              nothing is charged and nothing is blocked.
+            </p>
+            <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+              <div>
+                <dt className={`text-xs ${MUTED}`}>Counted PIDs</dt>
+                <dd className="font-mono tabular-nums">{usage.activePids.toLocaleString("en-US")}</dd>
+              </div>
+              <div>
+                <dt className={`text-xs ${MUTED}`}>Billable</dt>
+                <dd className="font-mono tabular-nums">{usage.billablePids.toLocaleString("en-US")}</dd>
+              </div>
+              <div>
+                <dt className={`text-xs ${MUTED}`}>Free allowance</dt>
+                <dd className="font-mono tabular-nums">{usage.freeAllowance.toLocaleString("en-US")}</dd>
+              </div>
+              <div>
+                <dt className={`text-xs ${MUTED}`}>Over allowance</dt>
+                <dd className="font-mono tabular-nums">{usage.overagePids.toLocaleString("en-US")}</dd>
+              </div>
+            </dl>
+          </Card>
+        )}
         <Card className="border-t-0">
           <p className={SECTION_LABEL}>App fees</p>
           <p className={`mt-1 text-xs ${MUTED}`}>

@@ -16,6 +16,8 @@ import { randomBytes } from "node:crypto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { SecurityEventService } from "../../security/security-event.service";
 import { ClaimService } from "../claim.service";
+import { SsoService } from "../sso.service";
+import { UsageService } from "../../usage/usage.service";
 import { normalizeWalletAddress, verifyWalletSignature, type WalletNamespace } from "./wallet-signature";
 import { isP2002 } from "../../prisma/prisma-error";
 
@@ -40,7 +42,7 @@ export interface LinkedWalletView {
 
 /** What a verified signature resolves to, before the controller picks a response. */
 export type WalletVerifyResult =
-  | { kind: "session"; pid: string }
+  | { kind: "session"; pid: string; pidCode?: string }
   | { kind: "claim"; ticketId: string };
 
 @Injectable()
@@ -49,6 +51,8 @@ export class WalletAuthService {
     private readonly prisma: PrismaService,
     private readonly security: SecurityEventService,
     private readonly claim: ClaimService,
+    private readonly sso: SsoService,
+    private readonly usage: UsageService,
   ) {}
 
   /**
@@ -57,11 +61,28 @@ export class WalletAuthService {
    * exactly these bytes, so the server never re-derives what was signed.
    */
   async challenge(
-    input: { namespace: WalletNamespace; reference: string; address: string; action?: "login" | "link" },
+    input: {
+      namespace: WalletNamespace;
+      reference: string;
+      address: string;
+      action?: "login" | "link";
+      returnTo?: string;
+      clientId?: string;
+      codeChallenge?: string;
+    },
     ctx: { pid?: string; origin?: string },
   ): Promise<WalletChallengeView> {
     const action = input.action ?? "login";
     if (action === "link" && !ctx.pid) throw new UnauthorizedException("Sign in before linking a wallet");
+    // Bind the cross-origin target now: a third-party app gets its pid_code
+    // from `verify`, with no PeridotID-hosted window in between.
+    const target =
+      action === "login" && (input.returnTo || input.clientId)
+        ? await this.sso.resolveReturnTo(input.returnTo, input.clientId)
+        : null;
+    if (action === "login" && (input.returnTo || input.clientId) && !target) {
+      throw new BadRequestException("returnTo is not an allowed origin");
+    }
 
     const address = normalizeWalletAddress(input.namespace, input.address);
     if (!address) {
@@ -92,6 +113,9 @@ export class WalletAuthService {
         action,
         pid: ctx.pid ?? null,
         origin: ctx.origin ?? null,
+        redirectTo: target?.redirectTo ?? null,
+        clientId: target?.clientId ?? null,
+        codeChallenge: input.codeChallenge ?? null,
         message,
         expiresAt,
       },
@@ -123,18 +147,23 @@ export class WalletAuthService {
     });
 
     if (!existing) {
-      const ticketId = await this.claim.mintCredential({
-        provider: challenge.namespace,
-        providerUserId: challenge.address,
-        email: null,
-      });
+      const ticketId = await this.claim.mintCredential(
+        { provider: challenge.namespace, providerUserId: challenge.address, email: null },
+        undefined,
+        challenge.redirectTo
+          ? { redirectTo: challenge.redirectTo, clientId: challenge.clientId ?? undefined }
+          : undefined,
+      );
       return { kind: "claim", ticketId };
     }
     if (existing.identity.status !== "active") {
       throw new UnauthorizedException("This identity is not active");
     }
     await this.prisma.identityCredential.update({ where: { id: existing.id }, data: { lastLoginAt: new Date() } });
-    return { kind: "session", pid: existing.pid };
+    // App-bound logins are the one metered event (stage 5). First-party logins
+    // carry no clientId, so they never reach here.
+    if (challenge.clientId) await this.usage.recordWalletLogin(challenge.clientId, existing.pid);
+    return { kind: "session", pid: existing.pid, pidCode: await this.pidCodeFor(challenge, existing.pid) };
   }
 
   /**
@@ -167,6 +196,30 @@ export class WalletAuthService {
       // owning identity instead.
       if (isP2002(err)) throw new ConflictException("This wallet is already linked to a PeridotID");
       throw err;
+    }
+  }
+
+  /**
+   * One-time SSO code for the app bound at challenge time. Verified apps only —
+   * same rule as the Google/passkey paths (an unverified app needs explicit
+   * consent, and a wallet challenge is never a consent screen). Undefined means
+   * "signed in, no code"; it never fails the login itself.
+   */
+  private async pidCodeFor(
+    challenge: { redirectTo: string | null; clientId: string | null; codeChallenge: string | null },
+    pid: string,
+  ): Promise<string | undefined> {
+    if (!challenge.redirectTo) return undefined;
+    const resolved = await this.sso.resolveReturnTo(challenge.redirectTo, challenge.clientId ?? undefined);
+    if (!resolved) return undefined;
+    try {
+      this.sso.requireVerifiedForAutoIssue(resolved);
+      return await this.sso.issue(pid, resolved.redirectTo, {
+        clientId: resolved.clientId,
+        ...(challenge.codeChallenge ? { codeChallenge: challenge.codeChallenge } : {}),
+      });
+    } catch {
+      return undefined;
     }
   }
 

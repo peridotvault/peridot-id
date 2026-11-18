@@ -54,6 +54,40 @@ The component owns the whole ceremony:
    **approval popup** on the PeridotID origin; the result flows back into the
    embedded UI.
 
+## Wallet login modal (no PeridotID window)
+
+`PeridotLoginModal` signs users in with an external wallet (Phantom, MetaMask)
+from your own page. The approval appears in the **wallet extension**, so this
+path opens no PeridotID window at all; the iframe embed above keeps its hosted
+popup for existing consumers.
+
+```tsx
+"use client";
+
+import { PeridotLoginModal } from "@peridotvault/pid-react-embed";
+
+export function Login({ open, onClose, onDone }) {
+  return (
+    <PeridotLoginModal
+      open={open}
+      clientId="pidapp_…"                     // binds the pid_code to your app
+      returnTo="https://mygame.dev/auth/cb"   // where the pid_code is exchanged
+      codeChallenge={codeChallenge}           // public clients: PKCE S256
+      onSuccess={({ pid, pidCode }) => onDone(pid, pidCode)}
+      onClose={onClose}
+    />
+  );
+}
+```
+
+- `mode="link"` attaches the wallet to the **current** session's PID instead of
+  signing in; the result arrives via `onLinked(wallet)`.
+- An unknown address continues into the ordinary PID claim step, inside the same
+  modal — no hosted window and no implicit account merge.
+- States covered: loading, cancellation (retry stays available), unavailable
+  wallet (install hint), and errors announced through `role="alert"`. Escape and
+  the overlay close it; focus moves in on open and returns on close.
+
 ## Register your app first
 
 Create the app with `POST /v1/apps` and add the **exact origin** of the page

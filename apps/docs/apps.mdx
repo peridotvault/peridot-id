@@ -115,6 +115,26 @@ curl -X PUT https://api.peridot.id/v1/apps/<id>/fees/topup \
 Read the whole schedule with `GET /v1/apps/:id/fees`. When `enabled` is `false`
 the operation charges nothing.
 
+## Web3 usage (reporting only)
+
+External-wallet logins are metered per app. One PID counts **once per UTC
+calendar month** after a successful app-bound wallet login — a second wallet
+address, a retry, or a refresh does not count again. Web2 logins, cancelled
+signatures, reads, fiat-only activity and first-party apps are excluded; the
+classification is made on the server from the app's registered origins, never
+from a client flag.
+
+```ts
+const report = await peridot.usage.monthly(appId);        // current UTC month
+const november = await peridot.usage.monthly(appId, "2026-11");
+// { activePids, billablePids, firstPartyPids, freeAllowance, overagePids, billing: "reporting-only" }
+```
+
+The same numbers are shown on the app's dashboard page. The free allowance
+(suggested 500, configurable on the server) is **reporting only**: exceeding it
+never creates a charge and never blocks a login. Paid overage rates and
+enforcement behavior are not defined yet.
+
 ## Escrow
 
 An app owner identity (e.g. `live2dev@pid`) is a normal participant. Users send

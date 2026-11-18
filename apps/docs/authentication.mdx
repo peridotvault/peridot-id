@@ -98,6 +98,50 @@ if (res.pendingClaim) {
 }
 ```
 
+## External wallet login
+
+Phantom (Solana) and MetaMask (EVM) can prove ownership of an address and sign in.
+The server issues a short-lived (5 min) single-use challenge and stores the exact
+message; the wallet signs it verbatim and the server verifies the signature
+(Ed25519 for Solana, EIP-191 for EVM). A signature is **proof of control only** —
+it never moves funds, approves spending, or makes the external wallet the
+authority of a PID's passkey smart account.
+
+```ts
+const challenge = await peridot.auth.walletChallenge({
+  namespace: "solana",          // or "evm"
+  reference: "mainnet-beta",    // "1" for Ethereum mainnet
+  address,                      // from the wallet
+  returnTo: "https://mygame.dev/auth/callback", // optional: app-bound login
+  clientId: "pidapp_…",         // optional: binds the issued pid_code to your app
+  codeChallenge,                // required for public clients
+});
+const signature = await signWithWallet(challenge.message); // base64 (Solana) / hex (EVM)
+const res = await peridot.auth.walletVerify(challenge.challengeId, signature);
+if (res.pendingClaim) {
+  await peridot.auth.claim("ifal", res.claimTicket); // new address → pick a handle
+}
+// returning wallet: res.pid, plus res.pidCode when the challenge was app-bound
+```
+
+Addresses are normalized per chain (EVM lowercase, Solana base58 verbatim) and
+stored as ordinary credentials, so a wallet is never the same account as another
+PID by accident. An address already linked to a PID is rejected with `409` — it is
+never reassigned or merged.
+
+Signed-in users link and unlink from the same endpoints:
+
+```ts
+const linkChallenge = await peridot.auth.walletLinkChallenge({ namespace: "evm", reference: "1", address });
+await peridot.auth.walletLink(linkChallenge.challengeId, await signWithWallet(linkChallenge.message));
+
+const wallets = await peridot.auth.wallets();      // [{ id, namespace, address, linkedAt, lastLoginAt }]
+await peridot.auth.unlinkWallet(wallets[0].id);    // last login method → 409
+```
+
+The session issued by a wallet login is a normal PeridotID session: the same PID,
+the same fiat balance, and the same authorization rules as any other login method.
+
 ## Refreshing tokens
 
 The access token expires after 15 minutes. Instead of asking the user to log in again,

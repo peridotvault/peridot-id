@@ -202,6 +202,11 @@ model WalletAuthChallenge {
   action     String // "login" | "link"
   pid        String? // link target — the authenticated session's pid
   origin     String? // requesting first-party/dapp origin, when the browser sent one
+  // SSO target bound at challenge time: a third-party app completing wallet
+  // login gets a one-time pid_code without any PeridotID-hosted window.
+  redirectTo String?
+  clientId   String?
+  codeChallenge String? // PKCE S256 challenge for a public client
   message    String // exact UTF-8 text the wallet must sign
   expiresAt  DateTime  @db.Timestamptz(3)
   consumedAt DateTime? @db.Timestamptz(3)
@@ -1365,6 +1370,43 @@ model BackfillRun {
 
   @@index([startedAt])
   @@map("xp_backfill_runs")
+}
+
+// Web3 usage metering (stage 5 of docs/plan/05). Only server-authored rows:
+// a successful app-bound external-wallet login. Web2 login, failed signatures,
+// reads, fiat and first-party logins never write here. Dedupe is the key itself,
+// so retries and a second wallet address for the same PID collapse.
+model UsageEvent {
+  id          String   @id @default(uuid())
+  appClientId String
+  pid         String
+  // Qualifying reason; today only "wallet_login".
+  reason      String
+  // UTC calendar month, `YYYY-MM`.
+  month       String
+  // Server classification of the app, decided when the event is written.
+  firstParty  Boolean  @default(false)
+  createdAt   DateTime @db.Timestamptz(3) @default(now())
+
+  @@unique([appClientId, pid, month, reason])
+  @@index([appClientId, month])
+  @@index([pid, month])
+  @@map("usage_events")
+}
+
+// Reporting projection: one row per app/PID/month, the row billing would count.
+// Raw events stay for corrections; this table is what reports read.
+model UsageMonthly {
+  id          String   @id @default(uuid())
+  appClientId String
+  pid         String
+  month       String
+  firstParty  Boolean  @default(false)
+  createdAt   DateTime @db.Timestamptz(3) @default(now())
+
+  @@unique([appClientId, pid, month])
+  @@index([appClientId, month])
+  @@map("usage_monthly")
 }
 
 // Direct app Checkout intent. Money and event outbox commit together.

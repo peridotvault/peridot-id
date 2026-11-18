@@ -1,6 +1,6 @@
 # Stage 3: Fiat access and replaceable payment backend
 
-Status: **Not implemented**.
+Status: **Implemented**.
 Dependency: Stage 2; see [plan index](README.md).
 
 ## Scope and requirements
@@ -22,14 +22,14 @@ A renamed UI alone does not make the backend provider-interchangeable.
 `apps/wallet/src/pages/fiat`, and `apps/wallet/src/shared/app/fiatEnsure.ts`.
 
 ## Work items
-- [ ] Specify applicable eligibility states, onboarding and fiat authorization requirements.
-- [ ] Allow eligible wallet-authenticated PIDs to reuse their existing fiat balance.
-- [ ] Remove any accidental requirement for on-chain account provisioning from fiat access.
-- [ ] Introduce checkout adapter interface and normalized payment status/notification types.
-- [ ] Store provider routing with intents so outstanding payments reconcile through their original adapter.
-- [ ] Keep secrets and provider protocol details entirely behind the API.
-- [ ] Test adapter behavior, exact amount matching, late payment, retry and duplicate notifications.
-- [ ] Test authorization scopes, transfer restrictions, refund and insufficient-balance cases.
+- [x] Specify applicable eligibility states, onboarding and fiat authorization requirements.
+- [x] Allow eligible wallet-authenticated PIDs to reuse their existing fiat balance.
+- [x] Remove any accidental requirement for on-chain account provisioning from fiat access.
+- [x] Introduce checkout adapter interface and normalized payment status/notification types.
+- [x] Store provider routing with intents so outstanding payments reconcile through their original adapter.
+- [x] Keep secrets and provider protocol details entirely behind the API.
+- [x] Test adapter behavior, exact amount matching, late payment, retry and duplicate notifications.
+- [x] Test authorization scopes, transfer restrictions, refund and insufficient-balance cases.
 
 ## Acceptance
 The same PID sees the same balance regardless of login method. External assets are

@@ -179,8 +179,21 @@ export class PeridotAuth {
     namespace: WalletNamespace;
     reference: string;
     address: string;
+    /** Cross-origin app target: the verified login then returns a `pidCode`. */
+    returnTo?: string;
+    clientId?: string;
+    /** PKCE S256 challenge — required by public clients. */
+    codeChallenge?: string;
   }): Promise<WalletChallenge> {
-    const res = await this.client.post<WalletChallenge>("/v1/auth/wallet/challenge", input);
+    const clientId = this.appId(input.clientId);
+    const res = await this.client.post<WalletChallenge>("/v1/auth/wallet/challenge", {
+      namespace: input.namespace,
+      reference: input.reference,
+      address: input.address,
+      ...(input.returnTo ? { returnTo: input.returnTo } : {}),
+      ...(clientId ? { clientId } : {}),
+      ...(input.codeChallenge ? { codeChallenge: input.codeChallenge } : {}),
+    });
     if (!res.ok) {
       const msg = (res.data as ApiError)?.message;
       throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Couldn't start wallet sign-in"));
@@ -197,17 +210,26 @@ export class PeridotAuth {
   async walletVerify(
     challengeId: string,
     signature: string,
-  ): Promise<{ ok: boolean; pid?: string; pendingClaim?: boolean }> {
-    const res = await this.client.post<{ ok: boolean; pid?: string; pendingClaim?: boolean }>(
-      "/v1/auth/wallet/verify",
-      { challengeId, signature },
-    );
+  ): Promise<{ ok: boolean; pid?: string; pidCode?: string; pendingClaim?: boolean; claimTicket?: string }> {
+    const res = await this.client.post<{
+      ok: boolean;
+      pid?: string;
+      pidCode?: string;
+      pendingClaim?: boolean;
+      claimTicket?: string;
+    }>("/v1/auth/wallet/verify", { challengeId, signature });
     if (!res.ok) {
       const msg = (res.data as ApiError)?.message;
       throw new Error(Array.isArray(msg) ? msg.join(" ") : (msg ?? "Wallet sign-in failed"));
     }
     clearCache();
-    return res.data as { ok: boolean; pid?: string; pendingClaim?: boolean };
+    return res.data as {
+      ok: boolean;
+      pid?: string;
+      pidCode?: string;
+      pendingClaim?: boolean;
+      claimTicket?: string;
+    };
   }
 
   /** Start linking an external wallet to the CURRENT session's PID. */
@@ -366,10 +388,14 @@ export class PeridotAuth {
    * result also carries the SSO `pidCode` plus the validated `redirectTo` —
    * the caller (a hosted page) navigates there itself.
    */
-  async claim(handle: string): Promise<{ ok: boolean; pid: string; pidCode?: string; redirectTo?: string }> {
+  async claim(
+    handle: string,
+    /** Ticket from a cross-origin wallet login (`claimTicket`); cookie callers omit it. */
+    ticket?: string,
+  ): Promise<{ ok: boolean; pid: string; pidCode?: string; redirectTo?: string }> {
     const res = await this.client.post<{ ok: boolean; pid: string; pidCode?: string; redirectTo?: string }>(
       "/v1/auth/claim",
-      { handle },
+      { handle, ...(ticket ? { ticket } : {}) },
     );
     if (!res.ok) {
       const msg = (res.data as ApiError)?.message;

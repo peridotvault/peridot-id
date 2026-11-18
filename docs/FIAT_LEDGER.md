@@ -182,6 +182,30 @@ PPN is folded into `Transfer Fee`; the API still returns the parts separately.
   against live RPC balances with on-chain nonce replay protection — they do not
   inherit this section's transactional guarantees.
 
+## Eligibility and authorization
+
+Fiat access is attached to the **PID**, never to a login method or a wallet
+address. Any active identity with a valid session reaches the same balance —
+Google, email OTP, passkey, or an external wallet (Phantom/MetaMask). A wallet
+signature proves control of an address; it is not identity verification for
+financial services, so nothing here treats it as one.
+
+- **No on-chain prerequisite.** Fiat is the internal ledger
+  (`fiat_ledger_entries`); depositing, holding a balance, or transferring does
+  not require a provisioned smart account. `walletEnsure`-style flows are
+  unrelated to fiat access.
+- **No fiat onboarding step.** The ledger account is created lazily on the first
+  paid deposit (`FiatLedgerService.lockAccounts`).
+- **Suspended identities fail closed.** A session whose identity is not
+  `active` is refused before any ledger write.
+- **Writes need user authority.** Deposits, transfer inquiry/confirm/cancel and
+  deposit sync require a session (or an app machine token with the
+  `fiat:transfer` scope). A read-scoped SSO bearer may only sync its own deposit.
+- **Transfers stay restricted** to app owners / the allowlisted escrow app
+  (`PID_FIAT_LEDGER_APP_ALLOWLIST`); user→user sends are rejected.
+- **Limits and fees** are code constants (`fiat-limits.ts`) and policy rows, not
+  per-login-method settings.
+
 ## Flags
 
 | Flag | Default | Meaning |

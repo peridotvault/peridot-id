@@ -1,15 +1,19 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { UserTokenGuard } from "../common/user-token.guard";
 import { PidAppsService } from "./apps.service";
 import { CreatePidAppDto, SetAppFeeDto, SetWebhookDto, UpdatePidAppDto } from "./dto/app.dto";
+import { UsageService, utcMonth } from "../usage/usage.service";
 
 @Controller("v1/apps")
 @UseGuards(ThrottlerGuard, JwtAuthGuard)
 export class PidAppsController {
-  constructor(private readonly apps: PidAppsService) {}
+  constructor(
+    private readonly apps: PidAppsService,
+    private readonly usage: UsageService,
+  ) {}
 
   /** Register a third-party app and get its public client_id. Origins managed after. */
   @Post()
@@ -34,6 +38,25 @@ export class PidAppsController {
   @UseGuards(JwtAuthGuard, UserTokenGuard)
   get(@CurrentUser() user: AuthenticatedUser, @Param("id", ParseUUIDPipe) id: string) {
     return this.apps.get(user.pid, id);
+  }
+
+  /**
+   * Owner-scoped Web3 usage for one UTC month (`YYYY-MM`, default: this month).
+   * Reporting-only: the allowance is shown, nothing is charged or blocked.
+   */
+  @Get(":id/usage")
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
+  async usageReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Query("month") month?: string,
+  ) {
+    if (month !== undefined && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      throw new BadRequestException("month must be YYYY-MM");
+    }
+    const app = await this.apps.get(user.pid, id);
+    return this.usage.report(app.clientId, month ?? utcMonth());
   }
 
   /** Rename, change redirect URIs, or disable one of my apps. */
