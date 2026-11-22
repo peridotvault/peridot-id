@@ -43,10 +43,24 @@ jobs:
       - name: Build
         run: pnpm --filter @peridotvault/pid-types --filter @peridotvault/pid-core --filter @peridotvault/pid-payments --filter @peridotvault/pid-solana --filter @peridotvault/pid-evm --filter @peridotvault/pid-sdk-js --filter @peridotvault/pid-react-embed build
 
+      # setup-node (registry-url) points npm at a temp userconfig
+      # (NPM_CONFIG_USERCONFIG), so ~/.npmrc is NOT read on this runner — write
+      # where npm actually looks, and fail loudly: an empty/expired token makes
+      # npm answer the PUT with E404 "is not in this registry", which reads like
+      # a missing package instead of an auth problem.
       - name: Configure npm auth
-        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::NPM_TOKEN is empty — set the repository secret (Settings → Secrets and variables → Actions)"
+            exit 1
+          fi
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          npm whoami || {
+            echo "::error::NPM_TOKEN was rejected by npm — it is expired, revoked, or lacks access to @peridotvault (granular token needs read+write, the scope, and 'bypass 2FA')"
+            exit 1
+          }
 
       - name: Publish (leaves first)
         env:
