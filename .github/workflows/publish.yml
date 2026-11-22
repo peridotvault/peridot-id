@@ -94,10 +94,11 @@ jobs:
             pnpm --filter "$pkg" publish --access public --no-git-checks --provenance || {
               echo "publish failed for $pkg@$ver"; exit 1; }
             # A 2FA-staged publish "succeeds" but never reaches the registry, so
-            # verify the version is actually live. Registry propagation takes up
-            # to ~2 minutes ("Your package is being processed…"), so poll long
-            # enough — a short window failed a good publish at 30s.
-            for _ in $(seq 1 12); do
+            # verify the version is actually live. npm's registry now accepts a
+            # publish asynchronously ("Your package is being processed and may
+            # take a few minutes"), so poll up to ~5 minutes — 30s and 2min
+            # windows both failed publishes that were in fact live.
+            for _ in $(seq 1 30); do
               npm view "$pkg@$ver" version >/dev/null 2>&1 && break
               sleep 10
             done
