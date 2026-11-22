@@ -4,9 +4,8 @@ import { Check } from "../../../shared/components/icons";
 import { styles as s } from "../../../shared/styles/theme";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import type { AccountMenuModel } from "../../../shared/components/shell/AccountMenu";
-import { AppOriginBadge, originHost } from "./AppOriginBadge";
-import { AppLogo } from "./AppLogo";
-import { APP_TAGLINE_FALLBACK, ConsentShell } from "./ConsentShell";
+import { AppIdentity } from "./AppIdentity";
+import { ConsentShell } from "./ConsentShell";
 
 // App-scoped consent card: who is asking (logo, name, origin), what they
 // receive, and one primary action. The shell header stays (brand left, profile
@@ -55,26 +54,15 @@ export function SsoConsentModal({
       level={level}
       accountMenu={accountMenu}
     >
-      <div className="flex flex-col items-center gap-2">
-        <AppLogo logoUrl={logoUrl} name={appName ?? originHost(origin)} />
-        {/* II's layout: the origin is the small badge the user verifies —
-            never the heading, so a long domain can't blow the card up. */}
-        <AppOriginBadge origin={origin} />
-        {/* Two lines max, narrower than the card: a tagline, never a wall
-            of text (Internet Identity's proportions). */}
-        <p className="line-clamp-2 max-w-[280px] text-center font-sans text-sm text-paragraph">
-          {description || APP_TAGLINE_FALLBACK}
-        </p>
-        <h1 className="self-start text-left font-sans text-xl font-semibold text-foreground">
-          {appName ? `Continue to ${appName}` : "Continue to this app"}
-        </h1>
-        <span className="self-start text-left font-sans text-sm text-paragraph">with your PeridotID</span>
-        {verified ? (
-          <span className="text-center font-sans text-xs text-success">
-            <span aria-hidden="true">✓ </span>Verified partner — 0% PeridotID fee
-          </span>
-        ) : null}
-      </div>
+      <AppIdentity
+        origin={origin}
+        appName={appName}
+        logoUrl={logoUrl}
+        description={description}
+        verified={verified}
+        title={appName ? `Continue to ${appName}` : "Continue to this app"}
+        subtitle="with your PeridotID"
+      />
       {error && <p role="alert" style={s.error}>{error}</p>}
       {/* II renders the options above the primary button: the card grows
           upward from fixed Continue / Deny / switch at the bottom. */}

@@ -4,6 +4,8 @@ import { styles as s } from "../../../shared/styles/theme";
 import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import type { HandleStatus } from "../hooks/usePidClaim";
+import { AppIdentity } from "./AppIdentity";
+import { ConsentShell } from "./ConsentShell";
 
 // Claim branch: verified credential, no identity yet — the only way forward
 // is creating the permanent <handle>@pid.
@@ -15,6 +17,11 @@ export function PidClaimForm({
   ackPermanent,
   busy,
   error,
+  origin,
+  appName,
+  logoUrl,
+  description,
+  verified,
   onHandle,
   onAck,
   onSubmit,
@@ -27,29 +34,31 @@ export function PidClaimForm({
   ackPermanent: boolean;
   busy: boolean;
   error: string | null;
+  origin?: string | null;
+  appName?: string | null;
+  logoUrl?: string | null;
+  description?: string | null;
+  verified?: boolean;
   onHandle: (t: string) => void;
   onAck: () => void;
   onSubmit: () => void;
   onSignOut: () => void;
 }) {
   return (
-    <div className="flex flex-col flex-1">
+    <div className="flex flex-col flex-1 relative">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <div style={s.container} className="flex flex-col">
-      <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center justify-end pt-2">
-        <Pressable onPress={onSignOut} disabled={busy} accessibilityLabel="Sign out and cancel PID creation">
-          <span className="font-sans text-sm text-danger">Sign Out</span>
-        </Pressable>
-      </div>
-      <div className="flex flex-col flex-1 w-full items-center justify-center gap-5">
-        <div className="flex flex-col items-center gap-2">
-          <span className="font-sans text-4xl tracking-[-0.4px] text-foreground">Create your PID</span>
-          {(email || displayName) && (
-            <span className="font-sans text-sm text-muted-foreground">Continuing as {displayName ?? email}</span>
-          )}
-        </div>
+      <ConsentShell>
+        <AppIdentity
+          origin={origin}
+          appName={appName}
+          logoUrl={logoUrl}
+          description={description}
+          verified={verified}
+          title="Create your PID"
+          subtitle={email || displayName ? `Continuing as ${displayName ?? email}` : undefined}
+        />
         {error && <p role="alert" style={s.error}>{error}</p>}
-        <div className="flex flex-col w-full max-w-[343px] gap-3">
+        <div className="flex flex-col w-full gap-3">
           <div className="flex flex-col relative flex-1 justify-center">
             <TextField
                 id="pid-claim-handle"
@@ -91,9 +100,11 @@ export function PidClaimForm({
             disabled={busy || handleStatus !== "free" || !ackPermanent}
             variant="primary"
           />
+          <Pressable onPress={onSignOut} disabled={busy} accessibilityLabel="Sign out and cancel PID creation">
+            <span className="text-center font-sans text-sm text-danger">Sign out</span>
+          </Pressable>
         </div>
-      </div>
-      </div>
+      </ConsentShell>
     </div>
   );
 }

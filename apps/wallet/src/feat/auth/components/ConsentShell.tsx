@@ -3,10 +3,6 @@ import { BrandTop } from "../../../shared/components/shell/BrandTop";
 import { ProfileMenu } from "../../../shared/components/shell/ProfileMenu";
 import type { AccountMenuModel } from "../../../shared/components/shell/AccountMenu";
 
-/** PeridotID's own line when the app has no owner-set tagline. */
-export const APP_TAGLINE_FALLBACK =
-  "One identity for gaming: wallet, items and Rupiah. Private and tamperproof.";
-
 // Shared chrome for every app-facing ceremony on the PeridotID origin: scrim,
 // brand topbar (with the account popover when the flow has one) and one centered
 // card. Consent (login) and approval (a dapp's request) must read as the same

@@ -2,9 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { styles as s } from "../../../shared/styles/theme";
 import { UIButton } from "../../../shared/components/ui/UIButton";
-import { AppOriginBadge, originHost } from "./AppOriginBadge";
-import { AppLogo } from "./AppLogo";
-import { APP_TAGLINE_FALLBACK } from "./ConsentShell";
+import { AppIdentity } from "./AppIdentity";
 import type { ExecuteGate } from "../utils/knownPrograms";
 
 export const UNKNOWN_PROGRAM_RISK_COPY =
@@ -95,22 +93,15 @@ export function PopupReview({
 
   return (
     <>
-      <div className="flex flex-col items-center gap-2">
-        <AppLogo logoUrl={logoUrl} name={appName ?? originHost(origin)} />
-        <AppOriginBadge origin={origin} />
-        <p className="line-clamp-2 max-w-[280px] text-center font-sans text-sm text-paragraph">
-          {description || APP_TAGLINE_FALLBACK}
-        </p>
-        <h1 className="self-start text-left font-sans text-xl font-semibold text-foreground">
-          {appName ? `Approve for ${appName}` : "Approve this request"}
-        </h1>
-        <span className="self-start text-left font-sans text-sm text-paragraph">with your PeridotID</span>
-        {verified ? (
-          <span className="text-center font-sans text-xs text-success">
-            <span aria-hidden="true">✓ </span>Verified partner — 0% PeridotID fee
-          </span>
-        ) : null}
-      </div>
+      <AppIdentity
+        origin={origin}
+        appName={appName}
+        logoUrl={logoUrl}
+        description={description}
+        verified={verified}
+        title={appName ? `Approve for ${appName}` : "Approve this request"}
+        subtitle="with your PeridotID"
+      />
 
       {details}
 
