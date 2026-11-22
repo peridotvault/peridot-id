@@ -36,14 +36,16 @@ jobs:
       - name: Rust wasm target
         run: rustup target add wasm32-unknown-unknown
 
-      - name: Unit + integration tests
-        working-directory: apps/mcp
-        run: cargo test -p peridot_id_mcp
-
       # Stale index = agents keep reading the old guidance. Fail here, not in prod.
+      # Runs before the tests so drift reports as "stale index", not as a
+      # confusing assertion inside a corpus test.
       - name: Generated index is in sync with apps/docs
         working-directory: apps/mcp
         run: ./scripts/sync-docs --check
+
+      - name: Unit + integration tests
+        working-directory: apps/mcp
+        run: cargo test -p peridot_id_mcp
 
       # dfxvm's installer asks for confirmation unless DFXVM_INIT_YES is set
       # (no TTY in CI). Vendor pin: 0.29.2, per apps/mcp/docs/topup-runbook.md.

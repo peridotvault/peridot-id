@@ -352,10 +352,10 @@ mod tests {
 
     #[test]
     fn corpus_is_source_backed_and_sized() {
-        // 13 Mintlify pages x sections + OpenAPI operations; the exact
-        // count is owned by sync-docs (see generated_docs.meta.json).
+        // 15 Mintlify pages x sections + OpenAPI operations. The corpus is owned
+        // by sync-docs: freshness is enforced by `./scripts/sync-docs --check`
+        // (byte-identical regeneration) in CI, so no count is duplicated here.
         assert!(DOCS.len() >= 100, "corpus too small: {}", DOCS.len());
-        assert_eq!(DOCS.len(), 219);
         for doc in &DOCS {
             assert!(
                 doc.url.starts_with("https://docs.peridot.id/"),
