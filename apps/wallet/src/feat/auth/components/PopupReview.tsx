@@ -1,19 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { styles as s } from "../../../shared/styles/theme";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import { AppOriginBadge, originHost } from "./AppOriginBadge";
 import { AppLogo } from "./AppLogo";
+import { APP_TAGLINE_FALLBACK } from "./ConsentShell";
 import type { ExecuteGate } from "../utils/knownPrograms";
 
 export const UNKNOWN_PROGRAM_RISK_COPY =
   "This action calls a program this wallet doesn't recognize. It can move any SOL or tokens your smart account holds — including things you didn't intend to spend. Only continue if you trust the requesting app and understand exactly what this call does.";
 
+// Card body of an approval (the shell lives in the page, `ConsentShell`): who is
+// asking, what it asks for, the risk block when the call is unknown, and the two
+// actions. Same proportions as the login consent card so a dapp request is not a
+// second, older-looking product.
 export function PopupReview({
   summary,
   origin,
   appName,
   logoUrl,
+  description,
+  verified,
+  details,
   busy,
   onApprove,
   onDeny,
@@ -29,6 +37,12 @@ export function PopupReview({
   appName?: string | null;
   /** Owner-set logo; null renders the generic tile. */
   logoUrl?: string | null;
+  /** Owner-set tagline; null falls back to PeridotID's own line. */
+  description?: string | null;
+  /** Verified partner: PeridotID fee waived for this app (trust signal). */
+  verified?: boolean;
+  /** Verified quote/breakdown rendered above the action (fiat checkout). */
+  details?: ReactNode;
   busy: boolean;
   onApprove: () => void;
   onDeny: () => void;
@@ -56,6 +70,9 @@ export function PopupReview({
   // AC3/AC6: unknown requires acknowledgement; malformed blocks Approve entirely.
   // Deny is never gated by acknowledgement (AC3) — only by the busy ceremony.
   const approveDisabled = busy || invalid != null || (unknown != null && acknowledged !== true);
+  // Payloads (execute data, fiat summary) outgrow the card: clamp the preview and
+  // keep the full text one tap away.
+  const longSummary = summary != null && summary.length > 160;
 
   const copyTarget = () => {
     if (!unknown) return;
@@ -78,33 +95,54 @@ export function PopupReview({
 
   return (
     <>
-      <div className="flex items-center gap-3 rounded-md border border-line p-3">
-        <AppLogo logoUrl={logoUrl} name={appName ?? originHost(origin)} size="sm" />
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <span className="break-words font-sans text-base font-semibold text-foreground">{appName ?? "This app"}</span>
-          <AppOriginBadge origin={origin} />
-        </div>
+      <div className="flex flex-col items-center gap-2">
+        <AppLogo logoUrl={logoUrl} name={appName ?? originHost(origin)} />
+        <AppOriginBadge origin={origin} />
+        <p className="line-clamp-2 max-w-[280px] text-center font-sans text-sm text-paragraph">
+          {description || APP_TAGLINE_FALLBACK}
+        </p>
+        <h1 className="self-start text-left font-sans text-xl font-semibold text-foreground">
+          {appName ? `Approve for ${appName}` : "Approve this request"}
+        </h1>
+        <span className="self-start text-left font-sans text-sm text-paragraph">with your PeridotID</span>
+        {verified ? (
+          <span className="text-center font-sans text-xs text-success">
+            <span aria-hidden="true">✓ </span>Verified partner — 0% PeridotID fee
+          </span>
+        ) : null}
       </div>
+
+      {details}
+
       {summary && (
-        <>
-          <span style={s.label}>Requested action</span>
-          <span style={s.mono} className="select-text">{summary}</span>
-        </>
+        <div className="flex flex-col gap-1 border-t border-line pt-3">
+          <span className="font-sans text-xs font-medium text-muted-foreground">Requested action</span>
+          <p className="line-clamp-3 select-text break-words font-mono text-xs text-paragraph">{summary}</p>
+          {longSummary && (
+            <details className="flex flex-col">
+              <summary className="cursor-pointer font-sans text-xs text-muted-foreground">Show full request</summary>
+              <p className="mt-1 max-h-40 select-text overflow-y-auto break-all font-mono text-xs text-paragraph">
+                {summary}
+              </p>
+            </details>
+          )}
+        </div>
       )}
+
       {unknown && (
-        <div style={s.card} className="flex flex-col">
-          <span style={s.label}>Unknown program</span>
-          <span style={s.mono} className="select-text">{unknown.description.target}</span>
+        <div className="flex flex-col gap-1 border-t border-line pt-3">
+          <span className="font-sans text-xs font-medium text-muted-foreground">Unknown program</span>
+          <span className="select-text break-all font-mono text-xs text-paragraph">{unknown.description.target}</span>
           <Pressable onPress={copyTarget} accessibilityRole="button" accessibilityLabel="Copy program address">
             <span style={s.hint}>{copied ? "Copied" : "Copy address"}</span>
           </Pressable>
-          <span style={s.mono}>
+          <span className="break-all font-mono text-xs text-paragraph">
             {unknown.description.dataLen} bytes · sha256:{unknown.description.dataHashHex}
           </span>
-          <p style={s.hint}>
+          <p className="font-sans text-xs text-muted-foreground">
             {unknown.description.metaCount} accounts ({unknown.description.writableCount} writable)
           </p>
-          <p style={s.hint}>{UNKNOWN_PROGRAM_RISK_COPY}</p>
+          <p className="font-sans text-xs text-paragraph">{UNKNOWN_PROGRAM_RISK_COPY}</p>
           <Pressable
             style={{ flexDirection: "row" }}
             className="items-center gap-2.5"
@@ -121,20 +159,29 @@ export function PopupReview({
           </Pressable>
         </div>
       )}
+
       {invalid && (
-        <div style={s.card} className="flex flex-col">
-          <p role="alert" style={s.error}>Cannot approve this request</p>
-          <p style={s.hint}>{invalid.reason}</p>
+        <div role="alert" className="flex flex-col gap-1 border-t border-line pt-3">
+          <p style={s.error}>Cannot approve this request</p>
+          <p className="font-sans text-xs text-paragraph">{invalid.reason}</p>
         </div>
       )}
-      {approvingPid && (
-        <p style={s.hint}>
-          Approving as {approvingPid}{switched ? " (switched to this account for approval)" : ""}
-        </p>
-      )}
-      <p style={s.hint}>Review carefully — approving signs with your passkey.</p>
-      <UIButton title={busy ? "Waiting for passkey…" : "Approve"} onPress={onApprove} disabled={approveDisabled} variant="primary" />
-      <UIButton title="Deny" onPress={onDeny} disabled={busy} />
+
+      <div className="flex flex-col mt-1 gap-3">
+        {approvingPid && (
+          <span className="self-start rounded-md border border-line px-2 py-1 font-mono text-xs text-paragraph">
+            {approvingPid}
+            {switched ? " · switched to this account for approval" : ""}
+          </span>
+        )}
+        <p className="font-sans text-xs text-muted-foreground">Review carefully — approving signs with your passkey.</p>
+        <UIButton title={busy ? "Waiting for passkey…" : "Approve"} onPress={onApprove} disabled={approveDisabled} variant="primary" />
+        <div className="flex items-center justify-center">
+          <Pressable onPress={onDeny} disabled={busy} accessibilityRole="button" accessibilityLabel="Deny request">
+            <span className="font-sans text-sm text-danger">Deny</span>
+          </Pressable>
+        </div>
+      </div>
     </>
   );
 }
