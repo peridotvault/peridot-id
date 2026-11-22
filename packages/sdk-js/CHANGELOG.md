@@ -1,5 +1,14 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.11.3
+
+- **One login-params builder.** `loginTab`/`loginPopup` and the passkey
+  delegation built the hosted URL twice with slightly different query sets; both
+  now go through `loginParams`. No public API change.
+- **`redirect_uri` is always sent.** When the caller passes no `returnTo`, it
+  falls back to the app's own origin, so a login tab whose opener disappeared
+  still mints a code and lands on the app instead of stranding on PeridotID.
+
 ## 1.11.2
 
 - **Login always opens a tab, never a window popup.** Extension wallets that

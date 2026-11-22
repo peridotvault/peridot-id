@@ -16,6 +16,15 @@ import { openLoginPopup, openLoginTab, PopupClosedError, PopupUnavailableError }
 import type { PeridotClient } from "./client.js";
 import { CACHE_TTL, cachedRead, clearCache, invalidateCache } from "./internal/cache.js";
 
+/** Options accepted by the hosted login entry points ({@link loginPopup}/{@link loginTab}). */
+export interface LoginHostOpts {
+  clientId?: string;
+  returnTo?: string;
+  method?: string;
+  firstParty?: boolean;
+  sessionScope?: string;
+}
+
 export class PeridotAuth {
   constructor(private client: PeridotClient) {}
 
@@ -64,7 +73,7 @@ export class PeridotAuth {
    * wallets (MetaMask) create their own window parented to the requesting one,
    * and a script-opened popup parent crashes Brave's browser process.
    */
-  async loginPopup(opts?: { clientId?: string; returnTo?: string; method?: string; firstParty?: boolean; sessionScope?: string }): Promise<{ pidCode?: string }> {
+  async loginPopup(opts?: LoginHostOpts): Promise<{ pidCode?: string }> {
     return this.openLogin(openLoginPopup, opts);
   }
 
@@ -72,14 +81,14 @@ export class PeridotAuth {
    * Sign in via the PeridotID origin in a new tab. Same result as `loginPopup`;
    * opt in when a tab is preferred over a popup.
    */
-  async loginTab(opts?: { clientId?: string; returnTo?: string; method?: string; firstParty?: boolean; sessionScope?: string }): Promise<{ pidCode?: string }> {
+  async loginTab(opts?: LoginHostOpts): Promise<{ pidCode?: string }> {
     return this.openLogin(openLoginTab, opts);
   }
 
-  /** Shared host guard + login popup params for {@link loginPopup}/{@link loginTab}. */
+  /** Shared host guard + login params for {@link loginPopup}/{@link loginTab}. */
   private async openLogin(
     opener: (opts: { popupBaseUrl: string; params: Record<string, string | undefined> }) => Promise<{ pidCode?: string }>,
-    opts?: { clientId?: string; returnTo?: string; method?: string; firstParty?: boolean; sessionScope?: string },
+    opts?: LoginHostOpts,
   ): Promise<{ pidCode?: string }> {
     // Same rule as login(): the popup may sign in as another account.
     clearCache();
@@ -87,30 +96,26 @@ export class PeridotAuth {
       throw new PopupUnavailableError("No popup host configured — omit baseUrl so the env preset applies, or pass popupBaseUrl.");
     }
     if (typeof window === "undefined") throw new PopupUnavailableError("Sign-in needs a browser.");
-    const clientId = this.appId(opts?.clientId);
-    return opener({
-      popupBaseUrl: this.client.popupBaseUrl,
-      params: {
-        popup: "login",
-        origin: window.location.origin,
-        ...(opts?.method ? { method: opts.method } : {}),
-        ...(clientId ? { client_id: clientId } : {}),
-        ...(opts?.returnTo ? { redirect_uri: opts.returnTo } : {}),
-        ...(opts?.firstParty ? { first_party: "1" } : {}),
-        ...(opts?.sessionScope ? { session_scope: opts.sessionScope } : {}),
-      },
-    });
+    return opener({ popupBaseUrl: this.client.popupBaseUrl, params: this.loginParams(opts) });
   }
 
-  /** Popup params shared by the login delegation below (redirect + app binding). */
-  private loginPopupParams(opts?: { returnTo?: string; clientId?: string }): Record<string, string | undefined> {
+  /**
+   * The one login params builder: hosted URL `?popup=login&origin=&client_id=`.
+   * `redirect_uri` always points somewhere real (the caller's `returnTo`, else
+   * this origin) so the hosted page can mint a code even when its opener is
+   * gone — the tab simply lands back on the app instead of stranding.
+   */
+  private loginParams(opts?: LoginHostOpts): Record<string, string | undefined> {
     if (typeof window === "undefined") return {};
     const clientId = this.appId(opts?.clientId);
     return {
-      redirect_uri: opts?.returnTo ?? window.location.origin,
-      origin: window.location.origin,
       popup: "login",
+      origin: window.location.origin,
+      redirect_uri: opts?.returnTo ?? window.location.origin,
+      ...(opts?.method ? { method: opts.method } : {}),
       ...(clientId ? { client_id: clientId } : {}),
+      ...(opts?.firstParty ? { first_party: "1" } : {}),
+      ...(opts?.sessionScope ? { session_scope: opts.sessionScope } : {}),
     };
   }
 
@@ -123,7 +128,7 @@ export class PeridotAuth {
     try {
       const data = await openLoginPopup({
         popupBaseUrl: this.client.popupBaseUrl,
-        params: { ...this.loginPopupParams(opts), ...extra },
+        params: { ...this.loginParams(opts), ...extra },
       });
       return { ok: true, pidCode: data.pidCode };
     } catch (e) {

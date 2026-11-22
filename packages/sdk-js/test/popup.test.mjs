@@ -114,6 +114,33 @@ test("readPopupParams: approval params survive the OAuth round-trip", async () =
   }, store);
 });
 
+test("loginTab: one params builder — origin, client_id, redirect_uri fallback", async () => {
+  const { Peridot } = await import("../dist/esm/index.js");
+  const win = popupMock();
+  const calls = [];
+  await withOpener(
+    (...args) => (calls.push(args), win),
+    async (w) => {
+      const peridot = Peridot({ popupBaseUrl: POPUP_ORIGIN, clientId: "pidapp_test" });
+      const p = peridot.auth.loginTab();
+      assert.equal(calls.length, 1, "exactly one window.open");
+      const url = new URL(calls[0][0]);
+      assert.equal(url.searchParams.get("popup"), "login");
+      assert.equal(url.searchParams.get("origin"), DAPP_ORIGIN);
+      assert.equal(url.searchParams.get("client_id"), "pidapp_test");
+      // No returnTo given: the app's own origin is the mint/landing target, so
+      // a tab whose opener is gone still ends somewhere real.
+      assert.equal(url.searchParams.get("redirect_uri"), DAPP_ORIGIN);
+      w.emit("message", {
+        source: win,
+        origin: POPUP_ORIGIN,
+        data: { type: "pid-popup-result", ok: true, data: { pidCode: "abc" } },
+      });
+      assert.deepEqual(await p, { pidCode: "abc" });
+    },
+  );
+});
+
 test("readPopupParams: login is not persisted here (has its own context)", async () => {
   const { readPopupParams } = await import("../dist/esm/popup.js");
   const store = new Map();

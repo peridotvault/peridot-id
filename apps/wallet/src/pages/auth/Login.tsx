@@ -176,27 +176,6 @@ export function Login({
     return <SigningScreen origin={appOrigin ?? ""} appName={appInfo?.name} logoUrl={appInfo?.logoUrl} pending />;
   }
 
-  // Already logged in + third-party SSO request: one-tap consent, no redundant login.
-  if (sso && session && !showLogin) {
-    return (
-      <SsoConsentModal
-        origin={ssoOrigin(sso.redirectUri)}
-        appName={appInfo?.name}
-        logoUrl={appInfo?.logoUrl}
-        description={appInfo?.description}
-        sessionLabel={session.label}
-        avatarUrl={header.avatarUrl}
-        level={header.level}
-        busy={busy}
-        error={error}
-        onAllow={consent.allowApp}
-        onDeny={consent.denyApp}
-        verified={appVerified}
-        accountMenu={accountMenu}
-      />
-    );
-  }
-
   // Delivered/denied but still open: terminal screen, never the consent card.
   if (finished) {
     return (
@@ -209,11 +188,14 @@ export function Login({
     );
   }
 
-  // Auth-in-a-new-tab + pre-existing session: explicit consent, same card as SSO.
-  if (ctx && session && !showLogin && claim.claim === null) {
+  // Already logged in + a pending request: one tap of consent, no redundant
+  // login. Third-party SSO (`?redirect_uri=`) and auth-in-a-new-tab
+  // (`?popup=login`) are the same card — only the allow handler differs, so
+  // there is one consent screen, not one per entry point.
+  if ((sso || ctx) && session && !showLogin) {
     return (
       <SsoConsentModal
-        origin={ctx.origin}
+        origin={appOrigin ?? ""}
         appName={appInfo?.name}
         logoUrl={appInfo?.logoUrl}
         description={appInfo?.description}
@@ -222,7 +204,7 @@ export function Login({
         level={header.level}
         busy={busy}
         error={error}
-        onAllow={consent.allowCtx}
+        onAllow={sso ? consent.allowApp : consent.allowCtx}
         onDeny={consent.denyApp}
         verified={appVerified}
         accountMenu={accountMenu}
