@@ -2,6 +2,29 @@
 
 ## 1.11.2
 
+- **Login always opens a tab, never a window popup.** Extension wallets that
+  create their own approval window (MetaMask: `chrome.windows.create`) are
+  parented to the window that asked for the signature, and Chromium kills the
+  whole browser process when that parent is a script-opened popup (observed on
+  Brave, `EXC_BREAKPOINT` before any JS frame). `loginTab`/`openLoginTab` are
+  now the only login windows; `loginPopup`/`openLoginPopup` still exist but
+  open the same tab and are deprecated. Approval popups (`openPeridotPopup`)
+  are unchanged — they never touch a wallet extension.
+- **MetaMask is discovered through EIP-6963.** Brave Wallet and Phantom's EVM
+  proxy both report `isMetaMask: true`, so `detectWallets` could open the wrong
+  wallet. New `discoverWallets()` reads the announced providers (`rdns`
+  `io.metamask`) and keeps a MetaMask row that talks to real MetaMask.
+- **Wallet errors reach the caller intact.** EIP-1193 rejections arrive as
+  plain `{ code, message }` objects; `String(e)` used to render
+  `[object Object]`. Connectors now surface the wallet's own message.
+- **A connect that reports `already pending for origin` recovers.** MetaMask
+  allows one permission request per origin, so an attempt that never settled
+  (closed window, crash, double click) blocked every retry. The connector now
+  falls back to `eth_accounts` (no prompt) and continues when the origin
+  already granted access.
+- **Audit trail: `walletChallenge()` sends `providerCode`.** It was accepted
+  and then dropped, leaving `wallet_auth_challenges.providerCode` NULL and the
+  audit blind to which wallet answered.
 - **Switching accounts no longer serves the previous identity from cache.**
   Starting a login (`auth.login`, `loginPopup`, `loginTab`,
   `loginWithPasskey`) now clears the read cache before the redirect, so
