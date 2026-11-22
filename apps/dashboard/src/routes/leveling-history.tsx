@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useWorkspace } from "../workspace/workspace-provider";
 import { Card, ERROR, FIELD, MUTED, MiniButton } from "../workspace/ui";
 import { LevelingLayout, useResource } from "../leveling/LevelingLayout";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../shared/ui/table";
 import { LEDGER_KINDS, formatXp } from "../leveling/xp";
 import { xpAdmin, type LedgerEntry } from "../leveling/api";
 
@@ -24,13 +25,13 @@ export default function LevelingHistoryPage() {
           <MiniButton size="sm" onClick={reload}>Retry</MiniButton>
         </div>
       )}
-      <div className="flex flex-col">
-        <div className="grid gap-px bg-line lg:grid-cols-2">
+      <div className="flex flex-col gap-3">
+        <div className="grid gap-3 lg:grid-cols-2">
           <AdjustForm onDone={reload} />
           <ReverseForm onDone={reload} />
         </div>
         <Card>
-          <h2 className="text-lg font-semibold tracking-tight">Audit table</h2>
+          <h2 className="text-base font-semibold tracking-tight">Audit table</h2>
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <label className="text-xs">PID
               <input aria-label="Filter by PID" className={FIELD} value={pid} onChange={(e) => setPid(e.target.value)} placeholder="user@pid" />
@@ -51,23 +52,23 @@ export default function LevelingHistoryPage() {
           ) : (
             <>
               <div className="mt-3 overflow-x-auto">
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead>
-                    <tr className={`border-b border-border text-left text-xs uppercase tracking-wide ${MUTED}`}>
-                      <th className="py-2 pr-3">Time</th>
-                      <th className="py-2 pr-3">PID</th>
-                      <th className="py-2 pr-3">Kind</th>
-                      <th className="py-2 pr-3 text-right">Δ XP</th>
-                      <th className="py-2 pr-3 text-right">Balance</th>
-                      <th className="py-2 pr-3">Reason / actor</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table className="w-full min-w-[640px] text-sm">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="py-2 pr-3">Time</TableHead>
+                      <TableHead className="py-2 pr-3">PID</TableHead>
+                      <TableHead className="py-2 pr-3">Kind</TableHead>
+                      <TableHead className="py-2 pr-3 text-right">Δ XP</TableHead>
+                      <TableHead className="py-2 pr-3 text-right">Balance</TableHead>
+                      <TableHead className="py-2 pr-3">Reason / actor</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {data.rows.map((e) => (
                       <LedgerRow key={e.id} entry={e} />
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
               <p className={`mt-2 text-xs ${MUTED}`}>{data.total} total entries.</p>
             </>
@@ -80,19 +81,19 @@ export default function LevelingHistoryPage() {
 
 function LedgerRow({ entry: e }: { entry: LedgerEntry }) {
   return (
-    <tr className="border-b border-line align-top">
-      <td className="whitespace-nowrap py-1.5 pr-3 text-xs">{new Date(e.createdAt).toLocaleString()}</td>
-      <td className="max-w-[140px] truncate py-1.5 pr-3" title={e.pid}>{e.pid}</td>
-      <td className="py-1.5 pr-3">{e.kind}</td>
-      <td className="py-1.5 pr-3 text-right font-medium">
+    <TableRow className="align-top">
+      <TableCell className="whitespace-nowrap py-1.5 pr-3 text-xs">{new Date(e.createdAt).toLocaleString()}</TableCell>
+      <TableCell className="max-w-[140px] truncate py-1.5 pr-3" title={e.pid}>{e.pid}</TableCell>
+      <TableCell className="py-1.5 pr-3">{e.kind}</TableCell>
+      <TableCell className="py-1.5 pr-3 text-right font-medium">
         {e.deltaXp.startsWith("-") ? "" : "+"}{formatXp(e.deltaXp)}
-      </td>
-      <td className="py-1.5 pr-3 text-right">{formatXp(e.balanceAfter)}</td>
-      <td className="max-w-[220px] py-1.5 pr-3 text-xs">
+      </TableCell>
+      <TableCell className="py-1.5 pr-3 text-right">{formatXp(e.balanceAfter)}</TableCell>
+      <TableCell className="max-w-[220px] py-1.5 pr-3 text-xs">
         <span className="block truncate" title={e.reason ?? ""}>{e.reason ?? "—"}</span>
         <span className={MUTED}>{e.actorAdminId ?? ""}{e.levelAfter ? ` · L${e.levelAfter}` : ""}</span>
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -125,7 +126,7 @@ function AdjustForm({ onDone }: { onDone: () => void }) {
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold tracking-tight">Manual adjustment</h2>
+      <h2 className="text-base font-semibold tracking-tight">Manual adjustment</h2>
       <p className={`mt-1 text-sm ${MUTED}`}>Positive grants only; use Reverse for deductions. Reason is required.</p>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <label className="text-xs">PID<input aria-label="Adjust PID" className={FIELD} value={pid} onChange={(e) => setPid(e.target.value)} placeholder="user@pid" /></label>
@@ -180,7 +181,7 @@ function ReverseForm({ onDone }: { onDone: () => void }) {
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold tracking-tight">Reverse XP</h2>
+      <h2 className="text-base font-semibold tracking-tight">Reverse XP</h2>
       <p className={`mt-1 text-sm ${MUTED}`}>Writes a new negative entry; the original is never edited or deleted.</p>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         <label className="text-xs">PID<input aria-label="Reverse PID" className={FIELD} value={pid} onChange={(e) => setPid(e.target.value)} placeholder="user@pid" /></label>

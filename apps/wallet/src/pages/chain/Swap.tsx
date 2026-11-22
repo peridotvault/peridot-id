@@ -38,7 +38,7 @@ export function Swap({ onDone }: { onDone: () => void }) {
 
             <div style={{ flexDirection: "row" }} className="my-2 flex items-center gap-3">
               <div className="h-px flex-1 bg-line"  />
-              <div className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface">
                 <ArrowDownUp size={16} className="text-foreground" />
               </div>
               <div className="h-px flex-1 bg-line"  />

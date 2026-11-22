@@ -6,6 +6,9 @@ import { withDenied, withPidCode, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "./useLoginSession";
 import { clearApiCache } from "../../../shared/data/apiCache";
 
+/** The one pause before the browser leaves, hardcoded on purpose (no env). */
+const handoff = () => new Promise<void>((resolve) => setTimeout(resolve, 2000));
+
 export function useConsentActions(
   peridot: PeridotClient,
   opts: {
@@ -24,6 +27,8 @@ export function useConsentActions(
   // Client-login account picker ("Use a different account"): null = closed.
   const [picker, setPicker] = useState<AccountView[] | null>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
+  // Code minted, redirect in flight: the screen swaps to the signing animation.
+  const [signing, setSigning] = useState(false);
 
   const allowApp = async () => {
     if (!sso) return;
@@ -32,8 +37,13 @@ export function useConsentActions(
     try {
       // Mint a code for the CURRENT session — no re-authentication needed.
       const { pidCode } = await peridot.auth.authorize({ returnTo: sso.redirectUri, clientId: sso.clientId });
+      // Same beat as Internet Identity's redirect view: show the handoff
+      // before the browser leaves, instead of a frozen consent card.
+      setSigning(true);
+      await handoff();
       window.location.assign(withPidCode(sso.redirectUri, pidCode));
     } catch (e) {
+      setSigning(false);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -58,45 +68,42 @@ export function useConsentActions(
     setError(null);
     try {
       flags.delivered = true;
+      // The popup-login path closed the window the instant the code was
+      // delivered, so the animation never had a frame. Same handoff here.
+      setSigning(true);
+      await handoff();
       const ok = await deliverLoginCode(peridot, ctx);
       if (!ok) {
         flags.delivered = false;
+        setSigning(false);
         setError("Couldn't authorize — try again.");
       } else {
         onCtxDone?.(false);
       }
     } catch (e) {
       flags.delivered = false;
+      setSigning(false);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
 
-  /** "Use a different account": pick another linked identity (both client login
-   *  and third-party SSO), falling back to the login form when this browser
-   *  holds only one. Never signs the wallet out of PeridotID — an app's login
-   *  must not end the user's wallet session. */
-  const useDifferentCtx = async () => {
+  /** Profile popover: load every identity in this browser for the consent card.
+   *  Switching never signs the wallet out — an app's login must not end the
+   *  user's wallet session. */
+  const openAccounts = async () => {
     setBusy(true);
     setPickerError(null);
-    let accounts: AccountView[] = [];
+    setPicker([]);
     try {
       const res = await peridot.auth.accounts();
-      if (Array.isArray(res)) accounts = res as AccountView[];
+      setPicker(Array.isArray(res) ? (res as AccountView[]) : []);
     } catch (e) {
       setPickerError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-    if (accounts.length > 0) {
-      setPicker(accounts);
-      return;
-    }
-    // No other identity on this browser: start a real login instead.
-    flags.delivered = false;
-    setSession(null);
-    setShowLogin(true);
   };
 
   /** Pick a linked identity for the pending client login, then re-consent. */
@@ -130,7 +137,8 @@ export function useConsentActions(
     allowApp,
     denyApp,
     allowCtx,
-    useDifferentCtx,
+    signing,
+    openAccounts,
     pickAccount,
     addAccountCtx,
     picker,

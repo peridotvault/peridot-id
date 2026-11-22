@@ -3,13 +3,23 @@
 // travels in the redirect URL, then is exchanged server-to-server — no cross-site cookie
 // sharing. Single-use, short TTL, bound to the issuing identity.
 
-import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
-import { SSO_EXCHANGE_TOKEN_TTL, resolveServiceUrls, serviceOrigins, JWT_AUD_SSO, JWT_ISSUER, ttlSeconds } from "../common/app-config";
+import {
+  SSO_EXCHANGE_TOKEN_TTL,
+  SSO_REFRESH_TOKEN_TTL,
+  resolveServiceUrls,
+  serviceOrigins,
+  JWT_AUD_RP_REFRESH,
+  JWT_AUD_SSO,
+  JWT_ISSUER,
+  parseTtlMs,
+  ttlSeconds,
+} from "../common/app-config";
 import { PidAppsService } from "./apps.service";
 import { UsageService } from "../usage/usage.service";
 
@@ -75,6 +85,40 @@ export interface SsoIdentity {
   accessToken: string;
   /** accessToken lifetime in seconds (for RP-side caching). */
   expiresIn: number;
+  /**
+   * Server-held refresh token (audience `pid-rp-refresh`) — the RP stores it
+   * next to the bearer and rotates it at `POST /v1/auth/rp/refresh`. Sliding
+   * 30d, so the RP session lasts as long as the RP keeps refreshing.
+   */
+  refreshToken: string;
+  /** refreshToken lifetime in seconds. */
+  refreshExpiresIn: number;
+}
+
+/** Rotated RP credentials (same shape minus the identity profile). */
+export interface SsoRefreshResult {
+  pid: string;
+  /** @deprecated one-release shim for relying parties — identical to `pid`. */
+  identityId: string;
+  accessToken: string;
+  expiresIn: number;
+  refreshToken: string;
+  refreshExpiresIn: number;
+}
+
+/**
+ * Stable per-origin scope label for an RP session (`rp_live2dev_com`), within
+ * SCOPE_RE. It is what Settings lists and what "Disconnect app" revokes.
+ */
+export function rpScope(origin: string): string {
+  let host = "app";
+  try {
+    host = new URL(origin).hostname.toLowerCase();
+  } catch {
+    // unparseable origin — keep the generic label
+  }
+  const slug = host.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 29);
+  return `rp_${slug || "app"}`;
 }
 
 /** Validated cross-domain return target: where to redirect + which app asked.
@@ -283,7 +327,7 @@ export class SsoService {
   async issue(
     pid: string,
     redirectTo: string,
-    opts?: { clientId?: string; sessionId?: string; codeChallenge?: string; codeChallengeMethod?: string },
+    opts?: { clientId?: string; sessionId?: string; codeChallenge?: string; codeChallengeMethod?: string; method?: string },
   ): Promise<string> {
     // PKCE (ANT-284): public clients bind an S256 challenge at issue time.
     // Only S256 is accepted; `plain` and unknown methods are rejected here
@@ -309,6 +353,19 @@ export class SsoService {
     if (opts?.clientId) {
       const app = await this.apps.findActive(opts.clientId);
       if (!app) throw new Error("sso_app_unknown");
+      // Developer switch (dashboard → Integrations): an app can refuse a login
+      // method. Enforced at code mint so a stale login page cannot bypass it.
+      // Missing column (pre-migration/test double) means every method on.
+      const enabled: string[] | undefined = (app as { loginMethods?: string[] }).loginMethods;
+      // No method context = cannot evaluate the app's switches. Fail closed
+      // rather than minting a code that bypasses them (session reuse, old
+      // clients). Fresh logins always carry the authenticating provider.
+      if (!opts.method) {
+        throw new BadRequestException("Authentication method context is required — sign in again.");
+      }
+      if (Array.isArray(enabled) && !enabled.includes(opts.method)) {
+        throw new BadRequestException("This login method is disabled for this app.");
+      }
       if (!app.clientSecretHash && codeChallenge === null) {
         throw new BadRequestException("sso_pkce_invalid");
       }
@@ -321,6 +378,7 @@ export class SsoService {
         sessionId: opts?.sessionId ?? null,
         redirectTo,
         clientId: opts?.clientId ?? null,
+        providerCode: opts?.method ?? null,
         ...(codeChallenge ? { codeChallenge, codeChallengeMethod } : {}),
         expiresAt: new Date(Date.now() + CODE_TTL_MS),
       },
@@ -416,10 +474,94 @@ export class SsoService {
 
     // App-scoped bearer for RP backend reads (balance/ledger). The RP keeps it
     // server-side; the browser only ever sees the RP's own session.
+    const access = await this.mintSsoAccess(row.pid, row.clientId);
+    // Sliding refresh credential: the 24h bearer is renewed without the user
+    // until the RP stops refreshing (or the owner disconnects the app).
+    const refresh = await this.issueRpSession(row.pid, rpScope(origin), row.providerCode ?? null, row.clientId, undefined, undefined);
+
+    if (row.clientId) await this.usage.recordSuccessfulLogin(row.clientId, row.pid, row.id, row.providerCode ?? null);
+
+    return {
+      pid: row.pid,
+      identityId: row.pid,
+      profile: { displayName: profile?.displayName ?? null, avatarUrl: profile?.avatarUrl ?? null },
+      credentials,
+      accessToken: access.accessToken,
+      expiresIn: access.expiresIn,
+      refreshToken: refresh.refreshToken,
+      refreshExpiresIn: refresh.expiresIn,
+    };
+  }
+
+  /**
+   * Rotate an RP session: verify the refresh token, revoke the presented
+   * session row, and mint a fresh bearer + refresh token on the same device.
+   * Deliberately has no absolute family cap — the credential lives in the RP's
+   * backend, not on a user device, so device-theft caps do not apply; it ends
+   * on logout, "Disconnect app", or a global sign-out (revoked rows 401 here).
+   */
+  async refreshRpSession(refreshToken: string): Promise<SsoRefreshResult> {
+    let payload: { sub?: string; jti?: string; type?: string; app?: string };
+    try {
+      payload = await this.jwt.verifyAsync<{ sub?: string; jti?: string; type?: string; app?: string }>(refreshToken, {
+        secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_RP_REFRESH,
+      });
+    } catch {
+      throw new UnauthorizedException("Invalid refresh token");
+    }
+    if (payload.type !== "refresh" || !payload.sub || !payload.jti) {
+      throw new UnauthorizedException("Invalid refresh token");
+    }
+    const session = await this.prisma.session.findUnique({
+      where: { id: payload.jti },
+      include: { device: true },
+    });
+    // Only RP sessions rotate here — a first-party cookie refresh token
+    // presented by mistake fails closed (it has no `rp_` scope).
+    if (!session || !session.scope?.startsWith("rp_")) throw new UnauthorizedException("Invalid refresh token");
+    if (session.revokedAt || session.expiresAt <= new Date()) {
+      if (session.revokedAt) {
+        // Replay of a rotated token: revoke the whole app session family, log it.
+        await this.prisma.session.updateMany({
+          where: { deviceId: session.deviceId },
+          data: { revokedAt: new Date() },
+        });
+        await this.security.log(session.device.pid, "refresh.reuse_detected", {
+          deviceId: session.deviceId,
+          jti: payload.jti,
+          scope: session.scope,
+        });
+      }
+      throw new UnauthorizedException("Refresh token revoked");
+    }
+
+    await this.prisma.session.update({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
+    const access = await this.mintSsoAccess(payload.sub, payload.app ?? null);
+    const next = await this.issueRpSession(
+      payload.sub,
+      session.scope,
+      session.device.authMethod,
+      payload.app ?? null,
+      session.deviceId,
+      payload.jti,
+    );
+    return {
+      pid: payload.sub,
+      identityId: payload.sub,
+      accessToken: access.accessToken,
+      expiresIn: access.expiresIn,
+      refreshToken: next.refreshToken,
+      refreshExpiresIn: next.expiresIn,
+    };
+  }
+
+  private async mintSsoAccess(pid: string, clientId?: string | null): Promise<{ accessToken: string; expiresIn: number }> {
     const ttl = SSO_EXCHANGE_TOKEN_TTL;
     const accessToken = await this.jwt.signAsync(
       // scope:"read" — the RP backend may only GET (balance/ledger), never write.
-      { sub: row.pid, type: "access", scope: "read", ...(row.clientId ? { app: row.clientId } : {}) },
+      { sub: pid, type: "access", scope: "read", ...(clientId ? { app: clientId } : {}) },
       {
         secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
         expiresIn: ttl,
@@ -427,18 +569,45 @@ export class SsoService {
         audience: JWT_AUD_SSO,
       },
     );
+    return { accessToken, expiresIn: ttlSeconds(ttl, "SSO_EXCHANGE_TOKEN_TTL") };
+  }
 
-    if (row.clientId) await this.usage.recordSuccessfulLogin(row.clientId, row.pid);
-
-    return {
-      pid: row.pid,
-      identityId: row.pid,
-      profile: { displayName: profile?.displayName ?? null, avatarUrl: profile?.avatarUrl ?? null },
-      credentials,
-      accessToken,
-      // Guarded parse (ANT-227 item 4): throws on typo'd TTL, never NaN.
-      expiresIn: ttlSeconds(ttl, "SSO_EXCHANGE_TOKEN_TTL"),
-    };
+  /** Sign an RP refresh token and persist its session row (no cookies — server-held). */
+  private async issueRpSession(
+    pid: string,
+    scope: string,
+    authMethod: string | null,
+    clientId?: string | null,
+    deviceId?: string,
+    rotatedFrom?: string,
+  ): Promise<{ refreshToken: string; expiresIn: number }> {
+    const jti = randomUUID();
+    const refreshToken = await this.jwt.signAsync(
+      { sub: pid, jti, type: "refresh", ...(clientId ? { app: clientId } : {}) },
+      {
+        secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
+        expiresIn: SSO_REFRESH_TOKEN_TTL,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_RP_REFRESH,
+      },
+    );
+    let device = deviceId;
+    if (!device) {
+      const created = await this.prisma.device.create({ data: { pid, userAgent: null, authMethod } });
+      device = created.id;
+    } else {
+      await this.prisma.device.update({ where: { id: device }, data: { lastSeenAt: new Date() } });
+    }
+    await this.prisma.session.create({
+      data: {
+        id: jti,
+        deviceId: device,
+        scope,
+        rotatedFrom: rotatedFrom ?? null,
+        expiresAt: new Date(Date.now() + parseTtlMs(SSO_REFRESH_TOKEN_TTL, "SSO_REFRESH_TOKEN_TTL")),
+      },
+    });
+    return { refreshToken, expiresIn: ttlSeconds(SSO_REFRESH_TOKEN_TTL, "SSO_REFRESH_TOKEN_TTL") };
   }
 
   /** True when the identity revoked this origin (one-tap authorize stays blocked). */
@@ -477,10 +646,17 @@ export class SsoService {
     );
   }
 
-  /** Disconnect an origin: stops future one-tap issuance (idempotent, identity-scoped). */
+  /** Disconnect an origin: stops future one-tap issuance AND ends its RP
+   *  sessions (refresh stops immediately; the current bearer dies at its TTL). */
   async revokeGrant(pid: string, id: string): Promise<void> {
+    const grant = await this.prisma.ssoGrant.findUnique({ where: { id } });
+    if (!grant || grant.pid !== pid) return;
     await this.prisma.ssoGrant.updateMany({
       where: { id, pid },
+      data: { revokedAt: new Date() },
+    });
+    await this.prisma.session.updateMany({
+      where: { device: { pid }, scope: rpScope(grant.origin), revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }

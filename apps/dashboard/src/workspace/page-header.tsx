@@ -1,24 +1,26 @@
+import type { ReactNode } from "react";
 import { EYEBROW_UPPER, MUTED } from "./ui";
 
-/** Workspace header: same rule language as the content blocks (no floating frame). */
+/** Page header. The page container owns horizontal padding and width; this only
+ *  sets the type scale so every screen starts the same way. */
 export function PageHeader({
   eyebrow,
   title,
   description,
+  meta,
 }: {
   eyebrow: string;
   title: string;
   description?: string;
+  /** Small identity row (ids, status) that belongs to the title, not prose. */
+  meta?: ReactNode;
 }) {
   return (
-    <div className="border-t border-line bg-background px-6 py-8 sm:px-8 sm:py-10">
+    <header className="pb-6">
       <p className={EYEBROW_UPPER}>{eyebrow}</p>
-      <h1 className="mt-2 font-sans text-4xl font-normal leading-[1.12] tracking-[-0.01em] sm:text-5xl">
-        {title}
-      </h1>
-      {description && (
-        <p className={`mt-3 max-w-xl text-sm sm:text-base ${MUTED}`}>{description}</p>
-      )}
-    </div>
+      <h1 className="mt-2 text-3xl font-semibold leading-tight tracking-[-0.01em] sm:text-4xl">{title}</h1>
+      {meta && <div className="mt-3">{meta}</div>}
+      {description && <p className={`mt-2 max-w-2xl text-sm ${MUTED}`}>{description}</p>}
+    </header>
   );
 }

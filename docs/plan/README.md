@@ -68,3 +68,5 @@ pending the unresolved pricing decisions in stage 5.
 Active implementation plans live in this directory as Markdown. Historical plans
 and superseded references live in `../archive` and do not override this direction.
 Operational and security references remain outside the plan directory.
+
+- [06 — Provider catalogue, chain policies, login history](06-provider-catalog-and-login-history.md): implemented locally; verification and remaining scope documented.

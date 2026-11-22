@@ -87,6 +87,7 @@ export type {
   ProfileUpdate,
   RegistryToken,
   Role,
+  RpRefreshResult,
   Session,
   SsoGrant,
   Token,

@@ -128,6 +128,48 @@ to the tunnel URL — localhost values never reach DOKU.
   load `frontend-design-guidelines` + `design-taste` for UI work,
   `number-formatting` for amounts, `page-load-animations` for entrance motion,
   `web-design-guidelines` for accessibility audits.
+- Arctis `frontend` / `backend` / `monorepo` are vendored there too, so every
+  clone has them (no user-scope plugin needed). `.claude/skills/*` are symlinks
+  into `.agents/skills/*` — add a skill once, link it once.
+- Both apps ship shadcn-style primitives in the brand skin. Wallet:
+  `Button` (cva variant table) + `Dialog`/`Modal`/`BottomSheet` in
+  `shared/components/ui`. Dashboard: `src/shared/ui/` (button, input,
+  textarea, select, label, field, table, card, badge, segmented, switch);
+  screens keep importing from `workspace/ui.tsx` (`Card`, `Badge`,
+  `Segmented`/`SegmentedItem`, `MiniButton`, `FIELD` = the same input string,
+  `SECTION_LABEL`/`METRIC`/`MUTED`/`ERROR`/`WARN`).
+  Behavior comes from ui-sdk (`Dialog`, `Tabs`, `Switch`), not Radix.
+  Rules that keep the audit from drifting back: every content group is a
+  `Card` (never a bare bordered div), every table comes from `table.tsx`
+  (its head/row hairline is built in), tabs use `Segmented`, pills/chips use
+  `Badge`, links are quiet (`hover:text-foreground`) except inside prose,
+  hover tints are `bg-muted/40`, and the cut-corner button is gone.
+  `cn()` lives in `apps/wallet/src/shared/styles/cn.ts` and
+  `apps/dashboard/src/lib/cn.ts`.
+- Tokens follow shadcn's semantic contract (`--primary`, `--secondary`,
+  `--card-foreground`, `--popover*`, `--destructive`, `--input`, `--chart-*`,
+  `--sidebar*`) with brand values — dark only. Radius: both apps run the same
+  peridotbase scale (wallet `--radius-sm|md|lg|xl` = 6/8/10/14, dashboard
+  `--radius: 0.625rem`), so controls, rows and panels are rounded in both.
+  The peridot-only keys (`--surface`, `--paragraph`,
+  `--line`, `--label`, `--brand-1/2`) stay. **No `rounded-full`** anywhere
+  (avatars, icon tiles, switches, badges, progress bars, status dots): use the
+  radius scale. The only exception is token/chain logos (`AssetSection`,
+  `ChainRow`, dashboard token + chain logos), which stay circular.
+- `packages/react-embed` deliberately stays style-free (published, renders
+  inside a host page): no Tailwind, no ui-sdk, no shadcn.
+
+## ui-sdk
+
+- `@ui-sdk/react` + `@ui-sdk/core` are installed in `apps/wallet` and
+  `apps/dashboard`; default styles come from `@ui-sdk/core/web.css`, imported
+  once in each app's global stylesheet (`layer(components)` above Tailwind's
+  base, below its utilities).
+- Before using ui-sdk, follow the `ui-sdk` skill if it is installed (it is, in
+  `.agents/skills/ui-sdk`), and read
+  `apps/<app>/node_modules/@ui-sdk/react/docs/llms.txt` (pnpm does not hoist to
+  the repo root). To build a new component, also search
+  `.../docs/core.md` by heading, and read `.../docs/rendering.md` next to it.
 
 ## Verification
 

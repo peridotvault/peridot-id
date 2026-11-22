@@ -1,11 +1,13 @@
-import { ExecutionContext, Inject, Injectable, Logger, ServiceUnavailableException } from "@nestjs/common";
+import { ExecutionContext, Inject, Injectable, Logger, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { AuthGuard } from "@nestjs/passport";
 import { Response } from "express";
 import { setOAuthStateCookie } from "../common/cookies";
+import { decryptSecret } from "../common/secret-crypto";
+import { PrismaService } from "../prisma/prisma.service";
 import { decodeState } from "./sso.service";
 import { newOAuthNonce, oauthStateSecret, signOAuthState } from "./oauth-state";
-import { GOOGLE_OAUTH_OPTIONS, GoogleOAuthOptions } from "./google.strategy";
+import { GOOGLE_OAUTH_OPTIONS, GoogleOAuthOptions, GoogleStrategy } from "./google.strategy";
 import { resolveServiceUrls } from "../common/app-config";
 
 /** Marker for a failed OAuth callback — the controller redirects to retry UI. */
@@ -23,24 +25,82 @@ function toErrorCode(err: unknown): string {
   return "oauth_failed";
 }
 
+export interface GoogleCredentials {
+  clientID: string;
+  clientSecret: string;
+  scopes?: string[];
+}
+
+/**
+ * Point the passport strategy at the active client credentials.
+ *
+ * shortcut: passport-google-oauth20 keeps its OAuth2 client on `_oauth2`
+ * (private). Per-request mutation is how a DB-managed client can be used
+ * without re-registering the strategy; re-check on passport upgrades.
+ */
+export function applyGoogleCredentials(strategy: GoogleStrategy, credentials: GoogleCredentials): void {
+  const oauth2 = (strategy as unknown as { _oauth2?: { _clientId?: string; _clientSecret?: string } })._oauth2;
+  if (oauth2) {
+    oauth2._clientId = credentials.clientID;
+    oauth2._clientSecret = credentials.clientSecret;
+  }
+  if (credentials.scopes?.length) {
+    (strategy as unknown as { _scope?: string[] })._scope = credentials.scopes;
+  }
+}
+
 @Injectable()
 export class GoogleGuard extends AuthGuard("google") {
   private readonly logger = new Logger(GoogleGuard.name);
-  private readonly configured: boolean;
 
   constructor(
-    @Inject(GOOGLE_OAUTH_OPTIONS) oauthOptions: GoogleOAuthOptions | null,
+    @Inject(GOOGLE_OAUTH_OPTIONS) private readonly envOptions: GoogleOAuthOptions | null,
     private readonly config: ConfigService,
+    @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly strategy?: GoogleStrategy,
   ) {
     super();
-    this.configured = Boolean(oauthOptions);
   }
 
-  canActivate(context: ExecutionContext) {
-    if (!this.configured) {
-      throw new ServiceUnavailableException("Google OAuth is not configured. Set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET (and API_URL for the derived callback) in the env for this environment");
+  /**
+   * Platform DB credentials win over env (admin dashboard), env stays the
+   * fallback. Missing/undecryptable config fails closed with a retryable code.
+   */
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const credentials = await this.resolveCredentials();
+    if (!credentials) {
+      throw new ServiceUnavailableException(
+        "Google OAuth is not configured. Set it in the admin provider catalogue or GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET",
+      );
     }
+    if (this.strategy) applyGoogleCredentials(this.strategy, credentials);
     return super.canActivate(context) as boolean;
+  }
+
+  private async resolveCredentials(): Promise<GoogleCredentials | null> {
+    if (this.prisma) {
+      const provider = await this.prisma.loginProvider.findUnique({
+        where: { code: "google" },
+        select: { isAvailable: true },
+      });
+      if (!provider?.isAvailable) return null;
+      const row = await this.prisma.platformOAuthConfig.findUnique({
+        where: { providerCode: "google" },
+        select: { clientId: true, clientSecretEnc: true, scopes: true },
+      });
+      if (row) {
+        try {
+          const secret = decryptSecret(row.clientSecretEnc, this.config.get<string>("PID_SECRETS_ENC_KEY"));
+          if (secret) return { clientID: row.clientId, clientSecret: secret, scopes: row.scopes };
+        } catch (err) {
+          this.logger.warn(`google platform credentials unusable: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return null; // a broken DB row must not silently fall back to a stale env client
+      }
+    }
+    return this.envOptions
+      ? { clientID: this.envOptions.clientID, clientSecret: this.envOptions.clientSecret }
+      : null;
   }
 
   /**

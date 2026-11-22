@@ -22,7 +22,7 @@ export function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: F
   return (
     <Pressable key={tx.id} style={s.card} className="px-6" onPress={() => onSelect(item)}>
       <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
-        <div style={{ backgroundColor: color + "22" }} className="flex flex-col flex h-9 w-9 items-center justify-center rounded-full">
+        <div style={{ backgroundColor: color + "22" }} className="flex flex-col flex h-9 w-9 items-center justify-center rounded-md">
           <Icon size={16} className={tinted ? "text-success" : "text-foreground"} />
         </div>
         <div className="flex flex-col flex-1 gap-0.5">

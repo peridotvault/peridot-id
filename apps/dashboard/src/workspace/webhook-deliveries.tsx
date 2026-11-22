@@ -25,10 +25,10 @@ export function WebhookDeliveries({ client, appId }: { client: PeridotClient; ap
     } catch (e) { setError(e instanceof Error ? e.message : "Replay failed"); }
     finally { setBusy(null); }
   };
-  return <Card className="border-t-0">
+  return <Card>
     <div className="flex items-center justify-between gap-4">
       <h2 className={SECTION_LABEL}>Webhook deliveries</h2>
-      <MiniButton className="min-h-10" disabled={loading} onClick={() => void load()}>Refresh</MiniButton>
+      <MiniButton size="md" disabled={loading} onClick={() => void load()}>Refresh</MiniButton>
     </div>
     {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
     {loading ? <p role="status" className={`mt-4 ${MUTED}`}>Loading deliveries…</p> : rows.length === 0 ?
@@ -40,7 +40,7 @@ export function WebhookDeliveries({ client, appId }: { client: PeridotClient; ap
           <p className={`mt-1 text-xs ${MUTED}`}>{row.status} · {row.attempts} attempts · {new Date(row.createdAt).toLocaleString()}</p>
           {row.lastError && <p className={`mt-1 break-words text-xs ${ERROR}`}>{row.lastError}</p>}
         </div>
-        <MiniButton className="min-h-10" disabled={busy !== null} aria-label={`Replay ${row.eventType} ${row.id}`} onClick={() => void replay(row.id)}>{busy === row.id ? "Queuing…" : "Replay"}</MiniButton>
+        <MiniButton size="md" disabled={busy !== null} aria-label={`Replay ${row.eventType} ${row.id}`} onClick={() => void replay(row.id)}>{busy === row.id ? "Queuing…" : "Replay"}</MiniButton>
       </li>)}</ul>}
   </Card>;
 }

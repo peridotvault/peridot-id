@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { styles as s } from "../../../shared/styles/theme";
 import { UIButton } from "../../../shared/components/ui/UIButton";
+import { AppOriginBadge, originHost } from "./AppOriginBadge";
+import { AppLogo } from "./AppLogo";
 import type { ExecuteGate } from "../utils/knownPrograms";
 
 export const UNKNOWN_PROGRAM_RISK_COPY =
@@ -10,6 +12,8 @@ export const UNKNOWN_PROGRAM_RISK_COPY =
 export function PopupReview({
   summary,
   origin,
+  appName,
+  logoUrl,
   busy,
   onApprove,
   onDeny,
@@ -21,6 +25,10 @@ export function PopupReview({
 }: {
   summary: string | null;
   origin: string;
+  /** Registered app name; falls back to the origin's host. */
+  appName?: string | null;
+  /** Owner-set logo; null renders the generic tile. */
+  logoUrl?: string | null;
   busy: boolean;
   onApprove: () => void;
   onDeny: () => void;
@@ -70,6 +78,13 @@ export function PopupReview({
 
   return (
     <>
+      <div className="flex items-center gap-3 rounded-md border border-line p-3">
+        <AppLogo logoUrl={logoUrl} name={appName ?? originHost(origin)} size="sm" />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <span className="break-words font-sans text-base font-semibold text-foreground">{appName ?? "This app"}</span>
+          <AppOriginBadge origin={origin} />
+        </div>
+      </div>
       {summary && (
         <>
           <span style={s.label}>Requested action</span>
@@ -117,7 +132,6 @@ export function PopupReview({
           Approving as {approvingPid}{switched ? " (switched to this account for approval)" : ""}
         </p>
       )}
-      <p style={s.hint}>Requested by {origin}</p>
       <p style={s.hint}>Review carefully — approving signs with your passkey.</p>
       <UIButton title={busy ? "Waiting for passkey…" : "Approve"} onPress={onApprove} disabled={approveDisabled} variant="primary" />
       <UIButton title="Deny" onPress={onDeny} disabled={busy} />

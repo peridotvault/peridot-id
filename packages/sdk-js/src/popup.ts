@@ -77,17 +77,15 @@ interface WindowOpts {
   mode?: "popup" | "tab";
   width?: number;
   height?: number;
-  /** Fall back to a new tab when the popup is blocked (login only). */
-  fallbackToTab?: boolean;
 }
 
 /**
- * Open the auth page in a centered popup (approvals + login), or a normal new
- * tab when `mode: "tab"`. `onGone` fires once on timeout or user close.
+ * Open the auth page in a centered popup (approvals), or a normal new tab when
+ * `mode: "tab"` (every login). `onGone` fires once on timeout or user close.
  */
 function openWindow(url: string, timeoutMs: number, onGone: () => void, opts: WindowOpts = {}): { popup: Window; cancel: () => void } {
   requireBrowser();
-  const { mode = "popup", width = 420, height = 640, fallbackToTab = false } = opts;
+  const { mode = "popup", width = 420, height = 640 } = opts;
   let popup: Window | null;
   if (mode === "tab") {
     popup = window.open(url, "_blank");
@@ -95,9 +93,6 @@ function openWindow(url: string, timeoutMs: number, onGone: () => void, opts: Wi
     const left = Math.max(0, (window.screenX ?? 0) + ((window.innerWidth ?? width) - width) / 2);
     const top = Math.max(0, (window.screenY ?? 0) + ((window.innerHeight ?? height) - height) / 2);
     popup = window.open(url, "peridot-popup", `width=${width},height=${height},left=${left},top=${top},popup=1`);
-    // Blocked popup: login falls back to a tab so the user is never stranded;
-    // approval ceremonies surface the block instead (see openPeridotPopup).
-    if (!popup && fallbackToTab) popup = window.open(url, "_blank");
   }
   if (!popup) throw new PopupBlockedError();
   let done = false;
@@ -208,12 +203,19 @@ function loginFlow(opts: OpenerOpts, windowOpts: WindowOpts): Promise<{ pidCode?
 }
 
 /**
- * Login in a centered popup (preferred). Larger than the approval popup because
- * the flow is the full page: Google, the consent card, and the PID picker/claim
- * for new users. Falls back to a new tab when the popup is blocked.
+ * Login on a full tab. The name is kept only for API compatibility.
+ *
+ * There is no popup variant anymore: extension wallets that create their own
+ * window (MetaMask calls `chrome.windows.create`) are parented to the window
+ * that asked, and Chromium CHECKs when that parent is a script-opened popup —
+ * Brave 1.99 kills its whole browser process (SIGTRAP) on every MetaMask
+ * sign-in started from a popup login window. A plain tab is the shape every
+ * working dapp uses. Use `openLoginTab`.
+ *
+ * @deprecated use `openLoginTab`; this opens a tab.
  */
 export async function openLoginPopup(opts: OpenerOpts): Promise<{ pidCode?: string }> {
-  return loginFlow(opts, { mode: "popup", width: 480, height: 760, fallbackToTab: true });
+  return openLoginTab(opts);
 }
 
 /** Login in a normal new tab (opt-in, for apps that prefer a tab). */

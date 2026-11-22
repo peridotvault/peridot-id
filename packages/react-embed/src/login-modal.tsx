@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { Peridot, type LinkedWallet, type PeridotEnv } from "@peridotvault/pid-sdk-js";
-import { detectWallets, type WalletConnector } from "./wallet-connectors.js";
+import { detectWallets, discoverWallets, type WalletConnector } from "./wallet-connectors.js";
 
 export interface PeridotLoginModalProps {
   open: boolean;
@@ -95,7 +95,64 @@ export function PeridotLoginModal(props: PeridotLoginModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
 
-  const wallets = useMemo(() => (open ? detectWallets() : []), [open]);
+  // Discovery also asks EIP-6963 wallets to announce, so MetaMask is offered
+  // even when the browser's own wallet answers on `window.ethereum`.
+  const [wallets, setWallets] = useState<WalletConnector[]>(() => (open ? detectWallets() : []));
+  useEffect(() => {
+    if (!open) {
+      setWallets([]);
+      return;
+    }
+    let alive = true;
+    discoverWallets().then((found) => {
+      if (alive) setWallets(found);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+  // Platform catalogue + the app's switches. Until loaded, keep every detected
+  // wallet (the API rejects anything unavailable); once loaded, only ready,
+  // globally enabled, app-enabled connectors are offered.
+  const [catalog, setCatalog] = useState<Array<{ code: string; name: string; imageUrl: string | null; isAvailable: boolean; isSupported: boolean }> | null>(null);
+  const [allowedMethods, setAllowedMethods] = useState<string[] | null>(null);
+  const [failedIcons, setFailedIcons] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await peridot.get<Array<{ code: string; name: string; imageUrl: string | null; isAvailable: boolean; isSupported: boolean }>>("/v1/providers");
+        if (!cancelled && res.ok && Array.isArray(res.data)) setCatalog(res.data);
+      } catch {
+        // fail-open to detected wallets; the API still rejects unavailable ones
+      }
+    })();
+    (async () => {
+      if (!clientId) return;
+      try {
+        const res = await peridot.get<{ loginMethods?: string[] }>(`/v1/auth/app-info?clientId=${encodeURIComponent(clientId)}`);
+        if (!cancelled && res.ok) {
+          const data = res.data as { loginMethods?: string[] };
+          setAllowedMethods(Array.isArray(data.loginMethods) ? data.loginMethods : null);
+        }
+      } catch {
+        // fail-open; the API enforces the app's switches
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, clientId, peridot]);
+
+  const byCode = useMemo(() => new Map((catalog ?? []).map((p) => [p.code, p])), [catalog]);
+  const visibleWallets = wallets.filter((wallet) => {
+    if (allowedMethods && !allowedMethods.includes(wallet.kind)) return false;
+    if (!catalog) return true;
+    const provider = byCode.get(wallet.kind);
+    return Boolean(provider?.isAvailable && provider?.isSupported);
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -132,6 +189,7 @@ export function PeridotLoginModal(props: PeridotLoginModalProps) {
         setStatus("Approve the signature in your wallet…");
         if (mode === "link") {
           const challenge = await peridot.auth.walletLinkChallenge({
+            providerCode: wallet.kind,
             namespace: wallet.namespace,
             reference: wallet.reference,
             address,
@@ -145,6 +203,7 @@ export function PeridotLoginModal(props: PeridotLoginModalProps) {
           return;
         }
         const challenge = await peridot.auth.walletChallenge({
+          providerCode: wallet.kind,
           namespace: wallet.namespace,
           reference: wallet.reference,
           address,
@@ -229,14 +288,31 @@ export function PeridotLoginModal(props: PeridotLoginModalProps) {
           </form>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {wallets.length === 0 ? (
+            {visibleWallets.length === 0 ? (
               <p style={muted}>No browser wallet found. Install Phantom or MetaMask to sign in with a wallet.</p>
             ) : (
-              wallets.map((wallet) => (
-                <button key={wallet.kind} style={button} disabled={busy} onClick={() => void signIn(wallet)}>
-                  {wallet.label}
-                </button>
-              ))
+              visibleWallets.map((wallet) => {
+                const provider = byCode.get(wallet.kind);
+                const icon = provider?.imageUrl;
+                return (
+                  <button key={`${wallet.kind}:${wallet.namespace}`} style={button} disabled={busy} onClick={() => void signIn(wallet)}>
+                    {icon && !failedIcons[wallet.kind] ? (
+                      <img
+                        src={icon}
+                        alt=""
+                        width={16}
+                        height={16}
+                        loading="lazy"
+                        crossOrigin="anonymous"
+                        referrerPolicy="no-referrer"
+                        onError={() => setFailedIcons((prev) => ({ ...prev, [wallet.kind]: true }))}
+                        style={{ marginRight: 8, verticalAlign: "middle", objectFit: "contain" }}
+                      />
+                    ) : null}
+                    {provider?.name ?? wallet.label}
+                  </button>
+                );
+              })
             )}
           </div>
         )}

@@ -1,4 +1,4 @@
-import { IsOptional, IsString, Matches } from "class-validator";
+import { IsOptional, IsString, Matches, MinLength } from "class-validator";
 import { Transform } from "class-transformer";
 import { PID_HANDLE_REGEX, PID_REGEX } from "../../common/pid";
 export class LoginDto {
@@ -102,6 +102,16 @@ export class AppTokenDto {
   @IsString()
   @Matches(/^fiat:(transfer|payment)$/, { message: "scope must be fiat:transfer or fiat:payment" })
   scope?: string;
+}
+
+/**
+ * Rotate an RP backend session (no browser): exchanges its server-held refresh
+ * token for a fresh read bearer + rotated refresh token.
+ */
+export class RpRefreshDto {
+  @IsString()
+  @MinLength(20, { message: "Invalid refresh token" })
+  refreshToken!: string;
 }
 
 /**

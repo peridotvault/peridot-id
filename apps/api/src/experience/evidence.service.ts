@@ -73,6 +73,12 @@ export class EvidenceService {
         return { ok: false, reason: "no PeridotID-issued achievement registry (not shipped)" };
       case "backend_check.activity_verified":
         return { ok: false, reason: "no PeridotID-side activity record linkage (not shipped)" };
+      // Verified-app attestation: the app's own backend asserts the event and
+      // the platform already verified standing + approved event type upstream.
+      // Trust is bounded by task caps, app/org quotas, idempotency, reversals
+      // and suspend — XP never gates money.
+      case "backend_check.app_attested":
+        return { ok: true };
       default:
         return { ok: false, reason: `unknown checker: ${checker}` };
     }

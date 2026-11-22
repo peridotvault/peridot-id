@@ -1,4 +1,4 @@
-import { xpIntakeAppPidTracker, xpIntakeAppTracker } from "./rate-limit";
+import { skipUnlessIntake, xpIntakeAppPidTracker, xpIntakeAppTracker } from "./rate-limit";
 
 /**
  * ANT-89 M3 (ANT-441) — Tobias re-review S3: the F5 throttle keying is
@@ -53,5 +53,16 @@ describe("intake throttle trackers (F5 keying)", () => {
     expect(
       xpIntakeAppPidTracker({ body: { client_id: "x".repeat(128), user_id: "y".repeat(64) }, ip: "1.2.3.4" }),
     ).toBe(`xp-intake-app-pid:${"x".repeat(128)}:${"y".repeat(64)}`);
+  });
+});
+
+describe("intake tiers stay scoped to the intake route", () => {
+  const ctx = (path: string) => ({ switchToHttp: () => ({ getRequest: () => ({ path }) }) }) as never;
+
+  it("skips everywhere except /v1/experience", () => {
+    expect(skipUnlessIntake(ctx("/v1/apps"))).toBe(true);
+    expect(skipUnlessIntake(ctx("/v1/chains"))).toBe(true);
+    expect(skipUnlessIntake(ctx("/v1/experience/events"))).toBe(false);
+    expect(skipUnlessIntake({ switchToHttp: () => ({ getRequest: () => ({}) }) } as never)).toBe(true);
   });
 });

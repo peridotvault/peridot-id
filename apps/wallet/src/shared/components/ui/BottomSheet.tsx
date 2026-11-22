@@ -1,10 +1,16 @@
-import type { ReactNode } from "react";
-import { Modal } from "./Modal";
+import { useEffect, useState, type ReactNode } from "react";
+import { Dialog } from "./Dialog";
 import { Pressable } from "../ui/Pressable";
 import { StyleSheet } from "../../styles/stylesheet";
+import { cn } from "../../styles/cn";
 import { X } from "../icons";
 
-// Shared bottom drawer: slide-up sheet capped at the sm width and centered.
+// Exit animation length (`sheet-shrink` / `sheet-down` in base.css): the sheet
+// stays mounted this long after `visible` flips false.
+const EXIT_MS = 180;
+
+// Shared drawer: bottom-docked sheet slides up from the edge, `center` grows
+// from its own midline. Both shrink/slide back on close.
 // ponytail: marginHorizontal auto is the centering fix — left:0/right:0 alone
 // pins an absolute view full-bleed, so maxWidth without it never centers.
 export function BottomSheet({
@@ -13,6 +19,8 @@ export function BottomSheet({
   onClose,
   closeDisabled,
   scrimLabel,
+  center,
+  className,
   children,
 }: {
   visible: boolean;
@@ -20,17 +28,41 @@ export function BottomSheet({
   onClose: () => void;
   closeDisabled?: boolean;
   scrimLabel?: string;
+  /** Center the panel in the viewport instead of docking it to the bottom. */
+  center?: boolean;
+  /** Panel skin/width override (callers may want another surface or max width). */
+  className?: string;
   children: ReactNode;
 }) {
+  // The dialog outlives `visible` by one exit animation, so closing plays the
+  // exit instead of popping the panel out of existence.
+  const [mounted, setMounted] = useState(visible);
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      return;
+    }
+    const t = setTimeout(() => setMounted(false), EXIT_MS);
+    return () => clearTimeout(t);
+  }, [visible]);
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} label={title}>
+    <Dialog open={mounted} onDismiss={onClose} label={title} dismissible={!closeDisabled}>
       <Pressable
         style={styles.scrim}
+        className={visible ? "scrim-in" : "scrim-out"}
         onPress={closeDisabled ? undefined : onClose}
         accessibilityLabel={scrimLabel ?? `Close ${title}`}
-       />
+      />
       <div
-        className="flex flex-col absolute bottom-0 left-0 right-0 mx-auto max-h-[75%] w-full max-w-[576px] gap-3 self-center border-t border-border bg-surface p-5 pb-7"
+        className={cn(
+          "flex flex-col absolute left-0 right-0 mx-auto max-h-[75%] w-full max-w-[576px] gap-3 bg-surface p-5",
+          center
+            ? "top-1/2 -translate-y-1/2 rounded-xl border border-border"
+            : "bottom-0 self-center rounded-t-xl border-t border-border pb-7",
+          visible ? (center ? "sheet-grow" : "sheet-up") : center ? "sheet-shrink" : "sheet-down",
+          className,
+        )}
         style={{ overflowY: "auto" }}
       >
         <div style={{ flexDirection: "row" }} className="flex flex-col items-center justify-between">
@@ -43,7 +75,7 @@ export function BottomSheet({
         </div>
         {children}
       </div>
-    </Modal>
+    </Dialog>
   );
 }
 

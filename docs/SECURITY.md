@@ -15,6 +15,10 @@ per-request `status === "active"` check (`jwt.strategy.ts`), `JwtAuthGuard` on e
 protected route with the owner always from the token (no account ids in URLs, so no
 IDOR class), throttled auth/wallet routes, one-wallet-per-PID cardinality, existing-
 credential approval for new passkeys, last-credential unlink/revoke guard.
+Relying-party backends get a read-only 24h bearer (`aud: pid-sso`) plus a
+server-held rotating refresh token (`aud: pid-rp-refresh`, 30d sliding) whose
+session rows are listed and revocable per app — the app's own cookie session is
+never in our trust boundary.
 
 ## Threat model dispositions (PRD_v4 §23)
 

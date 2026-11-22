@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useWorkspace } from "../workspace/workspace-provider";
-import { Card, ERROR, FIELD, MUTED, MiniButton } from "../workspace/ui";
+import { Badge, Card, ERROR, FIELD, MUTED, MiniButton } from "../workspace/ui";
 import { LevelingLayout, useResource } from "../leveling/LevelingLayout";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../shared/ui/table";
 import { buildThresholds, formatXp, grantEnvelopeStatus } from "../leveling/xp";
 import { xpAdmin } from "../leveling/api";
 
@@ -30,14 +31,14 @@ export default function LevelingLevelsPage() {
         <p role="status" className={`text-sm ${MUTED}`}>Loading policies…</p>
       ) : !policies || policies.length === 0 ? (
         <Card>
-          <h2 className="text-lg font-semibold tracking-tight">No policy versions</h2>
+          <h2 className="text-base font-semibold tracking-tight">No policy versions</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>Draft the first progression policy below to start versioning.</p>
           <div className="mt-4"><PolicyDraftForm onDone={reload} /></div>
         </Card>
       ) : (
-        <div className="flex flex-col">
+        <div className="flex flex-col gap-3">
           <Card>
-            <h2 className="text-lg font-semibold tracking-tight">Policy versions</h2>
+            <h2 className="text-base font-semibold tracking-tight">Policy versions</h2>
             <ul className="mt-3 flex flex-col gap-2">
               {policies.map((p) => (
                 <li key={p.id}>
@@ -45,15 +46,13 @@ export default function LevelingLevelsPage() {
                     type="button"
                     onClick={() => setSelectedId(p.id)}
                     aria-pressed={selected?.id === p.id}
-                    className={`flex w-full flex-wrap items-center gap-2 border px-3 py-2 text-left text-sm transition-colors focus-ring ${
-                      selected?.id === p.id ? "border-foreground" : "border-border hover:border-foreground/50"
+                    className={`flex w-full flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors focus-ring ${
+                      selected?.id === p.id ? "border-foreground bg-muted" : "border-line hover:border-foreground/40 hover:bg-muted/40"
                     }`}
                   >
                     <span className="font-medium">v{p.version}</span>
                     {p.active && (
-                      <span className="bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-                        active
-                      </span>
+                      <Badge tone="success">active</Badge>
                     )}
                     <span className={`text-xs ${MUTED}`}>
                       base {p.formula.base} · exp {p.formula.exponent} · max {p.maxLevel ?? "—"} · {p.thresholdCount} thresholds
@@ -107,7 +106,7 @@ function PolicyDraftForm({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="border border-border p-4">
+    <div className="rounded-lg border border-line bg-background p-4">
       <h3 className="text-sm font-semibold">Draft policy version</h3>
       <div className="mt-2 grid gap-2 sm:grid-cols-3">
         <label className="text-xs">Base<input aria-label="Formula base" className={FIELD} value={base} inputMode="numeric" onChange={(e) => setBase(e.target.value)} /></label>
@@ -155,7 +154,7 @@ function ThresholdTable({
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold tracking-tight">
+        <h2 className="text-base font-semibold tracking-tight">
           Thresholds <span className={`text-sm font-normal ${MUTED}`}>floor({formula.base}·L^{formula.exponent}) · max {maxLevel ?? "—"}</span>
         </h2>
         {!active && (
@@ -171,34 +170,34 @@ function ThresholdTable({
         </p>
       ) : (
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[420px] text-sm">
-            <thead>
-              <tr className={`border-b border-border text-left text-xs uppercase tracking-wide ${MUTED}`}>
-                <th className="py-2 pr-4">Level</th>
-                <th className="py-2 pr-4 text-right">Draft XP</th>
-                <th className="py-2 pr-4 text-right">Active XP</th>
-                <th className="py-2 text-right">Δ</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="w-full min-w-[420px] text-sm">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="py-2 pr-4">Level</TableHead>
+                <TableHead className="py-2 pr-4 text-right">Draft XP</TableHead>
+                <TableHead className="py-2 pr-4 text-right">Active XP</TableHead>
+                <TableHead className="py-2 text-right">Δ</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.map((r) => (
-                <tr key={r.level} className="border-b border-line">
-                  <td className="py-1.5 pr-4 font-medium">L{r.level}</td>
-                  <td className="py-1.5 pr-4 text-right">{formatXp(r.draftXp)}</td>
-                  <td className="py-1.5 pr-4 text-right">{r.activeXp === null ? "—" : formatXp(r.activeXp)}</td>
-                  <td className="py-1.5 text-right">{r.delta === null ? "—" : `${r.delta > 0 ? "+" : ""}${formatXp(r.delta)}`}</td>
-                </tr>
+                <TableRow key={r.level}>
+                  <TableCell className="py-1.5 pr-4 font-medium">L{r.level}</TableCell>
+                  <TableCell className="py-1.5 pr-4 text-right">{formatXp(r.draftXp)}</TableCell>
+                  <TableCell className="py-1.5 pr-4 text-right">{r.activeXp === null ? "—" : formatXp(r.activeXp)}</TableCell>
+                  <TableCell className="py-1.5 text-right">{r.delta === null ? "—" : `${r.delta > 0 ? "+" : ""}${formatXp(r.delta)}`}</TableCell>
+                </TableRow>
               ))}
               {last && preview && preview.thresholdDiff.length > 16 && (
-                <tr>
-                  <td className="py-1.5 pr-4 font-medium">L{last.level}</td>
-                  <td className="py-1.5 pr-4 text-right">{formatXp(last.draftXp)}</td>
-                  <td className="py-1.5 pr-4 text-right">{last.activeXp === null ? "—" : formatXp(last.activeXp)}</td>
-                  <td className="py-1.5 text-right">{last.delta === null ? "—" : `${last.delta > 0 ? "+" : ""}${formatXp(last.delta)}`}</td>
-                </tr>
+                <TableRow>
+                  <TableCell className="py-1.5 pr-4 font-medium">L{last.level}</TableCell>
+                  <TableCell className="py-1.5 pr-4 text-right">{formatXp(last.draftXp)}</TableCell>
+                  <TableCell className="py-1.5 pr-4 text-right">{last.activeXp === null ? "—" : formatXp(last.activeXp)}</TableCell>
+                  <TableCell className="py-1.5 text-right">{last.delta === null ? "—" : `${last.delta > 0 ? "+" : ""}${formatXp(last.delta)}`}</TableCell>
+                </TableRow>
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
           {preview && preview.thresholdDiff.length > 16 && (
             <p className={`mt-2 text-xs ${MUTED}`}>Showing 15 of {preview.thresholdDiff.length} levels plus the max-level row.</p>
           )}
@@ -214,7 +213,7 @@ function ImpactPreview({ policyId, active }: { policyId: string; active: boolean
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold tracking-tight">Impact preview</h2>
+      <h2 className="text-base font-semibold tracking-tight">Impact preview</h2>
       {loading ? (
         <p role="status" className={`mt-2 text-sm ${MUTED}`}>Computing impact…</p>
       ) : error ? (
@@ -271,7 +270,7 @@ function ActivateGate({ policyId, version, onDone }: { policyId: string; version
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold tracking-tight">Activation review gate</h2>
+      <h2 className="text-base font-semibold tracking-tight">Activation review gate</h2>
       <p className={`mt-1 text-sm ${MUTED}`}>
         Activating v{version} flips the live pointer. A <em>different</em> admin must confirm, or you must
         record a justification (≥ 10 chars). Self-confirm is rejected server-side.
@@ -316,7 +315,7 @@ function SimulatorCard() {
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold tracking-tight">Simulator</h2>
+      <h2 className="text-base font-semibold tracking-tight">Simulator</h2>
       <p className={`mt-1 text-sm ${MUTED}`}>
         Client-side formula preview only — the server materializes and activates. Overrides must keep the
         curve non-decreasing. One per line: <code>level: xp</code>.
@@ -333,22 +332,22 @@ function SimulatorCard() {
         <p role="alert" className={`mt-2 text-sm ${ERROR}`}>{simError}</p>
       ) : (
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[300px] text-sm">
-            <thead>
-              <tr className={`border-b border-border text-left text-xs uppercase tracking-wide ${MUTED}`}>
-                <th className="py-2 pr-4">Level</th>
-                <th className="py-2 text-right">Cumulative XP</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table className="w-full min-w-[300px] text-sm">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="py-2 pr-4">Level</TableHead>
+                <TableHead className="py-2 text-right">Cumulative XP</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.slice(0, 25).map((r) => (
-                <tr key={r.level} className="border-b border-line">
-                  <td className="py-1.5 pr-4 font-medium">L{r.level}</td>
-                  <td className="py-1.5 text-right">{formatXp(r.cumulativeXp)}</td>
-                </tr>
+                <TableRow key={r.level}>
+                  <TableCell className="py-1.5 pr-4 font-medium">L{r.level}</TableCell>
+                  <TableCell className="py-1.5 text-right">{formatXp(r.cumulativeXp)}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
           {rows.length > 25 && <p className={`mt-2 text-xs ${MUTED}`}>Showing 25 of {rows.length} rows.</p>}
         </div>
       )}

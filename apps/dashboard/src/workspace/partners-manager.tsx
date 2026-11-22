@@ -72,7 +72,7 @@ export function PartnersManager({ client }: { client: PeridotClient }) {
   };
 
   return (
-    <section className="mt-8">
+    <section>
       <PageHeader
         eyebrow="Partnerships"
         title="Partners"

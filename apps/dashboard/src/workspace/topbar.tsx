@@ -1,4 +1,5 @@
-import { CutButton } from "./cut-button";
+import { Link } from "react-router";
+import { Badge, MiniButton, Segmented, SegmentedItem } from "./ui";
 
 export interface WorkspaceTab {
   key: string;
@@ -27,64 +28,46 @@ export function Topbar({
 }) {
   const isSandbox = env !== "production";
   return (
-    <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur">
-      <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-4 overflow-x-auto px-5 py-2 sm:px-8">
-        <span className="inline-flex shrink-0 items-center justify-self-start">
+    <header className="sticky top-0 z-10 border-b border-line bg-background/80 backdrop-blur">
+      <div className="flex w-full items-center gap-4 px-5 py-2 sm:px-8">
+        <Link to="/" aria-label="PeridotID workspace" className="shrink-0 focus-ring">
           <img src="/logo/logo-text.svg" alt="PeridotID" className="h-7 w-auto" />
-        </span>
-        <nav className="flex shrink-0 items-center gap-1 border border-border bg-muted p-1" aria-label="Workspace">
+        </Link>
+        <Badge
+          tone={isSandbox ? "warning" : "success"}
+          title={isSandbox ? "Sandbox: test payments — no real money moves here." : "Production: real payments."}
+          className="shrink-0"
+        >
+          {isSandbox ? "sandbox" : "production"}
+        </Badge>
+
+        <Segmented aria-label="Workspace" className="mx-auto min-w-0">
           {tabs.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => onTab(t.key)}
-              aria-current={t.key === active ? "page" : undefined}
-              className={`px-3 py-1 text-sm font-medium transition-colors focus-ring ${
-                t.key === active
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
+            <SegmentedItem key={t.key} active={t.key === active} onClick={() => onTab(t.key)}>
               {t.label}
-            </button>
+            </SegmentedItem>
           ))}
-        </nav>
-        <div className="flex shrink-0 items-center gap-3 justify-self-end">
-          {isSandbox ? (
-            <span
-              title="Sandbox: test payments — no real money moves here."
-              className="bg-amber-400/20 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300"
-            >
-              sandbox
-            </span>
-          ) : (
-            <span
-              title="Production: real payments."
-              className="bg-emerald-500/15 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300"
-            >
-              production
-            </span>
-          )}
+        </Segmented>
+
+        <div className="flex min-w-0 shrink-0 items-center gap-3">
           {/* Sandbox MVP (FR-3 / AC-D1): env switch ALWAYS rendered. The href
               is the configured VITE_OTHER_WORKSPACE_URL or the derived
               counterpart (see lib/config.ts) — never hidden. */}
           <a
             href={otherWorkspaceUrl ?? (isSandbox ? "https://dashboard.peridot.id" : "https://sandbox-dashboard.peridot.id")}
-            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            className="hidden text-xs text-muted-foreground transition-colors hover:text-foreground sm:inline"
           >
             {isSandbox ? "Switch to production" : "Open sandbox"}
           </a>
-          <span className="truncate text-xs text-muted-foreground" title={sessionLabel}>
-            {isAdmin && (
-              <span className="mr-2 bg-brand-1 px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-brand-2 dark:text-[#07170f]">
-                admin
-              </span>
-            )}
-            {sessionLabel}
+          <span className="hidden min-w-0 items-center gap-2 text-xs text-muted-foreground md:flex">
+            {isAdmin && <Badge tone="brand">admin</Badge>}
+            <span className="max-w-48 truncate" title={sessionLabel}>
+              {sessionLabel}
+            </span>
           </span>
-          <CutButton type="button" variant="outline" onClick={onSignOut}>
+          <MiniButton variant="outline" size="md" onClick={onSignOut}>
             Sign Out
-          </CutButton>
+          </MiniButton>
         </div>
       </div>
     </header>

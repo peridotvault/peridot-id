@@ -14,6 +14,7 @@ export {
   Coins,
   Copy,
   FlaskConical,
+  Globe,
   House,
   Info,
   KeyRound,
@@ -30,5 +31,6 @@ export {
   Trash2,
   TriangleAlert,
   User,
+  Wallet,
   X,
 } from "lucide-react";

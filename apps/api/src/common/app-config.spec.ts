@@ -3,6 +3,7 @@ import {
   JWT_ACCESS_AUDIENCES,
   JWT_AUD_APP,
   JWT_AUD_REFRESH,
+  JWT_AUD_RP_REFRESH,
   JWT_AUD_SESSION,
   JWT_AUD_SSO,
   JWT_ISSUER,
@@ -10,6 +11,7 @@ import {
   PID_EVM_POLL_MS,
   PID_FEE_POLICY_VERSION,
   SSO_EXCHANGE_TOKEN_TTL,
+  SSO_REFRESH_TOKEN_TTL,
   apiServesHttps,
   parseTtlMs,
   resolveServiceUrls,
@@ -107,10 +109,17 @@ describe("TTL guards + JWT claims (ANT-227 items 1, 4, 7)", () => {
     expect(ttlSeconds(SSO_EXCHANGE_TOKEN_TTL, "SSO_EXCHANGE_TOKEN_TTL")).toBeLessThanOrEqual(24 * 60 * 60);
   });
 
+  it("keeps the RP refresh token long-lived so RP sessions outlive the bearer", () => {
+    expect(ttlSeconds(SSO_REFRESH_TOKEN_TTL, "SSO_REFRESH_TOKEN_TTL")).toBeGreaterThan(
+      ttlSeconds(SSO_EXCHANGE_TOKEN_TTL, "SSO_EXCHANGE_TOKEN_TTL"),
+    );
+  });
+
   it("names one issuer and a distinct audience per token class", () => {
     expect(JWT_ISSUER).toBe("peridot-id");
-    expect(new Set([JWT_AUD_SESSION, JWT_AUD_REFRESH, JWT_AUD_APP, JWT_AUD_SSO]).size).toBe(4);
+    expect(new Set([JWT_AUD_SESSION, JWT_AUD_REFRESH, JWT_AUD_APP, JWT_AUD_SSO, JWT_AUD_RP_REFRESH]).size).toBe(5);
     expect([...JWT_ACCESS_AUDIENCES]).toEqual([JWT_AUD_SESSION, JWT_AUD_APP, JWT_AUD_SSO]);
     expect(JWT_ACCESS_AUDIENCES).not.toContain(JWT_AUD_REFRESH);
+    expect(JWT_ACCESS_AUDIENCES).not.toContain(JWT_AUD_RP_REFRESH);
   });
 });

@@ -230,9 +230,17 @@ export class PeridotClient {
       );
     }
     const expectedPid = opts?.expectedPid || undefined;
+    // The app's own client_id so the approval screen can show its verified
+    // name/logo. Asserted by the opener, so the API only honours it when the
+    // opener origin is one of that app's registered origins.
+    const clientId = this.clientId;
     return openPeridotPopup<T>({
       popupBaseUrl: this.popupBaseUrl,
-      params: { popup: action, ...(expectedPid ? { expected_pid: expectedPid } : {}) },
+      params: {
+        popup: action,
+        ...(expectedPid ? { expected_pid: expectedPid } : {}),
+        ...(clientId ? { client_id: clientId } : {}),
+      },
       request: { action, payload, ...(expectedPid ? { expectedPid } : {}) },
     });
   }

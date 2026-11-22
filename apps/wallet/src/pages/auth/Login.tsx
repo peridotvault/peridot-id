@@ -3,22 +3,21 @@ import { usePeridot } from "../../shared/app/AppContext";
 import { readLoginContext, type LoginContext } from "../../feat/auth/utils/popupLogin";
 import { readSsoParams, ssoOrigin } from "../../feat/auth/utils/sso";
 import { LoadingScreen } from "../../shared/components/shell/LoadingScreen";
-import { BrandMark } from "../../shared/components/ui/BrandMark";
-import { AccountSwitcherModal } from "../../shared/components/shell/AccountSwitcherModal";
+import type { AccountMenuModel } from "../../shared/components/shell/AccountMenu";
 import { SsoConsentModal } from "../../feat/auth/components/SsoConsentModal";
-import { useAppVerified } from "../../feat/auth/hooks/useAppVerified";
+import { SigningScreen } from "../../feat/auth/components/SigningScreen";
+import { useAppInfo } from "../../feat/auth/hooks/useAppInfo";
+import { useProviderCatalog } from "../../feat/auth/hooks/useProviderCatalog";
 import { useLoginSession } from "../../feat/auth/hooks/useLoginSession";
 import { usePidClaim } from "../../feat/auth/hooks/usePidClaim";
 import { useEmailSignIn } from "../../feat/auth/hooks/useEmailSignIn";
 import { useSignInMethods } from "../../feat/auth/hooks/useSignInMethods";
 import { useConsentActions } from "../../feat/auth/hooks/useConsentActions";
+import { useHeaderProfile } from "../../shared/hooks/useHeaderProfile";
 import { PidClaimForm } from "../../feat/auth/components/PidClaimForm";
 import { EmailOtpForm } from "../../feat/auth/components/EmailOtpForm";
 import { LoginOptions } from "../../feat/auth/components/LoginOptions";
 import { readOAuthError, stripOAuthError } from "../../feat/auth/utils/parseOAuthError";
-
-import { styles as s } from "../../shared/styles/theme";
-import { flatten } from "../../shared/styles/stylesheet";
 
 export function Login({
   onLoggedIn,
@@ -51,16 +50,26 @@ export function Login({
 
   // Verified-partner badge (server-sourced trust signal, fail-closed to hidden).
   const appClientId = sso?.clientId ?? ctx?.clientId;
-  const appVerified = useAppVerified(peridot, appClientId);
+  // Origin the app is requesting from — the API only answers app-info when the
+  // app owns it, so the name/logo can't be borrowed by another origin.
+  const appOrigin = sso ? ssoOrigin(sso.redirectUri) : (ctx?.origin ?? null);
+  const appInfo = useAppInfo(peridot, appClientId, appOrigin);
+  const catalog = useProviderCatalog(peridot);
+  const appVerified = appInfo?.isVerified ?? false;
+  // App-scoped login switches (dashboard → Integrations). null = show all.
+  const allowedMethods = appClientId ? appInfo?.loginMethods ?? null : null;
 
   // Terminal state for auth-in-a-new-tab: the code was delivered (or denied)
   // but window.close() didn't take, so this window is still open. Without it
   // the stale ctx renders the consent scrim again over a finished flow.
-  const [finished, setFinished] = useState<string | null>(null);
-  const finishCtx = useCallback((denied: boolean) => {
-    setCtx(null);
-    setFinished(denied ? "Request denied — you can close this window." : "Signed in — you can close this window.");
-  }, []);
+  const [finished, setFinished] = useState<{ denied: boolean; origin: string } | null>(null);
+  const finishCtx = useCallback(
+    (denied: boolean) => {
+      setFinished({ denied, origin: ctx?.origin ?? "" });
+      setCtx(null);
+    },
+    [ctx],
+  );
 
   const claim = usePidClaim(peridot, { sso, ctx, flags, onLoggedIn, setBusy, setError });
   const emailSignIn = useEmailSignIn(peridot, {
@@ -75,6 +84,21 @@ export function Login({
   });
   const { session, setSession, showLogin, setShowLogin } = useLoginSession(peridot, { sso, ctx, flags, claim: claim.claim, onCtxDone: finishCtx });
   const consent = useConsentActions(peridot, { sso, ctx, flags, setSession, setShowLogin, setBusy, setError, onCtxDone: finishCtx });
+  // Same avatar + level chip as the wallet topbar, so the consent header reads
+  // as the signed-in identity rather than a second, anonymous one.
+  const header = useHeaderProfile();
+  // Consent card's profile popover: same menu as the shell topbar, backed by the
+  // consent hook so switching here keeps the pending request alive.
+  const accountMenu: AccountMenuModel = {
+    open: consent.picker !== null,
+    accounts: consent.picker ?? [],
+    busy,
+    error: consent.pickerError,
+    openMenu: () => void consent.openAccounts(),
+    closeMenu: () => consent.setPicker(null),
+    select: (pid) => void consent.pickAccount(pid),
+    add: consent.addAccountCtx,
+  };
   const signIn = useSignInMethods(peridot, {
     sso,
     ctx,
@@ -93,7 +117,9 @@ export function Login({
     setError(
       code === "oauth_not_configured"
         ? "Sign-in is not available right now — please try again later."
-        : "Google sign-in failed — please try again.",
+        : code === "login_method_disabled"
+          ? "This app has turned off Google sign-in — use another method."
+          : "Google sign-in failed — please try again.",
     );
     stripOAuthError();
   }, []);
@@ -140,18 +166,28 @@ export function Login({
     );
   }
 
+  // Code minted, redirect in flight: the signing animation replaces the card.
+  if (consent.signing) {
+    return <SigningScreen origin={appOrigin ?? ""} appName={appInfo?.name} logoUrl={appInfo?.logoUrl} pending />;
+  }
+
   // Already logged in + third-party SSO request: one-tap consent, no redundant login.
   if (sso && session && !showLogin) {
     return (
       <SsoConsentModal
         origin={ssoOrigin(sso.redirectUri)}
+        appName={appInfo?.name}
+        logoUrl={appInfo?.logoUrl}
+        description={appInfo?.description}
         sessionLabel={session.label}
+        avatarUrl={header.avatarUrl}
+        level={header.level}
         busy={busy}
         error={error}
         onAllow={consent.allowApp}
-        onDifferent={consent.useDifferentCtx}
         onDeny={consent.denyApp}
         verified={appVerified}
+        accountMenu={accountMenu}
       />
     );
   }
@@ -159,24 +195,11 @@ export function Login({
   // Delivered/denied but still open: terminal screen, never the consent card.
   if (finished) {
     return (
-      <div style={flatten([s.container, { justifyContent: "center", alignItems: "center" }])} className="flex flex-col">
-        <h1><BrandMark size="md" /></h1>
-        <p style={s.hint}>{finished}</p>
-      </div>
-    );
-  }
-
-  // "Use a different account" picker — same modal for client login and SSO.
-  if ((sso || ctx) && session && consent.picker !== null) {
-    return (
-      <AccountSwitcherModal
-        visible
-        accounts={consent.picker}
-        busy={busy}
-        error={consent.pickerError}
-        onClose={() => consent.setPicker(null)}
-        onSelect={consent.pickAccount}
-        onAdd={consent.addAccountCtx}
+      <SigningScreen
+        origin={finished.origin}
+        appName={appInfo?.name}
+        logoUrl={appInfo?.logoUrl}
+        denied={finished.denied}
       />
     );
   }
@@ -186,13 +209,18 @@ export function Login({
     return (
       <SsoConsentModal
         origin={ctx.origin}
+        appName={appInfo?.name}
+        logoUrl={appInfo?.logoUrl}
+        description={appInfo?.description}
         sessionLabel={session.label}
+        avatarUrl={header.avatarUrl}
+        level={header.level}
         busy={busy}
         error={error}
         onAllow={consent.allowCtx}
-        onDifferent={consent.useDifferentCtx}
         onDeny={consent.denyApp}
         verified={appVerified}
+        accountMenu={accountMenu}
       />
     );
   }
@@ -227,6 +255,8 @@ export function Login({
       stepUp={!!stepUp}
       ssoOrigin={sso ? ssoOrigin(sso.redirectUri) : null}
       ctxOrigin={ctx?.origin ?? null}
+      allowedMethods={allowedMethods}
+      catalog={catalog}
       email={emailSignIn.email}
       onGoogle={() => signIn.continueWithGoogle()}
       onEmailChange={(t) => {

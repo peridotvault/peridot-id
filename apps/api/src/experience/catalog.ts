@@ -2,8 +2,9 @@
  * ANT-89 M2 — admin-write catalogs (Tobias C3 + F8).
  *
  * MVP event-type allowlist (C3): `approvedEventTypes` on PidApp is validated
- * at admin write time against strict format AND catalog membership. Unknown
- * types are refused with 400 and nothing is persisted.
+ * at admin write time against strict format only (app-defined event names are
+ * allowed; duplicates and oversized lists are refused). Nothing persists on
+ * error.
  *
  * Checker registry (F8, R3): MVP restricts verification to `internal_state`
  * + `backend_check` with a per-task `verification.checker`Naming: the checker
@@ -14,7 +15,11 @@
 
 export const EVENT_TYPE_FORMAT = /^[a-z][a-z0-9_]{2,63}$/;
 
-/** MVP catalog (plan rev 5 §13 / board table). Admin writes outside this fail closed. */
+/**
+ * Suggested event types. Apps may use ANY format-valid type: an app-scoped
+ * task's key IS its event type, so the catalog is a starting vocabulary, not
+ * a closed list (self-serve tasks, ANT app XP). Format + size stay enforced.
+ */
 export const MVP_EVENT_TYPES = [
   "onboarding_completed",
   "identity_verified",
@@ -23,11 +28,11 @@ export const MVP_EVENT_TYPES = [
   "ecosystem_activity",
 ] as const;
 export type MvpEventType = (typeof MVP_EVENT_TYPES)[number];
-const MVP_EVENT_SET = new Set<string>(MVP_EVENT_TYPES);
 
 export function validateEventType(value: string): string | null {
-  if (!EVENT_TYPE_FORMAT.test(value)) return `invalid event-type format: ${value}`;
-  if (!MVP_EVENT_SET.has(value)) return `unknown event type (not in MVP catalog): ${value}`;
+  if (typeof value !== "string" || !EVENT_TYPE_FORMAT.test(value)) {
+    return `invalid event-type format: ${value}`;
+  }
   return null;
 }
 
@@ -71,6 +76,11 @@ export const RELIABLE_CHECKERS = [
   "internal_state.campaign_verified",
   "backend_check.achievement_owned",
   "backend_check.activity_verified",
+  // Self-serve app events: the app is Verified + active + XP-enabled and the
+  // event type is on its approved list (checked in events.service before this
+  // runs). Platform keeps the guardrails: idempotency, task caps, quotas,
+  // reversals, suspend. XP is cosmetic progression only — never money.
+  "backend_check.app_attested",
 ] as const;
 const CHECKER_SET = new Set<string>(RELIABLE_CHECKERS);
 

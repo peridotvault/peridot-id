@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { Throttle, ThrottlerGuard } from "@nestjs/throttler";
 import { AuthenticatedUser, CurrentUser } from "../common/current-user.decorator";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
@@ -73,6 +74,21 @@ export class PidAppsController {
       throw new BadRequestException("Invalid user search or page");
     }
     return this.apps.users(user.pid, id, q ?? "", page === undefined ? 1 : Number(page));
+  }
+
+  /** Upload the consent-screen logo (PNG/JPEG/WebP, ≤512KB). Field: `logo`. */
+  @Post(":id/logo")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, UserTokenGuard)
+  @UseInterceptors(FileInterceptor("logo", { limits: { fileSize: 512 * 1024 } }))
+  setLogo(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @UploadedFile() file?: { buffer: Buffer; mimetype: string; size: number; originalname: string },
+  ) {
+    if (!file?.buffer) throw new BadRequestException("logo file required (field: logo)");
+    return this.apps.setLogo(user.pid, id, file);
   }
 
   /** Rename, change redirect URIs, or disable one of my apps. */

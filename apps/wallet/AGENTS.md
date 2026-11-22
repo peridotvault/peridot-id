@@ -180,6 +180,35 @@ done
 - Exactly one `h1` per screen (screen title; `PushHeader` title is the `h1`
   on pushed screens). Guard: `rg "shared/primitives" apps/wallet/src apps/wallet/App.tsx` must print nothing.
 
+## Done (Phase 12 — shadcn primitives, ui-sdk behavior)
+
+- `shared/styles/cn.ts` — `cn()` (clsx + tailwind-merge), shadcn's class merge.
+- `shared/components/ui/Button.tsx` — shadcn Button: `buttonVariants` (cva)
+  carries the brand skin (square, `px-5 py-[15px]`, outline/primary/danger).
+  `UIButton` is the thin wrapper that keeps the old call-shape
+  (`title`/`icon`/`note`/`align`).
+- `shared/components/ui/Dialog.tsx` — shadcn Dialog on `@ui-sdk/react/dialog`
+  (top layer, focus trap, Escape, focus returned); content is a transparent
+  full-bleed layer so the caller still owns the surface. `Modal` and
+  `BottomSheet` keep their props and their scrim/panel markup.
+- Deliberately not ported: `TextField` (shadcn Input's default border/height
+  would double the call sites' `s.input` styling), `ScrollArea` (native scroll
+  + themed scrollbar in `base.css` is already all it needs), `ToggleRow`
+  (ui-sdk `Switch` is a control; the row is a single button — wrong nesting).
+- Before touching these, read `node_modules/@ui-sdk/react/docs/llms.txt` and the
+  matching `docs/components/*.md`; `@ui-sdk/core/web.css` default look lands in
+  `layer(components)`, below Tailwind utilities, so utilities win.
+
+## Done (Phase 13 — shadcn token contract)
+
+- `shared/styles/tokens.css` + `theme.ts` grew the shadcn semantic aliases on
+  the same palette: `primary/secondary/destructive/accent` + their
+  `*-foreground`, `card-foreground`, `popover*`, `input`, `ring`, `--radius*`
+  (all `0px`). `theme.ts` mirrors every scalar; chart/sidebar stay CSS-only.
+- `Button` and `TextField` carry `data-slot` (`button`/`input`) +
+  `data-variant`/`data-align` for the shared primitive contract. No class or
+  markup change.
+
 ## Done (Phase 3 — App.tsx is a pure composer)
 
 - `shared/hooks/useSessionBootstrap.ts` — bootstrap, post-auth routing,

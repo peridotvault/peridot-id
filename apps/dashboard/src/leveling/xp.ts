@@ -30,6 +30,7 @@ export const RELIABLE_CHECKERS = [
   "internal_state.campaign_verified",
   "backend_check.achievement_owned",
   "backend_check.activity_verified",
+  "backend_check.app_attested",
 ] as const;
 
 export const EVENT_TYPE_FORMAT = /^[a-z][a-z0-9_]{2,63}$/;
@@ -90,10 +91,9 @@ export function levelFromXp(totalXp: number, thresholds: ThresholdRow[]): number
   return level;
 }
 
-/** Client-side event-type hint: format first, then catalog membership. */
+/** Client-side event-type hint: format only — apps may define their own types. */
 export function validateEventType(value: string): string | null {
   if (!EVENT_TYPE_FORMAT.test(value)) return `must match ^[a-z][a-z0-9_]{2,63}$`;
-  if (!(MVP_EVENT_TYPES as readonly string[]).includes(value)) return `not in the MVP catalog`;
   return null;
 }
 

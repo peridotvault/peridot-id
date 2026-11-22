@@ -1,5 +1,6 @@
 import { useNetworkMode } from "../../hooks/useNetworkMode";
 import { useHeaderProfile } from "../../hooks/useHeaderProfile";
+import { useAccountMenu } from "../../hooks/useAccountMenu";
 import { HomeHeader } from "./HomeHeader";
 
 // Header for phone / two-column layouts: brand + profile on one row, plus the
@@ -8,18 +9,22 @@ import { HomeHeader } from "./HomeHeader";
 // not rendered — the brand moves into the nav and the profile into InfoRail.
 export function TopBar({
   onProfile,
+  onSwitched,
   refreshKey,
 }: {
   onProfile: () => void;
+  /** Account switched from the profile popover: the shell re-bootstraps. */
+  onSwitched: () => void;
   refreshKey: string;
 }) {
   const net = useNetworkMode();
   const { displayName, avatarUrl, level } = useHeaderProfile(refreshKey);
+  const menu = useAccountMenu(onSwitched);
 
   return (
     <div className="flex flex-col">
       <div className="px-6 pb-3 pt-5">
-        <HomeHeader displayName={displayName} avatarUrl={avatarUrl} level={level} onProfile={onProfile} />
+        <HomeHeader displayName={displayName} avatarUrl={avatarUrl} level={level} menu={menu} onProfile={onProfile} />
       </div>
       {net.testnet && (
         <div className="border-t border-secondary bg-secondary px-6 py-1.5">

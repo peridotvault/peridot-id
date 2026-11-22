@@ -53,7 +53,7 @@ export function Chains({ onDone }: { onDone: () => void }) {
             <p role="status" className="mt-2 font-sans text-sm text-muted-foreground">{sel.notice}</p>
           )}
 
-          <div className="mt-3 divide-y divide-line border border-border bg-background">
+          <div className="mt-3 divide-y divide-line overflow-hidden rounded-lg border border-border bg-background">
             <ToggleRow
               icon={LayoutGrid}
               label="All chains"

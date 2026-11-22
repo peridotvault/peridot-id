@@ -1,17 +1,38 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
+import { BottomSheet } from "../../../shared/components/ui/BottomSheet";
 import { Section, SectionHead } from "../../../shared/components/ui/Section";
 import { TextField } from "../../../shared/components/ui/TextField";
 import { styles as s } from "../../../shared/styles/theme";
 import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
 import { BrandMark } from "../../../shared/components/ui/BrandMark";
 import { UIButton } from "../../../shared/components/ui/UIButton";
-import { ArrowRight, Mail } from "../../../shared/components/icons";
-import { detectWallets, type WalletConnector } from "@peridotvault/pid-sdk-js";
-import { useMemo } from "react";
+import { ArrowRight, Mail, Wallet } from "../../../shared/components/icons";
+import { detectWallets, discoverWallets, type WalletConnector } from "@peridotvault/pid-sdk-js";
+import { useEffect, useMemo, useState } from "react";
+import type { CatalogProvider } from "../hooks/useProviderCatalog";
 
-// Brand glyphs (Google "G", Apple logo) — inline SVG, the only two brand
-// marks in the wallet. lucide ships no brand icons; two tiny paths beat a
-// whole icon-font dependency.
+/** Catalogue icon with fallback; never renders catalogue SVG/HTML. */
+function CatalogIcon({ provider, fallback }: { provider: CatalogProvider; fallback: React.ReactNode }) {
+  const [failed, setFailed] = useState(false);
+  if (!provider.imageUrl || failed) return <>{fallback}</>;
+  return (
+    <img
+      src={provider.imageUrl}
+      alt=""
+      width={16}
+      height={16}
+      loading="lazy"
+      crossOrigin="anonymous"
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className="object-contain"
+    />
+  );
+}
+
+// Brand glyphs (Google "G") — inline SVG, the only brand mark in the wallet.
+// lucide ships no brand icons; one tiny path set beats a whole icon-font
+// dependency.
 function GoogleIcon({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
@@ -35,21 +56,16 @@ function GoogleIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-function AppleIcon({ size = 18, className }: { size?: number; className?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 384 512" fill="currentColor" className={className} aria-hidden>
-      <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z" />
-    </svg>
-  );
-}
-
-// Default login form: inline email / Google / Apple / passkey + legal line.
+// Default login form: inline email / Google / wallet / passkey + legal line.
+const EMAIL_RE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)*\.[a-z]{2,}$/i;
 export function LoginOptions({
   busy,
   error,
   stepUp,
   ssoOrigin,
   ctxOrigin,
+  allowedMethods,
+  catalog = null,
   email,
   onGoogle,
   onEmailChange,
@@ -62,6 +78,10 @@ export function LoginOptions({
   stepUp: boolean;
   ssoOrigin: string | null;
   ctxOrigin: string | null;
+  /** App-enabled login methods; null/undefined = all on. */
+  allowedMethods: string[] | null;
+  /** Platform catalogue; null = not loaded (fall back to app switches). */
+  catalog?: CatalogProvider[] | null;
   email: string;
   onGoogle: () => void;
   onEmailChange: (t: string) => void;
@@ -69,13 +89,45 @@ export function LoginOptions({
   onPasskey: () => void;
   onWallet: (wallet: WalletConnector) => void;
 }) {
-  // Discovered once per mount: an extension injected after mount is picked up
-  // on the next visit, which is when the user would try again anyway.
-  const wallets = useMemo(() => detectWallets(), []);
+  // Discovery runs once per mount and also over EIP-6963, so MetaMask is found
+  // even when the browser's own wallet answers on `window.ethereum`.
+  const [wallets, setWallets] = useState<WalletConnector[]>(() => detectWallets());
+  useEffect(() => {
+    let alive = true;
+    discoverWallets().then((found) => {
+      if (alive) setWallets(found);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const [walletSheet, setWalletSheet] = useState(false);
+  const byCode = useMemo(() => new Map((catalog ?? []).map((p) => [p.code, p])), [catalog]);
+  // Catalogue known ⇒ only ready + globally enabled providers are offered; an
+  // app switch never re-enables a disabled provider. Catalogue unknown ⇒ keep
+  // the app's switches (the API still rejects unavailable providers).
+  const allows = (m: string) => {
+    if (allowedMethods && !allowedMethods.includes(m)) return false;
+    if (!catalog) return true;
+    const provider = byCode.get(m);
+    return Boolean(provider?.isAvailable && provider.isSupported);
+  };
+  const google = byCode.get("google");
+  // One row per wallet kind: Phantom injects both a Solana and an EVM provider,
+  // and both carry kind "phantom" (the catalogue name would print it twice).
+  const visibleWallets = wallets
+    .filter((w) => allows(w.kind))
+    .filter((w, i, all) => all.findIndex((x) => x.kind === w.kind) === i);
+  // Shape check only (no API round-trip): the arrow stays disabled until the
+  // address looks like `local@domain.tld`. The server stays the authority.
+  const canSubmitEmail = !busy && EMAIL_RE.test(email.trim());
+  const submitEmail = () => {
+    if (canSubmitEmail) onSubmitEmail();
+  };
   return (
     <div className="flex flex-col flex-1">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 flex-col justify-center py-6">
       <Section className="border-t-0">
         <SectionHead className="flex flex-col gap-4 pb-8">
             <div className="flex flex-col flex-1 w-full items-center justify-center gap-5">
@@ -89,13 +141,17 @@ export function LoginOptions({
               </div>
               {error && <p role="alert" style={s.error}>{error}</p>}
               <div className="flex flex-col w-full max-w-[343px] gap-3">
-                <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-2">
-                  <div className="flex flex-col flex-1 items-center gap-2.5 border border-border bg-background px-5 py-[15px]" style={{ flexDirection: "row" }}>
-                    <Mail size={16} className="text-muted-foreground" />
+                {allows("email") && (
+                  <div
+                    onClick={() => document.getElementById("login-email-inline")?.focus()}
+                    className="flex min-h-13 cursor-text items-center gap-2.5 rounded-lg border border-border bg-elevated px-5 focus-within:border-foreground"
+                  >
+                    <Mail size={16} className="shrink-0 text-muted-foreground" />
+                    {/* outline-none! : base.css focus ring is unlayered, plain utilities lose to it */}
                     <TextField
                       id="login-email-inline"
                       aria-label="Email address"
-                      className="flex-1 p-0 font-sans text-sm text-foreground [--placeholder:var(--color-muted-foreground)] outline-none"
+                      className="h-auto min-w-0 flex-1 border-0 bg-transparent p-0 font-sans text-sm text-foreground [--placeholder:var(--color-muted-foreground)] outline-none!"
                       value={email}
                       onChangeText={onEmailChange}
                       autoCapitalize="none"
@@ -104,61 +160,55 @@ export function LoginOptions({
                       returnKeyType="go"
                       placeholder="Continue with email"
                       editable={!busy}
-                      onSubmitEditing={onSubmitEmail}
-                     />
+                      onSubmitEditing={submitEmail}
+                    />
+                    <Pressable
+                      onPress={submitEmail}
+                      disabled={!canSubmitEmail}
+                      accessibilityRole="button"
+                      accessibilityLabel="Continue with email"
+                      style={{ opacity: canSubmitEmail ? 1 : 0.4 }}
+                      className="-mr-3 shrink-0 p-3 text-foreground disabled:cursor-default"
+                    >
+                      <ArrowRight size={18} />
+                    </Pressable>
                   </div>
-                  <Pressable
-                    onPress={onSubmitEmail}
-                    disabled={busy}
-                    accessibilityRole="button"
-                    accessibilityLabel="Continue with email"
-                    style={({ pressed }) => ({ opacity: pressed && !busy ? 0.7 : busy ? 0.55 : 1 })}
-                    className="self-stretch"
-                  >
-                    <div className="flex flex-col flex h-full w-[50px] items-center justify-center border border-foreground bg-foreground">
-                      <ArrowRight size={18} className="text-background" />
-                    </div>
-                  </Pressable>
-                </div>
-                <UIButton
-                  title="Continue with Google"
-                  onPress={onGoogle}
-                  disabled={busy}
-                  align="left"
-                  icon={<GoogleIcon size={16} />}
-                />
-                <UIButton
-                  title="Continue with Apple"
-                  disabled
-                  align="left"
-                  icon={<AppleIcon size={18} className="text-muted-foreground" />}
-                />
-                <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
-                  <div className="flex flex-col h-px flex-1 bg-border"  />
-                  <span className="font-sans text-xs text-muted-foreground">or</span>
-                  <div className="flex flex-col h-px flex-1 bg-border"  />
-                </div>
-                {stepUp && (
-                  <span className="text-center font-sans text-sm text-foreground">Session expired — please confirm it's you with your passkey.</span>
                 )}
-                <UIButton
-                  title={busy ? "Waiting for passkey…" : "Select a passkey"}
-                  onPress={onPasskey}
-                  disabled={busy}
-                  variant="primary"
-                />
-                {wallets.length > 0 && (
-                  <div className="flex flex-col gap-2 pt-3 border-t border-border">
-                    {wallets.map((wallet) => (
-                      <UIButton
-                        key={wallet.kind}
-                        title={`Continue with ${wallet.label}`}
-                        onPress={() => onWallet(wallet)}
-                        disabled={busy}
-                        align="left"
-                      />
-                    ))}
-                  </div>
+                {allows("google") && (
+                  <UIButton
+                    title={google?.name ? `Continue with ${google.name}` : "Continue with Google"}
+                    onPress={onGoogle}
+                    disabled={busy}
+                    align="left"
+                    icon={google ? <CatalogIcon provider={google} fallback={<GoogleIcon size={16} />} /> : <GoogleIcon size={16} />}
+                  />
+                )}
+                {visibleWallets.length > 0 && (
+                  <UIButton
+                    title="Continue with Wallet"
+                    onPress={() => setWalletSheet(true)}
+                    disabled={busy}
+                    align="left"
+                    icon={<Wallet size={16} />}
+                  />
+                )}
+                {allows("passkey") && (
+                  <>
+                    <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+                      <div className="flex flex-col h-px flex-1 bg-border"  />
+                      <span className="font-sans text-xs text-muted-foreground">or</span>
+                      <div className="flex flex-col h-px flex-1 bg-border"  />
+                    </div>
+                    {stepUp && (
+                      <span className="text-center font-sans text-sm text-foreground">Session expired — please confirm it's you with your passkey.</span>
+                    )}
+                    <UIButton
+                      title={busy ? "Waiting for passkey…" : "Select a passkey"}
+                      onPress={onPasskey}
+                      disabled={busy}
+                      variant="primary"
+                    />
+                  </>
                 )}
                 <span className="text-center font-sans text-xs text-muted-foreground">By continuing, I agree to PeridotID Terms of Use and Privacy notice</span>
               </div>
@@ -167,6 +217,30 @@ export function LoginOptions({
         </SectionHead>
       </Section>
     </div>
+    <BottomSheet
+      visible={walletSheet}
+      title="Continue with Wallet"
+      onClose={() => setWalletSheet(false)}
+      center
+      className="max-w-[343px] rounded-xl border-line bg-card"
+    >
+      <span className="font-sans text-xs text-muted-foreground">Pick a browser wallet to sign in.</span>
+      <div className="flex flex-col gap-2">
+        {visibleWallets.map((wallet) => (
+          <UIButton
+            key={`${wallet.kind}:${wallet.namespace}`}
+            title={byCode.get(wallet.kind)?.name ?? wallet.label}
+            onPress={() => {
+              setWalletSheet(false);
+              onWallet(wallet);
+            }}
+            disabled={busy}
+            align="left"
+            className="border-line bg-elevated hover:bg-muted"
+          />
+        ))}
+      </div>
+    </BottomSheet>
     </div>
   );
 }

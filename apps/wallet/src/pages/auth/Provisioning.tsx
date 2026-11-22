@@ -7,11 +7,12 @@ import { styles as s } from "../../shared/styles/theme";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { ensureChainRows } from "../../feat/chain/utils/chainRows";
 
-type StepKey = "identity" | "wallet";
+type StepKey = "identity" | "passkey" | "wallet";
 type StepStatus = "pending" | "running" | "done" | "failed";
 
 const STEPS: { key: StepKey; label: string; hint: string }[] = [
   { key: "identity", label: "Identity", hint: "Your PID session" },
+  { key: "passkey", label: "Passkey", hint: "Signs for your wallet — replaces a seed phrase" },
   { key: "wallet", label: "Wallet", hint: "Your on-chain account record" },
 ];
 
@@ -23,9 +24,22 @@ async function runOne(peridot: PeridotClient, key: StepKey): Promise<void> {
     }
     return;
   }
+  if (key === "passkey") {
+    // A wallet-only identity (MetaMask / Phantom login) starts with no passkey,
+    // and the smart account's only authority IS a passkey — without one
+    // POST /v1/account defers every row by design (ANT-866 B1) and the wallet
+    // step could never succeed.
+    const keys = await peridot.passkey.list();
+    if (Array.isArray(keys) && keys.length > 0) return;
+    // shortcut: relies on the browser allowing credentials.create() without a
+    // fresh tap; the Retry button supplies the gesture where it does not.
+    await peridot.passkey.register();
+    return;
+  }
   const acc = await ensureChainRows(peridot);
   if (typeof acc === "object" && acc !== null && "statusCode" in acc) {
-    throw new Error("Could not set up the wallet — try again.");
+    const message = (acc as { message?: string | string[] }).message;
+    throw new Error((Array.isArray(message) ? message.join(" ") : message) || "Could not set up the wallet — try again.");
   }
 }
 
@@ -57,18 +71,21 @@ export function Provisioning({ onContinue }: { onContinue: () => void }) {
   const { peridot } = usePeridot();
   const [states, setStates] = useState<Record<StepKey, { status: StepStatus; error: string | null }>>({
     identity: { status: "pending", error: null },
+    passkey: { status: "pending", error: null },
     wallet: { status: "pending", error: null },
   });
   const started = useRef(false);
 
   const run = useCallback(
-    async (key: StepKey) => {
+    async (key: StepKey): Promise<boolean> => {
       setStates((prev) => ({ ...prev, [key]: { status: "running", error: null } }));
       try {
         await runOne(peridot, key);
         setStates((prev) => ({ ...prev, [key]: { status: "done", error: null } }));
+        return true;
       } catch (e) {
         setStates((prev) => ({ ...prev, [key]: { status: "failed", error: e instanceof Error ? e.message : String(e) } }));
+        return false;
       }
     },
     [peridot],
@@ -80,7 +97,7 @@ export function Provisioning({ onContinue }: { onContinue: () => void }) {
     void (async () => {
       for (const step of STEPS) {
         // eslint-disable-next-line no-await-in-loop
-        await run(step.key);
+        if (!(await run(step.key))) break;
       }
     })();
   }, [run]);
@@ -113,7 +130,7 @@ export function Provisioning({ onContinue }: { onContinue: () => void }) {
                     </div>
                     {st.status === "failed" && (
                       <Pressable onPress={() => run(step.key)} accessibilityLabel={`Retry ${step.label}`}>
-                        <div className="border border-border px-3 py-1.5">
+                        <div className="rounded-md border border-border px-3 py-1.5">
                           <span className="font-sans text-sm font-medium text-foreground">Retry</span>
                         </div>
                       </Pressable>

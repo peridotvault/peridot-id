@@ -38,7 +38,7 @@ export function SolActivationModal({
   return (
     <Modal visible={target !== null} transparent animationType="fade" onRequestClose={onClose}>
       <div className="flex flex-col flex-1 items-center justify-center bg-black/70 p-6">
-        <div className="flex flex-col w-full max-w-[360px] gap-3 border border-border bg-surface p-5">
+        <div className="flex flex-col w-full max-w-[360px] gap-3 rounded-xl border border-border bg-surface p-5">
           <span className="font-sans text-base font-semibold">{target?.label}</span>
           {target && (
             <div className="flex flex-col mb-2 self-center bg-foreground p-3">

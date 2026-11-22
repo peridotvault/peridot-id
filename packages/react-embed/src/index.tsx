@@ -74,7 +74,7 @@ export function PeridotWalletEmbed(props: PeridotWalletEmbedProps) {
 
   const connect = useCallback(async () => {
     try {
-      const { pidCode } = await peridot.auth.loginPopup({ clientId });
+      const { pidCode } = await peridot.auth.loginTab({ clientId });
       if (!pidCode) throw new Error("Sign-in was cancelled.");
       // ANT-238: exchange binds redirectUri to the issued redirect target.
       // Popup login issues the code for this origin, so present it byte-exact.
@@ -137,7 +137,7 @@ export { FeeQuoteSummary, formatFeeCountdown } from "./fee-summary.js";
 export type { FeeQuoteSummaryProps } from "./fee-summary.js";
 export { PeridotLoginModal } from "./login-modal.js";
 export type { PeridotLoginModalProps } from "./login-modal.js";
-export { detectWallets, bytesToBase64, utf8ToHex } from "./wallet-connectors.js";
+export { detectWallets, discoverWallets, bytesToBase64, utf8ToHex } from "./wallet-connectors.js";
 export type { WalletConnector, WalletKind, InjectedWallets } from "./wallet-connectors.js";
 // Fee-transparency UI surface (ANT-557): hosts render the same quote shape,
 // taxonomy copy, and formatting the wallet enforces.

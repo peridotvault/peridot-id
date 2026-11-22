@@ -16,12 +16,57 @@ function setup(apps?: {
     }),
     getOrThrow: jest.fn((key: string) => (key === "JWT_ACCESS_SECRET" ? "test-secret" : key)),
   };
-  const jwt = { signAsync: jest.fn(async () => "sso.jwt.token") };
+  const jwt = { signAsync: jest.fn(async () => "sso.jwt.token"), verifyAsync: jest.fn(async (): Promise<unknown> => null) };
   const security = mockSecurity();
   const rows = new Map<string, Record<string, unknown>>();
   const grants = new Map<string, Record<string, unknown>>();
+  const devices = new Map<string, Record<string, unknown>>();
+  const sessions = new Map<string, Record<string, unknown>>();
   const grantKey = (pid: string, origin: string) => `${pid}|${origin}`;
   const prisma = {
+    device: {
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: `dev_${devices.size + 1}`, authMethod: null, ...data };
+        devices.set(row.id as string, row);
+        return row;
+      }),
+      update: jest.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        Object.assign(devices.get(where.id) ?? {}, data);
+        return devices.get(where.id);
+      }),
+    },
+    session: {
+      create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        sessions.set(data.id as string, { revokedAt: null, ...data });
+        return sessions.get(data.id as string);
+      }),
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => {
+        const row = sessions.get(where.id);
+        if (!row) return null;
+        return { ...row, device: devices.get(row.deviceId as string) };
+      }),
+      update: jest.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        Object.assign(sessions.get(where.id) ?? {}, data);
+        return sessions.get(where.id);
+      }),
+      updateMany: jest.fn(
+        async ({ where, data }: { where: { deviceId?: string; device?: { pid: string }; scope?: string; revokedAt?: null }; data: Record<string, unknown> }) => {
+          let count = 0;
+          for (const s of sessions.values()) {
+            const matchesDevice = where.deviceId ? s.deviceId === where.deviceId : true;
+            const pid = (devices.get(s.deviceId as string) ?? {}).pid;
+            const matchesPid = where.device ? pid === where.device.pid : true;
+            const matchesScope = where.scope ? s.scope === where.scope : true;
+            const matchesRevoked = where.revokedAt === null ? s.revokedAt === null : true;
+            if (matchesDevice && matchesPid && matchesScope && matchesRevoked) {
+              Object.assign(s, data);
+              count++;
+            }
+          }
+          return { count };
+        },
+      ),
+    },
     ssoCode: {
       create: jest.fn(
         async ({ data }: { data: { code: string; pid: string; redirectTo: string; clientId?: string | null; expiresAt: Date } }) => {
@@ -71,8 +116,11 @@ function setup(apps?: {
         },
       ),
       findUnique: jest.fn(
-        async ({ where }: { where: { pid_origin: { pid: string; origin: string } } }) =>
-          grants.get(grantKey(where.pid_origin.pid, where.pid_origin.origin)) ?? null,
+        async ({ where }: { where: { id?: string; pid_origin?: { pid: string; origin: string } } }) => {
+          if (where.id) return [...grants.values()].find((g) => g.id === where.id) ?? null;
+          const po = where.pid_origin as { pid: string; origin: string };
+          return grants.get(grantKey(po.pid, po.origin)) ?? null;
+        },
       ),
       findMany: jest.fn(async ({ where }: { where: { pid: string; revokedAt: null } }) =>
         [...grants.values()]
@@ -107,7 +155,7 @@ function setup(apps?: {
   };
   const usage: any = { recordSuccessfulLogin: jest.fn(async () => undefined), recordAppLogin: jest.fn(async () => undefined) };
   const service = new SsoService(prisma as never, config as never, security as never, pidApps as never, jwt as never, usage as never);
-  return { service, rows, security, usage };
+  return { service, rows, security, usage, jwt, devices, sessions };
 }
 
 const DEV_SECRET = "pidsk_testsecret000000000000000000000000000001";
@@ -137,6 +185,26 @@ describe("SsoService", () => {
     expect(service.isAllowedReturnTo("http://localhost:3302/welcome")).toBe(true);
   });
 
+  it("refuses a login method the app switched off (Integrations)", async () => {
+    const { service } = setup({
+      findActive: async () => ({ ...DEV_APP, loginMethods: ["google"] }),
+      clientSecretValid: () => true,
+    });
+    await expect(
+      service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc", method: "passkey" }),
+    ).rejects.toThrow("This login method is disabled for this app.");
+    await expect(
+      service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc", method: "google" }),
+    ).resolves.toEqual(expect.any(String));
+  });
+
+  it("rejects an app-bound code with no method context (session-reuse bypass)", async () => {
+    const { service } = setup();
+    await expect(
+      service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" }),
+    ).rejects.toThrow("method context is required");
+  });
+
   it("issues a single-use code and consumes it into an identity payload", async () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
@@ -162,6 +230,79 @@ describe("SsoService", () => {
     );
     // 24h cliff (ANT-227 item 7: was 30d).
     expect(identity.expiresIn).toBe(24 * 60 * 60);
+  });
+
+  it("also mints a sliding RP refresh session (scope rp_<host>, rotating 30d)", async () => {
+    const { service, sessions, devices, jwt } = setup();
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    const identity = await service.consume(code, "https://live2dev.com/auth/callback");
+    expect(identity.refreshToken).toBeTruthy();
+    expect(identity.refreshExpiresIn).toBe(30 * 24 * 60 * 60);
+    const [session] = [...sessions.values()];
+    expect(session.scope).toBe("rp_live2dev_com");
+    expect((session.expiresAt as Date).getTime()).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60 * 1000);
+    expect(devices.size).toBe(1);
+    // Its own token class — a browser refresh token can never validate as one.
+    expect(jwt.signAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "refresh", sub: "pid_1" }),
+      expect.objectContaining({ audience: "pid-rp-refresh" }),
+    );
+  });
+
+  it("rotates an RP session on the same device and revokes the presented row", async () => {
+    const { service, sessions, jwt } = setup();
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    await service.consume(code, "https://live2dev.com/auth/callback");
+    const old = [...sessions.values()][0];
+    jwt.signAsync.mockClear();
+    jwt.verifyAsync.mockResolvedValueOnce({ sub: "pid_1", jti: old.id, type: "refresh" });
+
+    const out = await service.refreshRpSession("rp.refresh.jwt");
+
+    expect(out).toMatchObject({ pid: "pid_1", identityId: "pid_1", expiresIn: 24 * 60 * 60, refreshExpiresIn: 30 * 24 * 60 * 60 });
+    expect(jwt.signAsync).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ audience: "pid-sso" }));
+    expect(sessions.size).toBe(2);
+    expect(sessions.get(old.id as string)?.revokedAt).toBeInstanceOf(Date);
+    const fresh = [...sessions.values()].find((s) => s.id !== old.id)!;
+    expect(fresh.deviceId).toBe(old.deviceId);
+    expect(fresh.rotatedFrom).toBe(old.id);
+    expect(fresh.scope).toBe("rp_live2dev_com");
+  });
+
+  it("never rotates a first-party session through the RP endpoint", async () => {
+    const { service, sessions, jwt } = setup();
+    sessions.set("sess_wallet", {
+      id: "sess_wallet",
+      deviceId: "dev_x",
+      scope: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    jwt.verifyAsync.mockResolvedValueOnce({ sub: "pid_1", jti: "sess_wallet", type: "refresh" });
+    await expect(service.refreshRpSession("wallet.refresh.jwt")).rejects.toThrow("Invalid refresh token");
+  });
+
+  it("replaying a rotated RP token revokes the app session family", async () => {
+    const { service, sessions, security, jwt } = setup();
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    await service.consume(code, "https://live2dev.com/auth/callback");
+    const old = [...sessions.values()][0];
+    old.revokedAt = new Date();
+    jwt.verifyAsync.mockResolvedValueOnce({ sub: "pid_1", jti: old.id, type: "refresh" });
+
+    await expect(service.refreshRpSession("rp.refresh.jwt")).rejects.toThrow("Refresh token revoked");
+    expect(security.log).toHaveBeenCalledWith("pid_1", "refresh.reuse_detected", expect.anything());
+  });
+
+  it("disconnecting an app ends its RP sessions", async () => {
+    const { service, sessions } = setup();
+    const code = await service.issue("pid_1", "https://live2dev.com/auth/callback");
+    await service.consume(code, "https://live2dev.com/auth/callback");
+    const [grant] = await service.listGrants("pid_1");
+
+    await service.revokeGrant("pid_1", grant.id as string);
+
+    expect([...sessions.values()].every((s) => s.revokedAt instanceof Date)).toBe(true);
   });
 
   it("rejects reusing the same code (single-use)", async () => {
@@ -282,6 +423,7 @@ describe("SsoService", () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://mygame.dev/callback", {
       clientId: "pidapp_abc",
+      method: "passkey",
       codeChallenge: CHALLENGE,
     });
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", undefined, VERIFIER)).resolves.toMatchObject({
@@ -290,6 +432,7 @@ describe("SsoService", () => {
 
     const code2 = await service.issue("pid_1", "https://mygame.dev/callback", {
       clientId: "pidapp_abc",
+      method: "passkey",
       codeChallenge: CHALLENGE,
     });
     await expect(service.consume(code2, "https://mygame.dev/callback", "pidapp_other", undefined, VERIFIER)).rejects.toThrow(
@@ -352,6 +495,7 @@ describe("SsoService", () => {
     });
     const code = await service.issue("pid_1", "https://mygame.dev/callback", {
       clientId: "pidapp_abc",
+      method: "passkey",
       codeChallenge: CHALLENGE,
     });
     await service.consume(code, "https://mygame.dev/callback", "pidapp_abc", undefined, VERIFIER);
@@ -369,10 +513,10 @@ describe("SsoService", () => {
         PidAppsService.secretMatches(s, app.clientSecretHash),
     };
     const { service } = setup({ findActive: async () => withSecret, clientSecretValid: withSecret.clientSecretValid });
-    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc", method: "passkey" });
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", secret)).resolves.toMatchObject({ pid: "pid_1" });
 
-    const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    const code2 = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc", method: "passkey" });
     await expect(service.consume(code2, "https://mygame.dev/callback", "pidapp_abc", "wrong-secret")).rejects.toThrow("sso_code_invalid");
     // failed attempts don't consume the code — missing secret also rejected, same error
     await expect(service.consume(code2, "https://mygame.dev/callback", "pidapp_abc")).rejects.toThrow("sso_code_invalid");
@@ -393,6 +537,7 @@ describe("SsoService", () => {
     const { service } = setup();
     const code = await service.issue("pid_1", "https://mygame.dev/callback", {
       clientId: "pidapp_abc",
+      method: "passkey",
       codeChallenge: CHALLENGE,
     });
     // Right client, wrong path on the same origin: still rejected (exact match, not origin match).
@@ -414,7 +559,7 @@ describe("SsoService", () => {
       clientSecretValid: () => false,
     };
     const { service } = setup({ findActive: async () => expired, clientSecretValid: expired.clientSecretValid });
-    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc", method: "passkey" });
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
     // Failed attempts don't consume the code.
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).rejects.toThrow("sso_code_invalid");
@@ -475,7 +620,7 @@ describe("SsoService", () => {
       clientSecretValid: () => true,
     };
     const { service } = setup({ findActive: async () => withSecret, clientSecretValid: withSecret.clientSecretValid });
-    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    const code = await service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc", method: "passkey" });
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "any-secret")).resolves.toMatchObject({
       pid: "pid_1",
     });
@@ -512,6 +657,7 @@ describe("SsoService", () => {
     // failure asserted is the binding, not PKCE — PKCE runs first).
     const appCode = await service.issue("pid_1", "https://mygame.dev/callback", {
       clientId: "pidapp_abc",
+      method: "passkey",
       codeChallenge: CHALLENGE,
     });
     expect((await take(service.consume(appCode, "https://mygame.dev/callback", "pidapp_other", undefined, VERIFIER))).reason).toBe(
@@ -551,12 +697,13 @@ describe("SsoService", () => {
 
   it("issue fails closed when a public client omits the PKCE challenge", async () => {
     const { service } = setup({ findActive: async () => PUBLIC_APP });
-    await expect(service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_evil" })).rejects.toThrow(
+    await expect(service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_evil", method: "passkey" })).rejects.toThrow(
       "sso_pkce_invalid",
     );
     // with a challenge the mint succeeds
     const code = await service.issue("pid_1", "https://mygame.dev/callback", {
       clientId: "pidapp_evil",
+      method: "passkey",
       codeChallenge: pkceS256Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
     });
     expect(code).toMatch(/^[A-Za-z0-9_-]{20,}$/);
@@ -577,6 +724,7 @@ describe("SsoService", () => {
     const pub = setup({ findActive: async () => ({ ...PUBLIC_APP, isVerified: true }) });
     const pubCode = await pub.service.issue("pid_1", "https://mygame.dev/callback", {
       clientId: "pidapp_evil",
+      method: "passkey",
       codeChallenge: pkceS256Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
     });
     (pub.rows.get(pubCode) as Record<string, unknown>).codeChallenge = null;
@@ -585,7 +733,7 @@ describe("SsoService", () => {
     );
     // Unverified confidential app with a challengeless code: same uniform error.
     const unv = setup({ findActive: async () => UNVERIFIED_CONFIDENTIAL });
-    const unvCode = await unv.service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    const unvCode = await unv.service.issue("pid_1", "https://mygame.dev/callback", { clientId: "pidapp_abc", method: "passkey" });
     await expect(unv.service.consume(unvCode, "https://mygame.dev/callback", "pidapp_abc")).rejects.toThrow(
       "sso_code_invalid",
     );
@@ -611,12 +759,12 @@ describe("app user login recording", () => {
   it("records only successful exchanges, never issue, failed exchange or replay", async () => {
     const { service, usage } = setup({ findActive: async () => DEV_APP,
       clientSecretValid: (app, secret) => PidAppsService.secretMatches(secret, (app as any).clientSecretHash) });
-    const code = await service.issue("user@pid", "https://mygame.dev/callback", { clientId: "pidapp_abc" });
+    const code = await service.issue("user@pid", "https://mygame.dev/callback", { clientId: "pidapp_abc", method: "passkey" });
     expect(usage.recordSuccessfulLogin).not.toHaveBeenCalled();
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", "wrong")).rejects.toThrow();
     expect(usage.recordSuccessfulLogin).not.toHaveBeenCalled();
     await service.consume(code, "https://mygame.dev/callback", "pidapp_abc", DEV_SECRET);
-    expect(usage.recordSuccessfulLogin).toHaveBeenCalledWith("pidapp_abc", "user@pid");
+    expect(usage.recordSuccessfulLogin).toHaveBeenCalledWith("pidapp_abc", "user@pid", code, "passkey");
     await expect(service.consume(code, "https://mygame.dev/callback", "pidapp_abc", DEV_SECRET)).rejects.toThrow();
     expect(usage.recordSuccessfulLogin).toHaveBeenCalledTimes(1);
   });

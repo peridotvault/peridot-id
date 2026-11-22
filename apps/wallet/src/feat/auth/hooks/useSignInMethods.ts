@@ -103,7 +103,8 @@ export function useSignInMethods(
     try {
       const address = await wallet.connect();
       const challenge = await peridot.auth.walletChallenge({
-        namespace: wallet.namespace,
+        providerCode: wallet.kind,
+          namespace: wallet.namespace,
         reference: wallet.reference,
         address,
         ...(ctx ? {} : sso ? { returnTo: sso.redirectUri, clientId: sso.clientId } : {}),
@@ -122,8 +123,10 @@ export function useSignInMethods(
       if (finishSso(sso, res.pidCode)) return;
       onLoggedIn();
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setError(/reject|denied|cancel|closed/i.test(message) ? "Wallet signature cancelled — try again." : message);
+      // Never rewrite the wallet's own reason: the user needs it ("User rejected
+      // the request", "already pending for origin", …). Masking it with a
+      // friendly string is what hid this bug for three attempts.
+      setError(e instanceof Error ? e.message : "Wallet sign-in failed");
     } finally {
       setBusy(false);
     }

@@ -48,11 +48,11 @@ export function AccountSwitcherModal({
               disabled={busy || a.isActive}
               accessibilityLabel={`Switch to ${a.pid}`}
             >
-              <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 border border-border p-3">
+              <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 rounded-lg border border-border p-3">
                 {a.avatarUrl ? (
-                  <img src={a.avatarUrl} alt="" className="h-9 w-9 rounded-full border border-border"  />
+                  <img src={a.avatarUrl} alt="" className="h-9 w-9 rounded-md border border-border"  />
                 ) : (
-                  <div className="flex flex-col h-9 w-9 items-center justify-center rounded-full bg-muted" aria-label="No profile photo">
+                  <div className="flex flex-col h-9 w-9 items-center justify-center rounded-md bg-muted" aria-label="No profile photo">
                     <span aria-hidden="true" className="font-sans text-base text-foreground">{(a.displayName ?? a.pid).slice(0, 1).toUpperCase()}</span>
                   </div>
                 )}

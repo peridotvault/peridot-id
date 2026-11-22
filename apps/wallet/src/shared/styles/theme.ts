@@ -8,24 +8,35 @@ export const theme = {
     background: "#0d0f0e",
     surface: "#060807",
     card: "#060807",
+    cardForeground: "#e0e4e4",
+    popover: "#060807",
+    popoverForeground: "#e0e4e4",
     muted: "#363636",
+    elevated: "#1b1e1c",
     border: "#ffffff28",
+    input: "#ffffff28",
     line: "#ffffff14",
     foreground: "#e0e4e4",
     paragraph: "#b5b5b5",
     label: "#ffffff60",
-    mutedForeground: "#7d7d7d",
+    mutedForeground: "#a3a3a3",
     primary: "#349b65",
+    primaryForeground: "#0a0c0b",
     secondary: "#349b6650",
+    secondaryForeground: "#e0e4e4",
     accent: "#87ee83",
+    accentForeground: "#0a0c0b",
+    ring: "#87ee83",
     danger: "#ff5f57",
     dangerTint: "#2a1413",
+    destructive: "#ff5f57",
+    destructiveForeground: "#0d0f0e",
     success: "#87ee83",
   },
   spacing: 16,
-  // Web feel: sharp cut-corner aesthetic — radius 0 everywhere (circular
-  // avatars/dots keep their own inline radii).
-  radius: 0,
+  // Radius lives in tokens.css (`--radius-sm|md|lg|xl` = 6/8/10/14), the
+  // peridotbase scale shared with the dashboard. Inline style blocks that need
+  // it carry the same numbers (e.g. `styles.input` = 8).
   // App column cap (sm, 576px): every wallet screen centers inside this.
   // No-op on phones (<576pt); constrains + centers on wide web.
   // Past the md breakpoint the tab bar docks left as a sidebar instead.
@@ -172,7 +183,7 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: c.border,
     backgroundColor: c.surface,
-    borderRadius: 0,
+    borderRadius: 8,
     padding: 12,
     // 16px floor: prevents iOS Safari auto-zoom on focus (ANT-341 FR2).
     fontSize: 16,

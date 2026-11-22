@@ -10,6 +10,7 @@ function setup() {
       count: jest.fn(async () => 26),
     },
     profile: { findMany: jest.fn(async () => [{ pid: "user@pid", displayName: "User" }]) },
+    $queryRaw: jest.fn(async () => [{ pid: "user@pid", code: "phantom", name: "Phantom", evidence: "client_selected" }]),
     $transaction: jest.fn(async (queries) => Promise.all(queries)),
   };
   return { prisma, service: new PidAppsService(prisma as never) };
@@ -31,7 +32,8 @@ describe("app user directory", () => {
     });
     expect(prisma.appUser.count).toHaveBeenCalledWith({ where: { appClientId: "client-1", pid: { contains: "user" } } });
     expect(prisma.profile.findMany).toHaveBeenCalledWith({ where: { pid: { in: ["user@pid"] } }, select: { pid: true, displayName: true } });
-    expect(Object.keys(result.users[0]).sort()).toEqual(["displayName", "firstLoginAt", "lastLoginAt", "pid"]);
+    expect(Object.keys(result.users[0]).sort()).toEqual(["displayName", "firstLoginAt", "lastLoginAt", "lastLoginProvider", "pid"]);
+    expect(result.users[0].lastLoginProvider).toEqual({ code: "phantom", name: "Phantom", evidence: "client_selected" });
     expect(result).toMatchObject({ total: 26, page: 2, pageSize: 25 });
   });
   it.each([0, -1, 1.5, NaN, 100001])("rejects invalid page %s", async page => {

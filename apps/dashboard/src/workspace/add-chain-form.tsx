@@ -3,8 +3,7 @@
 import { useState } from "react";
 import type { ChainPreview, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
-import { Card, ERROR, FIELD, MUTED, WARN } from "./ui";
-import { CutButton } from "./cut-button";
+import { Card, ERROR, FIELD, MUTED, MiniButton, WARN } from "./ui";
 
 export function AddChainForm({
   client,
@@ -99,12 +98,12 @@ export function AddChainForm({
         <input value={rpcUrl} onChange={(e) => { setRpcUrl(e.target.value); setPreview(null); }} placeholder="https://…" maxLength={256} className={FIELD} />
       </label>
       <div className="mt-3 flex gap-2">
-        <CutButton type="button" onClick={check} disabled={busy}>
+        <MiniButton variant="solid" size="lg" type="button" onClick={check} disabled={busy}>
           {busy ? "Checking…" : "Check chain"}
-        </CutButton>
+        </MiniButton>
       </div>
       {preview && (
-        <div className="mt-3 rounded border border-border p-3 text-sm">
+        <div className="mt-3 rounded-lg border border-line p-3 text-sm">
           <p>
             RPC:{" "}
             {preview.rpc.ok ? (
@@ -119,14 +118,14 @@ export function AddChainForm({
           ))}
         </div>
       )}
-      <CutButton
+      <MiniButton variant="solid" size="lg"
         type="button"
         onClick={create}
         disabled={busy}
-        className={`mt-3 ${busy ? "pointer-events-none opacity-60" : ""}`}
+        className="mt-3"
       >
         {busy ? "Adding…" : "Add chain"}
-      </CutButton>
+      </MiniButton>
     </Card>
   );
 }

@@ -32,7 +32,7 @@ export function ChainSelect() {
         const [namespace, ...rest] = next.split(":");
         sel.setCustom([{ namespace, reference: rest.join(":") }]);
       }}
-      className="border border-border bg-background px-2.5 py-1.5 font-sans text-xs text-foreground hover:bg-surface disabled:opacity-40"
+      className="rounded-md border border-border bg-background px-2.5 py-1.5 font-sans text-xs text-foreground hover:bg-surface disabled:opacity-40"
     >
       <option value={ALL}>All chains</option>
       {value === CUSTOM && <option value={CUSTOM}>{sel.label}</option>}

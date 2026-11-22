@@ -1,5 +1,5 @@
 import { useWorkspace } from "../workspace/workspace-provider";
-import { Card, ERROR, MUTED, MiniButton } from "../workspace/ui";
+import { Card, ERROR, METRIC, MUTED, SECTION_LABEL, MiniButton } from "../workspace/ui";
 import { LevelingLayout, useResource } from "../leveling/LevelingLayout";
 import { formatXp } from "../leveling/xp";
 import { xpAdmin } from "../leveling/api";
@@ -20,27 +20,27 @@ export default function LevelingOverviewPage() {
       {loading ? (
         <p role="status" className={`text-sm ${MUTED}`}>Loading overview…</p>
       ) : data ? (
-        <div className="flex flex-col">
-          <div className="grid gap-px bg-line sm:grid-cols-3">
-            <Card className="border-t-0">
-              <p className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>XP distributed</p>
-              <p className="mt-1 text-3xl font-semibold tracking-tight">{formatXp(data.totalXpDistributed)}</p>
+        <div className="flex flex-col gap-3">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Card>
+              <p className={SECTION_LABEL}>XP distributed</p>
+              <p className={`mt-1 text-3xl ${METRIC}`}>{formatXp(data.totalXpDistributed)}</p>
               <p className={`mt-1 text-xs ${MUTED}`}>Net ledger sum across all users.</p>
             </Card>
-            <Card className="border-t-0">
-              <p className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>Users with XP state</p>
-              <p className="mt-1 text-3xl font-semibold tracking-tight">{formatXp(data.totalUsers)}</p>
+            <Card>
+              <p className={SECTION_LABEL}>Users with XP state</p>
+              <p className={`mt-1 text-3xl ${METRIC}`}>{formatXp(data.totalUsers)}</p>
               <p className={`mt-1 text-xs ${MUTED}`}>Rows in user_xp_states.</p>
             </Card>
-            <Card className="border-t-0">
-              <p className={`text-xs font-semibold uppercase tracking-wide ${MUTED}`}>Unreviewed suspicious</p>
-              <p className="mt-1 text-3xl font-semibold tracking-tight">{formatXp(data.unreviewedSuspicious)}</p>
+            <Card>
+              <p className={SECTION_LABEL}>Unreviewed suspicious</p>
+              <p className={`mt-1 text-3xl ${METRIC}`}>{formatXp(data.unreviewedSuspicious)}</p>
               <p className={`mt-1 text-xs ${MUTED}`}>Signals awaiting admin review below.</p>
             </Card>
           </div>
 
           <Card>
-            <h2 className="text-lg font-semibold tracking-tight">Level distribution</h2>
+            <h2 className="text-base font-semibold tracking-tight">Level distribution</h2>
             {data.levelDistribution.length === 0 ? (
               <p className={`mt-2 text-sm ${MUTED}`}>No leveled users yet.</p>
             ) : (
@@ -50,9 +50,9 @@ export default function LevelingOverviewPage() {
                   return (
                     <li key={d.level} className="flex items-center gap-3">
                       <span className="w-14 shrink-0 text-sm font-medium">L{d.level}</span>
-                      <span className="h-2 min-w-0 flex-1 rounded bg-muted" aria-hidden="true">
+                      <span className="h-2 min-w-0 flex-1 bg-muted" aria-hidden="true">
                         <span
-                          className="block h-2 rounded bg-foreground"
+                          className="block h-2 bg-foreground"
                           style={{ width: `${Math.max(2, Math.round((d.users / max) * 100))}%` }}
                         />
                       </span>
@@ -64,9 +64,9 @@ export default function LevelingOverviewPage() {
             )}
           </Card>
 
-          <div className="grid gap-px bg-line lg:grid-cols-2">
-            <Card className="border-t-0">
-              <h2 className="text-lg font-semibold tracking-tight">Recent activity</h2>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <Card>
+              <h2 className="text-base font-semibold tracking-tight">Recent activity</h2>
               {data.recentActivity.length === 0 ? (
                 <p className={`mt-2 text-sm ${MUTED}`}>No ledger entries yet.</p>
               ) : (
@@ -112,7 +112,7 @@ export function SuspiciousPanel() {
   return (
     <Card>
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold tracking-tight">Suspicious activity</h2>
+        <h2 className="text-base font-semibold tracking-tight">Suspicious activity</h2>
         <MiniButton size="sm" onClick={reload}>Refresh</MiniButton>
       </div>
       {error && <p role="alert" className={`mt-2 text-sm ${ERROR}`}>{error}</p>}
@@ -123,9 +123,9 @@ export function SuspiciousPanel() {
       ) : (
         <ul className="mt-3 flex flex-col gap-2">
           {data.rows.map((s) => (
-            <li key={s.id} className="border border-border p-3 text-sm">
+            <li key={s.id} className="rounded-lg border border-line bg-background p-3 text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">{s.signal}</span>
+                <span className="min-w-0 truncate font-medium">{s.signal}</span>
                 <MiniButton size="xs" onClick={() => void review(s.id, true)}>Mark reviewed</MiniButton>
               </div>
               <p className={`mt-1 text-xs ${MUTED}`}>

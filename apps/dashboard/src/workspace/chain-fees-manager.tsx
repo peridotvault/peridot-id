@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ChainFeePolicy, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
-import { Card, DIVIDER, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "./ui";
+import { Badge, Card, DIVIDER, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "./ui";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../shared/ui/table";
 
 /** Daily quote-vs-actual aggregate for the subsidy dashboard (admin, NFR-4). */
 export interface SubsidyDailySummary {
@@ -137,7 +138,7 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col gap-3">
       {error && (
         <div className="flex flex-wrap items-center gap-2">
           <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
@@ -176,9 +177,7 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold">v{v.version}</span>
                   {v.active ? (
-                    <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">
-                      active
-                    </span>
+                    <Badge tone="success">active</Badge>
                   ) : (
                     <MiniButton size="sm" onClick={() => void activate(v.version)} disabled={busy}>
                       Activate
@@ -188,7 +187,7 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
                     {fmtBps(v.bps)} · {Object.keys(v.minFee ?? {}).length} chain{Object.keys(v.minFee ?? {}).length === 1 ? "" : "s"} · updated {fmtDateTime(v.updatedAt)}
                   </span>
                 </div>
-                <p className={`mt-1 font-mono text-xs ${MUTED}`}>
+                <p className={`mt-1 break-all font-mono text-xs ${MUTED}`}>
                   {Object.entries(v.minFee ?? {}).map(([chain, floor]) => `${chain}=${floor}`).join(" · ") || "pure percentage — no chain minima"}
                 </p>
                 <p className={`mt-0.5 text-xs ${MUTED}`}>
@@ -325,28 +324,28 @@ export function ChainFeesManager({ client }: { client: PeridotClient }) {
           <p className={`mt-3 text-sm ${MUTED}`}>No subsidy rows in this window yet.</p>
         ) : (
           <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className={MUTED}>
-                  <th scope="col" className="py-1 pr-3 font-medium">Day</th>
-                  <th scope="col" className="py-1 pr-3 font-medium">Txns</th>
-                  <th scope="col" className="py-1 pr-3 font-medium">Quoted</th>
-                  <th scope="col" className="py-1 pr-3 font-medium">Actual</th>
-                  <th scope="col" className="py-1 font-medium">Subsidy</th>
-                </tr>
-              </thead>
-              <tbody className="font-mono">
+            <Table className="w-full text-left text-xs">
+              <TableHeader>
+                <TableRow className={MUTED}>
+                  <TableHead scope="col" className="py-1 pr-3 font-medium">Day</TableHead>
+                  <TableHead scope="col" className="py-1 pr-3 font-medium">Txns</TableHead>
+                  <TableHead scope="col" className="py-1 pr-3 font-medium">Quoted</TableHead>
+                  <TableHead scope="col" className="py-1 pr-3 font-medium">Actual</TableHead>
+                  <TableHead scope="col" className="py-1 font-medium">Subsidy</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="font-mono">
                 {summary.map((row) => (
-                  <tr key={row.day} className={DIVIDER}>
-                    <td className="py-1 pr-3">{row.day}</td>
-                    <td className="py-1 pr-3">{row.count}</td>
-                    <td className="py-1 pr-3">{row.quotedTotal}</td>
-                    <td className="py-1 pr-3">{row.actualTotal}</td>
-                    <td className={`py-1 ${row.subsidyTotal.startsWith("-") ? "" : WARN}`}>{row.subsidyTotal}</td>
-                  </tr>
+                  <TableRow key={row.day} className={DIVIDER}>
+                    <TableCell className="py-1 pr-3">{row.day}</TableCell>
+                    <TableCell className="py-1 pr-3">{row.count}</TableCell>
+                    <TableCell className="py-1 pr-3">{row.quotedTotal}</TableCell>
+                    <TableCell className="py-1 pr-3">{row.actualTotal}</TableCell>
+                    <TableCell className={`py-1 ${row.subsidyTotal.startsWith("-") ? "" : WARN}`}>{row.subsidyTotal}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </Card>

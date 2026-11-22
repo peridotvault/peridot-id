@@ -1,5 +1,5 @@
 // Wasabi key/URL builders (pure — no credentials needed).
-import { chainLogoKey, logoPublicUrl, normalizeMint, proxyLogoUrl, tokenLogoKey } from "./wasabi-storage";
+import { appLogoKey, chainLogoKey, logoPublicUrl, normalizeMint, proxyLogoUrl, tokenLogoKey } from "./wasabi-storage";
 
 describe("token logo keys", () => {
   it("uses one file per symbol", () => {
@@ -10,6 +10,14 @@ describe("token logo keys", () => {
   it("uses one file per chain", () => {
     expect(chainLogoKey("eip155", "97", "png")).toBe("public/chains/eip155-97.png");
     expect(chainLogoKey("solana", "a/b:c", "webp")).toBe("public/chains/solana-a_b_c.webp");
+  });
+
+  it("names app logos by client id + content hash (a re-upload gets a new key)", () => {
+    const key = appLogoKey("pidapp_abc", "png", Buffer.from("one"));
+    expect(key).toMatch(/^public\/apps\/pidapp_abc-[0-9a-f]{8}\.png$/);
+    expect(appLogoKey("pidapp_abc", "png", Buffer.from("one"))).toBe(key);
+    expect(appLogoKey("pidapp_abc", "png", Buffer.from("two"))).not.toBe(key);
+    expect(appLogoKey("pid/app*", "webp", Buffer.from("x"))).toMatch(/^public\/apps\/pid_app_-[0-9a-f]{8}\.webp$/);
   });
 
   it("builds proxy logo URLs (null without an API base)", () => {
@@ -45,6 +53,7 @@ describe("token logo keys", () => {
     const { WasabiStorageService } = await import("./wasabi-storage");
     const svc = new WasabiStorageService({ get: () => "" } as never);
     const file = (mimetype: string, size: number) => ({ buffer: Buffer.alloc(size), mimetype, size, originalname: "logo" });
+    await expect(svc.putAppLogo("pidapp_abc", file("image/png", 10))).rejects.toThrow("Wasabi storage is not configured");
     await expect(svc.putChainLogo("eip155", "97", file("image/svg+xml", 10))).rejects.toThrow("must be PNG, JPEG, or WebP");
     await expect(svc.putChainLogo("eip155", "97", file("image/png", 1024 * 1024))).rejects.toThrow("512KB or smaller");
     await expect(svc.putChainLogo("eip155", "97", file("image/png", 10))).rejects.toThrow("Wasabi storage is not configured");

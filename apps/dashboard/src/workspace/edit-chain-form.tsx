@@ -3,8 +3,7 @@
 import { useState } from "react";
 import type { Chain, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
-import { ERROR, FIELD, MUTED } from "./ui";
-import { CutButton } from "./cut-button";
+import { ERROR, FIELD, MUTED, MiniButton } from "./ui";
 
 export function EditChainForm({
   client,
@@ -78,7 +77,7 @@ export function EditChainForm({
 
   return (
     <div>
-      <div className={`border border-border px-3 py-2 font-mono text-xs ${MUTED}`}>
+      <div className={`break-all rounded-lg border border-line bg-background px-3 py-2 font-mono text-xs ${MUTED}`}>
         {chain.namespace}:{chain.reference} · id {chain.id}
       </div>
       {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
@@ -122,7 +121,7 @@ export function EditChainForm({
                 {symbol.slice(0, 3).toUpperCase() || "?"}
               </span>
             )}
-            <label className="inline-flex cursor-pointer items-center rounded border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            <label className="inline-flex cursor-pointer items-center rounded-md border border-line px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
               {uploading ? "Uploading…" : "Upload to our storage"}
               <input
                 type="file"
@@ -177,14 +176,14 @@ export function EditChainForm({
           Active
         </label>
       </div>
-      <CutButton
+      <MiniButton variant="solid" size="lg"
         type="button"
         onClick={save}
         disabled={busy}
-        className={`mt-4 ${busy ? "pointer-events-none opacity-60" : ""}`}
+        className="mt-4"
       >
         {busy ? "Saving…" : "Save chain"}
-      </CutButton>
+      </MiniButton>
     </div>
   );
 }

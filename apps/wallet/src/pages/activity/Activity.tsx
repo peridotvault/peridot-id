@@ -150,7 +150,7 @@ function ActivityHeader({
       <div style={{ flexDirection: "row" }} className="flex items-center justify-between">
         <h1 style={s.title}>Activity</h1>
         <Pressable onPress={onRefresh} disabled={busy} accessibilityLabel="Refresh activity">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface">
+          <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface">
             <RefreshCw size={16} className="text-foreground" />
           </div>
         </Pressable>
@@ -171,7 +171,7 @@ function TabButton({ label, active, onPress }: { label: string; active: boolean;
       onPress={onPress}
       accessibilityState={{ selected: active }}
     >
-      <Cell className={`flex w-full items-center justify-center py-2.5 transition-colors ${active ? "bg-secondary" : "bg-background hover:bg-surface"}`}>
+      <Cell className={`flex w-full items-center justify-center rounded-md py-2.5 transition-colors ${active ? "bg-secondary" : "bg-background hover:bg-surface"}`}>
         <span className={`font-sans text-sm font-medium ${active ? "text-foreground" : "text-muted-foreground"}`}>{label}</span>
       </Cell>
     </Pressable>

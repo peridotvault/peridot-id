@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useWorkspace } from "../workspace/workspace-provider";
-import { Card, ERROR, FIELD, MUTED, WARN, MiniButton } from "../workspace/ui";
+import { Badge, Card, ERROR, FIELD, MUTED, WARN, MiniButton } from "../workspace/ui";
 import { LevelingLayout, useResource } from "../leveling/LevelingLayout";
 import { MIN_JUSTIFICATION, MVP_EVENT_TYPES, formatXp, grantEnvelopeStatus, validateEventType } from "../leveling/xp";
 import { xpAdmin, type XpApp } from "../leveling/api";
@@ -32,7 +32,7 @@ export default function LevelingAppsPage() {
       <Card>
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">Applications</h2>
+            <h2 className="text-base font-semibold tracking-tight">Applications</h2>
             <p className={`mt-1 text-sm ${MUTED}`}>
               Verify partners, gate XP intake per app, and suspend abusive apps. Every change is audited server-side.
             </p>
@@ -51,16 +51,16 @@ export default function LevelingAppsPage() {
         ) : (
           <ul className="mt-3 flex flex-col gap-2">
             {data.map((app) => (
-              <li key={app.id} className="border border-border p-3 text-sm">
+              <li key={app.id} className="rounded-lg border border-line bg-background p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span>
                     <span className="font-medium">{app.name}</span>
                     <span className={`ml-2 text-xs ${MUTED}`}>{app.clientId}</span>
                   </span>
                   <span className="flex flex-wrap gap-1">
-                    <Badge on={app.isVerified} label={app.isVerified ? "verified" : "unverified"} />
-                    <Badge on={app.xpEnabled} label={app.xpEnabled ? "XP on" : "XP off"} />
-                    {!app.isActive && <Badge on={false} label="inactive" />}
+                    <StatusBadge on={app.isVerified} label={app.isVerified ? "verified" : "unverified"} />
+                    <StatusBadge on={app.xpEnabled} label={app.xpEnabled ? "XP on" : "XP off"} />
+                    {!app.isActive && <StatusBadge on={false} label="inactive" />}
                   </span>
                 </div>
                 <p className={`mt-1 text-xs ${MUTED}`}>
@@ -87,11 +87,8 @@ export default function LevelingAppsPage() {
   );
 }
 
-function Badge({ on, label }: { on: boolean; label: string }) {
-  const cls = on
-    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
-    : "bg-muted text-muted-foreground";
-  return <span className={`px-2 py-0.5 text-[11px] font-semibold ${cls}`}>{label}</span>;
+function StatusBadge({ on, label }: { on: boolean; label: string }) {
+  return <Badge tone={on ? "success" : "muted"}>{label}</Badge>;
 }
 
 function AppControls({ app, onChanged }: { app: XpApp; onChanged: () => void }) {
@@ -185,7 +182,7 @@ function AppControls({ app, onChanged }: { app: XpApp; onChanged: () => void }) 
   };
 
   return (
-    <div className="mt-3 flex flex-col gap-3 bg-muted/40 p-3">
+    <div className="mt-3 flex flex-col gap-3 rounded-md bg-muted/40 p-3">
       {/* Verification */}
       <section aria-label="Verification">
         <h3 className="text-sm font-semibold">Verification</h3>

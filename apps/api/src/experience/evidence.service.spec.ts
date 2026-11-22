@@ -56,4 +56,12 @@ describe("EvidenceService (R3 MVP checkers)", () => {
   it("unknown checkers fail closed", async () => {
     await expect(svc.verify("bogus.checker", { pid: "user@pid" }, txFor() as never)).resolves.toMatchObject({ ok: false });
   });
+
+  it("app_attested verifies a Verified app's own event (no PeridotID-side record needed)", async () => {
+    // Standing + approved event type are enforced in events.service before
+    // this runs; the checker itself only attests the trust decision.
+    await expect(
+      svc.verify("backend_check.app_attested", { pid: "user@pid", resourceId: "deal-1" }, txFor() as never),
+    ).resolves.toEqual({ ok: true });
+  });
 });

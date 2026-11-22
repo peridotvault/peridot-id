@@ -66,16 +66,29 @@ export class UsageService {
   ) {}
 
   /** Called only after a successful SSO exchange. Never creates a global-user listing. */
-  async recordSuccessfulLogin(appClientId: string, pid: string): Promise<void> {
+  async recordSuccessfulLogin(appClientId: string, pid: string, exchangeId?: string, providerCode: string | null = null): Promise<void> {
     try {
-      const at = new Date();
-      // Atomic upsert; GREATEST prevents a slower concurrent login moving time backwards.
-      await this.prisma.$executeRaw`
-        INSERT INTO app_users ("appClientId", pid, "firstLoginAt", "lastLoginAt")
-        VALUES (${appClientId}, ${pid}, ${at}, ${at})
-        ON CONFLICT ("appClientId", pid) DO UPDATE
-        SET "firstLoginAt" = LEAST(app_users."firstLoginAt", EXCLUDED."firstLoginAt"),
-            "lastLoginAt" = GREATEST(app_users."lastLoginAt", EXCLUDED."lastLoginAt")`;
+      await this.prisma.$transaction(async tx => {
+        const at = new Date();
+        if (exchangeId) {
+          const app = await tx.pidApp.findUnique({ where: { clientId: appClientId }, select: { id: true } });
+          if (!app) return;
+          const provider = providerCode ? await tx.loginProvider.findUnique({ where: { code: providerCode }, select: { protocol: true } }) : null;
+          await tx.loginEvent.upsert({
+            where: { exchangeId }, update: {},
+            create: { exchangeId, appId: app.id, pid, providerCode,
+              providerEvidence: !providerCode ? "unknown" : provider?.protocol === "wallet_signature" ? "client_selected" : "server" },
+          });
+        }
+
+        // Atomic upsert; GREATEST prevents a slower concurrent login moving time backwards.
+        await tx.$executeRaw`
+          INSERT INTO app_users ("appClientId", pid, "firstLoginAt", "lastLoginAt")
+          VALUES (${appClientId}, ${pid}, ${at}, ${at})
+          ON CONFLICT ("appClientId", pid) DO UPDATE
+          SET "firstLoginAt" = LEAST(app_users."firstLoginAt", EXCLUDED."firstLoginAt"),
+              "lastLoginAt" = GREATEST(app_users."lastLoginAt", EXCLUDED."lastLoginAt")`;
+      });
     } catch (err) {
       this.logger.warn(`App user login history unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }

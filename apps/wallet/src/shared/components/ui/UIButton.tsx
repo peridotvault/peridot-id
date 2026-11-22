@@ -1,11 +1,9 @@
 import type { ReactNode } from "react";
-import { Pressable } from "../ui/Pressable";
-import { StyleSheet, flatten } from "../../styles/stylesheet";
-import { theme } from "../../styles/theme";
+import { Button } from "./Button";
+import { cn } from "../../styles/cn";
 
-// Shared button — web CutButton feel: sharp corners, 14px medium
-// tracking-wide label, generous padding. Variants mirror the web
-// solid/outline recipe (+ danger for destructive actions).
+// Wallet button: shadcn Button + the label layout callers already expect
+// (title, optional icon, optional note under it).
 type Variant = "primary" | "outline" | "danger";
 
 export function UIButton({
@@ -16,6 +14,7 @@ export function UIButton({
   disabled,
   variant = "outline",
   align = "center",
+  className,
 }: {
   title: string;
   note?: string;
@@ -24,82 +23,24 @@ export function UIButton({
   disabled?: boolean;
   variant?: Variant;
   align?: "center" | "left";
+  className?: string;
 }) {
-  const primary = variant === "primary";
-  const danger = variant === "danger";
-  const left = align === "left";
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
-        styles.btn,
-        primary && styles.primary,
-        danger && styles.danger,
-        disabled && styles.disabled,
-        pressed && !disabled && styles.pressed,
-        left && styles.btnLeft,
-      ]}
-    >
-      <div style={flatten([styles.content, left && styles.contentLeft])} className="flex flex-col">
-        {icon}
-        <span
-          style={flatten([
-            styles.label,
-            primary && styles.labelPrimary,
-            danger && styles.labelDanger,
-            disabled && !primary && !danger && styles.labelDisabled,
-          ])}
-        >
-          {title}
-        </span>
-      </div>
-      {note && <span style={styles.note}>{note}</span>}
-    </Pressable>
+    <Button variant={variant} align={align} disabled={disabled} onClick={onPress} className={className}>
+      <span
+        className={cn(
+          "flex items-center gap-2.5 font-sans text-sm font-medium tracking-[0.4px]",
+          align === "left" ? "justify-start" : "justify-center",
+        )}
+      >
+        {/* Fixed icon slot keeps every left-aligned label on the same x. */}
+        {align === "left" && (
+          <span className="flex w-[18px] shrink-0 items-center justify-center">{icon}</span>
+        )}
+        {align === "center" && icon}
+        {title}
+      </span>
+      {note && <span className="font-sans text-xs text-muted-foreground">{note}</span>}
+    </Button>
   );
 }
-
-const c = theme.colors;
-const f = theme.fonts;
-
-const styles = StyleSheet.create({
-  btn: {
-    backgroundColor: c.background,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 0,
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-  },
-  primary: {
-    backgroundColor: c.foreground,
-    borderColor: c.foreground,
-  },
-  danger: {
-    borderColor: c.danger,
-  },
-  disabled: { opacity: 0.55 },
-  pressed: { opacity: 0.7 },
-  content: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-  },
-  btnLeft: { alignItems: "stretch" },
-  contentLeft: { justifyContent: "flex-start" },
-  label: {
-    fontSize: 14,
-    fontWeight: "500",
-    letterSpacing: 0.4,
-    color: c.foreground,
-    fontFamily: f.sansMedium,
-  },
-  labelPrimary: { color: c.background },
-  labelDanger: { color: c.danger },
-  labelDisabled: { color: c.mutedForeground },
-  note: { fontSize: 11, color: c.mutedForeground, fontFamily: f.sans },
-});

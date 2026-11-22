@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pressable } from "../../shared/components/ui/Pressable";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { Link2 } from "../../shared/components/icons";
 import type { IdentityCredential } from "@peridotvault/pid-types";
-import { detectWallets, type WalletConnector } from "@peridotvault/pid-sdk-js";
+import { detectWallets, discoverWallets, type WalletConnector } from "@peridotvault/pid-sdk-js";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead, invalidate } from "../../shared/data/apiCache";
@@ -18,7 +18,16 @@ export function ConnectedAccounts({ onDone }: { onDone: () => void }) {
   const [justUnlinked, setJustUnlinked] = useState(false);
   // External wallets are ordinary credentials (provider solana/evm) — the same
   // list, so one unlink path covers Google, email and wallets.
-  const wallets = useMemo(() => detectWallets(), []);
+  const [wallets, setWallets] = useState<WalletConnector[]>(() => detectWallets());
+  useEffect(() => {
+    let alive = true;
+    discoverWallets().then((found) => {
+      if (alive) setWallets(found);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     const res = await cachedRead("identity.credentials", { ttlMs: 60_000, tier: "session" }, () => peridot.identity.credentials());
@@ -104,7 +113,7 @@ export function ConnectedAccounts({ onDone }: { onDone: () => void }) {
             </span>
             {wallets.map((wallet) => (
               <UIButton
-                key={wallet.kind}
+                key={`${wallet.kind}:${wallet.namespace}`}
                 title={`Link ${wallet.label}`}
                 onPress={() => link(wallet)}
                 disabled={busy}
@@ -122,7 +131,7 @@ export function ConnectedAccounts({ onDone }: { onDone: () => void }) {
           {credentials.map((c) => (
             <div key={c.id} className="flex flex-col">
               <div className="flex items-center gap-3 px-6 py-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface">
                   <Link2 size={16} className="text-foreground" />
                 </div>
                 <div className="flex flex-1 flex-col gap-0.5">

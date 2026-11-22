@@ -104,6 +104,23 @@ describe("PidAppsService", () => {
     });
   });
 
+  it("setLogo stores an owner-uploaded logo as a proxy URL (404 for another owner)", async () => {
+    const { prisma, service } = setup();
+    const app = await service.create("pid_owner", "My Game");
+    const wasabi = { putAppLogo: jest.fn(async () => "public/apps/pidapp_x-abc12345.png") };
+    const config = {
+      get: (k: string, d?: string) =>
+        k === "API_URL" ? "https://api.example" : k === "PID_SECRETS_ENC_KEY" ? TEST_ENC_KEY : (d ?? ""),
+    };
+    const svc = new PidAppsService(prisma as never, config as never, undefined, wasabi as never);
+    const file = { buffer: Buffer.from("bytes"), mimetype: "image/png", size: 5, originalname: "logo.png" };
+    const updated = await svc.setLogo("pid_owner", app.id as string, file);
+    expect(wasabi.putAppLogo).toHaveBeenCalledWith(app.clientId, file);
+    expect(updated.logoUrl).toBe("https://api.example/v1/tokens/logo?key=public%2Fapps%2Fpidapp_x-abc12345.png");
+    await expect(svc.setLogo("pid_intruder", app.id as string, file)).rejects.toThrow("App not found");
+    expect(service).toBeDefined();
+  });
+
   it("findActive hides unknown and disabled apps", async () => {
     const { prisma, service } = setup();
     const app = await service.create("pid_owner", "My Game");

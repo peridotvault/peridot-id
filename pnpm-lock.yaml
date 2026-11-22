@@ -168,9 +168,24 @@ importers:
       '@peridotvault/pid-types':
         specifier: workspace:*
         version: link:../../packages/types
+      '@ui-sdk/core':
+        specifier: 0.1.0-beta.13
+        version: 0.1.0-beta.13
+      '@ui-sdk/react':
+        specifier: 0.1.0-beta.13
+        version: 0.1.0-beta.13(@types/react@19.2.18)(@ui-sdk/core@0.1.0-beta.13)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       buffer:
         specifier: ^6.0.3
         version: 6.0.3
+      class-variance-authority:
+        specifier: ^0.7.1
+        version: 0.7.1
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      lucide-react:
+        specifier: ^1.55.0
+        version: 1.55.0(@types/react@19.2.18)(react@19.0.0)
       react:
         specifier: 19.0.0
         version: 19.0.0
@@ -180,6 +195,9 @@ importers:
       react-router:
         specifier: ^7.18.4
         version: 7.18.4(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      tailwind-merge:
+        specifier: ^3.7.1
+        version: 3.7.1
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
@@ -217,9 +235,21 @@ importers:
       '@peridotvault/pid-types':
         specifier: workspace:*
         version: link:../../packages/types
+      '@ui-sdk/core':
+        specifier: 0.1.0-beta.13
+        version: 0.1.0-beta.13
+      '@ui-sdk/react':
+        specifier: 0.1.0-beta.13
+        version: 0.1.0-beta.13(@types/react@19.2.18)(@ui-sdk/core@0.1.0-beta.13)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
       buffer:
         specifier: ^6.0.3
         version: 6.0.3
+      class-variance-authority:
+        specifier: ^0.7.1
+        version: 0.7.1
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
       lucide-react:
         specifier: ^1.55.0
         version: 1.55.0(@types/react@19.2.18)(react@19.0.0)
@@ -232,6 +262,9 @@ importers:
       react-qr-code:
         specifier: ^2.2.0
         version: 2.2.0(react@19.0.0)
+      tailwind-merge:
+        specifier: ^3.7.1
+        version: 3.7.1
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
@@ -1396,6 +1429,9 @@ packages:
   '@smithy/core@3.36.2':
     resolution: {integrity: sha512-oRw0rB9QSUiCZfEs23G5F4Af+b2rQt1lItIICWu5IejFNd+uPM8SWqiKLMpQ6bX1Q7slsLbjuoE2niErFtkVPQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -1761,6 +1797,20 @@ packages:
 
   '@types/yargs@17.0.35':
     resolution: {integrity: sha512-qUHkeCyQFxMXg79wQfTtfndEC+N9ZZg76HJftDJp+qH2tV7Gj4OJi7l+PiWwJ+pWtW8GwSmqsDj/oymhrTWXjg==}
+
+  '@ui-sdk/core@0.1.0-beta.13':
+    resolution: {integrity: sha512-URjk9hqdc/cZKDtw6Gb9NqjY48U8l0EgoP4d5ghlooa3av+GrR0iSmsav133UU4oelcuKIO1ZPJ4j7gIPMr1Vg==}
+
+  '@ui-sdk/react@0.1.0-beta.13':
+    resolution: {integrity: sha512-Gz85tAcPJHwnv90WMIAtED3fDamqVD3F3FF3uKsA/TsL+KbaeHSgX1gGdIpNcnzkmDO8YZk9aZBKgCFgpaCcHA==}
+    peerDependencies:
+      '@types/react': '>=19.2.10'
+      '@ui-sdk/core': ^0.1.0-beta.13
+      react: '>=19'
+      react-dom: '>=19'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
 
   '@vitejs/plugin-react@6.1.2':
     resolution: {integrity: sha512-fhJNGUdscQa4HkI0xFxwonWyhnVReCPDbXI7FH7jmzpnVCrFQI7PRrhWecO263610vOrs9tr2Y4xcf8uAdFxbw==}
@@ -2147,6 +2197,9 @@ packages:
   class-validator@0.14.4:
     resolution: {integrity: sha512-AwNusCCam51q703dW82x95tOqQp6oC9HNUl724KxJJOfnKscI8dOloXFgyez7LbTTKWuRBA37FScqVbJEoq8Yw==}
 
+  class-variance-authority@0.7.1:
+    resolution: {integrity: sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg==}
+
   cli-cursor@3.1.0:
     resolution: {integrity: sha512-I/zHAwsKf9FqGoXM4WWRACob9+SNukZTd94DWF57E4toouRulbCxcUh6RKUEOQlYTHJnzkPMySvPNaaSLNfLZw==}
     engines: {node: '>=8'}
@@ -2170,6 +2223,10 @@ packages:
   clone@1.0.4:
     resolution: {integrity: sha512-JQHZ2QMW6l3aH/j6xCqQThY/9OH4D/9ls34cgkUBiEeocRTU04tHfKPBsUK1PqZCUQM7GiA0IIXJSuXHI64Kbg==}
     engines: {node: '>=0.8'}
+
+  clsx@2.1.1:
+    resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
+    engines: {node: '>=6'}
 
   co@4.6.0:
     resolution: {integrity: sha512-QVb0dM5HvG+uaxitm8wONl7jltx8dqhfU33DcqtOZcLSVIKSDDLDi7+0LbAKiyI8hD9u42m2YxXSkMGWThaecQ==}
@@ -3307,6 +3364,7 @@ packages:
 
   node-abort-controller@3.1.1:
     resolution: {integrity: sha512-AGK2yQKIjRuqnc6VkX2Xj5d+QW8xZ87pa1UK6yA6ouUyuxfHuMP6umE5QK7UmTeOAymo+Zx1Fxiuw9rVx8taHQ==}
+    deprecated: This package is no longer needed on supported Node.js versions. Node.js 16+ includes AbortController and AbortSignal as built-in globals. All Node.js versions requiring this polyfill are end-of-life. Use the built-in globals instead.
 
   node-emoji@1.11.0:
     resolution: {integrity: sha512-wo2DpQkQp7Sjm2A0cq+sN7EHKO6Sl0ctXeBdFZrL9T9+UywORbufTcTZxom8YqpLQt/FqNMUkOpkZrJVYSKD3A==}
@@ -3844,6 +3902,9 @@ packages:
   symbol-observable@4.0.0:
     resolution: {integrity: sha512-b19dMThMV4HVFynSAM1++gBHAbk2Tc/osgLIBZMKsyqh34jb2e8Os7T6ZW/Bt3pJFdBTd2JwAnAAEQV7rSNvcQ==}
     engines: {node: '>=0.10'}
+
+  tailwind-merge@3.7.1:
+    resolution: {integrity: sha512-v7y4BV4FUlO8exj/4M5UXKeoowDiuugVUg3tkMNIyOUCOHy5xp8+5aWQeXCtZ2491sUV1YPsVeM9EveZ6/xuZQ==}
 
   tailwindcss@4.3.3:
     resolution: {integrity: sha512-gOhV3P7ufE62QDGg1zVaTgCR+EtPv92k2nIhVcVKcLmxT1sUBsQGhnZj175j+MqRt4zLF7ic+sCYjfhxMxj7YQ==}
@@ -5953,6 +6014,16 @@ snapshots:
     dependencies:
       '@types/yargs-parser': 21.0.3
 
+  '@ui-sdk/core@0.1.0-beta.13': {}
+
+  '@ui-sdk/react@0.1.0-beta.13(@types/react@19.2.18)(@ui-sdk/core@0.1.0-beta.13)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)':
+    dependencies:
+      '@ui-sdk/core': 0.1.0-beta.13
+      react: 19.0.0
+      react-dom: 19.0.0(react@19.0.0)
+    optionalDependencies:
+      '@types/react': 19.2.18
+
   '@vitejs/plugin-react@6.1.2(babel-plugin-react-compiler@1.0.0)(vite@8.3.4(@types/node@26.4.0)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(yaml@2.9.0))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
@@ -6381,6 +6452,10 @@ snapshots:
       libphonenumber-js: 1.13.10
       validator: 13.15.35
 
+  class-variance-authority@0.7.1:
+    dependencies:
+      clsx: 2.1.1
+
   cli-cursor@3.1.0:
     dependencies:
       restore-cursor: 3.1.0
@@ -6402,6 +6477,8 @@ snapshots:
       wrap-ansi: 7.0.0
 
   clone@1.0.4: {}
+
+  clsx@2.1.1: {}
 
   co@4.6.0: {}
 
@@ -8214,6 +8291,8 @@ snapshots:
       '@scarf/scarf': 1.4.0
 
   symbol-observable@4.0.0: {}
+
+  tailwind-merge@3.7.1: {}
 
   tailwindcss@4.3.3: {}
 

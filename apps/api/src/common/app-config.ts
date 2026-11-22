@@ -24,8 +24,10 @@ export const ACCESS_TOKEN_TTL = "15m";
 export const REFRESH_TOKEN_TTL = "30d";
 export const GOOGLE_FAMILY_MAX_AGE = "90d";
 export const PASSKEY_FAMILY_MAX_AGE = "365d";
-/** RP-backend exchange bearer: 24h cliff, no refresh (ANT-227 item 7: was 30d). */
+/** RP-backend exchange bearer: short-lived; the RP rotates it with its refresh token. */
 export const SSO_EXCHANGE_TOKEN_TTL = "24h";
+/** RP-backend refresh token: sliding 30d, rotated per use — sessions last as long as the RP keeps refreshing. */
+export const SSO_REFRESH_TOKEN_TTL = "30d";
 
 export const WEBAUTHN_RP_NAME = "PeridotID";
 
@@ -55,6 +57,8 @@ export const JWT_AUD_REFRESH = "pid-refresh";
 export const JWT_AUD_APP = "pid-app";
 /** RP-backend exchange bearer from the SSO pid_code exchange. */
 export const JWT_AUD_SSO = "pid-sso";
+/** RP-backend refresh token (server-held; never a cookie). */
+export const JWT_AUD_RP_REFRESH = "pid-rp-refresh";
 /** Every access-class audience the JwtStrategy accepts (refresh has its own). */
 export const JWT_ACCESS_AUDIENCES = [JWT_AUD_SESSION, JWT_AUD_APP, JWT_AUD_SSO] as const;
 
@@ -99,6 +103,7 @@ for (const [name, ttl] of [
   ["GOOGLE_FAMILY_MAX_AGE", GOOGLE_FAMILY_MAX_AGE],
   ["PASSKEY_FAMILY_MAX_AGE", PASSKEY_FAMILY_MAX_AGE],
   ["SSO_EXCHANGE_TOKEN_TTL", SSO_EXCHANGE_TOKEN_TTL],
+  ["SSO_REFRESH_TOKEN_TTL", SSO_REFRESH_TOKEN_TTL],
   ["APP_TOKEN_TTL", APP_TOKEN_TTL],
   ["APP_CLIENT_SECRET_MAX_AGE", APP_CLIENT_SECRET_MAX_AGE],
   ["APP_CLIENT_SECRET_GRACE", APP_CLIENT_SECRET_GRACE],

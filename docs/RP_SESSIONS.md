@@ -30,12 +30,15 @@ const { pidCode } = await peridot.auth.loginPopup({ clientId: "pidapp_..." });
 app.get("/auth/callback", async (req, res) => {
   const identity = await peridot.auth.exchange(String(req.query.pid_code), "https://mygame.dev/callback", "pidapp_...");
   if ("statusCode" in identity) return res.status(401).send("exchange failed");
-  // identity = { pid, profile: { displayName, avatarUrl }, credentials, accessToken, expiresIn }
-  await store.save(sessionId(req), { pid: identity.pid, bearer: identity.accessToken });
+  // identity = { pid, profile, credentials, accessToken, expiresIn, refreshToken, refreshExpiresIn }
+  await store.save(sessionId(req), { pid: identity.pid, bearer: identity.accessToken, refresh: identity.refreshToken });
   res.cookie("sid", sessionId(req), { httpOnly: true, sameSite: "lax", secure: true });
   res.redirect("/");
 });
 ```
+
+Store **both** tokens; the refresh token is what keeps the session alive past the
+bearer's 24h (see §2b and §4).
 
 `pid_code` is single-use, 5-minute, bound to your `clientId`, and bound to the
 exact `redirectUri` it was issued for (pass the URL you received the code on —
@@ -68,6 +71,24 @@ Reachable with this bearer (all GET, `scope: "read"`): `GET /v1/identity/me`,
 403 — money moves go through the PeridotID popup or your machine token, never
 this bearer.
 
+## 2b. Keeping the session alive (refresh)
+
+The bearer lasts 24h. Before it expires, swap the stored refresh token for a
+fresh pair — no browser, no user:
+
+```ts
+// Every ~12h (or on a 401 from /v1/identity/me), per stored session.
+const next = await peridot.auth.refreshRp(sess.refresh);
+if ("statusCode" in next) return null; // revoked / expired → make the user log in again
+await store.save(sid, { pid: next.pid, bearer: next.accessToken, refresh: next.refreshToken }); // rotate: discard the old pair
+```
+
+The presented refresh token dies on use (rotation), so store the new one
+immediately. A replayed old token is treated as theft: the whole app session
+family is revoked and the user must log in again. Refreshing is sliding — as
+long as your backend refreshes at least once every 30 days, the session lasts
+indefinitely.
+
 ## 3. Your user row (still required)
 
 Auth is stateless; your app isn't. Keep one row per user keyed by `pid`
@@ -78,14 +99,16 @@ Auth is stateless; your app isn't. Keep one row per user keyed by `pid`
 
 1. **The bearer must stay server-side.** Anything in JS/localStorage is
    stealable via XSS. `httpOnly` cookie + server store, plus CSP. Non-negotiable.
-2. **24-hour cliff, no refresh.** `SSO_EXCHANGE_TOKEN_TTL` (`24h`, ANT-227 —
-   was `30d`) is non-sliding and non-refreshable — past expiry the user
-   re-clicks login (one-tap consent if their PeridotID session is alive).
-   Never log the bearer.
-3. **No single-token revoke.** A leaked bearer stays valid until expiry unless
-   the whole identity is deactivated. Scope contains the blast radius
-   (reads only, no fund movement) — that is the mitigation, and the reason
-   this pattern is blessed for reads only.
+2. **24h bearer, 30d sliding refresh.** `SSO_EXCHANGE_TOKEN_TTL` (`24h`,
+   ANT-227) and `SSO_REFRESH_TOKEN_TTL` (`30d`, rotated per use). The bearer is
+   non-sliding by design — rotate it with the refresh token (§2b). Miss the
+   30d window and the user re-clicks login (one-tap consent if their PeridotID
+   session is alive). Never log either token.
+3. **Revoke ends refresh, not in-flight bearers.** "Disconnect app" (wallet →
+   Settings → App connections) and revoking the app session in Settings kill
+   the refresh family immediately; an already-issued bearer stays valid for
+   reads until its 24h expiry. Scope contains the blast radius (reads only, no
+   fund movement) — that is the mitigation.
 4. **Verify-or-cache is your availability call.** Live-verify every request =
    PeridotID in your hot path (fail-closed when we're down, and deactivation
    honored immediately via the identity check). Caching identity up to ~15 min
@@ -118,7 +141,5 @@ app.post("/logout", async (req, res) => {
 ## What's deliberately missing (roadmap, in order)
 
 1. `GET /v1/auth/userinfo` — stable RP contract instead of coupling to wallet endpoints.
-2. Per-token revoke — kill one leaked bearer without deactivating the identity.
-3. JWKS — local JWT verification, breaking the hot-path coupling (§4).
-
-Each ships independently; (2) and (3) wait until a real RP feels the pain.
+2. JWKS — local JWT verification, breaking the hot-path coupling (§4).
+3. Push revocation notifications (webhook) — today a revoked app learns it on its next refresh (≤30d idle) or on a 401.

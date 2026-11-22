@@ -5,6 +5,7 @@ import { BackfillRunService } from "../settings/backfill-run.service";
 import { BackfillRunController } from "../settings/settings-admin.controller";
 import { SettingsModule } from "../settings/settings.module";
 import { AppCredentialGuard } from "./app-credential.guard";
+import { AppXpTasksController } from "./app-xp-tasks.controller";
 import { IntakeThrottleAlertFilter } from "./intake-throttle.filter";
 import { EventsController } from "./events.controller";
 import { EventsService } from "./events.service";
@@ -35,7 +36,7 @@ import { VerificationService } from "./verification.service";
  */
 @Module({
   imports: [SecurityModule, AuthModule, SettingsModule],
-  controllers: [LevelsController, ExperienceAdminController, EventsController, BackfillRunController],
+  controllers: [LevelsController, ExperienceAdminController, EventsController, BackfillRunController, AppXpTasksController],
   providers: [
     LevelsService,
     LedgerService,

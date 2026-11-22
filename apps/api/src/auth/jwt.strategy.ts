@@ -54,6 +54,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
       pid: payload.sub,
       ...(payload.app ? { app: payload.app } : {}),
       ...(payload.scope ? { scope: payload.scope } : {}),
+      ...(payload.method ? { method: payload.method } : {}),
     };
   }
 }

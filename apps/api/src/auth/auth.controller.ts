@@ -19,8 +19,9 @@ import { EmailOtpService } from "./email/email-otp.service";
 import { UsageService } from "../usage/usage.service";
 import { GoogleGuard, isGoogleAuthError } from "./google.guard";
 import { isPendingGoogleClaim } from "./google.strategy";
-import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto, GrantScopeDto } from "./dto/auth.dto";
+import { ExchangeDto, AuthorizeDto, ClaimDto, LoginDto, AppTokenDto, SwitchAccountDto, GrantScopeDto, RpRefreshDto } from "./dto/auth.dto";
 import { PidAppsService } from "./apps.service";
+import { ProvidersService } from "./providers.service";
 import { encodeState, isLoopbackReturnTo, SsoCodeInvalidError, SsoService } from "./sso.service";
 import { randomBytes } from "node:crypto";
 import { oauthStateSecret, verifyOAuthState } from "./oauth-state";
@@ -73,6 +74,7 @@ export class AuthController {
     private readonly claimService: ClaimService,
     private readonly emailOtp: EmailOtpService,
     private readonly apps: PidAppsService,
+    private readonly providers: ProvidersService,
     private readonly usage: UsageService,
     private readonly config: ConfigService,
   ) {}
@@ -140,17 +142,27 @@ export class AuthController {
    */
   @Get("app-info")
   @Throttle({ default: { limit: 30, ttl: 60000 } })
-  async appInfo(@Req() req: Request): Promise<{ name: string; isVerified: boolean }> {
+  async appInfo(@Req() req: Request): Promise<{ name: string; logoUrl: string | null; description: string | null; isVerified: boolean; loginMethods: string[] }> {
     const clientId = typeof req.query.clientId === "string" ? req.query.clientId : "";
-    const app = clientId ? await this.apps.findActive(clientId) : null;
+    // `origin` is what the browser asserts; when present it must be one of the
+    // app's registered origins, or a caller could borrow another app's name and
+    // logo on the consent screen. Absent = legacy callers (react-embed) that
+    // only read loginMethods.
+    const origin = typeof req.query.origin === "string" ? req.query.origin : "";
+    const app = clientId
+      ? origin
+        ? await this.apps.findActiveForOrigin(clientId, origin)
+        : await this.apps.findActive(clientId)
+      : null;
     if (!app) throw new NotFoundException("App not found");
-    return { name: app.name, isVerified: app.isVerified };
+    return { name: app.name, logoUrl: app.logoUrl, description: app.description, isVerified: app.isVerified, loginMethods: app.loginMethods };
   }
 
   @Post("passkey/start")
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
-  passkeyStart(): Promise<AuthenticateStartResult> {
+  async passkeyStart(): Promise<AuthenticateStartResult> {
+    await this.providers.assertUsable("passkey");
     return this.credentialService.loginStart();
   }
 
@@ -186,6 +198,7 @@ export class AuthController {
       try {
         pidCode = await this.ssoService.issue(pid, resolved.redirectTo, {
           clientId: resolved.clientId,
+          method: "passkey",
           ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
         });
       } catch (err) {
@@ -203,6 +216,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async emailStart(@Req() req: Request, @Body() dto: EmailStartDto): Promise<{ ok: true }> {
+    await this.providers.assertUsable("email");
     return this.emailOtp.request(dto.email, req.ip);
   }
 
@@ -241,6 +255,7 @@ export class AuthController {
         try {
           pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, {
             clientId: resolved.clientId,
+            method: "email",
             ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
           });
         } catch (err) {
@@ -290,6 +305,18 @@ export class AuthController {
   }
 
   /**
+   * Rotate an RP backend session. The RP posts its server-held refresh token;
+   * no cookies, no browser. Past `SSO_REFRESH_TOKEN_TTL` without a refresh the
+   * link is dead and the user re-logs in.
+   */
+  @Post("rp/refresh")
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async rpRefresh(@Body() dto: RpRefreshDto) {
+    return this.ssoService.refreshRpSession(dto.refreshToken);
+  }
+
+  /**
    * Mint a pid_code for the caller's CURRENT session (no re-authentication).
    * Powers consent screens on PeridotID-hosted pages: the user approves, the page
    * redirects itself to returnTo with the code. Cookie-authenticated by definition —
@@ -316,6 +343,10 @@ export class AuthController {
     try {
       pidCode = await this.ssoService.issue(user.pid, resolved.redirectTo, {
         clientId: resolved.clientId,
+        // Session reuse must carry the provider that actually authenticated it;
+        // a token without method context (legacy) fails closed instead of
+        // bypassing the app's provider switches.
+        ...(user.method ? { method: user.method } : {}),
         ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
       });
     } catch (err) {
@@ -471,12 +502,18 @@ export class AuthController {
       try {
         pidCode = await this.ssoService.issue(identity.pid, resolved.redirectTo, {
           clientId: resolved.clientId,
+          method: "google",
           ...(codeChallenge ? { codeChallenge } : {}),
         });
       } catch (err) {
         if (err instanceof Error && err.message === "sso_pkce_invalid") {
           this.logger.warn(`google callback: public client ${resolved.clientId} missing code_challenge`);
           res.redirect(withErrorFlag(successUrl, "pkce_required"));
+          return;
+        }
+        if (err instanceof BadRequestException) {
+          this.logger.warn(`google callback: ${err.message} (${resolved.clientId})`);
+          res.redirect(withErrorFlag(successUrl, "login_method_disabled"));
           return;
         }
         throw err;
@@ -506,7 +543,7 @@ export class AuthController {
   ): Promise<{ ok: true; pid: string; pidCode?: string; redirectTo?: string }> {
     const ticketId = dto.ticket ?? (req as Request & { cookies?: Record<string, string> }).cookies?.[CLAIM_COOKIE];
     if (!ticketId) throw new BadRequestException("No pending claim — sign in again to get a fresh one.");
-    const { pid, redirectTo, clientId, provider } = await this.claimService.claim(ticketId, dto.handle);
+    const { pid, redirectTo, clientId, provider, loginProviderCode } = await this.claimService.claim(ticketId, dto.handle);
     // A wallet that just claimed a PID inside an app is one metered login.
     if (clientId && authMethodFor(provider) === "wallet") await this.usage.recordWalletLogin(clientId, pid);
     await this.authService.issueSession(res, pid, req.headers["user-agent"], undefined, authMethodFor(provider));
@@ -525,6 +562,7 @@ export class AuthController {
         try {
           pidCode = await this.ssoService.issue(pid, resolved.redirectTo, {
             clientId: resolved.clientId,
+            method: loginProviderCode ?? (provider === "google" || provider === "email" ? provider : undefined),
             ...(dto.codeChallenge ? { codeChallenge: dto.codeChallenge } : {}),
           });
         } catch (err) {

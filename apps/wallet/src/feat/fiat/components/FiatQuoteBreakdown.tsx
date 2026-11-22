@@ -40,7 +40,7 @@ export function FiatQuoteBreakdown({
                 onPress={() => onMethod(m.key)}
                 accessibilityLabel={`Pay with ${m.label}`}
               >
-                <div style={{ flexDirection: "row" }} className={`flex flex-col w-full items-center justify-between border px-2.5 py-2 ${method === m.key ? "border-foreground" : "border-border"}`}>
+                <div style={{ flexDirection: "row" }} className={`flex flex-col w-full items-center justify-between rounded-lg border px-2.5 py-2 ${method === m.key ? "border-foreground" : "border-border"}`}>
                   <span className={`font-sans text-sm text-foreground ${method === m.key ? "font-semibold" : ""}`}>{m.label}</span>
                   {m.enabled && <span className="font-mono text-sm text-muted-foreground">{fmtIdr(sumIdr(m.gatewayFeeIdr, m.gatewayTaxIdr))}</span>}
                 </div>

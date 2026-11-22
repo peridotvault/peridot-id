@@ -1,4 +1,5 @@
-// Smallest runnable check for the login popup open/fallback/resolve logic.
+// Smallest runnable check for the login open/resolve logic (login always opens
+// a tab; approvals keep the popup) plus the hosted-side popup protocol.
 // Run: pnpm --filter @peridotvault/pid-sdk-js test
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -35,45 +36,27 @@ async function withOpener(openImpl, fn) {
   }
 }
 
-test("openLoginPopup: opens a centered popup and resolves with pidCode", async () => {
+test("openLoginPopup: opens a tab, never a popup window", async () => {
   const { openLoginPopup } = await import("../dist/esm/popup.js");
   const win = popupMock();
   const calls = [];
   await withOpener(
-    (url, name, features) => (calls.push({ url, name, features }), win),
+    (...args) => (calls.push(args), win),
     async (opener) => {
       const p = openLoginPopup({ popupBaseUrl: POPUP_ORIGIN, params: { popup: "login", origin: DAPP_ORIGIN } });
       assert.equal(calls.length, 1, "exactly one window.open");
-      assert.match(calls[0].url, /popup=login/);
-      assert.match(calls[0].features, /popup=1/);
+      assert.match(calls[0][0], /popup=login/);
+      // Login must not pass window features: an extension wallet parents its own
+      // window to this one, and a popup parent crashes Brave's browser process.
+      assert.equal(calls[0][1], "_blank", "opens a tab");
+      assert.equal(calls[0][2], undefined, "no popup features");
       opener.emit("message", {
         source: win,
         origin: POPUP_ORIGIN,
         data: { type: "pid-popup-result", ok: true, data: { pidCode: "abc" } },
       });
       assert.deepEqual(await p, { pidCode: "abc" });
-      assert.equal(win.closed, true, "popup closes after delivering the code");
-    },
-  );
-});
-
-test("openLoginPopup: falls back to a tab when the popup is blocked", async () => {
-  const { openLoginPopup } = await import("../dist/esm/popup.js");
-  const win = popupMock();
-  const calls = [];
-  await withOpener(
-    (url, name) => (calls.push({ url, name }), calls.length === 1 ? null : win),
-    async (opener) => {
-      const p = openLoginPopup({ popupBaseUrl: POPUP_ORIGIN, params: { popup: "login", origin: DAPP_ORIGIN } });
-      assert.equal(calls.length, 2, "popup then tab");
-      assert.equal(calls[0].name, "peridot-popup");
-      assert.equal(calls[1].name, "_blank", "tab fallback");
-      opener.emit("message", {
-        source: win,
-        origin: POPUP_ORIGIN,
-        data: { type: "pid-popup-result", ok: true, data: { pidCode: "z" } },
-      });
-      assert.deepEqual(await p, { pidCode: "z" });
+      assert.equal(win.closed, true, "window closes after delivering the code");
     },
   );
 });
@@ -280,4 +263,38 @@ test("readPopupParams: parses redirect_uri (http(s) only)", async () => {
   await withHostedWindow(`?popup=login&origin=${DAPP_ORIGIN}&redirect_uri=${encodeURIComponent("javascript:alert(1)")}`, () => {
     assert.equal(readPopupParams()?.redirectUri, undefined);
   });
+});
+
+test("popupRequest: carries the client's client_id so the approval screen knows the app", async () => {
+  const { Peridot } = await import("../dist/esm/index.js");
+  const win = popupMock();
+  const calls = [];
+  await withOpener(
+    (url) => (calls.push(url), win),
+    async () => {
+      const peridot = Peridot({ baseUrl: "https://api.example", popupBaseUrl: POPUP_ORIGIN, clientId: "pidapp_abc" });
+      const p = peridot.popupRequest("withdraw", { amount: "1" });
+      assert.equal(calls.length, 1);
+      assert.match(calls[0], /popup=withdraw/);
+      assert.match(calls[0], /client_id=pidapp_abc/);
+      win.close();
+      await assert.rejects(p, "closing the popup settles the request");
+    },
+  );
+});
+
+test("popupRequest: omits client_id when the client has none", async () => {
+  const { Peridot } = await import("../dist/esm/index.js");
+  const win = popupMock();
+  const calls = [];
+  await withOpener(
+    (url) => (calls.push(url), win),
+    async () => {
+      const peridot = Peridot({ baseUrl: "https://api.example", popupBaseUrl: POPUP_ORIGIN });
+      const p = peridot.popupRequest("withdraw", { amount: "1" });
+      assert.doesNotMatch(calls[0], /client_id=/);
+      win.close();
+      await assert.rejects(p);
+    },
+  );
 });

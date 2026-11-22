@@ -13,13 +13,18 @@ import { UIButton } from "../../shared/components/ui/UIButton";
 import { isFiatAction, runAction } from "../../feat/auth/utils/popupAction";
 import { assertExecuteGateAllows } from "../../feat/auth/utils/knownPrograms";
 import { usePopupRequest, type PopupAuthReason } from "../../feat/auth/hooks/usePopupRequest";
+import { useAppInfo } from "../../feat/auth/hooks/useAppInfo";
 import { useFiatPrepare } from "../../feat/fiat/hooks/useFiatPrepare";
 import { PopupReview } from "../../feat/auth/components/PopupReview";
+import { SigningScreen } from "../../feat/auth/components/SigningScreen";
 import { FiatQuoteBreakdown } from "../../feat/fiat/components/FiatQuoteBreakdown";
 
 export function Approve({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?: (reason?: PopupAuthReason) => void }) {
   const { peridot } = usePeridot();
   const fiat = useFiatPrepare(peridot);
+  // App the request came from: name + verified are server-sourced (fail-closed
+  // to hidden), the origin badge in PopupReview is the value the user verifies.
+  const appInfo = useAppInfo(peridot, popup.clientId, popup.origin);
   // Unknown-target acknowledgement (ANT-262): owned here so BOTH the review UI
   // (checkbox gating) and the approve path (pre-ceremony enforcement) read the
   // same value. Reset whenever a new request arrives.
@@ -55,6 +60,11 @@ export function Approve({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?
     void req.approve({ unknownAcknowledged: acknowledged });
   }, [req.approve, acknowledged]);
 
+  // Handed back to the opener: same terminal animation as the login popup.
+  if (req.phase === "done") {
+    return <SigningScreen origin={popup.origin} appName={appInfo?.name} logoUrl={appInfo?.logoUrl} />;
+  }
+
   return (
     <div className="flex flex-1 flex-col">
       <Section className="border-t-0">
@@ -63,7 +73,6 @@ export function Approve({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?
           {req.phase === "waiting" && <p role="status" style={s.hint}>Waiting for the app…</p>}
           {req.phase === "preparing" && <p role="status" style={s.hint}>Loading verified details…</p>}
           {req.phase === "redirecting" && <p style={s.hint}>Opening the payment page…</p>}
-          {req.phase === "done" && <p style={s.hint}>Done — you can close this window.</p>}
           {(req.phase === "review" || req.phase === "busy") && (
             <>
               {req.action === "fiat-checkout" && fiat.checkout && (
@@ -79,6 +88,8 @@ export function Approve({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?
               <PopupReview
                 summary={req.action === "fiat-checkout" ? (fiat.checkoutSummary ?? req.summary) : req.summary}
                 origin={popup.origin}
+                appName={appInfo?.name}
+                logoUrl={appInfo?.logoUrl}
                 busy={req.phase === "busy"}
                 onApprove={onApprove}
                 onDeny={req.deny}

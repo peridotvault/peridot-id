@@ -6,26 +6,29 @@ export function ProfileButton({
   displayName,
   avatarUrl,
   level,
+  label,
   onProfile,
 }: {
   displayName: string | null;
   avatarUrl: string | null;
   level: number | null;
+  /** Overrides the default "Profile" accessible name (e.g. account menu). */
+  label?: string;
   onProfile: () => void;
 }) {
   const initial = (displayName ?? "?").slice(0, 1).toUpperCase();
   return (
     <Pressable
       onPress={onProfile}
-      accessibilityLabel={level === null ? "Profile" : `Profile, level ${level}`}
+      accessibilityLabel={label ?? (level === null ? "Profile" : `Profile, level ${level}`)}
     >
-      <div className="flex items-center gap-2 border border-line py-1 pr-1 pl-2 hover:bg-surface">
+      <div className="flex items-center gap-2 rounded-lg border border-line py-1 pr-1 pl-2 hover:bg-surface">
         {level !== null && (
           <div className="flex min-w-6 items-center justify-center px-1">
             <span className="font-sans font-semibold leading-none text-foreground">{level}</span>
           </div>
         )}
-        <div className="h-10 w-10 border border-line">
+        <div className="h-10 w-10 rounded-md border border-line">
           {avatarUrl ? (
             <img src={avatarUrl} alt="" className="h-full w-full" />
           ) : (

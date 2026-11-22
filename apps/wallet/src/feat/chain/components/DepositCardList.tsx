@@ -23,7 +23,7 @@ export function DepositCardList({
         const isSol = t.key.startsWith("solana-");
         const alert = isSol && solAlert;
         return (
-          <div key={t.key} className={`flex flex-col mt-4 border bg-surface p-3 ${alert ? "border-danger" : "border-border"}`}>
+          <div key={t.key} className={`flex flex-col mt-4 rounded-lg border bg-surface p-3 ${alert ? "border-danger" : "border-border"}`}>
             <div style={{ flexDirection: "row" }} className="flex flex-col mb-2 items-baseline justify-between">
               <span className="font-sans text-base font-semibold">{t.label}</span>
               <p style={s.hint}>{t.sublabel}</p>

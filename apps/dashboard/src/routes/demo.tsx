@@ -7,10 +7,9 @@
 // NEXT_PUBLIC_PID_CLIENT_ID set.
 
 import { useMemo, useState } from "react";
-import { Peridot, openLoginPopup, type CheckoutDepositView, type FiatLedgerEntry } from "@peridotvault/pid-sdk-js";
-import { Card, ERROR, MUTED } from "../workspace/ui";
+import { Peridot, openLoginTab, type CheckoutDepositView, type FiatLedgerEntry } from "@peridotvault/pid-sdk-js";
+import { Card, ERROR, FIELD, MUTED, MiniButton } from "../workspace/ui";
 import { PageHeader } from "../workspace/page-header";
-import { CutButton } from "../workspace/cut-button";
 import { resolveBrowserUrl } from "../lib/api-base";
 
 const API_BASE = resolveBrowserUrl(import.meta.env.VITE_API_URL ?? "https://api.peridot.id");
@@ -28,6 +27,9 @@ export default function DemoPage() {
       Peridot({
         baseUrl: API_BASE,
         popupBaseUrl: POPUP_URL, // no passkeySigner → third-party popup mode
+        // Rides every popup request so the approval screen can show this app's
+        // name/logo (the API only honours it for a registered origin).
+        clientId: CLIENT_ID,
       }),
     [],
   );
@@ -55,7 +57,7 @@ export default function DemoPage() {
 
   const connect = () =>
     run("connect", async () => {
-      const { pidCode } = await openLoginPopup({
+      const { pidCode } = await openLoginTab({
         popupBaseUrl: POPUP_URL,
         params: {
           popup: "login",
@@ -100,40 +102,40 @@ export default function DemoPage() {
       </p>
 
       <Card>
-        <h2 className="text-lg font-semibold tracking-tight">1 · Connect</h2>
+        <h2 className="text-base font-semibold tracking-tight">1 · Connect</h2>
         {pid ? (
           <p className="mt-1 text-sm">
-            Signed in as <code>{pid}</code>
+            Signed in as <code className="break-all font-mono">{pid}</code>
             {name ? ` (${name})` : ""}
           </p>
         ) : (
           <div className="mt-4">
-            <CutButton type="button" onClick={connect} disabled={busy !== null}>
+            <MiniButton variant="solid" size="lg" type="button" onClick={connect} disabled={busy !== null}>
               {busy === "connect" ? "Waiting for popup…" : "Sign in with PeridotID"}
-            </CutButton>
+            </MiniButton>
           </div>
         )}
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold tracking-tight">2 · Top up (popup approval)</h2>
+        <h2 className="text-base font-semibold tracking-tight">2 · Top up (popup approval)</h2>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <input
-            className="rounded border px-3 py-2 text-sm"
+            className={FIELD}
             value={net}
             onChange={(e) => setNet(e.target.value)}
             inputMode="numeric"
             placeholder="Net IDR, min 50000"
             aria-label="Net amount in IDR"
           />
-          <CutButton type="button" onClick={topup} disabled={busy !== null || !pid}>
+          <MiniButton variant="solid" size="lg" type="button" onClick={topup} disabled={busy !== null || !pid}>
             {busy === "topup" ? "Waiting for approval…" : "Top up"}
-          </CutButton>
+          </MiniButton>
         </div>
         {deposit && (
           <p className="mt-3 text-sm">
-            Intent <code>{deposit.providerRef}</code> — pay {deposit.grossIdr} to receive {deposit.netIdr}.{" "}
-            <a className="underline" href={deposit.paymentUrl} target="_blank" rel="noreferrer">
+            Intent <code className="break-all font-mono">{deposit.providerRef}</code> — pay {deposit.grossIdr} to receive {deposit.netIdr}.{" "}
+            <a className="text-muted-foreground transition-colors hover:text-foreground" href={deposit.paymentUrl} target="_blank" rel="noreferrer">
               Reopen payment page
             </a>
           </p>
@@ -141,30 +143,30 @@ export default function DemoPage() {
       </Card>
 
       <Card>
-        <h2 className="text-lg font-semibold tracking-tight">3 · Transfer (popup approval)</h2>
+        <h2 className="text-base font-semibold tracking-tight">3 · Transfer (popup approval)</h2>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <input
-            className="rounded border px-3 py-2 text-sm"
+            className={FIELD}
             value={toPid}
             onChange={(e) => setToPid(e.target.value)}
             placeholder="Recipient, e.g. rani@pid"
             aria-label="Recipient PID"
           />
           <input
-            className="rounded border px-3 py-2 text-sm"
+            className={FIELD}
             value={sendAmount}
             onChange={(e) => setSendAmount(e.target.value)}
             inputMode="numeric"
             placeholder="Gross points"
             aria-label="Amount in points"
           />
-          <CutButton type="button" onClick={transfer} disabled={busy !== null || !pid}>
+          <MiniButton variant="solid" size="lg" type="button" onClick={transfer} disabled={busy !== null || !pid}>
             {busy === "transfer" ? "Waiting for approval…" : "Send"}
-          </CutButton>
+          </MiniButton>
         </div>
         {receipt && (
           <p className="mt-3 text-sm">
-            Transfer <code>{receipt.entryGroup}</code> — {receipt.status}. Amount {receipt.amountIdr} (
+            Transfer <code className="break-all font-mono">{receipt.entryGroup}</code> — {receipt.status}. Amount {receipt.amountIdr} (
             {receipt.direction}).
           </p>
         )}

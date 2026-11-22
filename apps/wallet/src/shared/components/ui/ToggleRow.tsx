@@ -32,7 +32,7 @@ export function ToggleRow({
       accessibilityLabel={testnet ? `${label} (testnet)` : label}
     >
       <div className={`flex w-full items-center justify-between gap-3 py-3 transition-colors hover:bg-surface ${className}`}>
-        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md border border-line bg-surface">
           <Icon size={18} className="text-foreground" />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -40,8 +40,8 @@ export function ToggleRow({
           <span className="font-sans text-xs text-muted-foreground">{hint}</span>
         </div>
         {testnet && <span className="font-sans text-xs font-bold tracking-[1px] text-muted-foreground">TESTNET</span>}
-        <div className={`flex h-5 w-10 shrink-0 items-center border p-[2px] ${on ? "justify-end border-accent bg-accent" : "justify-start border-border bg-surface"}`}>
-          <span aria-hidden className={`h-full w-3.5 shrink-0 ${on ? "bg-background" : "bg-muted-foreground"}`} />
+        <div className={`flex h-5 w-10 shrink-0 items-center rounded-sm border p-[2px] ${on ? "justify-end border-accent bg-accent" : "justify-start border-border bg-surface"}`}>
+          <span aria-hidden className={`h-full w-3.5 shrink-0 rounded-sm ${on ? "bg-background" : "bg-muted-foreground"}`} />
         </div>
       </div>
     </Pressable>

@@ -2,12 +2,14 @@
 // can register an app and get a public client_id; PeridotID only returns pid_codes to
 // the app's registered redirect URIs. CORS origins are derived from those URIs.
 
+import { Prisma } from "@prisma/client";
 import type { AppUsersPage } from "@peridotvault/pid-types";
-import { BadRequestException, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { APP_CLIENT_SECRET_GRACE, APP_CLIENT_SECRET_MAX_AGE, parseTtlMs } from "../common/app-config";
 import { encryptSecret } from "../common/secret-crypto";
+import { proxyLogoUrl, WasabiStorageService, type UploadFile } from "../common/wasabi-storage";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
 
@@ -30,12 +32,19 @@ export function normalizeOrigin(value: string): string {
   return parsed.origin;
 }
 
+const PROVIDER_INCLUDE = { providerSettings: { include: { provider: true } } } as const;
+function withLoginMethods<T extends object>(row: T) {
+  const { providerSettings, ...rest } = row as T & { providerSettings?: Array<{ providerCode: string; provider: { isAvailable: boolean } }> };
+  return { ...rest, loginMethods: (providerSettings ?? []).filter(x => x.provider.isAvailable).map(x => x.providerCode) };
+}
+
 @Injectable()
 export class PidAppsService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly config?: ConfigService,
     @Optional() private readonly security?: SecurityEventService,
+    @Optional() private readonly wasabi?: WasabiStorageService,
   ) {}
 
   /** Ownership is checked before reading any user rows, including search/count. */
@@ -53,9 +62,23 @@ export class PidAppsService {
     const profiles = await this.prisma.profile.findMany({
       where: { pid: { in: rows.map(row => row.pid) } }, select: { pid: true, displayName: true },
     });
+    // One indexed lookup per visible PID; never load another app's history.
+    const latest = rows.length ? await this.prisma.$queryRaw<Array<{ pid: string; code: string | null; name: string | null; evidence: string }>>`
+      SELECT u.pid, p.code, p.name, e."providerEvidence" AS evidence
+      FROM app_users u
+      LEFT JOIN LATERAL (
+        SELECT "providerCode", "providerEvidence" FROM login_events
+        WHERE "appId"=${id} AND pid=u.pid ORDER BY "occurredAt" DESC, id DESC LIMIT 1
+      ) e ON true LEFT JOIN providers p ON p.code=e."providerCode"
+      WHERE u."appClientId"=${app.clientId} AND u.pid IN (${Prisma.join(rows.map(row => row.pid))})` : [];
+    const providers = new Map(latest.map(event => [event.pid, event]));
     const names = new Map(profiles.map(profile => [profile.pid, profile.displayName]));
     return { total, page, pageSize, users: rows.map(row => ({
       pid: row.pid, displayName: names.get(row.pid) ?? null,
+      lastLoginProvider: providers.get(row.pid)?.code ? {
+        code: providers.get(row.pid)!.code!, name: providers.get(row.pid)!.name!,
+        evidence: providers.get(row.pid)!.evidence as "server" | "client_selected",
+      } : null,
       firstLoginAt: row.firstLoginAt.toISOString(), lastLoginAt: row.lastLoginAt.toISOString(),
     })) };
   }
@@ -105,14 +128,37 @@ export class PidAppsService {
     // ANT-804 D3.1 deny-by-default: self-serve registration NEVER produces a
     // verified app, even if a caller smuggles isVerified into the payload.
     // Verification is an admin-recorded grant only (AdminService).
-    return this.prisma.pidApp.create({
+    return withLoginMethods(await this.prisma.pidApp.create({
       data: { clientId, ownerPid, name, isVerified: false, allowedOrigins: [...new Set(allowedOrigins.map(normalizeOrigin))] },
       omit: PidAppsService.PUBLIC_OMIT,
-    });
+      include: PROVIDER_INCLUDE,
+    }));
   }
 
   async list(ownerPid: string) {
-    return this.prisma.pidApp.findMany({ where: { ownerPid }, orderBy: { createdAt: "desc" }, omit: PidAppsService.PUBLIC_OMIT });
+    return (await this.prisma.pidApp.findMany({ where: { ownerPid }, orderBy: { createdAt: "desc" }, omit: PidAppsService.PUBLIC_OMIT, include: PROVIDER_INCLUDE })).map(withLoginMethods);
+  }
+
+  /** Upload an app logo (owner only). Stored under a content-hashed key, so the
+   *  logo proxy's immutable cache never serves a replaced image. */
+  async setLogo(ownerPid: string, id: string, file: UploadFile) {
+    const app = await this.ownedApp(ownerPid, id);
+    if (!this.wasabi) throw new ServiceUnavailableException("Logo upload is not configured");
+    const key = await this.wasabi.putAppLogo(app.clientId, file);
+    const logoUrl = proxyLogoUrl(this.apiBase(), key);
+    if (!logoUrl) throw new ServiceUnavailableException("API_URL is not configured");
+    return withLoginMethods(
+      await this.prisma.pidApp.update({
+        where: { id },
+        data: { logoUrl },
+        omit: PidAppsService.PUBLIC_OMIT,
+        include: PROVIDER_INCLUDE,
+      }),
+    );
+  }
+
+  private apiBase(): string {
+    return (this.config?.get<string>("API_URL") ?? process.env.API_URL ?? "").trim();
   }
 
   /** One owned app (404 for anyone else — never leak another owner's app). */
@@ -122,7 +168,7 @@ export class PidAppsService {
     return safe;
   }
 
-  async update(ownerPid: string, id: string, patch: { name?: string; allowedOrigins?: string[]; isActive?: boolean; isVerified?: boolean }) {
+  async update(ownerPid: string, id: string, patch: { name?: string; logoUrl?: string; description?: string; allowedOrigins?: string[]; isActive?: boolean; isVerified?: boolean; loginMethods?: string[] }) {
     const app = await this.ownedApp(ownerPid, id);
     // ANT-804 D3.3 (negative): self-serve update can never set isVerified —
     // a smuggled field is stripped (ignored, not trusted). Admin grants flow
@@ -137,15 +183,24 @@ export class PidAppsService {
     const originsChanged = nextOrigins !== undefined &&
       JSON.stringify([...(app.allowedOrigins as string[] ?? [])].sort()) !== JSON.stringify([...nextOrigins].sort());
     const mustRevoke = originsChanged && PidAppsService.isVerificationActive(app as never);
+    if (safePatch.loginMethods !== undefined) {
+      const methods = [...new Set(safePatch.loginMethods)];
+      const available = await this.prisma.loginProvider.count({ where: { code: { in: methods }, isAvailable: true } });
+      if (!methods.length || available !== methods.length) throw new BadRequestException("Select at least one available provider");
+    }
     const updated = await this.prisma.pidApp.update({
       where: { id },
       data: {
         ...(safePatch.name !== undefined ? { name: safePatch.name } : {}),
+        ...(safePatch.logoUrl !== undefined ? { logoUrl: safePatch.logoUrl.trim() || null } : {}),
+        ...(safePatch.description !== undefined ? { description: safePatch.description.trim() || null } : {}),
         ...(nextOrigins !== undefined ? { allowedOrigins: nextOrigins } : {}),
         ...(safePatch.isActive !== undefined ? { isActive: safePatch.isActive } : {}),
+        ...(safePatch.loginMethods !== undefined ? { providerSettings: { deleteMany: {}, create: [...new Set(safePatch.loginMethods)].map(providerCode => ({ providerCode })) } } : {}),
         ...(mustRevoke ? { isVerified: false } : {}),
       },
       omit: PidAppsService.PUBLIC_OMIT,
+      include: PROVIDER_INCLUDE,
     });
     if (mustRevoke) {
       await this.auditVerification({
@@ -158,12 +213,12 @@ export class PidAppsService {
         clientId: (app as { clientId: string }).clientId, reason: "origins_changed",
       }).catch(() => null);
     }
-    return updated;
+    return withLoginMethods(updated);
   }
 
   /** Active app by client_id (null when unknown/disabled) — used by the SSO checks. */
   async findActive(clientId: string) {
-    const app = await this.prisma.pidApp.findUnique({ where: { clientId } });
+    const app = await this.prisma.pidApp.findUnique({ where: { clientId }, include: PROVIDER_INCLUDE });
     if (!app || !app.isActive) return null;
     // ANT-804 D3 edge 6: lazy expiry — an overdue grant flips to unverified
     // on read (no cron), so display labels and SSO checks never show a dead
@@ -177,9 +232,26 @@ export class PidAppsService {
         clientId, action: "expired", justification: "grant expired — waiver off", actorPid: "system",
       });
       await this.security?.log(app.ownerPid, "app.verification.revoked", { clientId, reason: "expired" }).catch(() => null);
-      return cleared ?? { ...app, isVerified: false };
+      return withLoginMethods({ ...app, ...(cleared ?? {}), isVerified: false });
     }
-    return app;
+    return withLoginMethods(app);
+  }
+
+  /**
+   * Active app by client_id, but only when `origin` is one of its registered
+   * origins. A client_id typed into a popup URL proves nothing on its own, so
+   * the consent screen's name/logo are shown only for an origin the app owns.
+   */
+  async findActiveForOrigin(clientId: string, origin: string) {
+    const app = await this.findActive(clientId);
+    if (!app) return null;
+    let normalized: string;
+    try {
+      normalized = normalizeOrigin(origin);
+    } catch {
+      return null;
+    }
+    return (app.allowedOrigins as string[]).includes(normalized) ? app : null;
   }
 
   /** SHA-256 hex of a plaintext secret (what's stored — never the secret itself). */
@@ -235,9 +307,9 @@ export class PidAppsService {
 
   /** Ownership strictly from the token — never a client-supplied identity. */
   private async ownedApp(ownerPid: string, id: string) {
-    const app = await this.prisma.pidApp.findFirst({ where: { id, ownerPid } });
+    const app = await this.prisma.pidApp.findFirst({ where: { id, ownerPid }, include: PROVIDER_INCLUDE });
     if (!app) throw new NotFoundException("App not found");
-    return app;
+    return withLoginMethods(app);
   }
 
   /**

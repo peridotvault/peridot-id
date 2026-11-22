@@ -1,4 +1,8 @@
-import { ArrayMaxSize, IsArray, IsBoolean, IsInt, IsOptional, IsString, Length, Matches, Max, MaxLength, Min } from "class-validator";
+import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Length, Matches, Max, MaxLength, Min } from "class-validator";
+
+/** Login methods an app can switch on/off (dashboard → Integrations). */
+export const APP_LOGIN_METHODS = ["passkey", "google", "email", "phantom", "metamask"] as const;
+export type AppLoginMethod = (typeof APP_LOGIN_METHODS)[number];
 
 /**
  * A bare http(s) origin: scheme + host + optional port, no path/query/fragment.
@@ -39,6 +43,30 @@ export class UpdatePidAppDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  /** Consent-screen logo. An empty string clears it; https only, because the
+   *  wallet renders it on an https page (mixed content is blocked silently). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  @Matches(/^(https:\/\/\S+)?$/i, { message: "logoUrl must be an https URL" })
+  logoUrl?: string;
+
+  /** Consent-card one-liner. Empty string clears it; the wallet clamps it to
+   *  two lines, so keep it a tagline, not a paragraph. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  description?: string;
+
+  /** Enabled login methods. At least one stays on so the app is never locked. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(APP_LOGIN_METHODS.length)
+  @ArrayUnique()
+  @IsIn(APP_LOGIN_METHODS, { each: true })
+  loginMethods?: AppLoginMethod[];
 }
 
 /** Per-app fee for one operation (stacks on the global fee). */

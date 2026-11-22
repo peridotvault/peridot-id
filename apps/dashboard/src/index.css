@@ -1,7 +1,9 @@
 /* Dashboard base styles. Theme tokens mirror brand.md (PeridotVault system):
    dark only, peridot green, Space Grotesk. */
 
+@layer ui-sdk;
 @import "tailwindcss";
+@import "@ui-sdk/core/web.css" layer(components);
 
 /* Drive the `dark:` variant off the `.dark` class. The app is dark-only now:
    index.html sets `class="dark"` so every `dark:` variant resolves. */
@@ -14,17 +16,47 @@
   --background: #0d0f0e;
   --surface: #060807;
   --card: #060807;
+  --card-foreground: #e0e4e4;
+  --popover: #060807;
+  --popover-foreground: #e0e4e4;
   --foreground: #e0e4e4;
   --paragraph: #b5b5b5;
+  --primary: #349b65;
+  --primary-foreground: #0a0c0b;
+  --secondary: #349b6650;
+  --secondary-foreground: #e0e4e4;
   --muted: #363636;
-  --muted-foreground: #7d7d7d;
+  /* AA on both the page surface and --muted chips (old #7d7d7d failed on muted). */
+  --muted-foreground: #a3a3a3;
   --border: #ffffff28;
+  --input: #ffffff28;
   --line: #ffffff14;
   --ring: #87ee83;
   --accent: #87ee83;
   --accent-foreground: #0a0c0b;
+  --destructive: #ff5f57;
+  --destructive-foreground: #0d0f0e;
+  --success: #87ee83;
+  --chart-1: #c6e2d1;
+  --chart-2: #9bc4ac;
+  --chart-3: #74a88a;
+  --chart-4: #589770;
+  --chart-5: #467d5c;
+  --sidebar: #060807;
+  --sidebar-foreground: #e0e4e4;
+  --sidebar-primary: #349b65;
+  --sidebar-primary-foreground: #0a0c0b;
+  --sidebar-accent: #349b6650;
+  --sidebar-accent-foreground: #e0e4e4;
+  --sidebar-border: #ffffff28;
+  --sidebar-ring: #87ee83;
+  /* peridotbase radius scale: 10px base, controls land at 6-8px. */
+  --radius: 0.625rem;
+  --topbar-h: 3.5rem;
   --font-sans: "Space Grotesk", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* Topbar height: Button lg h-10 (2.5rem) + py-2 (1rem). Keep in sync with
+     Topbar so the app sidebar sits flush under it for exactly one viewport. */
 }
 
 @theme inline {
@@ -33,17 +65,53 @@
   --color-background: var(--background);
   --color-surface: var(--surface);
   --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-foreground: var(--foreground);
   --color-paragraph: var(--paragraph);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
+  --color-input: var(--input);
   --color-line: var(--line);
   --color-ring: var(--ring);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+}
+
+@theme {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 html {
@@ -64,6 +132,22 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Section swap: same 6px lift as the rail, short enough to feel instant. */
+@keyframes section-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.section-in {
+  animation: section-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .focus-ring:focus-visible {

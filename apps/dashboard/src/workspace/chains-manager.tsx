@@ -2,14 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
-import { useNavigate } from "react-router";
 import type { Chain, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
 import { Card, ERROR, MUTED, MiniButton } from "./ui";
 import { PageHeader } from "./page-header";
-import { useWorkspace } from "./workspace-provider";
 
-/** Admin chain registry: browse chains, toggle availability, jump to contracts. */
+/** Admin chain registry: one card per chain, opening its detail page. */
 export function ChainsManager({ client }: { client: PeridotClient }) {
   const [chains, setChains] = useState<Chain[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,11 +33,11 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
   }, [load]);
 
   return (
-    <section className="mt-8">
+    <section>
       <PageHeader
         eyebrow="Chain registry"
         title="Chains"
-        description="Control which chains the wallet renders and activation uses."
+        description="Control which chains the wallet renders and activation uses. Open a chain for its settings, contracts and tokens."
       />
       {error && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -56,8 +54,8 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
         <div className="mt-4">
           <p className={`text-sm ${MUTED}`}>No chains registered yet — add your first chain below.</p>
           <Link
-            to="/chains/create"
-            className="focus-ring mt-3 flex min-h-32 w-full flex-col items-center justify-center gap-1 border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:w-1/2 lg:w-1/3"
+            to="/admin/chains/create"
+            className="focus-ring mt-3 flex min-h-32 w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground sm:w-1/2 lg:w-1/3"
           >
             <span aria-hidden="true" className="text-2xl leading-none">+</span>
             Add chain
@@ -66,20 +64,14 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
       ) : (
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Link
-            to="/chains/create"
-            className="focus-ring flex min-h-32 flex-col items-center justify-center gap-1 border border-dashed border-border text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            to="/admin/chains/create"
+            className="focus-ring flex min-h-32 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           >
             <span aria-hidden="true" className="text-2xl leading-none">+</span>
             Add chain
           </Link>
           {chains.map((c) => (
-            <ChainCard
-              key={c.id}
-              client={client}
-              chain={c}
-              onChanged={load}
-              onError={setError}
-            />
+            <ChainCard key={c.id} chain={c} />
           ))}
         </div>
       )}
@@ -87,69 +79,32 @@ export function ChainsManager({ client }: { client: PeridotClient }) {
   );
 }
 
-function ChainCard({
-  client,
-  chain,
-  onChanged,
-  onError,
-}: {
-  client: PeridotClient;
-  chain: Chain;
-  onChanged: () => Promise<void>;
-  onError: (e: string | null) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const navigate = useNavigate();
-  const { openContracts } = useWorkspace();
-
-  const setActive = async (isActive: boolean) => {
-    setBusy(true);
-    onError(null);
-    try {
-      await client.admin.updateChain(chain.id, { isActive }).then((r) => unwrap({ ok: true, data: r }, "Updating chain"));
-      await onChanged();
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Update failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
+function ChainCard({ chain }: { chain: Chain }) {
   const contractCount = (chain.contracts ?? []).length;
 
   return (
-    <Card className={chain.isActive ? "" : "opacity-60"}>
-      <div className="flex items-center gap-3">
-        {chain.logoUrl ? (
-          // Plain img: no Next.js Image optimizer in the Vite app.
-          <img src={chain.logoUrl} alt="" className="h-6 w-6 rounded-full" />
-        ) : (
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
-            {chain.nativeSymbol.slice(0, 3)}
-          </span>
-        )}
-        <span className="font-semibold tracking-tight">{chain.name}</span>
-      </div>
-      <p className={`mt-2 text-xs ${MUTED}`}>
-        {chain.namespace}:{chain.reference} · {chain.nativeSymbol}
-        {chain.isTestnet && " · testnet"}
-      </p>
-      <p className={`mt-1 text-xs ${MUTED}`}>
-        {contractCount === 0 ? "No contracts yet" : `${contractCount} contract${contractCount === 1 ? "" : "s"}`}
-        {!chain.isActive && <span className={`font-semibold ${ERROR}`}> · disabled</span>}
-      </p>
-      <div className="mt-3 flex gap-2">
-        <MiniButton size="sm" disabled={busy} onClick={() => setActive(!chain.isActive)}>
-          {chain.isActive ? "Disable" : "Enable"}
-        </MiniButton>
-        {/* ANT-341 FR7: chain ids are encoded — never raw `?id=` into the URL. */}
-        <MiniButton size="sm" onClick={() => navigate(`/chains/edit?id=${encodeURIComponent(chain.id)}`)}>
-          Edit
-        </MiniButton>
-        <MiniButton size="sm" onClick={() => openContracts(chain.id)}>
-          Contracts <span aria-hidden="true">→</span>
-        </MiniButton>
-      </div>
-    </Card>
+    <Link to={`/admin/chains/${chain.id}`} className="focus-ring block">
+      <Card className={`transition-colors hover:bg-muted/40 ${chain.isActive ? "" : "opacity-60"}`}>
+        <div className="flex items-center gap-3">
+          {chain.logoUrl ? (
+            // Plain img: no Next.js Image optimizer in the Vite app.
+            <img src={chain.logoUrl} alt="" className="h-6 w-6 rounded-full" />
+          ) : (
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
+              {chain.nativeSymbol.slice(0, 3)}
+            </span>
+          )}
+          <span className="font-semibold tracking-tight">{chain.name}</span>
+        </div>
+        <p className={`mt-2 text-xs ${MUTED}`}>
+          {chain.namespace}:{chain.reference} · {chain.nativeSymbol}
+          {chain.isTestnet && " · testnet"}
+        </p>
+        <p className={`mt-1 text-xs ${MUTED}`}>
+          {contractCount === 0 ? "No contracts yet" : `${contractCount} contract${contractCount === 1 ? "" : "s"}`}
+          {!chain.isActive && <span className={`font-semibold ${ERROR}`}> · disabled</span>}
+        </p>
+      </Card>
+    </Link>
   );
 }

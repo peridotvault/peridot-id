@@ -174,3 +174,24 @@ describe("report", () => {
     expect((await setup("0").service.report("pidapp_third", utcMonth())).freeAllowance).toBe(0);
   });
 });
+
+describe("successful login provider attribution", () => {
+  it.each([
+    ["google", "oauth", "server"],
+    ["phantom", "wallet_signature", "client_selected"],
+    [null, null, "unknown"],
+  ])("records %s with evidence %s without duplicating an exchange", async (code, protocol, evidence) => {
+    const { service, prisma } = setup();
+    prisma.pidApp.findUnique.mockResolvedValue({ id: "app-id" });
+    prisma.loginProvider = { findUnique: jest.fn(async () => ({ protocol })) };
+    prisma.loginEvent = { upsert: jest.fn(async () => ({})) };
+    prisma.$executeRaw = jest.fn();
+    await service.recordSuccessfulLogin("client", "a@pid", "exchange", code);
+    expect(prisma.loginEvent.upsert).toHaveBeenCalledWith({
+      where: { exchangeId: "exchange" }, update: {},
+      create: { exchangeId: "exchange", appId: "app-id", pid: "a@pid", providerCode: code, providerEvidence: evidence },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+  });
+});

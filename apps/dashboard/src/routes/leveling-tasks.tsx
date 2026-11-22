@@ -33,7 +33,7 @@ export default function LevelingTasksPage() {
       )}
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold tracking-tight">Tasks</h2>
+          <h2 className="text-base font-semibold tracking-tight">Tasks</h2>
           <div className="flex items-center gap-2">
             <label className="text-xs">Status
               <select aria-label="Filter by status" className={FIELD} value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -54,7 +54,7 @@ export default function LevelingTasksPage() {
           <>
             <ul className="mt-3 flex flex-col gap-2">
               {data.rows.map((t) => (
-                <li key={t.id} className="border border-border p-3 text-sm">
+                <li key={t.id} className="rounded-lg border border-line bg-background p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span>
                       <span className="font-medium">{t.name}</span>
@@ -160,7 +160,7 @@ function TaskForm({ initial, onClose, onSaved }: { initial: XpTask | null; onClo
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold tracking-tight">{initial ? "Edit task" : "New task"}</h2>
+      <h2 className="text-base font-semibold tracking-tight">{initial ? "Edit task" : "New task"}</h2>
       {!initial && (
         <label className="mt-2 block text-xs">Key (lowercase, 3–64 chars)
           <input aria-label="Task key" className={FIELD} value={form.key} onChange={(e) => set("key", e.target.value)} placeholder="onboarding_complete" />

@@ -16,6 +16,7 @@ import { randomBytes } from "node:crypto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { SecurityEventService } from "../../security/security-event.service";
 import { ClaimService } from "../claim.service";
+import { adapterFor } from "../provider-adapters";
 import { SsoService } from "../sso.service";
 import { UsageService } from "../../usage/usage.service";
 import { normalizeWalletAddress, verifyWalletSignature, type WalletNamespace } from "./wallet-signature";
@@ -62,6 +63,7 @@ export class WalletAuthService {
    */
   async challenge(
     input: {
+      providerCode?: "phantom" | "metamask";
       namespace: WalletNamespace;
       reference: string;
       address: string;
@@ -84,6 +86,23 @@ export class WalletAuthService {
       throw new BadRequestException("returnTo is not an allowed origin");
     }
 
+    if (input.providerCode === "metamask" && input.namespace !== "evm") {
+      throw new BadRequestException("This connector does not implement that namespace");
+    }
+    if (input.providerCode) {
+      const provider = await this.prisma.loginProvider.findUnique({ where: { code: input.providerCode } });
+      if (!provider?.isAvailable || provider.protocol !== "wallet_signature") throw new BadRequestException("Provider unavailable");
+    } else {
+      // Legacy clients omit the connector: attribution stays unknown, but the
+      // chain family still needs at least one globally enabled wallet adapter.
+      const providers = await this.prisma.loginProvider.findMany({
+        where: { protocol: "wallet_signature", isAvailable: true },
+        select: { code: true },
+      });
+      if (!providers.some(provider => adapterFor(provider.code)?.namespace === input.namespace)) {
+        throw new BadRequestException("No wallet provider is available for this chain");
+      }
+    }
     const address = normalizeWalletAddress(input.namespace, input.address);
     if (!address) {
       throw new BadRequestException(
@@ -107,6 +126,7 @@ export class WalletAuthService {
 
     const row = await this.prisma.walletAuthChallenge.create({
       data: {
+        providerCode: input.providerCode ?? null,
         namespace: input.namespace,
         reference: input.reference,
         address,
@@ -151,7 +171,7 @@ export class WalletAuthService {
         { provider: challenge.namespace, providerUserId: challenge.address, email: null },
         undefined,
         challenge.redirectTo
-          ? { redirectTo: challenge.redirectTo, clientId: challenge.clientId ?? undefined }
+          ? { redirectTo: challenge.redirectTo, clientId: challenge.clientId ?? undefined, loginProviderCode: challenge.providerCode ?? undefined }
           : undefined,
       );
       return { kind: "claim", ticketId };
@@ -206,7 +226,7 @@ export class WalletAuthService {
    * "signed in, no code"; it never fails the login itself.
    */
   private async pidCodeFor(
-    challenge: { redirectTo: string | null; clientId: string | null; codeChallenge: string | null },
+    challenge: { providerCode?: string | null; redirectTo: string | null; clientId: string | null; codeChallenge: string | null; namespace: string },
     pid: string,
   ): Promise<string | undefined> {
     if (!challenge.redirectTo) return undefined;
@@ -214,8 +234,11 @@ export class WalletAuthService {
     if (!resolved) return undefined;
     try {
       this.sso.requireVerifiedForAutoIssue(resolved);
+      // Wallet switches are per extension: Phantom is the Solana injected
+      // wallet, MetaMask the EVM one (namespace is brand-agnostic on the wire).
       return await this.sso.issue(pid, resolved.redirectTo, {
         clientId: resolved.clientId,
+        method: challenge.providerCode ?? undefined,
         ...(challenge.codeChallenge ? { codeChallenge: challenge.codeChallenge } : {}),
       });
     } catch {
@@ -280,7 +303,22 @@ export class WalletAuthService {
   }
 }
 
-/** Human-readable message the wallet displays and signs. */
+/**
+ * Human-readable message the wallet displays and signs.
+ *
+ * Wallets auto-detect `<domain> wants you to sign in with your <chain> account:`
+ * as SIWS/EIP-4361 and then validate it strictly — Phantom refuses anything
+ * non-compliant with "The app's signature request cannot be shown due to invalid
+ * formatting" (siwParseErrorDescription). So the layout follows CAIP-122: the
+ * domain is the requesting page's host (port included, never a scheme), `URI` is
+ * its origin. Solana omits the (optional) chain line — see below; EVM carries the
+ * wallet's real EIP-155 chain. The server verifies the exact stored bytes, so any
+ * change here only invalidates challenges already in flight.
+ *
+ * Statement text stays printable ASCII: the SIWS grammar allows only URI
+ * reserved/unreserved characters and spaces, so a typographic dash ("—")
+ * fails the parse. Keep it plain.
+ */
 function buildMessage(input: {
   namespace: WalletNamespace;
   reference: string;
@@ -291,17 +329,30 @@ function buildMessage(input: {
   issuedAt: Date;
   expiresAt: Date;
 }): string {
+  const solana = input.namespace === "solana";
+  let domain = input.origin;
+  try {
+    domain = new URL(input.origin).host;
+  } catch {
+    domain = input.origin.replace(/^https?:\/\//, "");
+  }
   return [
-    `PeridotID wants you to sign in with your ${input.namespace === "solana" ? "Solana" : "EVM"} account:`,
+    `${domain} wants you to sign in with your ${solana ? "Solana" : "Ethereum"} account:`,
     input.address,
     "",
     input.action === "link"
-      ? "Link this wallet to your PeridotID. This proves ownership only — no funds move and no spending is approved."
-      : "Sign in to PeridotID. This proves ownership only — no funds move and no spending is approved.",
+      ? "Link this wallet to your PeridotID. This proves ownership only - no funds move and no spending is approved."
+      : "Sign in to PeridotID. This proves ownership only - no funds move and no spending is approved.",
     "",
     `URI: ${input.origin}`,
     "Version: 1",
-    `Chain: ${input.namespace}:${input.reference}`,
+    // Solana: no Chain ID line. Phantom compares it with the wallet's own network
+    // and refuses on a mismatch ("chain ID does not match"), while the injected
+    // provider never exposes that network for us to match. The field is optional
+    // in SIWS, so omitting it works on mainnet, devnet and localnet alike. EVM
+    // keeps it — providers answer `eth_chainId`, so the value is always the
+    // wallet's real chain (required by EIP-4361).
+    ...(solana ? [] : [`Chain ID: ${input.reference}`]),
     `Nonce: ${input.nonce}`,
     `Issued At: ${input.issuedAt.toISOString()}`,
     `Expiration Time: ${input.expiresAt.toISOString()}`,

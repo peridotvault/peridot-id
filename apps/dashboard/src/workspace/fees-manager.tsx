@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "@ui-sdk/react/tabs";
 import type { FeePolicyView, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
 import type { PaymentFeeRate } from "./app-types";
@@ -72,17 +72,8 @@ export function FeesManager({ client }: { client: PeridotClient }) {
     flashTimer.current = setTimeout(() => setMsg(null), 2500);
   };
 
-  // ANT-341 FR6: roving-tabindex tab refs for arrow-key nav.
+  // Tab order for the fee console (arrow keys and roving focus: ui-sdk Tabs).
   const tabOrder: Tab[] = ["peridot", "doku", "chain"];
-  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ peridot: null, doku: null, chain: null });
-  const onTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, current: Tab) => {
-    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    e.preventDefault();
-    const i = tabOrder.indexOf(current);
-    const next = tabOrder[(i + (e.key === "ArrowRight" ? 1 : tabOrder.length - 1)) % tabOrder.length]!;
-    setTab(next);
-    tabRefs.current[next]?.focus();
-  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -189,14 +180,14 @@ export function FeesManager({ client }: { client: PeridotClient }) {
 
   if (loading) {
     return (
-      <section className="mt-8">
+      <section>
         <p role="status" className={`text-sm ${MUTED}`}>Loading…</p>
       </section>
     );
   }
 
   return (
-    <section className="mt-8">
+    <section>
       <PageHeader
         eyebrow="Treasury"
         title="Fees"
@@ -216,34 +207,24 @@ export function FeesManager({ client }: { client: PeridotClient }) {
         </p>
       )}
 
-      <div className="mt-6 flex w-fit gap-1 border border-border bg-muted p-1" role="tablist" aria-label="Fee settings">
-        {tabOrder.map((k) => (
-          <button
-            key={k}
-            type="button"
-            role="tab"
-            id={`fees-tab-${k}`}
-            aria-selected={tab === k}
-            aria-controls={`fees-panel-${k}`}
-            tabIndex={tab === k ? 0 : -1}
-            ref={(el) => {
-              tabRefs.current[k] = el;
-            }}
-            onClick={() => setTab(k)}
-            onKeyDown={(e) => onTabKeyDown(e, k)}
-            className={`px-3 py-1 text-sm font-medium transition-colors focus-ring ${
-              tab === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {k === "peridot" ? "PeridotID" : k === "doku" ? "Payment gateway" : "Chain"}
-          </button>
-        ))}
-      </div>
+      <Tabs value={tab} onValueChange={(next) => setTab(next as Tab)}>
+        <TabsList aria-label="Fee settings" className="mt-6 flex w-fit gap-1 rounded-md border border-line bg-muted/40 p-1">
+          {tabOrder.map((k) => (
+            <TabsTab
+              key={k}
+              value={k}
+              className="mb-0 h-auto rounded-sm border-0 px-3 py-1 text-sm font-medium text-muted-foreground transition-colors focus-ring hover:text-foreground data-selected:bg-background data-selected:text-foreground data-selected:shadow-sm"
+            >
+              {k === "peridot" ? "PeridotID" : k === "doku" ? "Payment gateway" : "Chain"}
+            </TabsTab>
+          ))}
+        </TabsList>
 
-      <div role="tabpanel" id={`fees-panel-${tab}`} aria-labelledby={`fees-tab-${tab}`} className="mt-4 grid gap-px bg-line">
-        {tab === "chain" ? (
+        <TabsPanel value="chain" className="mt-4 grid gap-3 p-0 text-base">
           <ChainFeesManager client={client} />
-        ) : tab === "peridot" ? (
+        </TabsPanel>
+
+        <TabsPanel value="peridot" className="mt-4 grid gap-3 p-0 text-base">
           <Card>
             <div className="flex items-center justify-between gap-3">
               <p className={SECTION_LABEL}>PeridotID platform fee</p>
@@ -307,7 +288,8 @@ export function FeesManager({ client }: { client: PeridotClient }) {
               </p>
             )}
           </Card>
-        ) : (
+        </TabsPanel>
+        <TabsPanel value="doku" className="mt-4 grid gap-3 p-0 text-base">
           <Card>
             <p className={SECTION_LABEL}>Payment methods</p>
             <p className={`mt-1 text-xs ${MUTED}`}>
@@ -386,8 +368,8 @@ export function FeesManager({ client }: { client: PeridotClient }) {
               })}
             </div>
           </Card>
-        )}
-      </div>
+        </TabsPanel>
+      </Tabs>
     </section>
   );
 }

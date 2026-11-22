@@ -1,71 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { useWorkspace } from "../workspace/workspace-provider";
-import { Card, ERROR, MUTED } from "../workspace/ui";
 import { PageHeader } from "../workspace/page-header";
-import { CutButton } from "../workspace/cut-button";
 
 const TABS = [
-  { key: "overview", label: "Overview", to: "/leveling" },
-  { key: "levels", label: "Levels", to: "/leveling/levels" },
-  { key: "tasks", label: "Tasks", to: "/leveling/tasks" },
-  { key: "history", label: "XP History", to: "/leveling/history" },
-  { key: "settings", label: "Settings", to: "/leveling/settings" },
-  { key: "apps", label: "Applications", to: "/leveling/apps" },
+  { key: "overview", label: "Overview", to: "/admin/leveling" },
+  { key: "levels", label: "Levels", to: "/admin/leveling/levels" },
+  { key: "tasks", label: "Tasks", to: "/admin/leveling/tasks" },
+  { key: "history", label: "XP History", to: "/admin/leveling/history" },
+  { key: "settings", label: "Settings", to: "/admin/leveling/settings" },
+  { key: "apps", label: "Applications", to: "/admin/leveling/apps" },
 ];
 
 /**
- * Shared leveling shell: session gate + Role.admin gate + sub-navigation.
- * Non-admin developers get no system-wide leveling admin (plan §7): the tab
- * is admin-only and direct URLs render an access notice. The server
- * (AdminGuard) enforces — this gate is UX only.
+ * Leveling section header + sub-navigation. Session and admin gates live in
+ * AdminLayout; the server (AdminGuard) enforces.
  */
 export function LevelingLayout({ active, children }: { active: string; children: React.ReactNode }) {
-  const { status, isAdmin, signIn, busy, error } = useWorkspace();
-
-  if (status === "checking") {
-    return (
-      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
-        <p role="status" className={`mt-8 text-sm ${MUTED}`}>Checking session…</p>
-      </main>
-    );
-  }
-
-  if (status === "anonymous") {
-    return (
-      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
-        <PageHeader eyebrow="Leveling" title="Leveling admin" />
-        <Card>
-          <h2 className="text-lg font-semibold tracking-tight">Sign in to continue</h2>
-          <p className={`mt-1 text-sm ${MUTED}`}>Leveling administration requires a signed-in admin session.</p>
-          {error && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{error}</p>}
-          <div className="mt-4">
-            <CutButton type="button" onClick={signIn} disabled={busy}>
-              {busy ? "Waiting for wallet…" : "Sign in with PeridotID"}
-            </CutButton>
-          </div>
-        </Card>
-      </main>
-    );
-  }
-
-  if (!isAdmin) {
-    return (
-      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
-        <PageHeader eyebrow="Leveling" title="Leveling admin" />
-        <Card>
-          <h2 className="text-lg font-semibold tracking-tight">Admins only</h2>
-          <p className={`mt-1 text-sm ${MUTED}`}>
-            Leveling configuration and XP adjustments require the admin role. Developers get no
-            system-wide leveling admin; your own level stays visible in the wallet.
-          </p>
-        </Card>
-      </main>
-    );
-  }
-
   return (
-    <main id="main-content" className="mx-auto w-full max-w-7xl px-5 pb-16 pt-8 sm:px-8">
+    <section>
       <PageHeader
         eyebrow="Leveling"
         title="Leveling admin"
@@ -77,10 +29,10 @@ export function LevelingLayout({ active, children }: { active: string; children:
             key={t.key}
             to={t.to}
             aria-current={t.key === active ? "page" : undefined}
-            className={`border px-3 py-1.5 text-sm font-medium transition-colors focus-ring ${
+            className={`rounded-sm border px-3 py-1.5 text-sm font-medium transition-colors focus-ring ${
               t.key === active
                 ? "border-foreground bg-foreground text-background"
-                : "border-border text-muted-foreground hover:text-foreground"
+                : "border-line text-muted-foreground hover:bg-muted/40 hover:text-foreground"
             }`}
           >
             {t.label}
@@ -88,7 +40,7 @@ export function LevelingLayout({ active, children }: { active: string; children:
         ))}
       </nav>
       <div className="mt-6">{children}</div>
-    </main>
+    </section>
   );
 }
 

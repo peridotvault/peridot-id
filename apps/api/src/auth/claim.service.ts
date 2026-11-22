@@ -73,7 +73,7 @@ export class ClaimService {
    * boundary where an unverified address must never become a claim ticket.
    * Throws 400 when the profile carries no verified email.
    */
-  async mint(profile: GoogleProfile, opts?: { redirectTo?: string; clientId?: string }): Promise<string> {
+  async mint(profile: GoogleProfile, opts?: { redirectTo?: string; clientId?: string; loginProviderCode?: string }): Promise<string> {
     const firstEmail = profile.emails?.[0];
     const email = firstEmail?.value ?? null;
     if (!email || firstEmail?.verified !== true) {
@@ -90,7 +90,7 @@ export class ClaimService {
   async mintCredential(
     credential: { provider: string; providerUserId: string; email: string | null },
     profile?: { displayName?: string | null; avatarUrl?: string | null },
-    opts?: { redirectTo?: string; clientId?: string },
+    opts?: { redirectTo?: string; clientId?: string; loginProviderCode?: string },
   ): Promise<string> {
     const id = `ct_${randomBytes(24).toString("base64url")}`;
     await this.prisma.claimTicket.create({
@@ -103,6 +103,7 @@ export class ClaimService {
         avatarUrl: profile?.avatarUrl ?? null,
         redirectTo: opts?.redirectTo ?? null,
         clientId: opts?.clientId ?? null,
+        loginProviderCode: opts?.loginProviderCode ?? null,
         expiresAt: new Date(Date.now() + CLAIM_TTL_MS),
       },
     });
@@ -131,7 +132,7 @@ export class ClaimService {
    * Claim the ticket's credential under a fresh handle: one transaction creates
    * identity + profile + credential and consumes the ticket. Returns the new pid.
    */
-  async claim(ticketId: string, handle: string): Promise<{ pid: string; redirectTo: string | null; clientId?: string; provider: string }> {
+  async claim(ticketId: string, handle: string): Promise<{ pid: string; redirectTo: string | null; clientId?: string; provider: string; loginProviderCode?: string }> {
     const normalized = normalizePidHandle(handle ?? "");
     if (!isPidHandle(normalized)) {
       throw new BadRequestException(
@@ -207,7 +208,7 @@ export class ClaimService {
       });
       await tx.claimTicket.update({ where: { id: ticket.id }, data: { consumedAt: new Date() } });
       await this.security.log(pid, "identity.claimed", { provider: ticket.provider }, tx);
-      return { pid, redirectTo: ticket.redirectTo, clientId: ticket.clientId ?? undefined, provider: ticket.provider };
+      return { pid, redirectTo: ticket.redirectTo, clientId: ticket.clientId ?? undefined, provider: ticket.provider, loginProviderCode: ticket.loginProviderCode ?? undefined };
       });
     } catch (err) {
       if (isP2002(err)) throw new ConflictException("This login was just claimed — sign in instead.");

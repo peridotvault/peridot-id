@@ -11,7 +11,7 @@ import { formatTotalParts } from "../../../shared/data/currency";
 // the column width and swipe on phones. No rail under the header: the cards are
 // objects, not cells.
 const CARD =
-  "flex aspect-[1.586] w-64 shrink-0 flex-col justify-between border border-line bg-surface p-4";
+  "flex aspect-[1.586] w-64 shrink-0 flex-col justify-between rounded-xl border border-line bg-surface p-4";
 
 export function FiatSection({
   balanceIdr,

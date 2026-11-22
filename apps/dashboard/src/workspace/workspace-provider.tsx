@@ -2,9 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Peridot } from "@peridotvault/pid-sdk-js";
+import { Topbar, type WorkspaceTab } from "./topbar";
 import type { PeridotClient, Role } from "@peridotvault/pid-sdk-js";
 import { PopupClosedError } from "@peridotvault/pid-sdk-js";
-import { Topbar, type WorkspaceTab } from "./topbar";
 import { resolveBrowserUrl } from "../lib/api-base";
 import {
   CONFIGURED_API_BASE,
@@ -30,9 +30,6 @@ interface WorkspaceContextValue {
   tabs: WorkspaceTab[];
   tab: string;
   onTab: (key: string) => void;
-  contractChainId: string | null;
-  openContracts: (chainId?: string) => void;
-  clearContractChainId: () => void;
   env: string;
   otherWorkspaceUrl?: string;
   busy: boolean;
@@ -95,16 +92,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     void refreshSession();
   }, [refreshSession]);
 
-  // First-party sign-in: the wallet app (popup) handles Google + passkey + the
-  // account switcher. No client_id/secret — the session cookie is shared.
-  // ANT-694: every failure surfaces in `error`. Only a user-closed popup
-  // stays quiet; a completed popup with no session (wrong-API build, blocked
+  // First-party sign-in: the wallet app handles Google + passkey + the account
+  // switcher and the browser wallet extension. Opened as a full tab, never a
+  // `window.open` popup: Chromium parents the extension's own notification
+  // window to the requesting window, and a popup parent crashed Brave's
+  // browser process on MetaMask's sign request (browser-level SIGTRAP, no JS
+  // frame). A tab is the same shape as every other dapp that works.
+  // No client_id/secret — the session cookie is shared.
+  // ANT-694: every failure surfaces in `error`. Only a user-closed window
+  // stays quiet; a completed window with no session (wrong-API build, blocked
   // third-party cookies, scope mismatch) reports instead of going silent.
   const signIn = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      await client.auth.loginPopup({ firstParty: true, sessionScope: SESSION_SCOPE });
+      await client.auth.loginTab({ firstParty: true, sessionScope: SESSION_SCOPE });
       const established = await refreshSession();
       if (!established) {
         setError(
@@ -141,58 +143,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [client, navigate]);
 
   const isAdmin = role === "admin";
-  // Tabs are routes now (?tab= retired): active state follows the pathname.
-  const tab =
-    pathname?.startsWith("/leveling") === true
-      ? "leveling"
-      : pathname?.startsWith("/settings") === true
-      ? "settings"
-      : pathname?.startsWith("/contracts") === true
-      ? "contracts"
-      : pathname?.startsWith("/chains") === true
-        ? "chains"
-        : pathname?.startsWith("/tokens") === true
-          ? "tokens"
-          : pathname?.startsWith("/partners") === true
-          ? "partners"
-          : pathname?.startsWith("/fees") === true
-            ? "fees"
-            : "apps";
+  // Two areas, not two nav sets: the developer workspace owns apps only.
+  // Chains, fees, partners, leveling and system settings live in /admin.
+  const tab = pathname?.startsWith("/admin") === true ? "admin" : "apps";
   const tabs = useMemo<WorkspaceTab[]>(
-    () =>
-      isAdmin
-        ? [
-            { key: "apps", label: "Apps" },
-            { key: "chains", label: "Chains" },
-            { key: "tokens", label: "Tokens" },
-            { key: "contracts", label: "Contracts" },
-            { key: "partners", label: "Partners" },
-            { key: "fees", label: "Fees" },
-            { key: "leveling", label: "Leveling" },
-            { key: "settings", label: "System" },
-          ]
-        : [{ key: "apps", label: "Apps" }],
+    () => (isAdmin ? [{ key: "apps", label: "Apps" }, { key: "admin", label: "Admin" }] : [{ key: "apps", label: "Apps" }]),
     [isAdmin],
   );
-
   const onTab = useCallback(
     (key: string) => {
-      void navigate(key === "apps" ? "/" : `/${key}`);
+      void navigate(key === "admin" ? "/admin" : "/");
     },
     [navigate],
   );
-
-  const [contractChainId, setContractChainId] = useState<string | null>(null);
-  const openContracts = useCallback(
-    (chainId?: string) => {
-      if (chainId) setContractChainId(chainId);
-      void navigate("/contracts");
-    },
-    [navigate],
-  );
-  // ANT-341 FR7: the handoff is single-use — ContractsManager clears it after
-  // consume so a later visit never re-selects a stale chain.
-  const clearContractChainId = useCallback(() => setContractChainId(null), []);
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
@@ -204,9 +167,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       tabs,
       tab,
       onTab,
-      contractChainId,
-      openContracts,
-      clearContractChainId,
       env: PID_ENV,
       otherWorkspaceUrl: OTHER_WORKSPACE_URL,
       busy,
@@ -214,22 +174,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
     }),
-    [client, status, role, isAdmin, pid, tabs, tab, onTab, contractChainId, openContracts, clearContractChainId, busy, error, signIn, signOut],
+    [client, status, role, isAdmin, pid, tabs, tab, onTab, busy, error, signIn, signOut],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 
-/** Layout-owned topbar fed from context (hidden until an owner session exists). */
+/** Topbar in front of every route; the session gate stays in the layouts. */
 export function WorkspaceTopbar() {
-  const { status, tabs, tab, onTab, pid, isAdmin, signOut, env, otherWorkspaceUrl } = useWorkspace();
-  if (status !== "owner") return null;
+  const { tabs, tab, onTab, pid, isAdmin, env, otherWorkspaceUrl, signOut } = useWorkspace();
   return (
     <Topbar
       tabs={tabs}
       active={tab}
       onTab={onTab}
-      sessionLabel={pid}
+      sessionLabel={pid || "signed out"}
       isAdmin={isAdmin}
       env={env}
       otherWorkspaceUrl={otherWorkspaceUrl}

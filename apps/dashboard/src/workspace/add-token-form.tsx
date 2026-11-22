@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import type { Chain, PeridotClient, TokenPreview } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "./api";
 import { Card, ERROR, FIELD, MUTED, MiniButton, WARN } from "./ui";
-import { CutButton } from "./cut-button";
 
 interface ChainRow {
   key: number;
@@ -26,17 +25,22 @@ export function AddTokenForm({
   client,
   onDone,
   onError,
+  defaultChainId,
 }: {
   client: PeridotClient;
   onDone: () => void;
   onError: (e: string | null) => void;
+  /** Pre-select the chain the form was opened from. */
+  defaultChainId?: string;
 }) {
   const [chains, setChains] = useState<Chain[]>([]);
   const [symbol, setSymbol] = useState("");
   const [name, setName] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [withLogo, setWithLogo] = useState(true);
-  const [rows, setRows] = useState<ChainRow[]>([{ key: 0, chainId: "", mint: "", decimals: "", preview: null, checking: false }]);
+  const [rows, setRows] = useState<ChainRow[]>([
+    { key: 0, chainId: defaultChainId ?? "", mint: "", decimals: "", preview: null, checking: false },
+  ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -148,7 +152,7 @@ export function AddTokenForm({
             type="file"
             accept="image/png,image/jpeg,image/webp"
             onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
-            className={`${FIELD} file:mr-2 file:rounded file:border file:border-border file:bg-muted file:px-2 file:py-1 file:text-xs`}
+            className={`${FIELD} file:mr-2 file:rounded-sm file:border file:border-line file:bg-muted file:px-2 file:py-1 file:text-xs`}
           />
         </label>
       </div>
@@ -158,7 +162,7 @@ export function AddTokenForm({
         {rows.map((r) => {
           const chain = chains.find((c) => c.id === r.chainId);
           return (
-            <div key={r.key} className="rounded border border-border p-3">
+            <div key={r.key} className="rounded-lg border border-line p-3">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
                 <label className="text-sm">
                   Chain
@@ -219,9 +223,9 @@ export function AddTokenForm({
         </label>
       )}
       <div className="mt-3">
-        <CutButton type="button" onClick={save} disabled={busy}>
+        <MiniButton variant="solid" size="lg" type="button" onClick={save} disabled={busy}>
           {busy ? "Saving…" : "Save token"}
-        </CutButton>
+        </MiniButton>
       </div>
     </Card>
   );

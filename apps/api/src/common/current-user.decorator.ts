@@ -6,6 +6,8 @@ export interface AuthenticatedUser {
   app?: string;
   /** "read" = token is limited to safe (GET) routes. */
   scope?: string;
+  /** Provider that authenticated this browser session, when known. */
+  method?: string;
 }
 
 export const CurrentUser = createParamDecorator(

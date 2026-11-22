@@ -97,7 +97,7 @@ export function Passkey({ onDone }: { onDone: () => void }) {
           {authorities.map((a) => (
             <div key={a.id} className="flex flex-col">
               <div className="flex items-center gap-3 px-6 py-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface">
                   <KeyRound size={16} className="text-foreground" />
                 </div>
                 <div className="flex flex-1 flex-col gap-0.5">

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecurityEventService } from "../security/security-event.service";
@@ -33,6 +33,12 @@ function sanitizeTaskKey(key: string): string {
 
 const MAX_INT = 100000;
 
+/** Self-serve app tasks: small XP per event (progression only, never money). */
+export const APP_TASK_MAX_XP = 1000;
+/** Guard against DB flooding from one app. */
+export const APP_TASK_MAX_COUNT = 100;
+const APP_TASK_STATUSES = ["active", "disabled"] as const;
+
 @Injectable()
 export class ExperienceTasksService {
   constructor(
@@ -47,6 +53,13 @@ export class ExperienceTasksService {
     if (dto.verificationType !== undefined && !(["internal_state", "backend_check"] as string[]).includes(dto.verificationType)) {
       throw new BadRequestException("verificationType must be internal_state|backend_check");
     }
+    // Uniqueness is per scope; the ecosystem-wide namespace has no NULL-safe
+    // DB unique, so check it explicitly before insert.
+    const clash = await this.prisma.xpTask.findFirst({
+      where: { key, scopeAppId: dto.scopeAppId ?? null },
+      select: { id: true },
+    });
+    if (clash) throw new ConflictException("task key already exists in this scope");
     try {
       const task = await this.prisma.xpTask.create({
         data: {
@@ -184,6 +197,109 @@ export class ExperienceTasksService {
     if (typeof data.name === "string") data.name = data.name.trim();
     const updated = await this.prisma.xpTask.update({ where: { id }, data: data as never });
     await this.security.log(actorAdminId, "admin.xp.task.updated", { taskId: id, patch: Object.keys(data) });
+    return updated;
+  }
+
+  // ---------------------------------------------------------------- self-serve
+  // Verified app owners define their own XP tasks (achievement vocabulary).
+  // Forced on create: scope = own app, checker = backend_check.app_attested,
+  // status active, recurring unlimited, NO daily/weekly/monthly/cooldown caps.
+  // XP is cosmetic progression only; it never gates money or access.
+
+  private async ownedApp(ownerPid: string, appId: string) {
+    const app = await this.prisma.pidApp.findFirst({ where: { id: appId, ownerPid } });
+    if (!app) throw new NotFoundException("app not found");
+    return app;
+  }
+
+  async listAppTasks(ownerPid: string, appId: string) {
+    await this.ownedApp(ownerPid, appId);
+    return this.prisma.xpTask.findMany({
+      where: { scopeAppId: appId },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async createAppTask(
+    ownerPid: string,
+    appId: string,
+    dto: { key: string; name: string; description?: string; xpReward: number },
+  ) {
+    const app = await this.ownedApp(ownerPid, appId);
+    if (!app.isActive || !app.isVerified) {
+      throw new ForbiddenException("Only a Verified, active app can add XP tasks");
+    }
+    const key = sanitizeTaskKey(dto.key);
+    const name = (dto.name ?? "").trim();
+    if (!name || name.length > 120) throw new BadRequestException("name must be 1-120 chars");
+    if (!Number.isInteger(dto.xpReward) || dto.xpReward < 1 || dto.xpReward > APP_TASK_MAX_XP) {
+      throw new BadRequestException(`xpReward must be an integer 1..${APP_TASK_MAX_XP}`);
+    }
+    const count = await this.prisma.xpTask.count({ where: { scopeAppId: appId } });
+    if (count >= APP_TASK_MAX_COUNT) {
+      throw new BadRequestException(`task limit reached (${APP_TASK_MAX_COUNT} per app)`);
+    }
+    const clash = await this.prisma.xpTask.findFirst({
+      where: { key, scopeAppId: appId },
+      select: { id: true },
+    });
+    if (clash) throw new ConflictException("task key already exists for this app");
+
+    const task = await this.prisma.xpTask.create({
+      data: {
+        key,
+        name,
+        description: dto.description?.trim() || null,
+        xpReward: dto.xpReward,
+        recurring: "unlimited",
+        verificationType: "backend_check",
+        verificationChecker: "backend_check.app_attested",
+        scopeAppId: appId,
+        status: "active",
+        createdBy: ownerPid,
+      },
+    });
+    // The task key IS the event type: approve it for intake and switch XP on.
+    const approved = [...new Set([...(app.approvedEventTypes ?? []), key])];
+    await this.prisma.pidApp.update({
+      where: { id: appId },
+      data: { xpEnabled: true, approvedEventTypes: approved },
+    });
+    await this.security.log(ownerPid, "app.xp.task.created", { appId, taskId: task.id, key });
+    return task;
+  }
+
+  async updateAppTask(
+    ownerPid: string,
+    appId: string,
+    taskId: string,
+    dto: { name?: string; description?: string | null; xpReward?: number; status?: string },
+  ) {
+    await this.ownedApp(ownerPid, appId);
+    const task = await this.prisma.xpTask.findUnique({ where: { id: taskId } });
+    if (!task || task.scopeAppId !== appId) throw new NotFoundException("task not found");
+    const data: Record<string, unknown> = {};
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name || name.length > 120) throw new BadRequestException("name must be 1-120 chars");
+      data.name = name;
+    }
+    if (dto.description !== undefined) data.description = dto.description?.trim() || null;
+    if (dto.xpReward !== undefined) {
+      if (!Number.isInteger(dto.xpReward) || dto.xpReward < 1 || dto.xpReward > APP_TASK_MAX_XP) {
+        throw new BadRequestException(`xpReward must be an integer 1..${APP_TASK_MAX_XP}`);
+      }
+      data.xpReward = dto.xpReward;
+    }
+    if (dto.status !== undefined) {
+      if (!(APP_TASK_STATUSES as readonly string[]).includes(dto.status)) {
+        throw new BadRequestException(`status must be one of ${APP_TASK_STATUSES.join("|")}`);
+      }
+      data.status = dto.status;
+    }
+    if (Object.keys(data).length === 0) return task;
+    const updated = await this.prisma.xpTask.update({ where: { id: taskId }, data: data as never });
+    await this.security.log(ownerPid, "app.xp.task.updated", { appId, taskId, patch: Object.keys(data) });
     return updated;
   }
 }

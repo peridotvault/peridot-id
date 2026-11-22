@@ -19,7 +19,7 @@ partner / fee consoles.
 
 ## Stack
 
-- Vite 8 / React 19 / React Router 7 (flat routes, no nested layouts)
+- Vite 8 / React 19 / React Router 7 (workspace routes + one nested `/admin` layout)
 - Tailwind v4 via `@tailwindcss/vite` (theme tokens mirror `apps/docs`)
 - `@peridotvault/pid-sdk-js` (all API calls — zero new endpoints)
 
@@ -51,14 +51,28 @@ The env badge follows the *configured* URL, not the LAN-resolved one.
 
 ## Routes
 
-| Route | Port source (historical — `apps/docs` is now the Mintlify source) |
-|---|---|
-| `/` (Apps + session gate) | `apps/docs/app/workspace/page.tsx` |
-| `/apps/:id` | `apps/docs/app/workspace/apps/[id]/page.tsx` |
-| `/chains`, `/chains/create`, `/chains/edit` | `…/chains/**` |
-| `/contracts`, `/fees`, `/partners` | admin consoles |
-| `/demo` | third-party sample dapp (popup only, no session) |
+Workspace (topbar shell): `/` (Apps + session gate), `/apps/:id`, `/demo`.
 
-Admin tabs (Chains / Contracts / Partners / Fees) render only for
-`role === "admin"`; other visitors see the "Admin only" guard, same as before.
-Session scope stays `"web"` so existing workspace sessions remain valid.
+Every admin console lives under `/admin/*` behind `AdminLayout`
+(`src/feat/admin/admin-layout.tsx`): session + `role === "admin"` gate, then a
+sidebar shell. Non-admins and anonymous visitors get a gate screen; the API
+(`AdminGuard`) is the authoritative check.
+
+| Route | Page |
+|---|---|
+| `/admin` | redirect → `/admin/providers` |
+| `/admin/providers` | provider list |
+| `/admin/providers/new` | add a provider |
+| `/admin/providers/:code` | one provider: display, availability, OAuth client, chain policy |
+| `/admin/chain-families` | signing namespaces |
+| `/admin/chains`, `/admin/chains/create` | chain registry |
+| `/admin/chains/:id` | one chain: `general` (settings), `contracts`, `tokens` tabs |
+| `/admin/fees` | fee consoles |
+| `/admin/partners` | partner directory (verify apps) |
+| `/admin/login-activity` | login history |
+| `/admin/leveling` (+ `levels`, `tasks`, `history`, `settings`, `apps`) | progression admin |
+| `/admin/settings` | system settings |
+
+Old top-level admin URLs (`/chains`, `/fees`, `/leveling`, …) are gone and 404.
+Admin tabs render only for `role === "admin"`. Session scope stays `"web"` so
+existing workspace sessions remain valid.

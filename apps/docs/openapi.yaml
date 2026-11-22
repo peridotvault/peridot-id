@@ -86,6 +86,307 @@ tags:
     description: Public chain + token registry (references, RPC endpoints, mainnet availability signals)
 
 paths:
+  /providers:
+    get:
+      tags: [auth]
+      summary: List login provider metadata and configured chain policies
+      description: Includes unavailable future providers. Empty selected policies are unconfigured, not a claim of network support. No credentials are returned.
+      responses:
+        "200":
+          description: Provider catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code: {type: string}
+                    name: {type: string}
+                    imageUrl: {type: string, nullable: true}
+                    category: {type: string, enum: [web2, web3]}
+                    protocol: {type: string, enum: [oauth, email_otp, passkey, wallet_signature]}
+                    isAvailable: {type: boolean}
+                    adapter: {type: string, nullable: true, description: Implemented runtime connector, null when none ships}
+                    isSupported: {type: boolean, description: True only when an implemented adapter accepts this protocol}
+                    isConfigured: {type: boolean, description: Adapter implemented plus OAuth configuration present}
+                    configSource: {type: string, enum: [database, environment, none, adapter]}
+                    chainPolicies:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          namespace: {type: string}
+                          mode: {type: string, enum: [all, selected]}
+                          selections:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                chain:
+                                  type: object
+                                  properties:
+                                    id: {type: string}
+                                    namespace: {type: string}
+                                    reference: {type: string}
+                                    name: {type: string}
+                                    isActive: {type: boolean}
+  /apps/{id}/logins:
+    get:
+      tags: [auth]
+      summary: Successful login history for an app owned by the caller
+      description: Begins at provider tracking rollout. Unknown providers remain null. Wallet brand is client-selected, not attested. Requires an owner user session; machine tokens are refused.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+        - in: query
+          name: page
+          schema: {type: integer, minimum: 1, maximum: 99999}
+      responses:
+        "200":
+          description: Paginated login events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: {type: integer}
+                  page: {type: integer}
+                  pageSize: {type: integer, enum: [25]}
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string}
+                        appId: {type: string}
+                        pid: {type: string}
+                        occurredAt: {type: string, format: date-time}
+                        providerEvidence: {type: string, enum: [server, client_selected, unknown]}
+                        provider:
+                          type: object
+                          nullable: true
+                          properties:
+                            code: {type: string}
+                            name: {type: string}
+                            imageUrl: {type: string, nullable: true}
+                            category: {type: string, enum: [web2, web3]}
+        "404":
+          description: App absent or not owned by caller
+  /admin/providers:
+    get:
+      tags: [auth]
+      summary: Admin provider catalogue (readiness, adapter, OAuth client metadata)
+      description: Requires an active admin user session; anonymous, non-admin and machine/app tokens are rejected. Never returns a client secret.
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      responses:
+        "200":
+          description: Provider rows including oauth metadata (clientId, scopes, redirectUri, secretUpdatedAt, hasSecret)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/AdminProvider'}
+        "401": {description: No session}
+        "403": {description: Not an admin session}
+    post:
+      tags: [auth]
+      summary: Add a provider (starts disabled)
+      description: Code/protocol/category are immutable afterwards. Enabling later requires an implemented adapter and complete configuration.
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, name, category, protocol]
+              properties:
+                code: {type: string, pattern: '^[a-z][a-z0-9_]{1,31}$'}
+                name: {type: string, maxLength: 80}
+                category: {type: string, enum: [web2, web3]}
+                protocol: {type: string, enum: [oauth, email_otp, passkey, wallet_signature]}
+                imageUrl: {type: string, nullable: true, description: https URL or same-origin path}
+      responses:
+        "201": {description: Created provider}
+        "400": {description: Invalid classification or image URL}
+        "409": {description: Provider code already exists}
+  /admin/providers/{code}:
+    get:
+      tags: [auth]
+      summary: Admin provider detail
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: path, name: code, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Provider row (see AdminProvider)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AdminProvider'}
+        "404": {description: Unknown provider}
+    patch:
+      tags: [auth]
+      summary: Edit display metadata or global availability
+      description: Enabling fails when no adapter is implemented or required configuration is missing.
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: path, name: code, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string, maxLength: 80}
+                imageUrl: {type: string, nullable: true}
+                isAvailable: {type: boolean}
+      responses:
+        "200": {description: Updated provider}
+        "400": {description: Adapter missing or configuration incomplete}
+  /admin/providers/{code}/oauth:
+    get:
+      tags: [auth]
+      summary: Read OAuth client metadata (no secret)
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: path, name: code, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: clientId, scopes, server-derived redirectUri, secretUpdatedAt, hasSecret, configSource, adapter, isSupported
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providerCode: {type: string}
+                  adapter: {type: string, nullable: true}
+                  isSupported: {type: boolean}
+                  redirectUri: {type: string}
+                  clientId: {type: string, nullable: true}
+                  scopes: {type: array, items: {type: string}}
+                  secretUpdatedAt: {type: string, format: date-time, nullable: true}
+                  hasSecret: {type: boolean}
+                  configSource: {type: string, enum: [database, environment, none]}
+        "400": {description: Provider is not OAuth}
+    put:
+      tags: [auth]
+      summary: Write OAuth client credentials (secret write-only)
+      description: Stored as an enc:v1 envelope. Endpoints are code-owned; admins cannot supply authorization/token URLs.
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: path, name: code, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [clientId]
+              properties:
+                clientId: {type: string, maxLength: 200}
+                clientSecret: {type: string, description: Required for a new configuration; omitted keeps the current secret}
+                scopes: {type: array, maxItems: 20, items: {type: string}}
+      responses:
+        "200": {description: Same shape as GET, never the secret}
+        "400": {description: Unsupported adapter, missing secret for a new configuration, or invalid scopes}
+  /admin/providers/{code}/chains/{namespace}:
+    put:
+      tags: [auth]
+      summary: Replace a wallet provider's chain policy for one family
+      description: Wallet-signature providers only. Every chain must belong to the given family; all mode cannot carry chain IDs.
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: path, name: code, required: true, schema: {type: string}}
+        - {in: path, name: namespace, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, chainIds]
+              properties:
+                mode: {type: string, enum: [all, selected]}
+                chainIds: {type: array, maxItems: 500, uniqueItems: true, items: {type: string, format: uuid}}
+      responses:
+        "200": {description: Replaced policy with its selections}
+        "400": {description: Non-wallet provider, unknown family or cross-family chain}
+  /admin/chain-families:
+    get:
+      tags: [auth]
+      summary: List chain families with their chains
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      responses:
+        "200":
+          description: Families ordered by code
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code: {type: string}
+                    chains:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id: {type: string, format: uuid}
+                          namespace: {type: string}
+                          reference: {type: string}
+                          name: {type: string}
+                          isActive: {type: boolean}
+    post:
+      tags: [auth]
+      summary: Register a chain family (namespace)
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: {type: string, pattern: '^[a-z0-9][a-z0-9_-]{1,31}$'}
+      responses:
+        "201": {description: Created family}
+        "409": {description: Family already exists}
+  /admin/logins:
+    get:
+      tags: [auth]
+      summary: Admin login history with filters
+      description: Requires an active admin user session. Evidence distinguishes server-attested providers from client-selected wallet brands and unknown legacy rows.
+      security: [{cookieAuth: []}, {bearerAuth: []}]
+      parameters:
+        - {in: query, name: page, schema: {type: integer, minimum: 1, maximum: 99999}}
+        - {in: query, name: appId, schema: {type: string, format: uuid}}
+        - {in: query, name: pid, schema: {type: string}}
+        - {in: query, name: provider, schema: {type: string}}
+        - {in: query, name: evidence, schema: {type: string, enum: [server, client_selected, unknown]}}
+        - {in: query, name: from, schema: {type: string, format: date-time}}
+        - {in: query, name: to, schema: {type: string, format: date-time}}
+      responses:
+        "200":
+          description: Paginated login events (same event shape as the app-scoped route)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: {type: integer}
+                  page: {type: integer}
+                  pageSize: {type: integer, enum: [25]}
+                  events:
+                    type: array
+                    items:
+                      type: object
+        "400": {description: Invalid filter value}
   /fiat/payments:
     post:
       tags: [fiat]
@@ -631,6 +932,40 @@ paths:
                 $ref: "#/components/schemas/ExchangeResult"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/rp/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate a relying-party backend session
+      description: |
+        Server-to-server only. Post the `refreshToken` returned by `/auth/exchange`
+        (or by the previous refresh) and get a fresh read bearer plus a rotated
+        refresh token. Sliding 30d with no absolute cap, so an RP session lasts as
+        long as the backend keeps refreshing. The presented token dies on use;
+        replaying it revokes the app's session family.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "200":
+          description: Rotated credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RpRefreshResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -3094,14 +3429,27 @@ paths:
   /auth/app-info:
     get:
       tags: [auth]
-      summary: Public app display name + verified flag for consent screens
+      summary: Public app display name, logo + verified flag for consent screens
       description: |
-        Lookup by `clientId`. Returns only `{name, isVerified}` — no secrets,
-        no scopes. 404 for an unknown or disabled app. Rate limited (30/min).
+        Lookup by `clientId`. Returns only `{name, logoUrl, description, isVerified,
+        loginMethods}` — no secrets, no scopes. `logoUrl` is the owner-set https logo
+        and `description` the owner-set tagline (both null when unset; the wallet
+        clamps the tagline to two lines). 404 for an unknown or disabled app.
+        Rate limited (30/min).
+
+        Pass `origin` (the requesting site) whenever the result drives consent UI:
+        it must then be one of the app's registered origins, otherwise the lookup
+        404s and callers fall back to the bare host — a borrowed `clientId` can
+        never put another app's name and logo on the screen.
       parameters:
         - name: clientId
           in: query
           required: true
+          schema: { type: string }
+        - name: origin
+          in: query
+          required: false
+          description: Origin asserting the lookup (checked against the app's allowed origins).
           schema: { type: string }
       responses:
         "200":
@@ -3112,6 +3460,8 @@ paths:
                 type: object
                 properties:
                   name: { type: string }
+                  logoUrl: { type: string, nullable: true }
+                  description: { type: string, nullable: true }
                   isVerified: { type: boolean }
         "404":
           $ref: "#/components/responses/NotFound"
@@ -3182,6 +3532,7 @@ paths:
                 namespace: { type: string, enum: [solana, evm] }
                 reference: { type: string, description: "Chain reference, e.g. mainnet-beta or 1" }
                 address: { type: string }
+                providerCode: { type: string, enum: [phantom, metamask], description: "Selected wallet connector; not cryptographic proof of wallet brand. Omitted means unknown." }
                 returnTo: { type: string, description: Cross-origin success origin, bound at challenge time }
                 clientId: { type: string, description: Registered app id — binds the issued pid_code to it }
                 codeChallenge: { type: string, description: PKCE S256 challenge; required by public clients }
@@ -4115,6 +4466,34 @@ components:
             message: "XP intake is disabled"
 
   schemas:
+    AdminProvider:
+      type: object
+      required: [code, name, category, protocol, isAvailable, isSupported, isConfigured, configSource]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        imageUrl: {type: string, nullable: true}
+        category: {type: string, enum: [web2, web3]}
+        protocol: {type: string, enum: [oauth, email_otp, passkey, wallet_signature]}
+        isAvailable: {type: boolean}
+        adapter: {type: string, nullable: true}
+        isSupported: {type: boolean}
+        isConfigured: {type: boolean}
+        configSource: {type: string, enum: [database, environment, none, adapter]}
+        oauth:
+          type: object
+          nullable: true
+          description: Client metadata only; the secret is never returned.
+          properties:
+            clientId: {type: string}
+            scopes: {type: array, items: {type: string}}
+            redirectUri: {type: string}
+            secretUpdatedAt: {type: string, format: date-time}
+            hasSecret: {type: boolean}
+        chainPolicies:
+          type: array
+          items:
+            type: object
     AppUsersPage:
       type: object
       required: [users, total, page, pageSize]
@@ -4132,6 +4511,13 @@ components:
               displayName: {type: string, nullable: true}
               firstLoginAt: {type: string, format: date-time}
               lastLoginAt: {type: string, format: date-time}
+              lastLoginProvider:
+                type: object
+                nullable: true
+                properties:
+                  code: {type: string}
+                  name: {type: string}
+                  evidence: {type: string, enum: [server, client_selected]}
 
     UsageReport:
       type: object
@@ -4206,7 +4592,7 @@ components:
 
     ExchangeResult:
       type: object
-      required: [pid, identityId, profile, credentials]
+      required: [pid, identityId, profile, credentials, accessToken, expiresIn, refreshToken, refreshExpiresIn]
       properties:
         pid:
           type: string
@@ -4237,6 +4623,39 @@ components:
               email:
                 type: string
                 nullable: true
+        accessToken:
+          type: string
+          description: Read-only bearer (`scope: read`). Keep server-side.
+        expiresIn:
+          type: integer
+          description: accessToken lifetime in seconds (24h)
+        refreshToken:
+          type: string
+          description: Server-held refresh token (audience `pid-rp-refresh`). Post to /auth/rp/refresh before refreshExpiresIn. Never send it to the browser.
+        refreshExpiresIn:
+          type: integer
+          description: refreshToken lifetime in seconds (sliding 30d, rotated per use)
+
+    RpRefreshResult:
+      type: object
+      required: [pid, identityId, accessToken, expiresIn, refreshToken, refreshExpiresIn]
+      properties:
+        pid:
+          type: string
+          pattern: "^[a-z0-9_]{3,20}@pid$"
+        identityId:
+          type: string
+          deprecated: true
+          description: Shim — identical to pid, removed next release
+        accessToken:
+          type: string
+        expiresIn:
+          type: integer
+        refreshToken:
+          type: string
+          description: Rotated refresh token — replace the stored one; the presented token is now dead.
+        refreshExpiresIn:
+          type: integer
 
     PidApp:
       type: object

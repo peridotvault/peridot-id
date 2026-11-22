@@ -7,13 +7,16 @@
 // Wasabi account blocks public bucket reads) — no signed URLs, no secrets.
 // Reads never need credentials (fail-open to `logoUrl: null`); uploads throw
 // when WASABI_* env is missing.
+import { createHash } from "node:crypto";
 import { BadRequestException, Injectable, Optional, PayloadTooLargeException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 export const TOKEN_LOGO_PREFIX = "public/tokens";
 export const CHAIN_LOGO_PREFIX = "public/chains";
+export const APP_LOGO_PREFIX = "public/apps";
 const LOGO_MAX_BYTES = 512 * 1024;
+const LOGO_PREFIXES = [TOKEN_LOGO_PREFIX, CHAIN_LOGO_PREFIX, APP_LOGO_PREFIX];
 
 const MIME_EXT: Record<string, string> = {
   "image/png": "png",
@@ -40,6 +43,14 @@ export function tokenLogoKey(symbol: string, ext: string): string {
 export function chainLogoKey(namespace: string, reference: string, ext: string): string {
   const safeRef = reference.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
   return `${CHAIN_LOGO_PREFIX}/${namespace}-${safeRef}.${ext}`;
+}
+
+/** App logo key: content hash in the name, so the proxy's immutable cache can
+ *  never serve an old logo after a re-upload (each upload is a new key). */
+export function appLogoKey(clientId: string, ext: string, bytes: Buffer): string {
+  const safe = clientId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+  const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 8);
+  return `${APP_LOGO_PREFIX}/${safe}-${hash}.${ext}`;
 }
 
 /** API logo-proxy URL for a stored key (same shape the registry serves). */
@@ -117,6 +128,10 @@ export class WasabiStorageService {
     return this.putImage(chainLogoKey(namespace, reference, this.checkedExt(file)), file);
   }
 
+  async putAppLogo(clientId: string, file: UploadFile): Promise<string> {
+    return this.putImage(appLogoKey(clientId, this.checkedExt(file), file.buffer), file);
+  }
+
   private checkedExt(file: UploadFile): string {
     const ext = extForMime(file.mimetype);
     if (!ext) throw new BadRequestException("Logo must be PNG, JPEG, or WebP");
@@ -146,7 +161,7 @@ export class WasabiStorageService {
    */
   async moveLogo(fromKey: string, toKey: string): Promise<void> {
     for (const key of [fromKey, toKey]) {
-      if (!key.startsWith(`${TOKEN_LOGO_PREFIX}/`) && !key.startsWith(`${CHAIN_LOGO_PREFIX}/`)) {
+      if (!LOGO_PREFIXES.some((p) => key.startsWith(`${p}/`))) {
         throw new Error("Unknown logo");
       }
     }
@@ -162,7 +177,7 @@ export class WasabiStorageService {
    * refused, so callers can never pull arbitrary bucket objects.
    */
   async getLogo(key: string): Promise<{ bytes: Buffer; contentType: string }> {
-    if (!key.startsWith(`${TOKEN_LOGO_PREFIX}/`) && !key.startsWith(`${CHAIN_LOGO_PREFIX}/`)) {
+    if (!LOGO_PREFIXES.some((p) => key.startsWith(`${p}/`))) {
       throw new Error("Unknown logo");
     }
     const ext = key.split(".").pop()?.toLowerCase();

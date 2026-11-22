@@ -101,9 +101,9 @@ export function Profile({
           <Pressable onPress={goEditProfile}>
             <div className="flex w-full items-center gap-3 px-6 py-3 transition-colors hover:bg-surface">
               {profile?.avatarUrl ? (
-                <img src={profile.avatarUrl} alt="" className="h-[34px] w-[34px] rounded-full border border-line"  />
+                <img src={profile.avatarUrl} alt="" className="h-[34px] w-[34px] rounded-md border border-line"  />
               ) : (
-                <div className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-line bg-surface" aria-label="No profile photo">
+                <div className="flex h-[34px] w-[34px] items-center justify-center rounded-md border border-line bg-surface" aria-label="No profile photo">
                   <span aria-hidden="true" className="font-sans text-base text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</span>
                 </div>
               )}
@@ -114,7 +114,7 @@ export function Profile({
 
           <Pressable onPress={openAccounts}>
             <div className="flex w-full items-center gap-3 py-3 transition-colors hover:bg-surface">
-              <div className="flex h-[34px] w-[34px] items-center justify-center rounded-full border border-line bg-surface">
+              <div className="flex h-[34px] w-[34px] items-center justify-center rounded-md border border-line bg-surface">
                 <RefreshCw size={18} className="text-foreground" />
               </div>
               <span className="flex-1 font-sans text-base font-medium text-foreground">Switch Account</span>

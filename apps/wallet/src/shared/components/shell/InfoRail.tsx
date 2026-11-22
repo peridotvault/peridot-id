@@ -1,6 +1,7 @@
 import { useNetworkMode } from "../../hooks/useNetworkMode";
 import { useHeaderProfile } from "../../hooks/useHeaderProfile";
-import { ProfileButton } from "./ProfileButton";
+import { useAccountMenu } from "../../hooks/useAccountMenu";
+import { ProfileMenu } from "./ProfileMenu";
 
 // Right column (three-column desktop): the profile affordance on top and a
 // quiet footer underneath — company line, two links, network mode. No cards,
@@ -13,14 +14,23 @@ const LINKS = [
   { label: "Terms", href: "https://peridot.id/terms" },
 ];
 
-export function InfoRail({ onProfile, refreshKey = "" }: { onProfile: () => void; refreshKey?: string }) {
+export function InfoRail({
+  onProfile,
+  onSwitched,
+  refreshKey = "",
+}: {
+  onProfile: () => void;
+  onSwitched: () => void;
+  refreshKey?: string;
+}) {
   const { displayName, avatarUrl, level } = useHeaderProfile(refreshKey);
+  const menu = useAccountMenu(onSwitched);
   const net = useNetworkMode();
 
   return (
     <aside aria-label="About PeridotID" style={{ width: 300 }} className="flex shrink-0 flex-col gap-8 py-5">
       <div style={{ flexDirection: "row" }} className="flex justify-end">
-        <ProfileButton displayName={displayName} avatarUrl={avatarUrl} level={level} onProfile={onProfile} />
+        <ProfileMenu displayName={displayName} avatarUrl={avatarUrl} level={level} menu={menu} onProfile={onProfile} />
       </div>
 
       <div className="flex flex-col gap-2">

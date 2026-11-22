@@ -50,8 +50,13 @@ Check text contrast against the real surface.
 
 ## Surfaces and shape
 
-Square corners (radius 0), flat surfaces, thin borders. Dark only — the
-dashboard pins `class="dark"` on `<html>`; there is no light theme or toggle.
+Flat surfaces, thin borders, dark only — the dashboard pins `class="dark"` on
+`<html>`; there is no light theme or toggle.
+
+- `apps/wallet`: square corners (radius 0).
+- `apps/dashboard`: the peridotbase radius scale (`--radius: 0.625rem`);
+  controls `rounded-sm` (6px), panels `rounded-xl` (14px), admin shell is a
+  224px labelled sidebar (`w-56`, icon + text rows, `rounded-md` hover/active).
 
 ## Shell layout
 

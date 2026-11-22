@@ -24,14 +24,14 @@ export default function LevelingSettingsPage() {
           <MiniButton size="sm" onClick={reload}>Retry</MiniButton>
         </div>
       )}
-      <div className="flex flex-col">
+      <div className="flex flex-col gap-3">
         <Card>
-          <h2 className="text-lg font-semibold tracking-tight">Progression defaults</h2>
+          <h2 className="text-base font-semibold tracking-tight">Progression defaults</h2>
           {loading ? (
             <p role="status" className={`mt-2 text-sm ${MUTED}`}>Loading policies…</p>
           ) : !active ? (
             <p className={`mt-2 text-sm ${MUTED}`}>
-              No active policy. Draft and activate one from the <Link className="underline" to="/leveling/levels">Levels</Link> page.
+              No active policy. Draft and activate one from the <Link className="text-muted-foreground transition-colors hover:text-foreground" to="/admin/leveling/levels">Levels</Link> page.
             </p>
           ) : (
             <p className="mt-2 text-sm">
@@ -46,23 +46,23 @@ export default function LevelingSettingsPage() {
         <OrgQuotaCard />
 
         <Card>
-          <h2 className="text-lg font-semibold tracking-tight">Fraud flags</h2>
+          <h2 className="text-base font-semibold tracking-tight">Fraud flags</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>
             Self-grant alerts and abuse signals land in suspicious activity; abusive apps are
             suspended from the Applications page (awards short-circuit while suspended).
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Link to="/leveling">
+            <Link to="/admin/leveling">
               <MiniButton size="sm">Review suspicious activity</MiniButton>
             </Link>
-            <Link to="/leveling/apps">
+            <Link to="/admin/leveling/apps">
               <MiniButton size="sm">Open Applications</MiniButton>
             </Link>
           </div>
         </Card>
 
         <Card>
-          <h2 className="text-lg font-semibold tracking-tight">Visibility defaults</h2>
+          <h2 className="text-base font-semibold tracking-tight">Visibility defaults</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>
             Pending GA decision (plan §13 F1): per-user visibility defaults, per-app read caps, and
             enumeration throttling must be specified before M3 so the event pipeline does not inherit
@@ -125,7 +125,7 @@ function OrgQuotaCard() {
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold tracking-tight">Earning limits — organization quotas</h2>
+      <h2 className="text-base font-semibold tracking-tight">Earning limits — organization quotas</h2>
       <p className={`mt-1 text-sm ${MUTED}`}>
         Cap aggregate XP across every app of one developer org (keyed by owner PID). Raising a cap
         needs a second-person confirm or a justification (≥ {MIN_JUSTIFICATION} chars). Blank = unchanged, 0 = clear.

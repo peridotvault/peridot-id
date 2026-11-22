@@ -33,10 +33,9 @@ const APP_ROW = {
 };
 
 describe("catalog validators (C3/F8 pure rules)", () => {
-  it("C3: unknown event type is rejected (nothing persisted by caller)", () => {
+  it("C3: custom app event types are allowed (format is the gate)", () => {
     const r = validateEventTypeAllowlist(["campaign_completed", "mint_xp"]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.join(";")).toMatch(/not in MVP catalog/);
+    expect(r).toEqual({ ok: true, types: ["campaign_completed", "mint_xp"] });
   });
 
   it("C3: bad format is rejected", () => {
@@ -50,7 +49,7 @@ describe("catalog validators (C3/F8 pure rules)", () => {
     expect(validateEventTypeAllowlist(["campaign_completed", "campaign_completed"]).ok).toBe(false);
   });
 
-  it("C3: MVP catalog passes", () => {
+  it("C3: suggested catalog passes", () => {
     const r = validateEventTypeAllowlist(["onboarding_completed", "campaign_completed"]);
     expect(r).toEqual({ ok: true, types: ["onboarding_completed", "campaign_completed"] });
   });

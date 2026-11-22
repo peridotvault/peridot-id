@@ -33,6 +33,7 @@ export interface AppUsersPage {
     displayName: string | null;
     firstLoginAt: string;
     lastLoginAt: string;
+    lastLoginProvider: { code: string; name: string; evidence: "server" | "client_selected" } | null;
   }>;
   total: number;
   page: number;

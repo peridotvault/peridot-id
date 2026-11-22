@@ -37,6 +37,26 @@ export interface ExchangeResult {
   accessToken: string;
   /** accessToken lifetime in seconds. */
   expiresIn: number;
+  /**
+   * Server-held refresh token (never send it to the browser). Post it to
+   * `POST /v1/auth/rp/refresh` before `refreshExpiresIn` to get a fresh bearer
+   * + rotated refresh token — sessions last as long as the RP keeps refreshing.
+   */
+  refreshToken: string;
+  /** refreshToken lifetime in seconds (sliding 30d, rotated per use). */
+  refreshExpiresIn: number;
+}
+
+/** Rotated RP credentials: same bearer shape, no identity profile re-read. */
+export interface RpRefreshResult {
+  /** Permanent PID (`<handle>@pid`). */
+  pid: string;
+  /** @deprecated one-release shim — identical to `pid`, removed next release. */
+  identityId: string;
+  accessToken: string;
+  expiresIn: number;
+  refreshToken: string;
+  refreshExpiresIn: number;
 }
 
 /** WebAuthn registration ceremony (task 003). */

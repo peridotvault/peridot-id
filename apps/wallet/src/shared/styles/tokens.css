@@ -1,31 +1,55 @@
-/* Brand tokens (byte-identical to styles/theme.ts): sidebar and other
+/* Brand tokens (scalars mirrored in styles/theme.ts): sidebar and other
    Tailwind-styled components consume these so the palette stays single-source.
-   Values mirror the PeridotVault marketing system (brand.md). */
+   Values mirror the PeridotVault marketing system (brand.md). The shadcn
+   aliases below are the same palette under shadcn's names, dark only. */
 @theme {
   /* Brand */
   --color-primary: #349b65;
+  --color-primary-foreground: #0a0c0b;
   --color-secondary: #349b6650;
+  --color-secondary-foreground: #e0e4e4;
   --color-accent: #87ee83;
+  --color-accent-foreground: #0a0c0b;
 
   /* Surfaces */
   --color-background: #0d0f0e;
   --color-surface: #060807;
   --color-card: #060807;
+  --color-card-foreground: #e0e4e4;
+  --color-popover: #060807;
+  --color-popover-foreground: #e0e4e4;
   --color-muted: #363636;
+  /* Solid step above the page (#0d0f0e) for controls that must read as a
+     filled surface: buttons, input rows. Opaque on purpose. */
+  --color-elevated: #1b1e1c;
 
   /* Lines */
   --color-border: #ffffff28;
+  --color-input: #ffffff28;
   --color-line: #ffffff14;
 
   /* Text */
   --color-foreground: #e0e4e4;
   --color-paragraph: #b5b5b5;
   --color-label: #ffffff60;
-  --color-muted-foreground: #7d7d7d;
+  /* AA on the page surface and on --color-muted (parity with the dashboard;
+     the old #7d7d7d failed on muted). */
+  --color-muted-foreground: #a3a3a3;
 
   /* Status */
   --color-danger: #ff5f57;
+  --color-destructive: #ff5f57;
+  --color-destructive-foreground: #0d0f0e;
   --color-success: #87ee83;
+  --color-ring: #87ee83;
+
+  /* Radius scale, mirrored from the dashboard's peridotbase tokens so the two
+     apps read as one system: controls/inputs 8px, rows 10px, panels 14px.
+     Square corners were the old wallet look; only the classes in use emit. */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.875rem;
 
   --font-sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;

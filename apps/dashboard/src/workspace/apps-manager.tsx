@@ -5,9 +5,8 @@ import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import type { PidApp } from "./app-types";
 import { unwrap } from "./api";
-import { Card, ERROR, FIELD, MUTED, MiniButton } from "./ui";
+import { Badge, Card, ERROR, FIELD, MUTED, MiniButton } from "./ui";
 import { PageHeader } from "./page-header";
-import { CutButton } from "./cut-button";
 
 /** Apps list: name only. Every setting lives on the app's detail page. */
 export function AppsManager({ client }: { client: PeridotClient }) {
@@ -78,24 +77,26 @@ export function AppsManager({ client }: { client: PeridotClient }) {
             <Link
               key={app.id}
               to={`/apps/${app.id}`}
-              className="flex items-center justify-between border border-border bg-background px-4 py-3 transition-colors hover:bg-muted"
+              className="flex items-center justify-between gap-3 rounded-md border border-line bg-background px-4 py-3 transition-colors hover:bg-muted/40 focus-ring"
             >
-              <span className="font-semibold tracking-tight">
-                {app.name}{" "}
+              <span className="min-w-0 truncate font-semibold tracking-tight">
+                {app.name}
                 {app.isVerified && (
-                  <>
-                    <span aria-hidden="true" className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">✓</span>
+                  <Badge tone="success" className="ml-2 align-middle">
+                    <span aria-hidden="true">✓</span>
                     <span className="sr-only">Verified</span>
-                  </>
+                  </Badge>
                 )}
               </span>
-              <span className={`text-xs ${MUTED}`}>{app.isActive ? "Active" : "Disabled"} <span aria-hidden="true">→</span></span>
+              <span className={`shrink-0 text-xs ${MUTED}`}>
+                {app.isActive ? "Active" : "Disabled"} <span aria-hidden="true">→</span>
+              </span>
             </Link>
           ))}
           {apps.length === 0 && !error && (
             <p className={`text-sm ${MUTED}`}>
               No apps yet — register your first below. New here?{" "}
-              <Link to="/demo" className="underline underline-offset-2 hover:text-foreground">
+              <Link to="/demo" className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground">
                 Try the sandbox sample
               </Link>
               .
@@ -107,7 +108,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
       <Card>
         <h3 className="font-semibold tracking-tight">Register a new app</h3>
         <p className={`mt-1 text-sm ${MUTED}`}>Just a name — everything else is configured inside the app.</p>
-        <label className="mt-3 block text-sm">
+        <label className="mt-4 block text-xs">
           Name
           <input
             value={name}
@@ -120,14 +121,14 @@ export function AppsManager({ client }: { client: PeridotClient }) {
             className={FIELD}
           />
         </label>
-        <CutButton
+        <MiniButton variant="solid" size="lg"
           type="button"
           onClick={() => void create()}
           disabled={creating}
-          className={`mt-3 ${creating ? "pointer-events-none opacity-60" : ""}`}
+          className="mt-3"
         >
           {creating ? "Registering…" : "Register app"}
-        </CutButton>
+        </MiniButton>
       </Card>
     </section>
   );

@@ -41,6 +41,7 @@ export function TextField({
   return (
     <input
       {...rest}
+      data-slot="input"
       value={value}
       placeholder={placeholder}
       spellCheck={autoCorrect === false ? false : undefined}

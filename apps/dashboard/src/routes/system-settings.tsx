@@ -12,9 +12,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useWorkspace } from "../workspace/workspace-provider";
-import { Card, ERROR, FIELD, MUTED, MiniButton, WARN } from "../workspace/ui";
+import { Badge, Card, ERROR, FIELD, MUTED, SECTION_LABEL, MiniButton, WARN } from "../workspace/ui";
 import { PageHeader } from "../workspace/page-header";
-import { CutButton } from "../workspace/cut-button";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import {
   GROUP_LABELS,
@@ -51,57 +50,10 @@ function isBackendMissing(message: string): boolean {
 }
 
 export default function SystemSettingsPage() {
-  const { client, status, isAdmin, signIn, busy, error: sessionError } = useWorkspace();
-
-  if (status === "checking") {
-    return (
-      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
-        <p role="status" className={`mt-8 text-sm ${MUTED}`}>
-          Checking session…
-        </p>
-      </main>
-    );
-  }
-
-  if (status === "anonymous") {
-    return (
-      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
-        <PageHeader eyebrow="Admin" title="System settings" />
-        <Card>
-          <h2 className="text-lg font-semibold tracking-tight">Sign in to continue</h2>
-          <p className={`mt-1 text-sm ${MUTED}`}>System settings require a signed-in admin session.</p>
-          {sessionError && (
-            <p role="alert" className={`mt-3 text-sm ${ERROR}`}>
-              {sessionError}
-            </p>
-          )}
-          <div className="mt-4">
-            <CutButton type="button" onClick={signIn} disabled={busy}>
-              {busy ? "Waiting for wallet…" : "Sign in with PeridotID"}
-            </CutButton>
-          </div>
-        </Card>
-      </main>
-    );
-  }
-
-  if (!isAdmin) {
-    // UX-only gate (F-E4); the server (AdminGuard) enforces.
-    return (
-      <main id="main-content" className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8">
-        <PageHeader eyebrow="Admin" title="System settings" />
-        <Card>
-          <h2 className="text-lg font-semibold tracking-tight">Admin access required</h2>
-          <p className={`mt-1 text-sm ${MUTED}`}>
-            System settings are restricted to admins. Your own level stays visible in the wallet.
-          </p>
-        </Card>
-      </main>
-    );
-  }
+  const { client } = useWorkspace();
 
   return (
-    <main id="main-content" className="mx-auto w-full max-w-7xl px-5 pb-16 pt-8 sm:px-8">
+    <>
       <PageHeader
         eyebrow="Admin"
         title="System settings"
@@ -111,7 +63,7 @@ export default function SystemSettingsPage() {
         <IntakeBanner client={client} />
         <SettingsSection client={client} />
       </div>
-    </main>
+    </>
   );
 }
 
@@ -169,9 +121,9 @@ function IntakeBanner({ client }: { client: PeridotClient }) {
         <div className="flex items-center gap-3">
           <span
             aria-hidden
-            className={`inline-block h-3 w-3 rounded-full ${!data ? "bg-muted" : open && !degraded ? "bg-green-600" : degraded ? "bg-amber-500" : "bg-red-600"}`}
+            className={`inline-block h-3 w-3 ${!data ? "bg-muted" : open && !degraded ? "bg-green-600" : degraded ? "bg-amber-500" : "bg-red-600"}`}
           />
-          <h2 className="text-lg font-semibold tracking-tight">
+          <h2 className="text-base font-semibold tracking-tight">
             {!data ? (
               "Loading intake status…"
             ) : degraded ? (
@@ -196,8 +148,8 @@ function IntakeBanner({ client }: { client: PeridotClient }) {
       </div>
       {b && (
         <dl className="mt-3 flex flex-wrap gap-2 text-xs" aria-label="Intake breakdown">
-          <Chip label={`global suspend ${onOff(b.suspendGlobal)}`} on={!b.suspendGlobal} invert />
-          <Chip label={`app suspend ${onOff(b.suspendApp)}`} on={!b.suspendApp} invert />
+          <Chip label={`global suspend ${onOff(b.suspendGlobal)}`} on={!b.suspendGlobal} />
+          <Chip label={`app suspend ${onOff(b.suspendApp)}`} on={!b.suspendApp} />
           <Chip label={`source ${b.source}`} on={b.source === "db"} />
         </dl>
       )}
@@ -213,15 +165,8 @@ function onOff(v: boolean): string {
   return v ? "on" : "off";
 }
 
-function Chip({ label, on, invert = false }: { label: string; on: boolean; invert?: boolean }) {
-  const good = invert ? on : on;
-  return (
-    <span
-      className={`rounded-full border px-2 py-0.5 font-medium ${good ? "border-border text-muted-foreground" : "border-red-300 text-red-600 dark:border-red-800 dark:text-red-400"}`}
-    >
-      {label}
-    </span>
-  );
+function Chip({ label, on }: { label: string; on: boolean }) {
+  return <Badge tone={on ? "muted" : "danger"}>{label}</Badge>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -274,14 +219,14 @@ function SettingsSection({ client }: { client: PeridotClient }) {
       // Role changed mid-session or guard rejected: full-page 403 (F-E4).
       return (
         <Card>
-          <h2 className="text-lg font-semibold tracking-tight">Admin access required</h2>
+          <h2 className="text-base font-semibold tracking-tight">Admin access required</h2>
           <p className={`mt-1 text-sm ${MUTED}`}>{error}</p>
         </Card>
       );
     }
     return (
       <Card>
-        <h2 className="text-lg font-semibold tracking-tight">
+        <h2 className="text-base font-semibold tracking-tight">
           {isBackendMissing(error) ? "Settings API unavailable" : "Could not load settings"}
         </h2>
         <p className={`mt-1 text-sm ${MUTED}`}>
@@ -311,7 +256,7 @@ function SettingsSection({ client }: { client: PeridotClient }) {
     <Card>
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg font-semibold tracking-tight">Keys ({filtered.length})</h2>
+          <h2 className="text-base font-semibold tracking-tight">Keys ({filtered.length})</h2>
           <label className="text-xs sm:max-w-xs sm:flex-1">
             <span className="sr-only">Filter keys by substring</span>
             <input
@@ -357,14 +302,14 @@ function SettingsSection({ client }: { client: PeridotClient }) {
               if (inGroup.length === 0) return null;
               return (
                 <section key={g} aria-label={GROUP_LABELS[g]}>
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <h3 className={SECTION_LABEL}>
                     {GROUP_LABELS[g]}
                   </h3>
                   <ul className="mt-2 flex flex-col gap-2">
                     {inGroup.map((s) => (
                       <li
                         key={s.key}
-                        className="border border-border p-3 sm:p-4"
+                        className="rounded-lg border border-line bg-background p-3 sm:p-4"
                       >
                         <SettingRow
                           setting={s}
@@ -403,8 +348,8 @@ function FilterChip({ active, onClick, label }: { active: boolean; onClick: () =
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors focus-ring ${
-        active ? "border-foreground bg-foreground text-background" : "border-border hover:text-foreground"
+      className={`rounded-sm border px-3 py-1 text-xs font-medium transition-colors focus-ring ${
+        active ? "border-foreground bg-foreground text-background" : "border-line text-muted-foreground hover:bg-muted/40 hover:text-foreground"
       }`}
     >
       {label}
@@ -520,7 +465,7 @@ function EditForm({
   if (conflict) {
     // 409: never silent-overwrite (F-E3) — show actor/time/current + Reload.
     return (
-      <div role="alert" className="border border-amber-500/50 p-3">
+      <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
         <p className="text-sm font-semibold">Changed by someone else — not overwritten</p>
         <p className={`mt-1 text-sm ${MUTED}`}>
           Changed by {conflict.updatedBy} at {formatUpdatedAt(conflict.updatedAt)} (now v{conflict.version}).
@@ -551,7 +496,7 @@ function EditForm({
   const entry = lookupKey(setting.key);
   return (
     <form
-      className="flex flex-col gap-2 border border-line p-3"
+      className="flex flex-col gap-2 rounded-lg border border-line bg-background p-3"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
@@ -712,7 +657,7 @@ function HistoryView({ settingKey, client }: { settingKey: string; client: Perid
     <div className="flex flex-col gap-2">
       <ol className="flex flex-col gap-2">
         {entries.map((h) => (
-          <li key={h.version} className="rounded border border-border p-2 text-xs">
+          <li key={h.version} className="rounded-lg border border-line p-2 text-xs">
             <p className="font-semibold">
               v{h.version} · {h.updatedBy} · {formatUpdatedAt(h.updatedAt)}
             </p>

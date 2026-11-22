@@ -589,8 +589,10 @@ export const AsciiRidgesGL: React.FC<AsciiRidgesProps> = (props) => {
         bottom: 0,
         overflow: "hidden",
         opacity: 0.25,
-        // Backdrop must never intercept clicks: it paints above static
-        // siblings (e.g. the login buttons) in DOM order.
+        // Backdrop only: z-index -1 keeps the ridges behind the form. Without
+        // it an absolute wrapper paints above static siblings (the buttons),
+        // which made every filled surface look translucent.
+        zIndex: -1,
         pointerEvents: "none",
       }}
     >
@@ -839,8 +841,10 @@ const AsciiRidges2D: React.FC<AsciiRidgesProps> = (props) => {
         bottom: 0,
         overflow: "hidden",
         opacity: 0.25,
-        // Backdrop must never intercept clicks: it paints above static
-        // siblings (e.g. the login buttons) in DOM order.
+        // Backdrop only: z-index -1 keeps the ridges behind the form. Without
+        // it an absolute wrapper paints above static siblings (the buttons),
+        // which made every filled surface look translucent.
+        zIndex: -1,
         pointerEvents: "none",
       }}
     >

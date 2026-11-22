@@ -127,6 +127,15 @@ jobs:
             echo "::error::apps/wallet must not use the popup/hosted flow — see apps/wallet README"
             exit 1
           fi
+          # Login must open a TAB, never a script popup: extension wallets that
+          # create their own window (MetaMask: chrome.windows.create) are parented
+          # to the requester, and a popup parent crashes Brave's browser process
+          # (SIGTRAP) on the very first sign request. openLoginPopup now opens a
+          # tab too; this guard keeps new code from reaching for the popup path.
+          if rg -n '\bopenLoginPopup\(|\.loginPopup\(' apps/dashboard/src packages/react-embed/src --glob '!*.md' --glob '!*.test.*'; then
+            echo "::error::wallet login must use loginTab/openLoginTab — popup login crashes Brave's browser process"
+            exit 1
+          fi
           # Canonical hosts are peridot.id only (ANT-400 hard cutover): any
           # retired-host remnant in INFRA-OWNED surfaces fails the build.
           # Scoped to deploy + image + pipeline files on purpose — app source and

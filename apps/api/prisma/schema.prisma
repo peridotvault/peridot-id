@@ -65,6 +65,7 @@ model Identity {
   // sides); they cost nothing at runtime. Convention: never `include` from
   // Identity — query the child delegate directly (see docs/DATABASE.md).
   // Auth & profile.
+  loginEvents LoginEvent[]
   profile     Profile?
   credentials IdentityCredential[]
   devices     Device[]
@@ -114,6 +115,7 @@ model IdentityCredential {
   pid            String
   identity       Identity  @relation(fields: [pid], references: [pid], onDelete: Cascade)
   provider       String
+  credentialDomain CredentialDomain @relation(fields: [provider], references: [code], onDelete: Restrict)
   providerUserId String
   // Globally unique per non-null email (one email = one PID). Case-insensitive
   // enforcement lives in a raw-SQL functional index (see migration
@@ -195,6 +197,8 @@ model CredentialChallenge {
 // from ChainAccount (the identity's own on-chain smart account — an external
 // wallet is a login credential, never the authority of that account).
 model WalletAuthChallenge {
+  providerCode String?
+  loginProvider LoginProvider? @relation(fields: [providerCode], references: [code], onDelete: Restrict)
   id         String    @id @default(uuid())
   namespace  String // "solana" | "evm"
   reference  String // chain reference: "mainnet-beta" | "1"
@@ -378,6 +382,8 @@ model RelayerBroadcast {
 // the identity + profile + credential and consumes the ticket. 10-min TTL,
 // single-use, nothing is created until claim — abandoning restarts cleanly.
 model ClaimTicket {
+  loginProviderCode String?
+  loginProvider LoginProvider? @relation(fields: [loginProviderCode], references: [code], onDelete: Restrict)
   id             String    @id @default(uuid())
   provider       String
   providerUserId String
@@ -418,6 +424,8 @@ model EmailOtp {
 // different origin) asked to be returned to. The code rides in the redirect URL and is
 // exchanged server-to-server — no cookie sharing across sites. Single-use, 60s TTL.
 model SsoCode {
+  providerCode String?
+  loginProvider LoginProvider? @relation(fields: [providerCode], references: [code], onDelete: Restrict)
   id         String    @id @default(uuid())
   code       String    @unique
   pid        String
@@ -472,6 +480,8 @@ model Chain {
   createdAt    DateTime @db.Timestamptz(3) @default(now())
   updatedAt    DateTime @db.Timestamptz(3) @updatedAt
 
+  family ChainFamily @relation(fields: [namespace], references: [code], onDelete: Restrict)
+  providerSelections ProviderChainSelection[]
   contracts ChainContract[]
   accounts  ChainAccount[]
   evmRelayerKey EvmRelayerKey?
@@ -931,6 +941,11 @@ model PidApp {
   ownerPid              String
   owner                 Identity  @relation(fields: [ownerPid], references: [pid], onDelete: Cascade)
   name                  String
+  // Owner-set app logo (https URL) shown on the sign-in consent screens. Null
+  // renders the generic tile — a broken/unreachable URL falls back the same way.
+  logoUrl               String?
+  // Owner-set one-liner under the app name on the consent card (≤160 chars).
+  description           String?
   allowedOrigins        String[]
   isActive              Boolean   @default(true)
   // Verified partner (admin-only): the global PeridotID fiat fee is waived
@@ -965,6 +980,13 @@ model PidApp {
   // ledger posts signed events here (X-Pid-Signature). See docs/FIAT_LEDGER.md.
   webhookUrl            String?
   webhookSecret         String?
+  // Login methods this app accepts (developer switch): passkey | google |
+  // email | phantom | metamask. Enforced when an app-bound pid_code is minted,
+  // so a disabled method cannot complete a third-party login even if the
+  // hosted login page is stale. First-party wallet logins are unaffected.
+  providerSettings AppLoginProvider[]
+  oauthConfigs AppOAuthConfig[]
+  loginEvents LoginEvent[]
   // XP & Leveling (ANT-89 M1): per-app XP permission. Verification alone
   // grants nothing — event intake (M3) requires isVerified AND xpEnabled AND
   // an approved event type. Admin-only writes (Role.admin); dev self-approval
@@ -1180,7 +1202,10 @@ model UserXpState {
 
 model XpTask {
   id          String  @id @default(uuid())
-  key         String  @unique
+  // Event type this task awards. Unique PER SCOPE: every app owns its own
+  // namespace, while the ecosystem-wide namespace (scopeAppId NULL) stays
+  // single-valued via a partial unique index in the migration.
+  key         String
   name        String
   description String?
   xpReward    Int
@@ -1212,6 +1237,7 @@ model XpTask {
 
   @@index([status])
   @@index([scopeAppId])
+  @@unique([key, scopeAppId])
   @@map("xp_tasks")
 }
 
@@ -1452,4 +1478,130 @@ model AppUser {
   @@id([appClientId, pid])
   @@index([appClientId, lastLoginAt])
   @@map("app_users")
+}
+
+// Provider metadata is distinct from chain-scoped wallet credential ownership.
+enum ProviderCategory {
+  web2
+  web3
+}
+enum ProviderProtocol {
+  oauth
+  email_otp
+  passkey
+  wallet_signature
+}
+enum ChainSupportMode {
+  all
+  selected
+}
+model LoginProvider {
+  code String @id
+  name String
+  imageUrl String? @map("image_url")
+  category ProviderCategory
+  protocol ProviderProtocol
+  isAvailable Boolean @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+  domains CredentialDomain[]
+  chainPolicies ProviderChainPolicy[]
+  appSettings AppLoginProvider[]
+  oauthConfigs AppOAuthConfig[]
+  platformOauthConfig PlatformOAuthConfig?
+  ssoCodes SsoCode[]
+  walletChallenges WalletAuthChallenge[]
+  claimTickets ClaimTicket[]
+  loginEvents LoginEvent[]
+  @@map("providers")
+}
+model ChainFamily {
+  code String @id
+  chains Chain[]
+  providerPolicies ProviderChainPolicy[]
+  credentialDomains CredentialDomain[]
+  @@map("chain_families")
+}
+// A scope is EITHER an OAuth/email issuer OR a wallet chain family, never a wallet brand.
+model CredentialDomain {
+  code String @id
+  providerCode String?
+  provider LoginProvider? @relation(fields: [providerCode], references: [code], onDelete: Restrict)
+  namespace String?
+  family ChainFamily? @relation(fields: [namespace], references: [code], onDelete: Restrict)
+  credentials IdentityCredential[]
+  @@map("credential_domains")
+}
+model ProviderChainPolicy {
+  id String @id @default(uuid())
+  providerCode String
+  provider LoginProvider @relation(fields: [providerCode], references: [code], onDelete: Restrict)
+  namespace String
+  family ChainFamily @relation(fields: [namespace], references: [code], onDelete: Restrict)
+  mode ChainSupportMode @default(selected)
+  selections ProviderChainSelection[]
+  @@unique([providerCode, namespace])
+  @@map("provider_chain_policies")
+}
+model ProviderChainSelection {
+  policyId String
+  policy ProviderChainPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  chainId String
+  chain Chain @relation(fields: [chainId], references: [id], onDelete: Restrict)
+  @@id([policyId, chainId])
+  @@index([chainId])
+  @@map("provider_chain_selections")
+}
+// Row presence enables a provider. No duplicated boolean/array on pid_apps.
+model AppLoginProvider {
+  appId String
+  app PidApp @relation(fields: [appId], references: [id], onDelete: Cascade)
+  providerCode String
+  provider LoginProvider @relation(fields: [providerCode], references: [code], onDelete: Restrict)
+  @@id([appId, providerCode])
+  @@map("app_login_providers")
+}
+// Storage contract only; custom OAuth exchange is not yet implemented.
+model AppOAuthConfig {
+  appId String
+  app PidApp @relation(fields: [appId], references: [id], onDelete: Cascade)
+  providerCode String
+  provider LoginProvider @relation(fields: [providerCode], references: [code], onDelete: Restrict)
+  clientId String
+  clientSecretEnc String
+  secretUpdatedAt DateTime @default(now()) @db.Timestamptz(3)
+  @@id([appId, providerCode])
+  @@map("app_oauth_configs")
+}
+// Platform-level OAuth client (admin-managed). One row per OAuth provider;
+// per-app overrides stay in AppOAuthConfig and are not runtime-wired. The
+// secret is write-only (`enc:v1:` envelope, PID_SECRETS_ENC_KEY) and is never
+// selected by a read path. Endpoints are code-owned adapter constants — no
+// admin-supplied URLs, so there is no SSRF surface.
+model PlatformOAuthConfig {
+  providerCode String @id
+  provider LoginProvider @relation(fields: [providerCode], references: [code], onDelete: Restrict)
+  clientId String
+  clientSecretEnc String
+  scopes String[] @default([])
+  redirectUri String
+  secretUpdatedAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+  @@map("platform_oauth_configs")
+}
+// One event per successful SSO exchange. NULL provider means unknown/legacy session reuse.
+model LoginEvent {
+  id String @id @default(uuid())
+  exchangeId String @unique
+  appId String
+  app PidApp @relation(fields: [appId], references: [id], onDelete: Restrict)
+  pid String
+  identity Identity @relation(fields: [pid], references: [pid], onDelete: Restrict)
+  providerCode String?
+  provider LoginProvider? @relation(fields: [providerCode], references: [code], onDelete: Restrict)
+  // Wallet connector is client-selected, never cryptographic proof of extension brand.
+  providerEvidence String
+  occurredAt DateTime @default(now()) @db.Timestamptz(3)
+  @@index([appId, pid, occurredAt])
+  @@map("login_events")
 }

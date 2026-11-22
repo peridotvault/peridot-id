@@ -34,6 +34,10 @@ function challengeRow(overrides: Record<string, unknown> = {}) {
 
 function setup() {
   const prisma = {
+    loginProvider: {
+      findUnique: jest.fn(async () => ({ isAvailable: true, protocol: "wallet_signature" }) as any),
+      findMany: jest.fn(async () => [{ code: "phantom" }, { code: "metamask" }] as any),
+    },
     walletAuthChallenge: {
       create: jest.fn(async ({ data }: any) => ({ id: "ch-1", ...data })),
       findUnique: jest.fn(async () => challengeRow() as any),
@@ -85,11 +89,27 @@ describe("challenge", () => {
       { origin: "https://app.example" },
     );
     expect(view.message).toContain("SoLanaAddress");
-    expect(view.message).toContain("Chain: solana:mainnet-beta");
+    // SIWS layout Phantom validates: page host as domain.
+    expect(view.message.split("\n")[0]).toBe("app.example wants you to sign in with your Solana account:");
+    // No Chain ID line: Phantom refuses a value that differs from its own network.
+    expect(view.message).not.toContain("Chain ID:");
     expect(view.message).toContain("URI: https://app.example");
+    // SIWS statement grammar is ASCII-only; a typographic dash breaks Phantom's parser.
+    expect(view.message).toMatch(/^[\x20-\x7e\n]+$/);
     expect(prisma.walletAuthChallenge.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ action: "login", address: "SoLanaAddress" }) }),
     );
+  });
+
+  it("uses the EIP-4361 fields for EVM (word Ethereum, numeric chain id)", async () => {
+    const { service } = setup();
+    const view = await service.challenge(
+      { namespace: "evm", reference: "1", address: "0x0000000000000000000000000000000000000001" },
+      { origin: "http://localhost:3302" },
+    );
+    expect(view.message.split("\n")[0]).toBe("localhost:3302 wants you to sign in with your Ethereum account:");
+    expect(view.message).toContain("Chain ID: 1");
+    expect(view.message).toContain("URI: http://localhost:3302");
   });
 
   it("refuses an unallowlisted returnTo", async () => {
@@ -203,7 +223,7 @@ it("mints the SSO code for the app bound at challenge time", async () => {
   const { prisma, sso, service } = setup();
   verifyMock.mockResolvedValue(true);
   prisma.walletAuthChallenge.findUnique.mockResolvedValue(
-    challengeRow({ redirectTo: "https://app.example", clientId: "pidapp_x", codeChallenge: "c".repeat(43) }) as any,
+    challengeRow({ redirectTo: "https://app.example", clientId: "pidapp_x", providerCode: "phantom", codeChallenge: "c".repeat(43) }) as any,
   );
   prisma.identityCredential.findUnique.mockResolvedValue({
     id: "cred-1",
@@ -217,6 +237,7 @@ it("mints the SSO code for the app bound at challenge time", async () => {
   });
   expect(sso.issue).toHaveBeenCalledWith("ifal@pid", "https://app.example", {
     clientId: "pidapp_x",
+    method: "phantom",
     codeChallenge: "c".repeat(43),
   });
 });

@@ -6,6 +6,10 @@ import type { WalletNamespace } from "../wallet-signature";
  * `action` defaults to `login`; `link` additionally requires a session.
  */
 export class WalletChallengeDto {
+  @IsOptional()
+  @IsIn(["phantom", "metamask"])
+  providerCode?: "phantom" | "metamask";
+
   @IsIn(["solana", "evm"])
   namespace!: WalletNamespace;
 

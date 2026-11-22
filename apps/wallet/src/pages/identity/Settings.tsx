@@ -153,7 +153,7 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
       <Group title="Preferences">
         {/* flexWrap: at 320px the two currency pills drop below the label instead of squeezing. */}
         <div className="flex flex-wrap items-center gap-3 px-6 py-3">
-          <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+          <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md border border-line bg-surface">
             <Banknote size={18} className="text-foreground" />
           </div>
           <span className="flex-1 font-sans text-base font-medium text-foreground">Currency</span>
@@ -163,7 +163,7 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
               onPress={() => pickCurrency(c)}
               accessibilityState={{ selected: currency === c }}
             >
-              <div className={`flex items-center gap-1 border px-2.5 py-1.5 ${currency === c ? "border-foreground" : "border-border"}`}>
+              <div className={`flex items-center gap-1 rounded-md border px-2.5 py-1.5 ${currency === c ? "border-foreground" : "border-border"}`}>
                 {currency === c && <Check size={14} className="text-foreground" />}
                 <span className={`font-sans text-sm font-medium ${currency === c ? "text-foreground" : "text-muted-foreground"}`}>{c}</span>
               </div>
@@ -207,7 +207,7 @@ function Row({
   return (
     <Pressable onPress={onPress} accessibilityLabel={label}>
       <div className="flex w-full items-center gap-3 px-6 py-3 transition-colors hover:bg-surface">
-        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md border border-line bg-surface">
           <Icon size={18} className="text-foreground" />
         </div>
         <span className="flex-1 font-sans text-base font-medium text-foreground">{label}</span>

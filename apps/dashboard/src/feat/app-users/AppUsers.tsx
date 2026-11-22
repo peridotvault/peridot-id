@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AppUsersPage, PeridotClient } from "@peridotvault/pid-sdk-js";
+import { Card, FIELD, MiniButton, MUTED } from "../../workspace/ui";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../shared/ui/table";
 
 /** App-scoped directory. Request cleanup prevents old app/search results leaking into the current view. */
 export function AppUsers({ client, appId }: { client: PeridotClient; appId: string }) {
@@ -24,46 +26,81 @@ export function AppUsers({ client, appId }: { client: PeridotClient; appId: stri
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [client, appId, q, page, retry]);
-  const button = "rounded border border-border px-3 py-2 text-xs disabled:opacity-50";
   const formatTime = (value: string) => new Date(value).toLocaleString();
   return (
-    <section aria-labelledby="app-users-title" className="border border-border p-4">
-      <h2 id="app-users-title" className="text-sm font-semibold">Users</h2>
-      <p className="mt-1 text-xs text-muted-foreground">
+    <Card>
+      <h2 id="app-users-title" className="text-base font-semibold tracking-tight">Users</h2>
+      <p className={`mt-1 max-w-2xl text-xs ${MUTED}`}>
         People who completed login to this app. Each PID appears once, across all login methods.
         History starts when user tracking is enabled; older logins are not backfilled. Times use your local timezone.
       </p>
-      <form className="mt-3 flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); setQ(search.trim()); setPage(1); }}>
-        <label className="flex flex-col gap-1 text-xs">
+      <form className="mt-4 flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); setQ(search.trim()); setPage(1); }}>
+        <label className="text-xs">
           Search PID
-          <input value={search} onChange={event => setSearch(event.target.value)} maxLength={100}
-            placeholder="Search by PID" className="rounded border border-border bg-background px-3 py-2" />
+          <input
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            maxLength={100}
+            placeholder="Search by PID"
+            className={FIELD}
+          />
         </label>
-        <button type="submit" className={`${button} self-end`}>Search</button>
-        <button type="button" className={`${button} self-end`} onClick={() => setRetry(n => n + 1)} disabled={loading}>Refresh</button>
+        <MiniButton size="sm" type="submit">Search</MiniButton>
+        <MiniButton size="sm" disabled={loading} onClick={() => setRetry(n => n + 1)}>Refresh</MiniButton>
       </form>
-      {loading && <p role="status" className="mt-3 text-sm">Loading users…</p>}
-      {error && <div role="alert" className="mt-3 text-sm">{error} <button className={button} onClick={() => setRetry(n => n + 1)}>Retry</button></div>}
-      {result && <>
-        <p role="status" className="mt-3 text-xs text-muted-foreground">{result.total.toLocaleString()} {q ? "matching users" : "users"}</p>
-        {result.users.length === 0 ? <p className="mt-3 text-sm">{q ? "No users match this PID." : "No recorded users yet. Users appear after completing login to this app."}</p> :
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <caption className="sr-only">Users of this application</caption>
-              <thead><tr>{["PID", "Name", "First recorded login", "Latest login"].map(label => <th key={label} scope="col" className="p-2 font-medium">{label}</th>)}</tr></thead>
-              <tbody>{result.users.map(user => <tr key={user.pid} className="border-t border-border">
-                <td className="p-2 font-mono">{user.pid}</td><td className="p-2">{user.displayName ?? "—"}</td>
-                <td className="p-2"><time dateTime={user.firstLoginAt}>{formatTime(user.firstLoginAt)}</time></td>
-                <td className="p-2"><time dateTime={user.lastLoginAt}>{formatTime(user.lastLoginAt)}</time></td>
-              </tr>)}</tbody>
-            </table>
-          </div>}
-        <nav aria-label="User list pages" className="mt-3 flex items-center gap-3">
-          <button className={button} disabled={page <= 1} onClick={() => setPage(n => n - 1)}>Previous</button>
-          <span className="text-xs">Page {page}</span>
-          <button className={button} disabled={page * result.pageSize >= result.total} onClick={() => setPage(n => n + 1)}>Next</button>
-        </nav>
-      </>}
-    </section>
+      {loading && <p role="status" className={`mt-4 text-sm ${MUTED}`}>Loading users…</p>}
+      {error && (
+        <div role="alert" className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+          <span>{error}</span>
+          <MiniButton size="sm" onClick={() => setRetry(n => n + 1)}>Retry</MiniButton>
+        </div>
+      )}
+      {result && (
+        <>
+          <p role="status" className={`mt-4 text-xs ${MUTED}`}>
+            {result.total.toLocaleString()} {q ? "matching users" : "users"}
+          </p>
+          {result.users.length === 0 ? (
+            <p className={`mt-3 text-sm ${MUTED}`}>
+              {q ? "No users match this PID." : "No recorded users yet. Users appear after completing login to this app."}
+            </p>
+          ) : (
+            <div className="mt-3 overflow-x-auto">
+              <Table className="w-full text-left text-xs">
+                <caption className="sr-only">Users of this application</caption>
+                <TableHeader>
+                  <TableRow>
+                    {["PID", "Name", "First recorded login", "Latest login", "Login provider"].map(label => (
+                      <TableHead key={label} scope="col" className="py-2 pr-4 font-medium">{label}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {result.users.map(user => (
+                    <TableRow key={user.pid}>
+                      <TableCell className="py-2 pr-4 font-mono">{user.pid}</TableCell>
+                      <TableCell className="py-2 pr-4">{user.displayName ?? "—"}</TableCell>
+                      <TableCell className="py-2 pr-4"><time dateTime={user.firstLoginAt}>{formatTime(user.firstLoginAt)}</time></TableCell>
+                      <TableCell className="py-2 pr-4"><time dateTime={user.lastLoginAt}>{formatTime(user.lastLoginAt)}</time></TableCell>
+                      <TableCell className="py-2 pr-4">
+                        {user.lastLoginProvider?.name ?? "Unknown"}
+                        {user.lastLoginProvider?.evidence === "client_selected" && (
+                          <span className={`block text-xs ${MUTED}`}>Selected wallet connector</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <nav aria-label="User list pages" className="mt-4 flex items-center gap-3">
+            <MiniButton size="sm" disabled={page <= 1} onClick={() => setPage(n => n - 1)}>Previous</MiniButton>
+            <span className="text-xs">Page {page}</span>
+            <MiniButton size="sm" disabled={page * result.pageSize >= result.total} onClick={() => setPage(n => n + 1)}>Next</MiniButton>
+          </nav>
+        </>
+      )}
+    </Card>
   );
 }

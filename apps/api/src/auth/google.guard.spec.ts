@@ -122,3 +122,50 @@ describe("GoogleGuard.getAuthenticateOptions (M3 signed state)", () => {
     });
   });
 });
+
+describe("GoogleGuard credentials", () => {
+  const KEY = "a".repeat(64);
+
+  function setup(envOptions: typeof OPTS | null, provider: unknown, row: unknown) {
+    const config = {
+      get: jest.fn((key: string, def?: string) => (key === "PID_SECRETS_ENC_KEY" ? KEY : (def ?? ""))),
+    };
+    const prisma = {
+      loginProvider: { findUnique: jest.fn(async () => provider) },
+      platformOAuthConfig: { findUnique: jest.fn(async () => row) },
+    };
+    const strategy = { _oauth2: { _clientId: "", _clientSecret: "" }, _scope: [] };
+    const guard = new GoogleGuard(envOptions, config as never, prisma as never, strategy as never);
+    return { guard, strategy };
+  }
+
+  it("prefers the admin-configured client over the env client", async () => {
+    const { encryptSecret } = await import("../common/secret-crypto");
+    const { applyGoogleCredentials } = await import("./google.guard");
+    const { guard, strategy } = setup(OPTS, { isAvailable: true }, {
+      clientId: "db-client", clientSecretEnc: encryptSecret("db-secret", KEY), scopes: ["email"],
+    });
+    const credentials = await (guard as unknown as { resolveCredentials(): Promise<unknown> }).resolveCredentials();
+    expect(credentials).toMatchObject({ clientID: "db-client", clientSecret: "db-secret" });
+    applyGoogleCredentials(strategy as never, credentials as never);
+    expect(strategy._oauth2._clientId).toBe("db-client");
+  });
+
+  it("fails closed when the provider is disabled or its secret is unusable", async () => {
+    const disabled = setup(OPTS, { isAvailable: false }, null);
+    await expect(
+      (disabled.guard as unknown as { resolveCredentials(): Promise<unknown> }).resolveCredentials(),
+    ).resolves.toBeNull();
+    const broken = setup(OPTS, { isAvailable: true }, { clientId: "db", clientSecretEnc: "enc:v1:bad", scopes: [] });
+    await expect(
+      (broken.guard as unknown as { resolveCredentials(): Promise<unknown> }).resolveCredentials(),
+    ).resolves.toBeNull();
+  });
+
+  it("falls back to the env client when no DB row exists", async () => {
+    const { guard } = setup(OPTS, { isAvailable: true }, null);
+    await expect(
+      (guard as unknown as { resolveCredentials(): Promise<unknown> }).resolveCredentials(),
+    ).resolves.toEqual({ clientID: "id", clientSecret: "secret" });
+  });
+});

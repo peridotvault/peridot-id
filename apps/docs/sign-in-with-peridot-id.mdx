@@ -44,7 +44,7 @@ Your redirect URI origins are automatically allowed for browser API calls (withi
 always allowed — arbitrary production hosts are never accepted without registration
 (an open redirect would let anyone steal users' login codes).
 
-## 2. Open the login popup
+## 2. Start the login (new tab)
 
 ```ts
 import { Peridot } from '@peridotvault/pid-sdk-js';
@@ -52,7 +52,7 @@ import { Peridot } from '@peridotvault/pid-sdk-js';
 const peridot = Peridot({ clientId: 'pidapp_…' }); // environment auto-detected
 
 async function signIn() {
-  const { pidCode } = await peridot.auth.loginPopup(); // opens a popup (tab fallback)
+  const { pidCode } = await peridot.auth.loginTab(); // opens a tab on peridot.id
   if (pidCode) {
     // redirectUri must byte-match the URL the code was issued for (default: this origin)
     const identity = await peridot.auth.exchange(pidCode, window.location.origin);
@@ -61,28 +61,37 @@ async function signIn() {
 }
 ```
 
-Auth opens a centered **popup** on the PeridotID origin (Google, plus the PID
-picker/claim if the visitor has no PeridotID yet). It stays open through the
-whole flow and closes itself once the user allows (your page receives the
-one-time `pid_code` via `window.opener`) or denies/cancels — no bridge code on
-your page. Only when the browser gives the popup no opener (a plain tab, or
-`Cross-Origin-Opener-Policy: same-origin` on your page) does it fall back to a
+Auth opens a **tab** on the PeridotID origin (Google, plus the PID picker/claim if
+the visitor has no PeridotID yet). It stays open through the whole flow and closes
+itself once the user allows (your page receives the one-time `pid_code` via
+`window.opener`) or denies/cancels — no bridge code on your page. If your page has
+no opener (`Cross-Origin-Opener-Policy: same-origin`), the flow falls back to a
 full-page `redirect_uri?pid_code=…` navigation; that is the one case where a
-landing page needs `forwardPopupLoginCode()`. If the popup is blocked, the SDK
-falls back to a new tab automatically; `peridot.auth.loginTab()` is available if
-you prefer a tab outright. You never handle a password and nothing runs in your
-DOM. Passkeys run on the PeridotID origin (browsers bind WebAuthn to our domain);
-Google uses the redirect round-trip. No API calls happen before login, so there
-is nothing CORS-related to configure.
+landing page needs `forwardPopupLoginCode()`. You never handle a password and
+nothing runs in your DOM. Passkeys run on the PeridotID origin (browsers bind
+WebAuthn to our domain); Google uses the redirect round-trip. No API calls happen
+before login, so there is nothing CORS-related to configure.
+
+> **Login is a tab, never a popup.** Browser-extension wallets that create their
+> own approval window (MetaMask does) are parented to the window that asked, and
+> Chromium can crash the *whole browser process* when that parent is a
+> script-opened popup (observed on Brave). `loginPopup`/`openLoginPopup` still
+> exist for compatibility but open a tab. The only windows PeridotID still opens
+> as popups are **approvals** (confirmations like transfers and payments), which
+> never touch a wallet extension.
 
 > **First sign-in creates a PID.** If the visitor has no PeridotID yet, the
 > window shows the emission-free **Create your PID** step (the handle is permanent
 > and user-chosen). Login only resolves once a PID exists and the user allows.
-> `popupBaseUrl` is reused as the auth host; approval **popups** (a smaller window
-> on the PeridotID origin) are used for confirmations like transfers and payments.
+> `popupBaseUrl` is reused as the auth host.
 
-In React, wrap the same two calls in your own button + hook — there is no
-provider component to install.
+For wallet login without leaving your page, install the React kit
+(`@peridotvault/pid-react-embed`) and render `PeridotLoginModal`: MetaMask/Phantom
+are discovered in your own tab (EIP-6963) and the signature is verified
+server-side, so **no second window opens at all** for the wallet path. Google and
+passkeys still continue in a tab on the PeridotID origin, because browsers bind
+WebAuthn to our domain.
+
 
 ## Who owns what: auth vs session
 
@@ -122,16 +131,22 @@ const identity = await r.json(); // single-use code, 60-second expiry
 // identity.accessToken → keep server-side, send as Authorization: Bearer
 // for reads (GET /v1/identity/me, /v1/fiat/balance, …). Set your own
 // httpOnly cookie for the browser — that cookie is your session, not ours.
+// identity.refreshToken → also server-side; rotate it before it expires so the
+// session survives the bearer's 24h (see below).
 ```
 
 Know the limits before promising anything to your users:
 
 - The bearer is **read-only** (`scope: "read"`): balance/ledger/identity/profile
   are reachable, transfers and writes always return 403.
-- It lasts **24 hours, non-refreshable** — afterwards the user re-clicks login
-  (one tap if their PeridotID session is alive). Never log the bearer.
-- There is **no single-token revoke**: a leaked bearer stays valid until expiry
-  unless the whole identity is deactivated. The read-only scope is the
+- It lasts **24 hours**; swap the stored `refreshToken` at
+  `POST /v1/auth/rp/refresh` for a fresh pair. The refresh token is sliding
+  (30 days, rotated per use), so the session lasts **indefinitely** as long as
+  your backend keeps refreshing. Miss the window and the user re-clicks login
+  (one tap if their PeridotID session is alive). Never log either token.
+- Revoking the app (wallet → Settings → App connections) ends refresh
+  immediately; an already-issued bearer stays valid for reads until its 24h
+  expiry. The read-only scope is the
   containment — the reason this pattern is blessed for reads only.
 - **Verify-or-cache is your call**: live-verify every request (fail-closed when
   we're down, deactivation honored immediately) or cache identity up to ~15 min
@@ -146,13 +161,16 @@ Know the limits before promising anything to your users:
 - Passkey login always runs on a PeridotID-hosted page (browsers bind WebAuthn to our
   domain) and returns with `pid_code` like Google does.
 - Codes are single-use, expire in 60 seconds, and are bound to your `client_id`.
-- Integrator API surface (all on `peridot.auth`): `loginPopup({ clientId?, returnTo? })`
-  (popup, tab fallback) or `loginTab({ clientId?, returnTo? })` for a tab outright;
+- Integrator API surface (all on `peridot.auth`): `loginTab({ clientId?, returnTo? })`
+  (a new tab on the PeridotID origin); `loginPopup(…)` still exists but opens the
+  same tab (deprecated — popup login crashed Brave's browser process when an
+  extension wallet opened its own window);
   `loginWithPasskey({ clientId?, returnTo? })`; and
   `exchange(code, redirectUri, clientId?, clientSecret?)` where `redirectUri`
   must exactly equal the URL the code was issued for (default: `window.location.origin`).
   Pass `clientSecret` only server-side, and only when the app has a secret set.
-  Lower-level popup helpers (`openLoginPopup`/`openLoginTab` in the SDK) are
+  Rotate a server-held session with `refreshRp(refreshToken)` (backend only).
+  Lower-level helpers (`openLoginTab`/`openLoginPopup` in the SDK) are
   not part of the integration contract.
 
 ## Verified partners

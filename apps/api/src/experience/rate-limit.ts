@@ -1,3 +1,5 @@
+import { ExecutionContext } from "@nestjs/common";
+
 /**
  * ANT-89 M3 (ANT-441) — intake throttle tiers (Tobias F5).
  *
@@ -13,6 +15,16 @@
  */
 export const XP_INTAKE_APP_THROTTLER = { name: "xp-intake-app", ttl: 60000, limit: 60 } as const;
 export const XP_INTAKE_APP_PID_THROTTLER = { name: "xp-intake-app-pid", ttl: 60000, limit: 30 } as const;
+
+/**
+ * Keep the intake tiers off every other route. They are registered globally in
+ * `ThrottlerModule.forRoot` (Nest has no per-controller tier registration), and
+ * without this skip a GET with no body keys them by IP — so 30 intake requests
+ * became a 30/min per-IP cap on the whole API (dashboard page flips hit it).
+ */
+export function skipUnlessIntake(context: ExecutionContext): boolean {
+  return !(context.switchToHttp().getRequest<{ path?: string }>().path ?? "").startsWith("/v1/experience/");
+}
 
 function bodyClientId(req: Record<string, unknown>): string | null {
   const body = req.body as Record<string, unknown> | undefined;

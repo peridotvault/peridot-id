@@ -41,6 +41,8 @@ export interface AccessTokenPayload {
   app?: string;
   /** "read" restricts the token to safe (GET) routes — e.g. the SSO exchange token. */
   scope?: string;
+  /** Provider that authenticated this browser session (never inferred). */
+  method?: string;
   iss: string;
   aud: string;
 }
@@ -181,7 +183,7 @@ export class AuthService {
     const refreshTtl = REFRESH_TOKEN_TTL;
 
     const accessToken = await this.jwt.signAsync(
-      { sub: pid, type: "access" },
+      { sub: pid, type: "access", ...(authMethod ? { method: authMethod } : {}) },
       {
         secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
         expiresIn: accessTtl,
@@ -315,7 +317,11 @@ export class AuthService {
 
     await this.prisma.session.update({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
 
-    await this.issueSession(res, payload.sub, req.headers["user-agent"], payload.jti, undefined, scope);
+    await this.issueSession(
+      res, payload.sub, req.headers["user-agent"], payload.jti,
+      (session.device.authMethod as "google" | "email" | "passkey" | "wallet" | null) ?? undefined,
+      scope,
+    );
   }
 
   async logout(req: Request, res: Response, scope: string | null = null): Promise<void> {

@@ -33,6 +33,7 @@ export class WalletAuthController {
   challenge(@Req() req: Request, @Body() dto: WalletChallengeDto): Promise<WalletChallengeView> {
     return this.wallet.challenge(
       {
+        providerCode: dto.providerCode,
         namespace: dto.namespace,
         reference: dto.reference,
         address: dto.address,
@@ -79,7 +80,8 @@ export class WalletAuthController {
     @Body() dto: WalletChallengeDto,
   ): Promise<WalletChallengeView> {
     return this.wallet.challenge(
-      { namespace: dto.namespace, reference: dto.reference, address: dto.address, action: "link" },
+      { providerCode: dto.providerCode,
+        namespace: dto.namespace, reference: dto.reference, address: dto.address, action: "link" },
       { pid: user.pid, origin: extractRequestOrigin(req) },
     );
   }

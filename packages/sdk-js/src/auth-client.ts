@@ -5,6 +5,7 @@ import type {
   ExchangeResult,
   LinkedWallet,
   LoginResponse,
+  RpRefreshResult,
   Session,
   SsoGrant,
   WalletChallenge,
@@ -55,11 +56,13 @@ export class PeridotAuth {
   }
 
   /**
-   * Sign in via the PeridotID origin in a centered popup (Google + PID picker,
-   * plus the PID claim step for new users). Resolves the one-time `pidCode` for
-   * `exchange`. Uses the configured popup host — no URL to pass. Falls back to a
-   * new tab when the popup is blocked. Throws `PopupUnavailableError` when no
-   * host is configured.
+   * Sign in via the PeridotID origin in a new tab (Google + PID picker, plus the
+   * PID claim step for new users). Resolves the one-time `pidCode` for
+   * `exchange`. Identical to {@link loginTab} — kept for API compatibility.
+   *
+   * @deprecated use `loginTab`. Login no longer opens a popup: extension
+   * wallets (MetaMask) create their own window parented to the requesting one,
+   * and a script-opened popup parent crashes Brave's browser process.
    */
   async loginPopup(opts?: { clientId?: string; returnTo?: string; method?: string; firstParty?: boolean; sessionScope?: string }): Promise<{ pidCode?: string }> {
     return this.openLogin(openLoginPopup, opts);
@@ -176,6 +179,7 @@ export class PeridotAuth {
    * ownership only: no funds move and no spending is approved.
    */
   async walletChallenge(input: {
+    providerCode?: "phantom" | "metamask";
     namespace: WalletNamespace;
     reference: string;
     address: string;
@@ -187,6 +191,9 @@ export class PeridotAuth {
   }): Promise<WalletChallenge> {
     const clientId = this.appId(input.clientId);
     const res = await this.client.post<WalletChallenge>("/v1/auth/wallet/challenge", {
+      // Server-side record of which wallet answered — the only way to tell
+      // MetaMask from Brave Wallet/Phantom after the fact (crash forensics).
+      ...(input.providerCode ? { providerCode: input.providerCode } : {}),
       namespace: input.namespace,
       reference: input.reference,
       address: input.address,
@@ -234,6 +241,7 @@ export class PeridotAuth {
 
   /** Start linking an external wallet to the CURRENT session's PID. */
   async walletLinkChallenge(input: {
+    providerCode?: "phantom" | "metamask";
     namespace: WalletNamespace;
     reference: string;
     address: string;
@@ -330,6 +338,16 @@ export class PeridotAuth {
       ...(cid ? { clientId: cid } : {}),
       ...(secret ? { clientSecret: secret } : {}),
     });
+    return res.data;
+  }
+
+  /**
+   * Rotate the RP backend session (server-side only — never call this in the
+   * browser). Post the `refreshToken` from `exchange` before it expires; you get
+   * a fresh bearer + a rotated refresh token. Store the new one, discard the old.
+   */
+  async refreshRp(refreshToken: string): Promise<RpRefreshResult | ApiError> {
+    const res = await this.client.post<RpRefreshResult>("/v1/auth/rp/refresh", { refreshToken });
     return res.data;
   }
 

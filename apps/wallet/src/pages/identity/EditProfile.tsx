@@ -60,9 +60,9 @@ export function EditProfile({ onDone }: { onDone: () => void }) {
       <Section>
         <SectionHead className="pb-0">
         {profile?.avatarUrl ? (
-          <img src={profile.avatarUrl} alt="" className="h-16 w-16 self-center rounded-full border border-line"  />
+          <img src={profile.avatarUrl} alt="" className="h-16 w-16 self-center rounded-md border border-line"  />
         ) : (
-          <div className="flex h-16 w-16 items-center justify-center self-center rounded-full border border-line bg-surface" aria-label="No profile photo">
+          <div className="flex h-16 w-16 items-center justify-center self-center rounded-md border border-line bg-surface" aria-label="No profile photo">
             <span aria-hidden="true" className="font-sans text-3xl text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</span>
           </div>
         )}

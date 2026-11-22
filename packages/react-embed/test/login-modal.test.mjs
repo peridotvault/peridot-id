@@ -24,10 +24,30 @@ const metamaskStub = (address, signature = "0xabc") => ({
 
 test("no injected provider yields no connectors (modal shows install hint)", () => {
   assert.deepEqual(mod.detectWallets({}), []);
+  // Phantom's `window.phantom` is a namespace, not the provider itself.
+  assert.deepEqual(mod.detectWallets({ phantom: {} }), []);
+  // `window.ethereum` is contested (Phantom injects there too): unproven → not MetaMask.
+  assert.deepEqual(mod.detectWallets({ ethereum: { request: async () => [] } }), []);
+});
+
+test("Phantom exposes a Solana and a namespaced EVM connector", () => {
+  const wallets = mod.detectWallets({
+    phantom: { solana: phantomStub("SoLaNaAddr"), ethereum: metamaskStub("0xAbC") },
+  });
+  assert.deepEqual(
+    wallets.map((w) => [w.kind, w.label, w.namespace]),
+    [
+      ["phantom", "Phantom", "solana"],
+      ["phantom", "Phantom (EVM)", "evm"],
+    ],
+  );
 });
 
 test("detects Phantom and MetaMask with their chain references", () => {
-  const wallets = mod.detectWallets({ phantom: phantomStub("SoLaNaAddr"), ethereum: metamaskStub("0xAbC") });
+  const wallets = mod.detectWallets({
+    phantom: { solana: phantomStub("SoLaNaAddr") },
+    ethereum: metamaskStub("0xAbC"),
+  });
   assert.deepEqual(
     wallets.map((w) => [w.kind, w.namespace, w.reference]),
     [
@@ -38,7 +58,7 @@ test("detects Phantom and MetaMask with their chain references", () => {
 });
 
 test("Solana signature is base64 of the wallet bytes", async () => {
-  const [phantom] = mod.detectWallets({ phantom: phantomStub("SoLaNaAddr") });
+  const [phantom] = mod.detectWallets({ phantom: { solana: phantomStub("SoLaNaAddr") } });
   const address = await phantom.connect();
   assert.equal(address, "SoLaNaAddr");
   const message = "PID|SOLANA|WALLET|v1\nnonce";
@@ -58,8 +78,11 @@ test("EVM signs the exact UTF-8 message via personal_sign (EIP-191)", async () =
   const address = await metamask.connect();
   const signature = await metamask.signMessage(address, "PID|EVM|WALLET|v1 ✓");
   assert.equal(signature, "0xsig");
-  const [method, params] = seen[1];
-  assert.equal(method, "personal_sign");
+  const [, params] = seen.find(([method]) => method === "personal_sign");
+  assert.deepEqual(
+    seen.map(([method]) => method),
+    ["eth_requestAccounts", "eth_chainId", "personal_sign"],
+  );
   assert.equal(params[1], address);
   // Hex must decode back to the identical UTF-8 bytes — the server verifies these.
   assert.equal(new TextDecoder().decode(Buffer.from(params[0].slice(2), "hex")), "PID|EVM|WALLET|v1 ✓");

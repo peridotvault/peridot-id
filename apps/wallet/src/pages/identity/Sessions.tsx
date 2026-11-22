@@ -13,9 +13,10 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** `dashboard` → "Dashboard"; a wallet session has no scope. */
+/** `dashboard` → "Dashboard"; `rp_<host>` → "Connected app"; no scope → the wallet. */
 function scopeLabel(scope?: string | null): string {
   if (!scope) return "PeridotID wallet";
+  if (scope.startsWith("rp_")) return "Connected app";
   return scope.charAt(0).toUpperCase() + scope.slice(1);
 }
 
@@ -92,7 +93,7 @@ export function Sessions({ onDone }: { onDone: () => void }) {
         <div className="flex flex-col divide-y divide-line">
           {sessions.map((se) => (
             <div key={se.id} className="flex items-center gap-3 px-6 py-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-surface">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface">
                 <Monitor size={16} className="text-foreground" />
               </div>
               <div className="flex flex-1 flex-col gap-0.5">

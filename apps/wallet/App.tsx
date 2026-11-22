@@ -193,11 +193,7 @@ export default function App() {
             onDone={pop}
             onLogout={logout}
             goEditProfile={() => push("edit-profile")}
-            onSwitched={() => {
-              setStack([]);
-              clearApiCache();
-              session.reloadSession();
-            }}
+            onSwitched={switchDone}
             onAddAccount={() => setScreen("login")}
           />
         );
@@ -249,6 +245,14 @@ export default function App() {
       setScreen("login");
     }
   }, [peridot, session]);
+
+  // Profile popover switched identity: drop the overlay stack, drop cached
+  // display reads, and re-bootstrap onto the new account.
+  const switchDone = useCallback(() => {
+    setStack([]);
+    clearApiCache();
+    session.reloadSession();
+  }, [session]);
 
   // Embedded and not yet authenticated: ask the parent to run the login popup.
   if (embedParams && !embed.bearer) {
@@ -305,7 +309,7 @@ export default function App() {
           <AppColumn
             top={
               isTabRoot && !three ? (
-                <TopBar onProfile={() => push("profile")} refreshKey={`${screen}-${epoch}`} />
+                <TopBar onProfile={() => push("profile")} onSwitched={switchDone} refreshKey={`${screen}-${epoch}`} />
               ) : undefined
             }
             side={
@@ -315,7 +319,7 @@ export default function App() {
             }
             info={
               isTabRoot && three ? (
-                <InfoRail onProfile={() => push("profile")} refreshKey={`${screen}-${epoch}`} />
+                <InfoRail onProfile={() => push("profile")} onSwitched={switchDone} refreshKey={`${screen}-${epoch}`} />
               ) : undefined
             }
             overlay={isTabRoot ? renderOverlay() : undefined}
