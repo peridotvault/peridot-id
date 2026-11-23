@@ -5,6 +5,7 @@ import { openExternalUrl } from "../../shared/app/openExternal";
 import { usePeridot } from "../../shared/app/AppContext";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
+import { Label } from "../../shared/components/ui/Label";
 import { fmtIdr } from "../../shared/data/fiat";
 import { isNetworkSwitching, isTestnetMode } from "../../shared/data/networkMode";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
@@ -109,9 +110,7 @@ export function Topup({ onDone }: { onDone: () => void }) {
           {error && <p role="alert" tabIndex={-1} id="topup-error" className="text-sm text-danger">{error}</p>}
 
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="topupAmount">
-              <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Amount credited to you (IDR)</span>
-            </label>
+            <Label htmlFor="topupAmount">Amount credited to you (IDR)</Label>
             <TextField id="topupAmount" aria-label="Amount credited to you (IDR)" className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="10.000"  />
             {belowMin && <p role="alert" className="text-sm text-danger">Minimum top-up is {fmtIdr(q.minimum.toString())}.</p>}
 

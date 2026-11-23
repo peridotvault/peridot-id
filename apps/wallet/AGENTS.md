@@ -1,17 +1,20 @@
 # AGENTS.md — wallet (`apps/wallet`) foldering
 
-First-party wallet app (Vite + React web SPA). Hand-rolled navigation in `App.tsx` (shell);
+First-party wallet app (Vite + React web SPA). Hand-rolled navigation in
+`src/App.tsx` (shell) driven by the route registry (`src/pages/route.tsx`);
 screens communicate via callback props (`onDone`, `goSend`, …), never imports.
 
 ## Layout
 
 ```
-App.tsx               # shell/composer — wires screens + providers + TabBar
 src/
-  pages/<domain>/     # 23 pages in domain folders (auth|home|chain|fiat|
-                      # activity|identity|embed) — flat, screen files only, no
-                      # subfolders. Route-private helpers live in-file. Never
-                      # screen→screen imports.
+  App.tsx             # shell/composer — wires pages registry + providers + TabBar
+  pages/
+    route.tsx         # root registry: one entry per screen (imports ./<domain>/<Page>)
+    <domain>/         # auth|home|chain|fiat|activity|identity|embed — page files
+                      # plus that group's route.tsx (registry for the group).
+                      # Flat: no deeper subfolders. Route-private helpers live
+                      # in-file. Never screen→screen imports.
   shared/             # highest reusable layer: usable by >1 feature AND by shell
     styles/           # index.css (+tokens/base split), theme.ts
                       # (TS token source, byte-identical to tokens.css;
@@ -46,9 +49,10 @@ src/
 
 ## Import rules
 
-1. `pages/<domain>/` → may import from `shared/` and `feat/` only.
-   **Never** from another screen (same folder or otherwise). No subfolders
-   under `pages/` — route-private helpers live in the screen file.
+1. `pages/<domain>/` → may import from `shared/`, `feat/`, and its own group's
+   page files (through `route.tsx`). **Never** from another screen or another
+   group. `pages/route.tsx` may import every group's `route.tsx`. No subfolders
+   below a group — route-private helpers live in the screen file.
 2. `shared/` → may import from `shared/` only (any subfolder).
    **Never** from `pages/` or `feat/`. Shell-only app-wide modules
    (`app/config`, `app/fiatEnsure`, `components/shell/TabBar`) live
@@ -57,7 +61,7 @@ src/
 3. `feat/<domain>/` → may import from `shared/` and from its **own**
    folder only. **Never** from `pages/`, **never** from another feat.
    Needed by 2+ feats? Promote it to `shared/`.
-4. `App.tsx` may import from `pages/`, `shared/`, and `feat/`.
+4. `src/App.tsx` may import from `pages/route`, `shared/`, and `feat/`.
    Nothing may import from `App.tsx`.
 5. New code: route-private (1 screen, incl. multi-namespace assembly and
    pure nav/chrome) → in-file helpers in the screen (`pages/` is flat);
@@ -91,11 +95,12 @@ W=apps/wallet
 # shared must not reference pages/ or feat/, and must never escape src/shared/
 rg "from\s+['\"][^'\"]*(pages|feat)/" $W/src/shared && exit 1
 rg "from\s+['\"]\.\./\.\./\.\./" $W/src/shared && exit 1
-# pages: flat (no subfolders) + shared/feat imports only (bare react/sdk
-# packages untouched). Same-folder screen→screen imports have nowhere to
-# hide: any RELATIVE import outside shared/|feat/ fails.
+# pages: groups are flat; a page imports shared/, feat/ or a sibling page in
+# the same group (route.tsx), nothing wider. Structural truth lives in
+# .agents/skills/frontend/scripts/validate-architecture.mjs (CI runs it too).
 test -z "$(find $W/src/pages -mindepth 2 -type d)" || exit 1
-rg -o "from\s+['\"]\.[^'\"]+['\"]" $W/src/pages | rg -v "shared/|feat/" && exit 1
+rg -o "from\s+['\"]\.[^'\"]+['\"]" $W/src/pages | rg -v "shared/|feat/" \
+  | rg -v "from\s+['\"]\./[^'\"]+['\"]" && exit 1
 # ui primitives never import shell chrome (shell composes ui, not the reverse)
 rg "from\s+['\"][^'\"]*components/shell/" $W/src/shared/components/ui && exit 1
 # no cross-feat imports: every RELATIVE import in feat/ must stay in-folder

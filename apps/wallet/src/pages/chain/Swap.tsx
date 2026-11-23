@@ -6,6 +6,7 @@ import { usePeridot } from "../../shared/app/AppContext";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { UIButton } from "../../shared/components/ui/UIButton";
+import { Label } from "../../shared/components/ui/Label";
 
 export function Swap({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -30,9 +31,9 @@ export function Swap({ onDone }: { onDone: () => void }) {
       <Section>
         <SectionHead className="pb-8">
           <div className="flex flex-col gap-2">
-            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">You pay</span>
+            <Label>You pay</Label>
             <TextField className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="0.0"  />
-            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">From asset</span>
+            <Label>From asset</Label>
             <TextField value={from} onChangeText={setFrom} autoCapitalize="none"  />
 
             <div className="my-2 flex flex-row items-center gap-3">
@@ -43,11 +44,11 @@ export function Swap({ onDone }: { onDone: () => void }) {
               <div className="h-px flex-1 bg-line"  />
             </div>
 
-            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">You receive</span>
+            <Label>You receive</Label>
             <span className="font-sans text-sm text-muted-foreground">
               No quote yet — swaps aren&apos;t available in this build, so no estimate is shown.
             </span>
-            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">To asset</span>
+            <Label>To asset</Label>
             <TextField value={to} onChangeText={setTo} autoCapitalize="none"  />
           </div>
 

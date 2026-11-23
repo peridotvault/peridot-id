@@ -4,6 +4,7 @@ import { TextField } from "../../shared/components/ui/TextField";
 import { usePeridot } from "../../shared/app/AppContext";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
+import { Label } from "../../shared/components/ui/Label";
 import { sendDestinationError } from "../../feat/chain/utils/solanaAddress";
 import { isNetworkSwitching } from "../../shared/data/networkMode";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
@@ -313,9 +314,7 @@ export function Send({ onDone }: { onDone: () => void }) {
           {phase === "form" && (
             <>
               {/* ANT-333: labels explicitly associated with their inputs. */}
-              <label htmlFor="send-to">
-                <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Destination (Solana address)</span>
-              </label>
+              <Label htmlFor="send-to">Destination (Solana address)</Label>
               <TextField
                 id="send-to"
                 aria-label="Destination (Solana address)"
@@ -324,9 +323,7 @@ export function Send({ onDone }: { onDone: () => void }) {
                 autoCapitalize="none"
                 placeholder="Recipient address"
               />
-              <label htmlFor="send-amount">
-                <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Amount ({asset === "SOL" ? "SOL" : "raw units"})</span>
-              </label>
+              <Label htmlFor="send-amount">Amount ({asset === "SOL" ? "SOL" : "raw units"})</Label>
               <TextField
                 id="send-amount"
                 aria-label={`Amount (${asset === "SOL" ? "SOL" : "raw units"})`}
@@ -335,9 +332,7 @@ export function Send({ onDone }: { onDone: () => void }) {
                 keyboardType="decimal-pad"
                 placeholder={asset === "SOL" ? "0.5" : "0"}
               />
-              <label htmlFor="send-asset">
-                <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Asset (SOL or mint address)</span>
-              </label>
+              <Label htmlFor="send-asset">Asset (SOL or mint address)</Label>
               <TextField
                 id="send-asset"
                 aria-label="Asset (SOL or mint address)"

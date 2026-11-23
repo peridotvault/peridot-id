@@ -28,6 +28,7 @@ The validator checks:
 
 - Required `src/pages/`, `src/feat/`, and `src/shared/` directories; no other direct `src/` directories or symlinked source paths.
 - `pages/` file extensions, forbidden implementation directories, and `route.tsx` in every page group.
+- No `*.test.*` or `*.spec.*` file under `src/` (`TEST_IN_SRC`).
 - Cross-feature, reverse-layer, page-to-page, and invalid route-registration imports, including aliases, relative paths, type-only imports, re-exports, barrels, static `require`, and literal dynamic imports.
 - Circular imports across source files in `src/`.
 
@@ -52,7 +53,7 @@ npm ci --prefix skills/architecture/frontend
 npm test --prefix skills/architecture/frontend
 ```
 
-The fixture suite covers allowed and forbidden edges, route ownership, aliases, type-only imports, re-exports, static dynamic imports, cycles, and layout failures. See [`tests/validate-architecture.test.mjs`](../tests/validate-architecture.test.mjs).
+The fixture suite covers allowed and forbidden edges, route ownership, aliases, type-only imports, re-exports, static dynamic imports, cycles, test placement, and layout failures. See [`tests/validate-architecture.test.mjs`](../tests/validate-architecture.test.mjs).
 
 ## Limits requiring review
 

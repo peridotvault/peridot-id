@@ -3,7 +3,7 @@ import type { AccountView } from "@peridotvault/pid-types";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, markExplicitLogin, rejectLogin, type LoginContext } from "../utils/popupLogin";
 import { withDenied, withPidCode, type SsoRequest } from "../utils/sso";
-import type { LoginFlowFlags, LoginSession } from "./useLoginSession";
+import type { LoginFlowFlags, LoginSession } from "../types/login";
 import { clearApiCache } from "../../../shared/data/apiCache";
 
 /** The one pause before the browser leaves, hardcoded on purpose (no env). */

@@ -5,7 +5,7 @@
 // Run: `node --test test/` from apps/dashboard.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { derivePidEnv } from "../src/lib/config.ts";
+import { derivePidEnv } from "../src/shared/lib/config.ts";
 
 describe("derivePidEnv", () => {
   it("treats loopback API hosts as sandbox", () => {

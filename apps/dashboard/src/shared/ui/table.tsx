@@ -1,5 +1,5 @@
 import type { ComponentPropsWithoutRef } from "react";
-import { cn } from "../../lib/cn";
+import { cn } from "../lib/cn";
 
 // shadcn Table parts on plain markup. The parts own the shared rhythm (hairline
 // rows, uppercase head) so screens only set their own column padding.

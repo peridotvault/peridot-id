@@ -5,6 +5,7 @@ import type { FiatTransferInquiryView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../../shared/app/AppContext";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
+import { Label } from "../../shared/components/ui/Label";
 import { isNetworkSwitching, isTestnetMode } from "../../shared/data/networkMode";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
 
@@ -172,17 +173,11 @@ export function FiatTransfer({ onDone }: { onDone: () => void }) {
             </div>
           )}
           {frozen && !gated && <p className="text-xs text-muted-foreground">Network is switching — transfers pause until balances reload.</p>}
-          <label htmlFor="fiat-to">
-            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Recipient PID</span>
-          </label>
+          <Label htmlFor="fiat-to">Recipient PID</Label>
           <TextField id="fiat-to" aria-label="Recipient PID" className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid"  />
-          <label htmlFor="fiat-amount">
-            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Amount (IDR)</span>
-          </label>
+          <Label htmlFor="fiat-amount">Amount (IDR)</Label>
           <TextField id="fiat-amount" aria-label="Amount (IDR)" className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000"  />
-          <label htmlFor="fiat-note">
-            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Note (optional)</span>
-          </label>
+          <Label htmlFor="fiat-note">Note (optional)</Label>
           <TextField id="fiat-note" aria-label="Note (optional)" className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for"  />
           <p className="text-xs text-muted-foreground">Recipient must have a PeridotID account.</p>
           {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error" className="text-sm text-danger">{error}</p>}
@@ -196,7 +191,7 @@ export function FiatTransfer({ onDone }: { onDone: () => void }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">{label}</span>
+      <Label>{label}</Label>
       <span className="select-text font-mono text-base text-foreground">{value}</span>
     </div>
   );

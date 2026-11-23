@@ -1,9 +1,9 @@
 import { Link, Outlet } from "react-router";
 import { ArrowLeft, Handshake, Layers, Link2, LogIn, LogOut, Plug, Receipt, Settings, Trophy } from "lucide-react";
-import { Card, ERROR, MUTED, MiniButton } from "../../workspace/ui";
-import { RAIL_TILE, Shell } from "../../workspace/shell";
-import { useWorkspace } from "../../workspace/workspace-provider";
-import { cn } from "../../lib/cn";
+import { Card, ERROR, MUTED, MiniButton } from "../../shared/ui/kit";
+import { RAIL_TILE, Shell } from "../../shared/components/shell";
+import { useWorkspace } from "../../shared/components/workspace-provider";
+import { cn } from "../../shared/lib/cn";
 
 const NAV = [
   { to: "/admin/providers", label: "Providers", icon: Plug },

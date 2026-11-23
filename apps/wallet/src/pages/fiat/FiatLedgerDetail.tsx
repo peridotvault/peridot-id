@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { usePeridot } from "../../shared/app/AppContext";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
+import { DetailRow } from "../../shared/components/ui/DetailRow";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import type { FiatLedgerItem } from "../../shared/data/fiat";
 import { ledgerStatusLabel } from "../../shared/data/fiat";
@@ -62,11 +63,11 @@ export function FiatLedgerDetail({ item: initial, onDone }: { item: FiatLedgerIt
         </SectionHead>
 
         <div className="flex flex-col divide-y divide-line border-t border-line">
-          <Field label="Status" value={ledgerStatusLabel(tx.status)} />
-          {tx.counterpartyPid && <Field label={incoming ? "From" : "To"} value={tx.counterpartyPid} />}
-          <Field label={incoming ? "Credited" : "Debited"} value={fmtIdr(tx.amountIdr)} />
-          <Field label="Reference" value={tx.entryGroup} />
-          <Field label="Created" value={fmtDate(item.createdAt)} />
+          <DetailRow label="Status" value={ledgerStatusLabel(tx.status)} />
+          {tx.counterpartyPid && <DetailRow label={incoming ? "From" : "To"} value={tx.counterpartyPid} />}
+          <DetailRow label={incoming ? "Credited" : "Debited"} value={fmtIdr(tx.amountIdr)} />
+          <DetailRow label="Reference" value={tx.entryGroup} />
+          <DetailRow label="Created" value={fmtDate(item.createdAt)} />
         </div>
       </Section>
 
@@ -89,11 +90,3 @@ export function FiatLedgerDetail({ item: initial, onDone }: { item: FiatLedgerIt
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 px-6 py-3">
-      <span className="font-sans text-xs uppercase tracking-[0.6px] text-muted-foreground">{label}</span>
-      <span className="select-text text-right font-sans text-sm text-foreground">{value}</span>
-    </div>
-  );
-}

@@ -1,5 +1,5 @@
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
-import { cn } from "../../lib/cn";
+import { cn } from "../lib/cn";
 import { Label } from "./label";
 
 /** shadcn Field family: one vertical rhythm for labelled controls. Pass the

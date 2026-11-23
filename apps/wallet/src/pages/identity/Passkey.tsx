@@ -5,6 +5,7 @@ import { KeyRound, Plus, Trash2 } from "../../shared/components/icons";
 import type { Authority } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead, invalidate } from "../../shared/data/apiCache";
+import { ListRow, RowTile } from "../../shared/components/ui/ListRow";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 
@@ -95,10 +96,10 @@ export function Passkey({ onDone }: { onDone: () => void }) {
         <div className="flex flex-col divide-y divide-line">
           {authorities.map((a) => (
             <div key={a.id} className="flex flex-col">
-              <div className="flex items-center gap-3 px-6 py-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface">
+              <ListRow hairline={false}>
+                <RowTile>
                   <KeyRound size={16} className="text-foreground" />
-                </div>
+                </RowTile>
                 <div className="flex flex-1 flex-col gap-0.5">
                   <span className="font-sans text-base font-semibold text-foreground">Passkey</span>
                   <span className="font-sans text-xs text-muted-foreground">Added {fmtDate(a.createdAt)}</span>
@@ -118,7 +119,7 @@ export function Passkey({ onDone }: { onDone: () => void }) {
                     <Trash2 size={16} className={onlyOne ? "text-muted-foreground" : "text-danger"} />
                   </div>
                 </Pressable>
-              </div>
+              </ListRow>
               {onlyOne && (
                 <span className="px-6 pb-3 font-sans text-xs text-muted-foreground">This is your only passkey — keep it to stay able to sign in.</span>
               )}

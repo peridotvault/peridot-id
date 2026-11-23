@@ -2,20 +2,7 @@ import { useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, isExplicitLogin, markExplicitLogin, type LoginContext } from "../utils/popupLogin";
 import type { SsoRequest } from "../utils/sso";
-import type { ClaimState } from "./usePidClaim";
-
-export interface LoginFlowFlags {
-  /** Guards the double-mint (inline deliver + effect). */
-  delivered: boolean;
-  /** Session presence at tab open: null = unknown, consent depends on it. */
-  hadSessionAtOpen: boolean | null;
-}
-
-/** Signed-in identity shown on the consent card. `pid` keys the header read. */
-export interface LoginSession {
-  label: string;
-  pid: string;
-}
+import type { ClaimState, LoginFlowFlags, LoginSession } from "../types/login";
 
 // Existing wallet session (SSO / login-tab mode): offers one-tap Allow
 // instead of forcing a redundant login. undefined = still checking.

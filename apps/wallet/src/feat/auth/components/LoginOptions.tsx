@@ -178,9 +178,12 @@ export function LoginOptions({
                 accessibilityRole="button"
                 accessibilityLabel="Continue with email"
                 style={{ opacity: canSubmitEmail ? 1 : 0.4 }}
-                className="-mr-3 shrink-0 p-3 text-foreground disabled:cursor-default"
+                className="shrink-0 text-foreground disabled:cursor-default"
               >
-                <ArrowRight size={18} />
+                {/* Pressable resets padding inline, so the 44px target is a child. */}
+                <span className="-mr-3 flex p-3">
+                  <ArrowRight size={18} />
+                </span>
               </Pressable>
             </div>
           )}

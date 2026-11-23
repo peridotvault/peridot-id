@@ -3,6 +3,7 @@ import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { openExternalUrl } from "../../shared/app/openExternal";
 import { usePeridot } from "../../shared/app/AppContext";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
+import { DetailRow } from "../../shared/components/ui/DetailRow";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import type { FiatItem } from "../../shared/data/fiat";
 import { fiatStatusLabel } from "../../shared/data/fiat";
@@ -67,9 +68,9 @@ export function FiatDetail({ item: initial, onDone }: { item: FiatItem; onDone: 
         </SectionHead>
 
         <div className="flex flex-col divide-y divide-line border-t border-line">
-          <Field label="Status" value={fiatStatusLabel(item.kind, tx.providerStatus)} />
-          {tx.feeIdr && <Field label="Service fee" value={fmtIdr(tx.feeIdr)} />}
-          <Field label="Created" value={fmtDate(item.createdAt)} />
+          <DetailRow label="Status" value={fiatStatusLabel(item.kind, tx.providerStatus)} />
+          {tx.feeIdr && <DetailRow label="Service fee" value={fmtIdr(tx.feeIdr)} />}
+          <DetailRow label="Created" value={fmtDate(item.createdAt)} />
         </div>
       </Section>
 
@@ -92,11 +93,3 @@ export function FiatDetail({ item: initial, onDone }: { item: FiatItem; onDone: 
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 px-6 py-3">
-      <span className="font-sans text-xs uppercase tracking-[0.6px] text-muted-foreground">{label}</span>
-      <span className="select-text text-right font-sans text-sm text-foreground">{value}</span>
-    </div>
-  );
-}

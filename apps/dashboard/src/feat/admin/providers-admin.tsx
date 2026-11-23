@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { unwrap } from "../../workspace/api";
-import { Card, ERROR, MUTED, SECTION_LABEL, WARN, MiniButton } from "../../workspace/ui";
-import { ProviderIcon } from "./provider-icon";
+import { unwrap } from "../../shared/api";
+import { Card, ERROR, MUTED, SECTION_LABEL, WARN, MiniButton } from "../../shared/ui/kit";
+import { ProviderIcon } from "../../shared/ui/provider-icon";
 import { groupByCategory, readiness, type AdminProvider } from "./provider-utils";
 
 const LINK_BUTTON =

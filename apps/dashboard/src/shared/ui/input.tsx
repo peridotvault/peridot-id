@@ -1,5 +1,5 @@
 import type { ComponentPropsWithoutRef } from "react";
-import { cn } from "../../lib/cn";
+import { cn } from "../lib/cn";
 
 /** The dashboard's control skin. Exported as FIELD so raw <input> call sites
  *  (and <select>/<textarea>) keep the same string they had. */

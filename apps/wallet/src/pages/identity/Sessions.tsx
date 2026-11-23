@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable } from "../../shared/components/ui/Pressable";
+import { ListRow, RowTile } from "../../shared/components/ui/ListRow";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { Monitor, LogOut } from "../../shared/components/icons";
 import type { Session } from "@peridotvault/pid-types";
@@ -91,10 +92,10 @@ export function Sessions({ onDone }: { onDone: () => void }) {
 
         <div className="flex flex-col divide-y divide-line">
           {sessions.map((se) => (
-            <div key={se.id} className="flex items-center gap-3 px-6 py-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface">
+            <ListRow key={se.id} hairline={false}>
+              <RowTile>
                 <Monitor size={16} className="text-foreground" />
-              </div>
+              </RowTile>
               <div className="flex flex-1 flex-col gap-0.5">
                 <span className="font-sans text-sm font-semibold text-foreground">
                   {scopeLabel(se.scope)}
@@ -111,7 +112,7 @@ export function Sessions({ onDone }: { onDone: () => void }) {
                   </div>
                 </Pressable>
               )}
-            </div>
+            </ListRow>
           ))}
         </div>
 

@@ -170,7 +170,7 @@ function TabButton({ label, active, onPress }: { label: string; active: boolean;
       onPress={onPress}
       accessibilityState={{ selected: active }}
     >
-      <Cell className={`flex w-full items-center justify-center rounded-md py-2.5 transition-colors ${active ? "bg-secondary" : "bg-background hover:bg-surface"}`}>
+      <Cell className={`flex w-full items-center justify-center rounded-md py-2.5 ${active ? "bg-secondary" : "bg-background hover:bg-surface"}`}>
         <span className={`font-sans text-sm font-medium ${active ? "text-foreground" : "text-muted-foreground"}`}>{label}</span>
       </Cell>
     </Pressable>

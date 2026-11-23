@@ -14,6 +14,7 @@
 import { formatFeeAmount, type ActivationView, type EvmActivationView } from "@peridotvault/pid-sdk-js";
 import { activationFeeQuote, type ActivationFeeView } from "../utils/activationFee";
 import { FeePanel } from "./FeePanel";
+import { Label } from "../../../shared/components/ui/Label";
 
 export function ActivationFee({
   view,
@@ -32,7 +33,7 @@ export function ActivationFee({
   const legacyLamports = "networkFeeLamports" in view ? String(view.networkFeeLamports) : null;
   return (
     <div className="flex flex-col gap-1.5 border-t border-line py-3">
-      <span className="mb-1.5 text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Fee quote</span>
+      <Label className="mb-1.5">Fee quote</Label>
       <span className="font-sans text-sm text-muted-foreground">
         {legacyLamports != null ? (
           <>

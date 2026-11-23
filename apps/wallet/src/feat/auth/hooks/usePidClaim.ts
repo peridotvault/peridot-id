@@ -2,13 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, rejectLogin, type LoginContext } from "../utils/popupLogin";
 import { finishSso, withPidCode, type SsoRequest } from "../utils/sso";
-import type { LoginFlowFlags } from "./useLoginSession";
-
-export type HandleStatus = "idle" | "checking" | "free" | "taken" | "invalid";
-
-// Post-auth pending claim (verified credential, no identity yet). undefined =
-// still checking, null = none. The claim screen takes over when set.
-export type ClaimState = { email: string | null; displayName: string | null } | null | undefined;
+import type { ClaimState, HandleStatus, LoginFlowFlags } from "../types/login";
 
 // Post-auth PID creation: the handle becomes the permanent `<handle>@pid`
 // identity (never changeable, reused, or reassigned). The user must tick the

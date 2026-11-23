@@ -15,6 +15,7 @@ try {
 const appRoot = canonical(path.resolve(process.argv[2] ?? '.'));
 const srcRoot = path.join(appRoot, 'src');
 const sourceExtension = /\.(?:[cm]?[jt]sx?)$/;
+const testFilePattern = /\.(test|spec)\.[cm]?[jt]sx?$/;
 const allowedRoots = new Set(['pages', 'feat', 'shared']);
 const forbiddenPageDirs = new Set(['components', 'hooks', 'utils', 'services', 'store', 'types', 'styles', 'schemas', 'context', 'constants', 'lib']);
 const errors = [];
@@ -65,6 +66,9 @@ function checkLayout() {
   if (!fs.existsSync(srcRoot) || !fs.statSync(srcRoot).isDirectory()) {
     errors.push('src MISSING_SRC: application root must contain src/');
     return;
+  }
+  for (const file of walk(srcRoot)) {
+    if (testFilePattern.test(file)) issue(file, null, 'TEST_IN_SRC', 'test and spec files belong in tests/, not src/');
   }
   for (const entry of fs.readdirSync(srcRoot, { withFileTypes: true })) {
     if (entry.isDirectory() && !allowedRoots.has(entry.name)) {

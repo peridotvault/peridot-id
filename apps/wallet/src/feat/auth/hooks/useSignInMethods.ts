@@ -2,7 +2,7 @@ import type { PeridotClient, WalletConnector } from "@peridotvault/pid-sdk-js";
 import { detectWallets } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
 import { finishSso, type SsoRequest } from "../utils/sso";
-import type { LoginFlowFlags } from "./useLoginSession";
+import type { LoginFlowFlags } from "../types/login";
 import { clearApiCache } from "../../../shared/data/apiCache";
 
 export function useSignInMethods(

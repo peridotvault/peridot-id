@@ -35,7 +35,7 @@ function Action({
       accessibilityLabel={disabled ? `${label}, coming soon` : label}
     >
       <div
-        className={`flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-lg border border-border bg-background transition-colors hover:bg-surface ${disabled ? "opacity-40" : ""}`}
+        className={`flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-lg border border-border bg-background hover:bg-surface ${disabled ? "opacity-40" : ""}`}
       >
         <Icon size={22} className="text-accent" />
         <span className="font-sans text-sm font-medium text-foreground">{label}</span>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable } from "../../shared/components/ui/Pressable";
+import { ListRow, RowTile } from "../../shared/components/ui/ListRow";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { Link2 } from "../../shared/components/icons";
 import type { IdentityCredential } from "@peridotvault/pid-types";
@@ -129,10 +130,10 @@ export function ConnectedAccounts({ onDone }: { onDone: () => void }) {
         <div className="flex flex-col divide-y divide-line">
           {credentials.map((c) => (
             <div key={c.id} className="flex flex-col">
-              <div className="flex items-center gap-3 px-6 py-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface">
+              <ListRow hairline={false}>
+                <RowTile>
                   <Link2 size={16} className="text-foreground" />
-                </div>
+                </RowTile>
                 <div className="flex flex-1 flex-col gap-0.5">
                   <span className="font-sans text-base font-semibold text-foreground">{walletLabel(c.provider)}</span>
                   <span className="font-sans text-xs text-muted-foreground">
@@ -148,7 +149,7 @@ export function ConnectedAccounts({ onDone }: { onDone: () => void }) {
                     <span className="p-2 font-sans text-sm text-danger">Unlink</span>
                   </Pressable>
                 )}
-              </div>
+              </ListRow>
               {credentials.length <= 1 && <span className="px-6 pb-3 font-sans text-xs text-muted-foreground">Keep at least one login method.</span>}
             </div>
           ))}

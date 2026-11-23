@@ -1,4 +1,5 @@
 import { Pressable } from "./Pressable";
+import { RowTile } from "./ListRow";
 import { Check } from "../icons";
 
 // On/off setting row: icon, label, hint, and a switch at the right edge. One
@@ -31,10 +32,10 @@ export function ToggleRow({
       accessibilityState={{ checked: on }}
       accessibilityLabel={testnet ? `${label} (testnet)` : label}
     >
-      <div className={`flex w-full items-center justify-between gap-3 py-3 transition-colors hover:bg-surface ${className}`}>
-        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md border border-line bg-surface">
+      <div className={`flex w-full items-center justify-between gap-3 py-3 hover:bg-surface ${className}`}>
+        <RowTile>
           <Icon size={18} className="text-foreground" />
-        </div>
+        </RowTile>
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="font-sans text-base font-medium text-foreground">{label}</span>
           <span className="font-sans text-xs text-muted-foreground">{hint}</span>

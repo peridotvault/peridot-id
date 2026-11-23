@@ -5,6 +5,8 @@ import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead } from "../../shared/data/apiCache";
 import { BackButton } from "../../shared/components/ui/BackButton";
+import { ListRow, RowTile } from "../../shared/components/ui/ListRow";
+import { Label } from "../../shared/components/ui/Label";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { Retry } from "../../shared/components/ui/Retry";
 import { ToggleRow } from "../../shared/components/ui/ToggleRow";
@@ -152,9 +154,9 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
       <Group title="Preferences">
         {/* flexWrap: at 320px the two currency pills drop below the label instead of squeezing. */}
         <div className="flex flex-wrap items-center gap-3 px-6 py-3">
-          <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md border border-line bg-surface">
+          <RowTile>
             <Banknote size={18} className="text-foreground" />
-          </div>
+          </RowTile>
           <span className="flex-1 font-sans text-base font-medium text-foreground">Currency</span>
           {CURRENCIES.map((c) => (
             <Pressable
@@ -185,7 +187,7 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <Section>
       <SectionHead className="pb-0 pt-4">
-        <span className="font-sans text-xs font-semibold uppercase tracking-[0.6px] text-muted-foreground">{title}</span>
+        <Label className="font-semibold">{title}</Label>
       </SectionHead>
       <div className="flex flex-col divide-y divide-line">{children}</div>
     </Section>
@@ -204,16 +206,14 @@ function Row({
   onPress: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} accessibilityLabel={label}>
-      <div className="flex w-full items-center gap-3 px-6 py-3 transition-colors hover:bg-surface">
-        <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md border border-line bg-surface">
-          <Icon size={18} className="text-foreground" />
-        </div>
-        <span className="flex-1 font-sans text-base font-medium text-foreground">{label}</span>
-        {value && <span className="font-sans text-sm text-muted-foreground">{value}</span>}
-        <ChevronRight size={16} className="text-muted-foreground" />
-      </div>
-    </Pressable>
+    <ListRow onPress={onPress} accessibilityLabel={label} hairline={false}>
+      <RowTile>
+        <Icon size={18} className="text-foreground" />
+      </RowTile>
+      <span className="flex-1 font-sans text-base font-medium text-foreground">{label}</span>
+      {value && <span className="font-sans text-sm text-muted-foreground">{value}</span>}
+      <ChevronRight size={16} className="text-muted-foreground" />
+    </ListRow>
   );
 }
 

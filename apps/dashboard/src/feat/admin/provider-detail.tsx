@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { unwrap } from "../../workspace/api";
-import { Card, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "../../workspace/ui";
-import { PageHeader } from "../../workspace/page-header";
+import { unwrap } from "../../shared/api";
+import { Card, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "../../shared/ui/kit";
+import { PageHeader } from "../../shared/ui/page-header";
 import { readiness, type AdminProvider, type ChainFamilyRow } from "./provider-utils";
 
 /** One provider: display, availability, OAuth client, per-family chain policy. */

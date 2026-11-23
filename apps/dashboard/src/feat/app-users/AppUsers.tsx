@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppUsersPage, PeridotClient } from "@peridotvault/pid-sdk-js";
-import { Card, FIELD, MiniButton, MUTED } from "../../workspace/ui";
+import { Card, FIELD, MiniButton, MUTED } from "../../shared/ui/kit";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../shared/ui/table";
 
 /** App-scoped directory. Request cleanup prevents old app/search results leaking into the current view. */

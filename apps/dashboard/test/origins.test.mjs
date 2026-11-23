@@ -3,7 +3,7 @@
 // apps/dashboard.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeOriginInput } from "../src/workspace/origins.ts";
+import { normalizeOriginInput } from "../src/feat/workspace/origins.ts";
 
 const ok = (input) => {
   const r = normalizeOriginInput(input);

@@ -1,6 +1,6 @@
 // ANT-460 — System Settings dashboard validation tests (pure logic only).
 // Run: node --test test/system-settings.test.mjs
-// These mirror apps/dashboard/src/settings/catalog.ts (client pre-validation;
+// These mirror apps/dashboard/src/feat/settings/catalog.ts (client pre-validation;
 // the server in ANT-459 is authoritative). The dashboard has no TS test
 // runner; the build typechecks the real module. These cases pin the shapes
 // both sides must satisfy (ANT-457 spec §3, §5).
@@ -8,7 +8,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-// --- Inline mirrors of apps/dashboard/src/settings/catalog.ts ---------------
+// --- Inline mirrors of apps/dashboard/src/feat/settings/catalog.ts ---------------
 
 const TASK_ID_FORMAT = /^[a-z0-9_]{1,64}$/;
 const THRESHOLD_NAME_FORMAT = /^[a-z0-9_]{1,64}$/;

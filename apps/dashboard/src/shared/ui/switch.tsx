@@ -1,6 +1,6 @@
 import { Switch as UiSwitch, SwitchThumb } from "@ui-sdk/react/switch";
 import type { ComponentProps } from "react";
-import { cn } from "../../lib/cn";
+import { cn } from "../lib/cn";
 
 // shadcn Switch on ui-sdk behavior (role=switch, keyboard, form input) with
 // the dashboard skin: a 36x20 pill, matching the chip language.

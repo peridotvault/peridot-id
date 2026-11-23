@@ -1,6 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentPropsWithoutRef } from "react";
-import { cn } from "../../lib/cn";
+import { cn } from "../lib/cn";
 
 // shadcn Button in the dashboard's skin (peridotbase): 6px corners, one
 // padding scale, 150ms ease-out, pressed scale. `default` is the primary

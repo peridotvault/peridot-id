@@ -1,5 +1,6 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { Copy } from "../../../shared/components/icons";
+import { Label } from "../../../shared/components/ui/Label";
 
 export function DepositAddressCard({
   address,
@@ -16,7 +17,7 @@ export function DepositAddressCard({
 }) {
   return (
     <div className="flex flex-col gap-1.5 border-t border-line py-3">
-      <span className="mb-1.5 text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Your deposit address</span>
+      <Label className="mb-1.5">Your deposit address</Label>
       <span className="font-sans text-sm leading-[19px] text-muted-foreground">
         Send SOL to this address to fund your wallet and cover the first-send setup. The cost
         currently requires about {requiredSol.toFixed(4)} SOL.

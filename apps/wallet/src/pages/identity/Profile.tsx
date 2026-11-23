@@ -5,6 +5,7 @@ import { ChevronRight, RefreshCw } from "../../shared/components/icons";
 import type { AccountView, Profile as ProfileData } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { AccountSwitcherModal } from "../../shared/components/shell/AccountSwitcherModal";
+import { ListRow, RowTile } from "../../shared/components/ui/ListRow";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { progressWidth, xpProgressLabel } from "../../feat/identity/utils/level";
 
@@ -98,29 +99,25 @@ export function Profile({
 
       <Section>
         <div className="flex flex-col divide-y divide-line">
-          <Pressable onPress={goEditProfile}>
-            <div className="flex w-full items-center gap-3 px-6 py-3 transition-colors hover:bg-surface">
-              {profile?.avatarUrl ? (
-                <img src={profile.avatarUrl} alt="" className="h-[34px] w-[34px] rounded-md border border-line"  />
-              ) : (
-                <div className="flex h-[34px] w-[34px] items-center justify-center rounded-md border border-line bg-surface" aria-label="No profile photo">
-                  <span aria-hidden="true" className="font-sans text-base text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</span>
-                </div>
-              )}
-              <span className="flex-1 font-sans text-base font-medium text-foreground">Edit Profile</span>
-              <ChevronRight size={16} className="text-muted-foreground" />
-            </div>
-          </Pressable>
+          <ListRow onPress={goEditProfile} hairline={false}>
+            {profile?.avatarUrl ? (
+              <img src={profile.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-md border border-line" />
+            ) : (
+              <RowTile>
+                <span aria-hidden="true" className="font-sans text-base text-foreground">{(profile?.displayName ?? "?").slice(0, 1).toUpperCase()}</span>
+              </RowTile>
+            )}
+            <span className="flex-1 font-sans text-base font-medium text-foreground">Edit Profile</span>
+            <ChevronRight size={16} className="text-muted-foreground" />
+          </ListRow>
 
-          <Pressable onPress={openAccounts}>
-            <div className="flex w-full items-center gap-3 py-3 transition-colors hover:bg-surface">
-              <div className="flex h-[34px] w-[34px] items-center justify-center rounded-md border border-line bg-surface">
-                <RefreshCw size={18} className="text-foreground" />
-              </div>
-              <span className="flex-1 font-sans text-base font-medium text-foreground">Switch Account</span>
-              <ChevronRight size={16} className="text-muted-foreground" />
-            </div>
-          </Pressable>
+          <ListRow onPress={openAccounts} hairline={false}>
+            <RowTile>
+              <RefreshCw size={18} className="text-foreground" />
+            </RowTile>
+            <span className="flex-1 font-sans text-base font-medium text-foreground">Switch Account</span>
+            <ChevronRight size={16} className="text-muted-foreground" />
+          </ListRow>
         </div>
       </Section>
 

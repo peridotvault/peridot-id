@@ -6,6 +6,7 @@ import { usePeridot } from "../../shared/app/AppContext";
 import { clearApiCache } from "../../shared/data/apiCache";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
+import { Label } from "../../shared/components/ui/Label";
 
 export function EditProfile({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -69,7 +70,7 @@ export function EditProfile({ onDone }: { onDone: () => void }) {
         {pid ? <span className="mt-3 block text-center font-sans text-sm text-muted-foreground">@{pid} · permanent, cannot be changed</span> : null}
 
         <div className="mt-4 flex flex-col gap-1.5 border-t border-line pt-4">
-          <span className="font-sans text-xs uppercase tracking-[0.6px] text-muted-foreground">Display Name</span>
+          <Label>Display Name</Label>
           <TextField className="[--placeholder:var(--color-muted-foreground)]" value={displayName} onChangeText={setDisplayName} placeholder="Display name"  />
         </div>
         </SectionHead>

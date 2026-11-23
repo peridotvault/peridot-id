@@ -32,8 +32,8 @@ export function DepositCardList({
               onPress={() => (isSol ? onOpen(t) : onCopy(t.key, t.address))}
             >
               <div className="flex w-full items-center justify-between gap-2 border-t border-line py-3">
-                <span className="select-text font-mono text-sm text-foreground">{t.address}</span>
-                {copiedKey === t.key && <Check size={16} className="text-success" />}
+                <span className="min-w-0 break-all select-text font-mono text-sm text-foreground">{t.address}</span>
+                {copiedKey === t.key && <Check size={16} className="shrink-0 text-success" />}
               </div>
             </Pressable>
             {copiedKey === t.key && <span className="text-center font-sans text-sm text-success">Copied to clipboard</span>}

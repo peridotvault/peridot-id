@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { unwrap } from "../../workspace/api";
-import { Card, ERROR, FIELD, SECTION_LABEL, MiniButton } from "../../workspace/ui";
-import { PageHeader } from "../../workspace/page-header";
-import type { ProviderMeta } from "../../workspace/app-types";
+import { unwrap } from "../../shared/api";
+import { Card, ERROR, FIELD, SECTION_LABEL, MiniButton } from "../../shared/ui/kit";
+import { PageHeader } from "../../shared/ui/page-header";
+import type { ProviderMeta } from "../../shared/app-types";
 
 const PROTOCOLS: ProviderMeta["protocol"][] = ["oauth", "email_otp", "passkey", "wallet_signature"];
 

@@ -5,6 +5,7 @@ import { formatFeeAmount } from "@peridotvault/pid-sdk-js";
 import { solanaExplorerTxUrl } from "../../shared/data/networkMode";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
+import { Label } from "../../shared/components/ui/Label";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -64,7 +65,7 @@ export function ActivityDetail({ tx, onDone }: { tx: WalletTransaction; onDone: 
           <Field label="Asset" value={tx.asset ?? "—"} />
           <Field label="Counterparty" value={shorten(tx.counterparty)} mono />
           <div className="flex flex-col gap-1 px-6 py-3">
-            <span className="font-sans text-xs uppercase tracking-[0.6px] text-muted-foreground">Fees</span>
+            <Label>Fees</Label>
             {tx.fees != null ? (
               <span className="select-text font-mono text-sm text-foreground">
                 Network {fmtFee(tx.fees.networkFee, tx.fees)} · Service {fmtFee(tx.fees.platformFee, tx.fees)} · Total {fmtFee(tx.fees.totalFee, tx.fees)}
@@ -101,7 +102,7 @@ export function ActivityDetail({ tx, onDone }: { tx: WalletTransaction; onDone: 
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex flex-col gap-1 px-6 py-3">
-      <span className="font-sans text-xs uppercase tracking-[0.6px] text-muted-foreground">{label}</span>
+      <Label>{label}</Label>
       <span className={mono ? "select-text font-mono text-sm text-foreground" : "select-text font-sans text-sm text-foreground"}>{value}</span>
     </div>
   );

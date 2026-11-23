@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { unwrap } from "../../workspace/api";
-import { Card, ERROR, FIELD, MUTED, SECTION_LABEL, MiniButton } from "../../workspace/ui";
+import { unwrap } from "../../shared/api";
+import { Card, ERROR, FIELD, MUTED, SECTION_LABEL, MiniButton } from "../../shared/ui/kit";
 
 export interface AppXpTask {
   id: string;

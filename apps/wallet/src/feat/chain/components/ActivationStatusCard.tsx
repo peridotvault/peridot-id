@@ -1,5 +1,6 @@
 
 import { Info } from "../../../shared/components/icons";
+import { Label } from "../../../shared/components/ui/Label";
 
 export function ActivationStatusCard({
   status,
@@ -12,7 +13,7 @@ export function ActivationStatusCard({
 }) {
   return (
     <div className="flex flex-col gap-1.5 border-t border-line py-3">
-      <span className="mb-1.5 text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Status</span>
+      <Label className="mb-1.5">Status</Label>
       <div className="flex flex-row items-start gap-2">
         <Info size={16} className="text-muted-foreground" />
         <span className="font-sans text-sm leading-[19px] text-muted-foreground">

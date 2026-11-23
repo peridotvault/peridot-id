@@ -1,5 +1,6 @@
 import { ScrollArea } from "../../../shared/components/ui/ScrollArea";
 import { Pressable } from "../../../shared/components/ui/Pressable";
+import { Label } from "../../../shared/components/ui/Label";
 import { Section, SectionHead } from "../../../shared/components/ui/Section";
 import { SectionTitle } from "../../../shared/components/ui/SectionTitle";
 import { fmtIdr } from "../../../shared/data/fiat";
@@ -49,7 +50,7 @@ export function FiatSection({
             </div>
           ) : (
             <Pressable className="shrink-0" onPress={onOpen} accessibilityLabel="Open Rupiah account">
-              <div className={`${CARD} transition-colors hover:border-border`}>
+              <div className={`${CARD} hover:border-border`}>
                 <CardTop flag="id.webp" label="Rupiah" />
                 <span
                   className="truncate font-mono text-2xl text-foreground"
@@ -78,7 +79,7 @@ export function FiatSection({
 function CardTop({ flag, label }: { flag: string; label: string }) {
   return (
     <div className="flex flex-row items-center justify-between">
-      <span className="font-sans text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">{label}</span>
+      <Label>{label}</Label>
       <img src={`/payment-gateway/${flag}`} alt="" className="h-5 w-5 object-cover" />
     </div>
   );

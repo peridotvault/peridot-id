@@ -1,0 +1,132 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import type { PeridotClient } from "@peridotvault/pid-sdk-js";
+import { unwrap } from "../../shared/api";
+import type { PidApp } from "../../shared/app-types";
+import { Card, ERROR, FIELD, MUTED, MiniButton } from "../../shared/ui/kit";
+import { PageHeader } from "../../shared/ui/page-header";
+
+type AdminApp = PidApp & { ownerPid: string };
+
+/** Admin partner directory: every registered app with verify/unverify inline.
+ *  Verified partners skip the PeridotID fiat fee (their own app fee, DOKU,
+ *  and on-chain fees still apply). */
+export function PartnersManager({ client }: { client: PeridotClient }) {
+  const [apps, setApps] = useState<AdminApp[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [searchPending, setSearchPending] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(
+    async (q: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const suffix = q ? `?q=${encodeURIComponent(q)}` : "";
+        setApps(unwrap(await client.get<AdminApp[]>(`/v1/admin/apps${suffix}`), "Loading apps"));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load apps");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [client],
+  );
+
+  // Search never fetches per letter: typing only restarts the 2s timer, and
+  // the API is hit once the user pauses. Clearing the box restores the full
+  // list immediately. searchPending announces the debounce wait so the quiet
+  // 2s gap never looks stuck.
+  useEffect(() => {
+    const q = query.trim();
+    if (q === "") {
+      setSearchPending(false);
+      void load("");
+      return;
+    }
+    setSearchPending(true);
+    const t = setTimeout(() => {
+      setSearchPending(false);
+      void load(q);
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [query, load]);
+
+  const flip = async (app: AdminApp) => {
+    setBusyId(app.id);
+    setError(null);
+    try {
+      const updated = unwrap(
+        await client.patch<AdminApp>(`/v1/admin/apps/${app.id}/verify`, { verified: !app.isVerified }),
+        "Update",
+      );
+      setApps((prev) => prev.map((a) => (a.id === app.id ? updated : a)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <section>
+      <PageHeader
+        eyebrow="Partnerships"
+        title="Partners"
+        description="Every registered app. Verified partners skip the PeridotID fiat fee — users see a ✓ badge at login."
+      />
+      {error && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p role="alert" className={`text-sm ${ERROR}`}>{error}</p>
+          <MiniButton size="sm" onClick={() => void load(query.trim())}>
+            Retry
+          </MiniButton>
+        </div>
+      )}
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search by app name or client_id…"
+        aria-label="Search apps"
+        className={`mt-4 max-w-md ${FIELD}`}
+      />
+      {searchPending && !loading && (
+        <p role="status" className={`mt-2 text-sm ${MUTED}`}>Searching…</p>
+      )}
+      {loading ? (
+        <p role="status" className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
+      ) : apps.length === 0 ? (
+        <p className={`mt-4 text-sm ${MUTED}`}>
+          {query.trim() ? `No apps match "${query.trim()}".` : "No apps registered yet."}
+        </p>
+      ) : (
+        <div className="mt-4 flex flex-col gap-2">
+          {apps.map((app) => (
+            <Card key={app.id} className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold tracking-tight">
+                  {app.name}{" "}
+                  {app.isVerified && (
+                    <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                      <span aria-hidden="true">✓</span> Verified — 0% PeridotID fee
+                    </span>
+                  )}
+                </p>
+                <p className={`mt-0.5 truncate font-mono text-xs ${MUTED}`} title={app.clientId}>{app.clientId}</p>
+                <p className={`mt-0.5 text-xs ${MUTED}`}>
+                  owner {app.ownerPid} · {app.isActive ? "active" : "disabled"}
+                </p>
+              </div>
+              <MiniButton onClick={() => void flip(app)} disabled={busyId !== null} className="shrink-0">
+                {busyId === app.id ? "…" : app.isVerified ? "Unverify" : "Verify"}
+              </MiniButton>
+            </Card>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}

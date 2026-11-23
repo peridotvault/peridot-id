@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Chain, PeridotClient, Token, TokenDeployment } from "@peridotvault/pid-sdk-js";
-import { unwrap } from "../../workspace/api";
-import { Card, ERROR, MUTED, SECTION_LABEL, MiniButton } from "../../workspace/ui";
-import { AddTokenForm } from "../../workspace/add-token-form";
+import { unwrap } from "../../shared/api";
+import { Card, ERROR, MUTED, SECTION_LABEL, MiniButton } from "../../shared/ui/kit";
+import { AddTokenForm } from "./add-token-form";
 
 /** Token deployments on one chain. Registration starts pre-filled with it. */
 export function ChainTokens({

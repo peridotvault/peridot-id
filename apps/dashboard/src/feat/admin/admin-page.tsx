@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { PageHeader } from "../../workspace/page-header";
+import { PageHeader } from "../../shared/ui/page-header";
 
 /** Admin page body: header + content. Session and admin gates live in AdminLayout. */
 export function AdminPage({

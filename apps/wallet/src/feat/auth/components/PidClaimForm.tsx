@@ -2,7 +2,7 @@ import { Pressable } from "../../../shared/components/ui/Pressable";
 import { TextField } from "../../../shared/components/ui/TextField";
 import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
 import { UIButton } from "../../../shared/components/ui/UIButton";
-import type { HandleStatus } from "../hooks/usePidClaim";
+import type { HandleStatus } from "../types/login";
 import { AppIdentity } from "./AppIdentity";
 import { ConsentShell } from "./ConsentShell";
 

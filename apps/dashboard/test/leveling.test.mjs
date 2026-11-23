@@ -6,7 +6,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-// --- Inline mirrors of apps/dashboard/src/leveling/xp.ts --------------------
+// --- Inline mirrors of apps/dashboard/src/feat/leveling/xp.ts --------------------
 // (Dashboard has no TS test runner; the build typechecks the real module.
 // These cases pin the algorithm + reference values both sides must satisfy.)
 

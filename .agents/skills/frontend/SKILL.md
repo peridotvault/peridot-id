@@ -11,7 +11,7 @@ description: Apply Arctis Frontend Architecture when creating, refactoring, or a
 
 1. Read the target project's `AGENTS.md`; locate the application's `src/` and inspect its pages, features, shared modules, route groups, aliases, and validation commands.
 2. Identify the owning feature and classify new code as page composition, feature implementation, or feature-independent shared code.
-3. Read [structure](references/structure.md) for file placement and reuse; [routing](references/routing.md) for page or route changes; [boundaries](references/boundaries.md) for imports and feature coordination; [enforcement](references/enforcement.md) for audits or validation setup.
+3. Read [structure](references/structure.md) for file placement and reuse; [routing](references/routing.md) for page or route changes; [boundaries](references/boundaries.md) for imports and feature coordination; [testing](references/testing.md) for test placement; [enforcement](references/enforcement.md) for audits or validation setup.
 
 ## During coding
 
@@ -19,6 +19,7 @@ description: Apply Arctis Frontend Architecture when creating, refactoring, or a
 - Keep pages thin and route registration hierarchical. Never make one ordinary page depend on another.
 - Keep each `feat/<name>/` isolated. Dependencies flow `pages → feat → shared`, with `pages → shared` also allowed. Do not create reverse, cross-feature, or circular dependencies through any import form.
 - Promote only the smallest genuinely feature-independent responsibility to `shared/`. Avoid duplicate logic and abstractions without a purpose.
+- Keep `*.test.*` and `*.spec.*` files out of `src/`; tests belong in the application's `tests/` tree.
 
 ## Before completion
 

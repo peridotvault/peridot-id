@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Chain, PeridotClient } from "@peridotvault/pid-sdk-js";
-import { unwrap } from "../../workspace/api";
-import { Card, DIVIDER, ERROR, FIELD, MUTED, MiniButton } from "../../workspace/ui";
+import { unwrap } from "../../shared/api";
+import { Card, DIVIDER, ERROR, FIELD, MUTED, MiniButton } from "../../shared/ui/kit";
 
 // EVM rows stay off until BOTH are active (the API derives a deposit address
 // from the pair), so the UI has to say which one is missing.

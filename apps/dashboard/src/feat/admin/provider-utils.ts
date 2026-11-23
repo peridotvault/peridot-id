@@ -1,4 +1,4 @@
-import type { ProviderMeta } from "../../workspace/app-types";
+import type { ProviderMeta } from "../../shared/app-types";
 
 export interface AdminProvider extends ProviderMeta {
   configSource: "database" | "environment" | "none" | "adapter";

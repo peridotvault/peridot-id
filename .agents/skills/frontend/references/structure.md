@@ -46,5 +46,6 @@ When independent features duplicate an implementation, identify its smallest reu
 - Feature-specific names or behavior in `shared/`.
 - Empty folder trees, unnecessary service layers, trivial one-line hooks, and wrappers with no responsibility.
 - Oversized modules with unrelated helpers or deeply nested directories that obscure ownership.
+- Co-located `*.test.*` or `*.spec.*` files under `src/`; tests belong in the application's `tests/` tree.
 
-Read [routing](routing.md) for page groups and [boundaries](boundaries.md) for permitted dependency directions.
+Read [routing](routing.md) for page groups, [boundaries](boundaries.md) for permitted dependency directions, and [testing](testing.md) for test placement.

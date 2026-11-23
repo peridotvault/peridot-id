@@ -1,5 +1,5 @@
 import type { ComponentPropsWithoutRef } from "react";
-import { cn } from "../../lib/cn";
+import { cn } from "../lib/cn";
 import { inputClass } from "./input";
 
 /** Native <select> in the dashboard skin: the OS menu is the right picker for

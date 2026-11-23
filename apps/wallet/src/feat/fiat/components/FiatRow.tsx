@@ -1,5 +1,5 @@
-import { Pressable } from "../../../shared/components/ui/Pressable";
 import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/components/icons";
+import { ListRow, RowTile } from "../../../shared/components/ui/ListRow";
 import { theme } from "../../../shared/styles/theme";
 import type { FiatItem } from "../../../shared/data/fiat";
 import { fiatStatusLabel, fmtIdr } from "../../../shared/data/fiat";
@@ -20,18 +20,16 @@ export function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: F
   // gross while unsettled.
   const moved = item.kind === "fee" ? (tx.feeIdr ?? tx.grossIdr) : (tx.netIdr ?? tx.grossIdr);
   return (
-    <Pressable key={tx.id} onPress={() => onSelect(item)}>
-      <div className="flex flex-row items-center gap-3 border-t border-line px-6 py-3">
-        <div style={{ backgroundColor: color + "22" }} className="flex h-9 w-9 items-center justify-center rounded-md">
-          <Icon size={16} className={tinted ? "text-success" : "text-foreground"} />
-        </div>
-        <div className="flex flex-col flex-1 gap-0.5">
-          <span className="font-sans text-base font-semibold text-foreground">{fiatLabel(item.kind)}</span>
-          <span className="font-sans text-xs text-muted-foreground">{fmtDate(item.createdAt)} · {fiatStatusLabel(item.kind, tx.providerStatus)}</span>
-        </div>
-        <span className="font-mono text-sm font-medium text-foreground">{sign}{fmtIdr(moved)}</span>
-        <ChevronRight size={16} className="text-muted-foreground" />
+    <ListRow key={tx.id} onPress={() => onSelect(item)}>
+      <RowTile tint={color}>
+        <Icon size={16} className={tinted ? "text-success" : "text-foreground"} />
+      </RowTile>
+      <div className="flex flex-1 flex-col gap-0.5">
+        <span className="font-sans text-base font-semibold text-foreground">{fiatLabel(item.kind)}</span>
+        <span className="font-sans text-xs text-muted-foreground">{fmtDate(item.createdAt)} · {fiatStatusLabel(item.kind, tx.providerStatus)}</span>
       </div>
-    </Pressable>
+      <span className="font-mono text-sm font-medium text-foreground">{sign}{fmtIdr(moved)}</span>
+      <ChevronRight size={16} className="text-muted-foreground" />
+    </ListRow>
   );
 }

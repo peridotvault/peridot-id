@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable } from "../../shared/components/ui/Pressable";
+import { ListRow, RowTile } from "../../shared/components/ui/ListRow";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { Link2 } from "../../shared/components/icons";
 import type { SsoGrant } from "@peridotvault/pid-types";
@@ -84,10 +85,10 @@ export function AppConnections({ onDone }: { onDone: () => void }) {
             const host = hostOf(g.origin);
             const label = g.name ?? host;
             return (
-              <div key={g.id} className="flex items-center gap-3 px-6 py-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface">
+              <ListRow key={g.id} hairline={false}>
+                <RowTile>
                   <Link2 size={16} className="text-foreground" />
-                </div>
+                </RowTile>
                 <div className="flex flex-1 flex-col gap-0.5">
                   <span className="font-sans text-base font-semibold text-foreground" aria-label={`${label}${g.isVerified ? ", verified" : ""}`}>
                     {label}
@@ -100,7 +101,7 @@ export function AppConnections({ onDone }: { onDone: () => void }) {
                 <Pressable onPress={() => disconnect(g.id, label)} disabled={busy} accessibilityLabel={`Disconnect ${label}`}>
                   <span className="p-2 font-sans text-sm text-danger">Disconnect</span>
                 </Pressable>
-              </div>
+              </ListRow>
             );
           })}
         </div>

@@ -1,3 +1,5 @@
+import { AmountRow } from "../../../shared/components/ui/AmountRow";
+import { Label } from "../../../shared/components/ui/Label";
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import type { DepositQuoteView } from "@peridotvault/pid-sdk-js";
 import { fmtIdr, sumIdr } from "../../../shared/data/fiat";
@@ -24,14 +26,14 @@ export function FiatQuoteBreakdown({
   return (
     <>
       <div className="flex flex-col mt-2 gap-1">
-        <Row label="Amount" value={fmtIdr(quote.netIdr)} />
-        {BigInt(transferFee) > 0n && <Row label="Transfer Fee" value={fmtIdr(transferFee)} />}
-        {Number(quote.appFeeIdr) > 0 && <Row label="App Fee" value={fmtIdr(quote.appFeeIdr)} />}
-        <Row label="Total Payment" value={fmtIdr(selectedTotalIdr)} strong />
+        <AmountRow label="Amount" value={fmtIdr(quote.netIdr)} />
+        {BigInt(transferFee) > 0n && <AmountRow label="Transfer Fee" value={fmtIdr(transferFee)} />}
+        {Number(quote.appFeeIdr) > 0 && <AmountRow label="App Fee" value={fmtIdr(quote.appFeeIdr)} />}
+        <AmountRow label="Total Payment" value={fmtIdr(selectedTotalIdr)} strong />
       </div>
       {editable && (
         <>
-          <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Payment method</span>
+          <Label>Payment method</Label>
           <div className="flex flex-col mt-0.5 gap-1.5">
             {quote.paymentMethods.map((m) => (
               <Pressable
@@ -52,12 +54,3 @@ export function FiatQuoteBreakdown({
   );
 }
 
-/** One label/value line of the quote breakdown. */
-function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div className="flex flex-row items-center justify-between">
-      <span className={`font-sans text-sm ${strong ? "font-bold text-foreground" : "text-muted-foreground"}`}>{label}</span>
-      <span className={`font-mono text-sm text-foreground ${strong ? "font-bold" : ""}`}>{value}</span>
-    </div>
-  );
-}

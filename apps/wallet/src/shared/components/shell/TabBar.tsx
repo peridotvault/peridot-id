@@ -79,7 +79,7 @@ function Tab({
         style={side ? { flexDirection: "row" } : undefined}
         className={
           side
-            ? `flex w-full items-center gap-3 border-b border-line px-4 py-3 transition-colors hover:bg-surface ${
+            ? `flex w-full items-center gap-3 border-b border-line px-4 py-3 hover:bg-surface ${
                 active ? "bg-surface shadow-[inset_2px_0_0_var(--color-accent)]" : ""
               }`
             : "flex w-full flex-col items-center gap-1"

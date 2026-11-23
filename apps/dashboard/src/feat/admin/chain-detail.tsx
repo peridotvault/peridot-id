@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useOutletContext } from "react-router";
 import type { Chain, PeridotClient } from "@peridotvault/pid-sdk-js";
-import { unwrap } from "../../workspace/api";
-import { Card, ERROR, MUTED } from "../../workspace/ui";
-import { PageHeader } from "../../workspace/page-header";
+import { unwrap } from "../../shared/api";
+import { Card, ERROR, MUTED } from "../../shared/ui/kit";
+import { PageHeader } from "../../shared/ui/page-header";
 
 export interface ChainDetailContext {
   client: PeridotClient;

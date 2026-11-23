@@ -50,6 +50,17 @@ test('baseline route tree and all three roots pass', () => {
   try { assert.equal(validate(root).status, 0); } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+for (const name of ['LoginForm.test.tsx', 'login.spec.ts']) {
+  test(`${name} under src fails`, () => {
+    const root = fixture({ [`feat/auth/components/${name}`]: 'export const bad = 1;' });
+    try {
+      const result = validate(root);
+      assert.equal(result.status, 1, result.output);
+      assert.match(result.output, /TEST_IN_SRC/);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
 const importCases = [
   ['pages → feature', 'pages/home.tsx', 'feat/home/components/Hero.tsx', "import '@/feat/home/components/Hero';", 0],
   ['pages → shared', 'pages/home.tsx', 'shared/components/Button.tsx', "import '@/shared/components/Button';", 0],

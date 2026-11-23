@@ -1,6 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentPropsWithoutRef } from "react";
-import { cn } from "../../lib/cn";
+import { cn } from "../lib/cn";
 
 // One chip treatment for the whole dashboard: pill, 11px semibold, tinted
 // background + matching text. Dark-only app, so no `dark:` duplication.

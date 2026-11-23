@@ -7,8 +7,9 @@ export function BackButton({ onPress, label = "Back" }: { onPress: () => void; l
     <Pressable
       onPress={onPress}
       accessibilityLabel={label}
-      style={{ flexDirection: "row" }}
-      className="items-center gap-1.5 py-2"
+      // Pressable pins padding to 0 inline, so the tap height rides the style prop.
+      style={{ flexDirection: "row", paddingTop: 8, paddingBottom: 8 }}
+      className="items-center gap-1.5"
     >
       <ArrowLeft size={18} className="text-foreground" />
       <span className="font-sans text-sm text-foreground">{label}</span>
