@@ -16,14 +16,13 @@
 // owned by the parent screen (same pattern as Send's send-error).
 
 import { formatFeeAmount, shortfallBaseUnits, shortfallMessage, type NormalizedFeeQuote } from "@peridotvault/pid-sdk-js";
-import { styles as s } from "../../../shared/styles/theme";
 import { formatCountdown, useQuoteCountdown } from "../hooks/useQuoteCountdown";
 
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
-    <div style={{ flexDirection: "row" }} className="flex flex-col items-center justify-between">
-      <span className={`font-sans text-sm ${strong ? "font-bold text-foreground" : "text-muted-foreground"}`}>{label}</span>
-      <span className={`font-mono text-sm text-foreground ${strong ? "font-bold" : ""}`}>{value}</span>
+    <div className="flex flex-row items-baseline justify-between gap-3">
+      <span className={`font-sans text-sm ${strong ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{label}</span>
+      <span className={`font-mono text-sm text-foreground ${strong ? "font-semibold" : ""}`}>{value}</span>
     </div>
   );
 }
@@ -63,8 +62,8 @@ export function FeePanel({
     quote.protocolFeeBps != null ? `Service fee (${quote.protocolFeeBps / 100}%)` : "Service fee";
 
   return (
-    <div style={s.card} className="flex flex-col">
-      <span style={s.label}>Fee quote</span>
+    <div className="flex flex-col gap-2 rounded-lg border border-line bg-card px-4 py-3">
+      <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Fee quote</span>
       <div className="flex flex-col gap-1">
         <Row label="Network fee" value={fmt(quote.networkFee)} />
         <Row label={serviceLabel} value={fmt(quote.platformFee)} />
@@ -72,24 +71,24 @@ export function FeePanel({
         <Row label="Max total you authorize" value={fmt(quote.maxTotalFee)} strong />
       </div>
       {quote.platformFeeDerived && (
-        <p style={s.hint}>Service fee is split from the quoted total (pre-v2 quote).</p>
+        <p className="text-xs text-muted-foreground">Service fee is split from the quoted total (pre-v2 quote).</p>
       )}
       {quote.activation?.required === true && (
-        <p style={s.hint}>Includes first-time account setup — no extra step.</p>
+        <p className="text-xs text-muted-foreground">Includes first-time account setup — no extra step.</p>
       )}
-      <p style={s.hint}>
+      <p className="text-xs text-muted-foreground">
         The transaction cannot charge more than the authorized max. Any spike above it stops the send — nothing is charged.
       </p>
-      <p style={s.hint}>
+      <p className="text-xs text-muted-foreground">
         Fee policy v{quote.feePolicyVersion} · quoted {quotedAt} · expires in {formatCountdown(remainingMs)}
       </p>
       {expired && (
-        <p role="alert" style={s.error}>
+        <p role="alert" className="text-sm text-danger">
           Quote expired — cancel and send again for a fresh quote. Do not approve a stale quote.
         </p>
       )}
       {shortfall && (
-        <p role="alert" style={s.error}>
+        <p role="alert" className="text-sm text-danger">
           {shortfallMessage({
             balanceBaseUnits: balanceBaseUnits as string,
             valueBaseUnits: valueBaseUnits as string,

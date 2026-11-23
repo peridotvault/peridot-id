@@ -7,7 +7,6 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { PopupParams } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { isFiatAction, runAction } from "../../feat/auth/utils/popupAction";
 import { assertExecuteGateAllows } from "../../feat/auth/utils/knownPrograms";
@@ -112,10 +111,10 @@ export function Approve({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?
       ) : (
         <>
           <h1 className="self-start text-left font-sans text-xl font-semibold text-foreground">Approve request</h1>
-          <p role="status" style={s.hint}>{PHASE_HINT[req.phase] ?? ""}</p>
+          <p role="status" className="text-xs text-muted-foreground">{PHASE_HINT[req.phase] ?? ""}</p>
         </>
       )}
-      {req.error && <p role="alert" tabIndex={-1} id="approve-error" style={s.error}>{req.error}</p>}
+      {req.error && <p role="alert" tabIndex={-1} id="approve-error" className="text-sm text-danger">{req.error}</p>}
     </ConsentShell>
   );
 }

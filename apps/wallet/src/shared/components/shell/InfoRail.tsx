@@ -29,7 +29,7 @@ export function InfoRail({
 
   return (
     <aside aria-label="About PeridotID" style={{ width: 300 }} className="flex shrink-0 flex-col gap-8 py-5">
-      <div style={{ flexDirection: "row" }} className="flex justify-end">
+      <div className="flex justify-end">
         <ProfileMenu displayName={displayName} avatarUrl={avatarUrl} level={level} menu={menu} onProfile={onProfile} />
       </div>
 

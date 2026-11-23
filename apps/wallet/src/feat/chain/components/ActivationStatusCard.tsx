@@ -1,7 +1,5 @@
 
 import { Info } from "../../../shared/components/icons";
-import { styles as s } from "../../../shared/styles/theme";
-import { flatten } from "../../../shared/styles/stylesheet";
 
 export function ActivationStatusCard({
   status,
@@ -13,9 +11,9 @@ export function ActivationStatusCard({
   balanceSol: number;
 }) {
   return (
-    <div style={s.card} className="flex flex-col">
-      <span style={flatten([s.label, { marginBottom: 6 }])}>Status</span>
-      <div style={{ flexDirection: "row" }} className="flex flex-col items-start gap-2">
+    <div className="flex flex-col gap-1.5 border-t border-line py-3">
+      <span className="mb-1.5 text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Status</span>
+      <div className="flex flex-row items-start gap-2">
         <Info size={16} className="text-muted-foreground" />
         <span className="font-sans text-sm leading-[19px] text-muted-foreground">
           {status === "ready"

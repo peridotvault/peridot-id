@@ -3,7 +3,6 @@ import { Pressable } from "../../shared/components/ui/Pressable";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { ensureChainRows } from "../../feat/chain/utils/chainRows";
 
@@ -106,8 +105,8 @@ export function Provisioning({ onContinue }: { onContinue: () => void }) {
     <div className="flex flex-1 flex-col">
       <Section className="border-t-0">
         <SectionHead className="pb-0">
-          <h1 style={s.title}>Setting up your wallet</h1>
-          <p style={s.subtitle} className="mt-2">Creating your on-chain account — this usually takes a few seconds.</p>
+          <h1 className="text-xl font-semibold text-foreground">Setting up your wallet</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Creating your on-chain account — this usually takes a few seconds.</p>
         </SectionHead>
       </Section>
 

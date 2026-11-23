@@ -8,7 +8,6 @@ import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { ArrowDownLeft, ArrowUpRight, Banknote, Coins } from "../../shared/components/icons";
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import { SectionTitle } from "../../shared/components/ui/SectionTitle";
 import { useSelectedChains } from "../../shared/hooks/useSelectedChains";
 import {
@@ -409,7 +408,7 @@ function TotalBalanceSection({
           …
         </span>
       ) : (
-        <div style={{ flexDirection: "row" }} className="flex flex-col items-baseline" aria-label={`${prefix}${int}${frac}`}>
+        <div className="flex flex-row items-baseline" aria-label={`${prefix}${int}${frac}`}>
           <span className="font-mono text-4xl text-foreground">{prefix}{int}</span>
           <span className="font-mono text-3xl text-muted-foreground">{frac}</span>
         </div>
@@ -473,7 +472,7 @@ function SendChoiceModal({
 }) {
   return (
     <BottomSheet visible={visible} title="Send" onClose={onClose} scrimLabel="Close send options">
-      <p style={s.hint}>Choose where to send from.</p>
+      <p className="text-xs text-muted-foreground">Choose where to send from.</p>
       <UIButton
         title="Send On-Chain"
         note="To Solana address"

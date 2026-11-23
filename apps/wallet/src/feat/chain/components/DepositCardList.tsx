@@ -1,6 +1,5 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { Check } from "../../../shared/components/icons";
-import { styles as s } from "../../../shared/styles/theme";
 import type { DepositTarget } from "../utils/depositTargets";
 
 export function DepositCardList({
@@ -24,16 +23,16 @@ export function DepositCardList({
         const alert = isSol && solAlert;
         return (
           <div key={t.key} className={`flex flex-col mt-4 rounded-lg border bg-surface p-3 ${alert ? "border-danger" : "border-border"}`}>
-            <div style={{ flexDirection: "row" }} className="flex flex-col mb-2 items-baseline justify-between">
+            <div className="mb-2 flex flex-row items-baseline justify-between">
               <span className="font-sans text-base font-semibold">{t.label}</span>
-              <p style={s.hint}>{t.sublabel}</p>
+              <p className="text-xs text-muted-foreground">{t.sublabel}</p>
             </div>
             {alert && <span className="mb-2 font-sans text-xs font-medium text-danger">Top up here for your first send</span>}
             <Pressable
               onPress={() => (isSol ? onOpen(t) : onCopy(t.key, t.address))}
             >
-              <div style={{ flexDirection: "row" }} className="flex w-full items-center justify-between gap-2 border-t border-line py-3">
-                <span style={s.mono} className="select-text">{t.address}</span>
+              <div className="flex w-full items-center justify-between gap-2 border-t border-line py-3">
+                <span className="select-text font-mono text-sm text-foreground">{t.address}</span>
                 {copiedKey === t.key && <Check size={16} className="text-success" />}
               </div>
             </Pressable>

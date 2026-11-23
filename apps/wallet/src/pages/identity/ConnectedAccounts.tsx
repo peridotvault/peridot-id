@@ -7,7 +7,6 @@ import { detectWallets, discoverWallets, type WalletConnector } from "@peridotva
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead, invalidate } from "../../shared/data/apiCache";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 
 export function ConnectedAccounts({ onDone }: { onDone: () => void }) {

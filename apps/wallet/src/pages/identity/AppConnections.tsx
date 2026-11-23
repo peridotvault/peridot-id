@@ -5,7 +5,6 @@ import { Link2 } from "../../shared/components/icons";
 import type { SsoGrant } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead, invalidate } from "../../shared/data/apiCache";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 
 function hostOf(origin: string): string {
@@ -106,7 +105,7 @@ export function AppConnections({ onDone }: { onDone: () => void }) {
           })}
         </div>
 
-        {grants.length === 0 && <p style={s.hint} className="px-6 py-3">No connected sites yet.</p>}
+        {grants.length === 0 && <p className="px-6 py-3 text-xs text-muted-foreground">No connected sites yet.</p>}
       </Section>
     </div>
   );

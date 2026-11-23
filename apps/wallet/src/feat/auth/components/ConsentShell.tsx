@@ -24,7 +24,7 @@ export function ConsentShell({
 }) {
   return (
     <div className="flex flex-col absolute inset-0 z-10">
-      <div className="flex flex-col absolute inset-0 bg-black/60" />
+      <div className="absolute inset-0 bg-black/60" />
       <div className="flex relative z-10 items-center justify-between gap-3 px-6 pb-3 pt-5">
         <BrandTop />
         {accountMenu && (

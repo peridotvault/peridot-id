@@ -47,7 +47,7 @@ export function TabBar({
   }
 
   return (
-    <div style={{ flexDirection: "row" }} className="flex border-t border-line bg-background pb-3.5 pt-2.5">
+    <div className="flex border-t border-line bg-background pb-3.5 pt-2.5">
       <Tab icon={House} label="Home" active={current === "home"} onPress={() => go("home")} />
       <Tab icon={Activity} label="Activity" active={current === "activity"} onPress={() => go("activity")} />
       <Tab icon={Settings} label="Settings" active={current === "settings"} onPress={() => go("settings")} />

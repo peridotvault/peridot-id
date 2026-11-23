@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { Modal } from "../../../shared/components/ui/Modal";
 import QRCode from "react-qr-code";
-import { theme, styles as s } from "../../../shared/styles/theme";
+import { theme } from "../../../shared/styles/theme";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import { ActivationFee } from "./ActivationFee";
 import type { useActivationGate } from "../hooks/useActivationGate";
@@ -45,14 +45,14 @@ export function SolActivationModal({
               <QRCode value={target.qrValue} size={220} bgColor={theme.colors.foreground} fgColor={theme.colors.background} />
             </div>
           )}
-          <span style={s.mono} className="select-text">{target?.address}</span>
+          <span className="select-text font-mono text-sm text-foreground">{target?.address}</span>
           {!gate.isActive && (
-            <span className={gate.balanceSol < gate.requiredSol ? "font-sans text-xs text-danger" : ""} style={gate.balanceSol < gate.requiredSol ? undefined : s.hint}>
+            <span className={gate.balanceSol < gate.requiredSol ? "font-sans text-xs text-danger" : "text-xs text-muted-foreground"}>
               Balance: {gate.balanceSol.toFixed(4)} SOL{gate.balanceSol < gate.requiredSol ? ` — top up to at least ${gate.requiredSol.toFixed(4)} SOL` : ""}.
             </span>
           )}
           {!gate.isActive && !gate.ready && (
-            <p style={s.hint}>
+            <p className="text-xs text-muted-foreground">
               {gate.st === "insufficient"
                 ? `Need at least ${gate.requiredSol.toFixed(4)} SOL to cover the first-send setup (you have ${gate.balanceSol.toFixed(4)}).`
                 : gate.st === "activating"
@@ -60,13 +60,13 @@ export function SolActivationModal({
                   : "Send SOL to this address first."}
             </p>
           )}
-          {gate.error && <p role="alert" style={s.error}>{gate.error}</p>}
+          {gate.error && <p role="alert" className="text-sm text-danger">{gate.error}</p>}
           {!gate.isActive && gate.activation && <ActivationFee view={gate.activation} />}
           {/* ANT-731 WS4: no separate setup step — the first send sets the
               account up automatically inside the send flow. This modal stays
               a funding view (address + QR + balance), never a CTA. */}
           {!gate.isActive && (
-            <p style={s.hint}>
+            <p className="text-xs text-muted-foreground">
               No setup step needed — your first send sets up this account automatically.
             </p>
           )}

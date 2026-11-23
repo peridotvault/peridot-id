@@ -4,7 +4,6 @@ import { ChevronRight, FlaskConical, KeyRound, Monitor, Link2, Check, Banknote, 
 import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead } from "../../shared/data/apiCache";
-import { styles as s } from "../../shared/styles/theme";
 import { BackButton } from "../../shared/components/ui/BackButton";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { Retry } from "../../shared/components/ui/Retry";
@@ -102,7 +101,7 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
 
       <Section className={tabRoot ? "border-t-0" : ""}>
         <SectionHead>
-          <h1 style={s.title}>Settings</h1>
+          <h1 className="text-xl font-semibold text-foreground">Settings</h1>
         </SectionHead>
       </Section>
 

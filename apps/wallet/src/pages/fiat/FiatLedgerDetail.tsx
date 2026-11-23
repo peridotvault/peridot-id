@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import type { FiatLedgerItem } from "../../shared/data/fiat";

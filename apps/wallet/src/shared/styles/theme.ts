@@ -35,8 +35,7 @@ export const theme = {
   },
   spacing: 16,
   // Radius lives in tokens.css (`--radius-sm|md|lg|xl` = 6/8/10/14), the
-  // peridotbase scale shared with the dashboard. Inline style blocks that need
-  // it carry the same numbers (e.g. `styles.input` = 8).
+  // peridotbase scale shared with the dashboard; screens use those classes.
   // App column cap (sm, 576px): every wallet screen centers inside this.
   // No-op on phones (<576pt); constrains + centers on wide web.
   // Past the md breakpoint the tab bar docks left as a sidebar instead.
@@ -55,13 +54,8 @@ export const theme = {
 };
 
 const c = theme.colors;
-const f = theme.fonts;
 
 export const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: c.background,
-  },
   // Shell centers the app column; column caps width at sm on wide web. The
   // page (document) scrolls — nothing here locks a viewport height, so the
   // window owns the scrollbar and the content column never grows its own.
@@ -140,64 +134,5 @@ export const styles = StyleSheet.create({
     overflowY: "auto",
     backgroundColor: c.background,
     alignItems: "center",
-  },
-  container: {
-    flex: 1,
-    padding: 24,
-    gap: 16,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: "700",
-    fontFamily: f.sansBold,
-    letterSpacing: -0.3,
-    color: c.foreground,
-  },
-  subtitle: {
-    fontSize: 14,
-    fontFamily: f.sans,
-    color: c.mutedForeground,
-  },
-  label: {
-    fontSize: 12,
-    color: c.mutedForeground,
-    fontWeight: "500",
-    fontFamily: f.sansMedium,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  // Row/block rule (brand.md): a top hairline that runs rail to rail. Containers
-  // own the lines, so the row carries its own horizontal padding.
-  card: {
-    borderTopWidth: 1,
-    borderColor: c.line,
-    paddingVertical: 12,
-    gap: 6,
-  },
-  mono: {
-    fontFamily: f.mono,
-    fontSize: 13,
-    color: c.foreground,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surface,
-    borderRadius: 8,
-    padding: 12,
-    // 16px floor: prevents iOS Safari auto-zoom on focus (ANT-341 FR2).
-    fontSize: 16,
-    fontFamily: f.sans,
-    color: c.foreground,
-  },
-  error: {
-    color: c.danger,
-    fontSize: 13,
-    fontFamily: f.sans,
-  },
-  hint: {
-    fontSize: 12,
-    fontFamily: f.sans,
-    color: c.mutedForeground,
   },
 });

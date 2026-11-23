@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-import { styles as s } from "../../styles/theme";
 import { BackButton } from "./BackButton";
 
 /**
@@ -23,8 +22,8 @@ export function PushHeader({
   return (
     <div className="flex flex-col gap-3">
       <BackButton onPress={onBack} label={label} />
-      <h1 style={s.title}>{title}</h1>
-      {subtitle ? <p style={s.subtitle}>{subtitle}</p> : null}
+      <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+      {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
     </div>
   );
 }

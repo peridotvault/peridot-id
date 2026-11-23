@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
-import { styles as s } from "../../../shared/styles/theme";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import { AppIdentity } from "./AppIdentity";
 import type { ExecuteGate } from "../utils/knownPrograms";
@@ -125,7 +124,7 @@ export function PopupReview({
           <span className="font-sans text-xs font-medium text-muted-foreground">Unknown program</span>
           <span className="select-text break-all font-mono text-xs text-paragraph">{unknown.description.target}</span>
           <Pressable onPress={copyTarget} accessibilityRole="button" accessibilityLabel="Copy program address">
-            <span style={s.hint}>{copied ? "Copied" : "Copy address"}</span>
+            <span className="text-xs text-muted-foreground">{copied ? "Copied" : "Copy address"}</span>
           </Pressable>
           <span className="break-all font-mono text-xs text-paragraph">
             {unknown.description.dataLen} bytes · sha256:{unknown.description.dataHashHex}
@@ -153,7 +152,7 @@ export function PopupReview({
 
       {invalid && (
         <div role="alert" className="flex flex-col gap-1 border-t border-line pt-3">
-          <p style={s.error}>Cannot approve this request</p>
+          <p className="text-sm text-danger">Cannot approve this request</p>
           <p className="font-sans text-xs text-paragraph">{invalid.reason}</p>
         </div>
       )}

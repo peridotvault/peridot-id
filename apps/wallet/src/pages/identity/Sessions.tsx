@@ -5,7 +5,6 @@ import { Monitor, LogOut } from "../../shared/components/icons";
 import type { Session } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead, invalidate } from "../../shared/data/apiCache";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 
@@ -116,7 +115,7 @@ export function Sessions({ onDone }: { onDone: () => void }) {
           ))}
         </div>
 
-        {sessions.length === 0 && <p style={s.hint} className="px-6 py-3">No active sessions.</p>}
+        {sessions.length === 0 && <p className="px-6 py-3 text-xs text-muted-foreground">No active sessions.</p>}
       </Section>
     </div>
   );

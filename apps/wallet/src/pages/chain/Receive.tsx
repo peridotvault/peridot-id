@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { Retry } from "../../shared/components/ui/Retry";
 import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
@@ -47,23 +46,23 @@ export function Receive({ onDone }: { onDone: () => void }) {
       <Section className="border-t-0">
         <SectionHead className="flex flex-col gap-4 pb-8">
           <PushHeader onBack={onDone} title="Receive" />
-          <p style={s.subtitle}>Share an address below. EVM chains share one address everywhere.</p>
+          <p className="text-sm text-muted-foreground">Share an address below. EVM chains share one address everywhere.</p>
 
-          {loading && targets.length === 0 && <p style={s.hint}>Loading deposit addresses…</p>}
+          {loading && targets.length === 0 && <p className="text-xs text-muted-foreground">Loading deposit addresses…</p>}
 
           {!loading && error && (
             <>
-              <p role="alert" style={s.hint}>
+              <p role="alert" className="text-xs text-muted-foreground">
                 Couldn&apos;t load deposit addresses ({error}).
               </p>
               <Retry onPress={reload} label="Retry loading deposit addresses" />
             </>
           )}
 
-          {!loading && !error && targets.length === 0 && <p style={s.hint}>{emptyHint}</p>}
+          {!loading && !error && targets.length === 0 && <p className="text-xs text-muted-foreground">{emptyHint}</p>}
 
           {!solanaAvailable && (
-            <p style={s.hint}>Solana deposits are available in Testnet Mode. EVM addresses below work as usual.</p>
+            <p className="text-xs text-muted-foreground">Solana deposits are available in Testnet Mode. EVM addresses below work as usual.</p>
           )}
 
           <DepositCardList

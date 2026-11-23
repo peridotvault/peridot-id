@@ -1,7 +1,6 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { BottomSheet } from "../../../shared/components/ui/BottomSheet";
 import { TextField } from "../../../shared/components/ui/TextField";
-import { styles as s } from "../../../shared/styles/theme";
 import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import { ArrowRight, Mail, Wallet } from "../../../shared/components/icons";
@@ -150,7 +149,7 @@ export function LoginOptions({
           title="Sign in"
           subtitle="with your PeridotID"
         />
-        {error && <p role="alert" style={s.error}>{error}</p>}
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <div className="flex flex-col w-full gap-3">
           {allows("email") && (
             <div
@@ -205,7 +204,7 @@ export function LoginOptions({
           )}
           {allows("passkey") && (
             <>
-              <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
+              <div className="flex flex-row items-center gap-3">
                 <div className="flex flex-col h-px flex-1 bg-border"  />
                 <span className="font-sans text-xs text-muted-foreground">or</span>
                 <div className="flex flex-col h-px flex-1 bg-border"  />

@@ -1,6 +1,6 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/components/icons";
-import { theme, styles as s } from "../../../shared/styles/theme";
+import { theme } from "../../../shared/styles/theme";
 import type { FiatLedgerItem } from "../../../shared/data/fiat";
 import { fmtIdr, ledgerStatusLabel } from "../../../shared/data/fiat";
 import { ledgerLabel } from "../utils/history";
@@ -17,9 +17,9 @@ export function LedgerRow({ item, onSelect }: { item: FiatLedgerItem; onSelect: 
   // Only posted money gets a sign: pending/failed/cancelled moved nothing.
   const sign = posted ? (incoming ? "+" : "-") : "";
   return (
-    <Pressable key={tx.id} style={s.card} className="px-6" onPress={() => onSelect(item)}>
-      <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
-        <div style={{ backgroundColor: color + "22" }} className="flex flex-col flex h-9 w-9 items-center justify-center rounded-md">
+    <Pressable key={tx.id} onPress={() => onSelect(item)}>
+      <div className="flex flex-row items-center gap-3 border-t border-line px-6 py-3">
+        <div style={{ backgroundColor: color + "22" }} className="flex h-9 w-9 items-center justify-center rounded-md">
           <Icon size={16} className={tone} />
         </div>
         <div className="flex flex-col flex-1 gap-0.5">

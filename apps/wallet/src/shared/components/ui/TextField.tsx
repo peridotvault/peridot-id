@@ -1,5 +1,12 @@
 import type { CSSProperties, InputHTMLAttributes } from "react";
+import { cn } from "../../styles/cn";
 import { flatten, type StyleProp } from "../../styles/stylesheet";
+
+// Design-system skin: every field looks the same unless the caller overrides it
+// (the login email row opts out with `border-0 bg-transparent p-0`). 16px text
+// is the iOS no-auto-zoom floor.
+const FIELD_CLASS =
+  "rounded-md border border-border bg-surface px-3 py-3 font-sans text-base text-foreground [--placeholder:var(--color-muted-foreground)]";
 
 const KEYBOARD_TYPE: Record<string, { type?: string; inputMode?: InputHTMLAttributes<HTMLInputElement>["inputMode"] }> = {
   "email-address": { type: "email" },
@@ -25,6 +32,7 @@ type TextFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, "style" | "onC
 // props (keyboardType, secureTextEntry, onChangeText, …) mapped to DOM.
 export function TextField({
   style,
+  className,
   value,
   onChangeText,
   placeholder,
@@ -42,6 +50,7 @@ export function TextField({
     <input
       {...rest}
       data-slot="input"
+      className={cn(FIELD_CLASS, className)}
       value={value}
       placeholder={placeholder}
       spellCheck={autoCorrect === false ? false : undefined}

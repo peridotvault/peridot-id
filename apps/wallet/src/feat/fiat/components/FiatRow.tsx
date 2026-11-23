@@ -1,6 +1,6 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { ArrowDownLeft, ArrowUpRight, ChevronRight } from "../../../shared/components/icons";
-import { theme, styles as s } from "../../../shared/styles/theme";
+import { theme } from "../../../shared/styles/theme";
 import type { FiatItem } from "../../../shared/data/fiat";
 import { fiatStatusLabel, fmtIdr } from "../../../shared/data/fiat";
 import { fiatLabel } from "../utils/history";
@@ -20,9 +20,9 @@ export function FiatRow({ item, onSelect }: { item: FiatItem; onSelect: (item: F
   // gross while unsettled.
   const moved = item.kind === "fee" ? (tx.feeIdr ?? tx.grossIdr) : (tx.netIdr ?? tx.grossIdr);
   return (
-    <Pressable key={tx.id} style={s.card} className="px-6" onPress={() => onSelect(item)}>
-      <div style={{ flexDirection: "row" }} className="flex flex-col items-center gap-3">
-        <div style={{ backgroundColor: color + "22" }} className="flex flex-col flex h-9 w-9 items-center justify-center rounded-md">
+    <Pressable key={tx.id} onPress={() => onSelect(item)}>
+      <div className="flex flex-row items-center gap-3 border-t border-line px-6 py-3">
+        <div style={{ backgroundColor: color + "22" }} className="flex h-9 w-9 items-center justify-center rounded-md">
           <Icon size={16} className={tinted ? "text-success" : "text-foreground"} />
         </div>
         <div className="flex flex-col flex-1 gap-0.5">

@@ -3,7 +3,6 @@ import { Section } from "../../shared/components/ui/Section";
 import { TextField } from "../../shared/components/ui/TextField";
 import { openExternalUrl } from "../../shared/app/openExternal";
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { fmtIdr } from "../../shared/data/fiat";
@@ -104,22 +103,22 @@ export function Topup({ onDone }: { onDone: () => void }) {
               </span>
             </div>
           )}
-          {frozen && !gated && <p style={s.hint}>Network is switching — top-ups pause until balances reload.</p>}
+          {frozen && !gated && <p className="text-xs text-muted-foreground">Network is switching — top-ups pause until balances reload.</p>}
 
           {/* ANT-341 FR7: submit errors render above the fold (no scroll to find them). */}
-          {error && <p role="alert" tabIndex={-1} id="topup-error" style={s.error}>{error}</p>}
+          {error && <p role="alert" tabIndex={-1} id="topup-error" className="text-sm text-danger">{error}</p>}
 
           <div className="flex flex-col gap-1.5">
             <label htmlFor="topupAmount">
-              <span style={s.label}>Amount credited to you (IDR)</span>
+              <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Amount credited to you (IDR)</span>
             </label>
-            <TextField id="topupAmount" aria-label="Amount credited to you (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="10.000"  />
-            {belowMin && <p role="alert" style={s.error}>Minimum top-up is {fmtIdr(q.minimum.toString())}.</p>}
+            <TextField id="topupAmount" aria-label="Amount credited to you (IDR)" className="[--placeholder:var(--color-muted-foreground)]" value={groupDigits(net)} onChangeText={(t) => setNet(digitsOnly(t))} keyboardType="numeric" placeholder="10.000"  />
+            {belowMin && <p role="alert" className="text-sm text-danger">Minimum top-up is {fmtIdr(q.minimum.toString())}.</p>}
 
             {q.quote && (
               <>
                 {q.noMethods ? (
-                  <p role="alert" style={s.error}>No payment methods available right now. Try again later.</p>
+                  <p role="alert" className="text-sm text-danger">No payment methods available right now. Try again later.</p>
                 ) : (
                   <FiatQuoteBreakdown
                     quote={q.quote}
@@ -141,7 +140,7 @@ export function Topup({ onDone }: { onDone: () => void }) {
             />
             {sync.pending && (
               <div className="flex flex-col gap-1.5">
-                <p style={s.hint}>Complete your payment, then tap Check status — your Saldo updates once the payment is confirmed.</p>
+                <p className="text-xs text-muted-foreground">Complete your payment, then tap Check status — your Saldo updates once the payment is confirmed.</p>
                 <UIButton
                   title={sync.syncing ? "Checking…" : "Check payment status"}
                   onPress={() => sync.checkStatus(sync.pending!)}
@@ -150,10 +149,10 @@ export function Topup({ onDone }: { onDone: () => void }) {
                 <UIButton title="Open payment page" onPress={() => openUrl(sync.pending!.paymentUrl)} />
               </div>
             )}
-            {sync.syncMsg && <p role="status" style={s.hint}>{sync.syncMsg}</p>}
+            {sync.syncMsg && <p role="status" className="text-xs text-muted-foreground">{sync.syncMsg}</p>}
           </div>
 
-          <p style={s.hint}>
+          <p className="text-xs text-muted-foreground">
             Minimum top-up {fmtIdr(q.minimum.toString())} net. Verified apps pay a Rp0 PeridotID fee. Tap Check payment status after paying — your Saldo updates once confirmed.
           </p>
         </div>

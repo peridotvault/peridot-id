@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import { cachedRead } from "../../shared/data/apiCache";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";

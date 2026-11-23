@@ -56,16 +56,15 @@ export function BottomSheet({
       />
       <div
         className={cn(
-          "flex flex-col absolute left-0 right-0 mx-auto max-h-[75%] w-full max-w-[576px] gap-3 bg-surface p-5",
+          "flex flex-col absolute left-0 right-0 mx-auto max-h-[75%] w-full max-w-[576px] gap-3 overflow-y-auto bg-surface p-5",
           center
             ? "top-1/2 -translate-y-1/2 rounded-xl border border-border"
             : "bottom-0 self-center rounded-t-xl border-t border-border pb-7",
           visible ? (center ? "sheet-grow" : "sheet-up") : center ? "sheet-shrink" : "sheet-down",
           className,
         )}
-        style={{ overflowY: "auto" }}
       >
-        <div style={{ flexDirection: "row" }} className="flex flex-col items-center justify-between">
+        <div className="flex flex-row items-center justify-between">
           <span className="font-sans text-2xl tracking-[-0.3px] text-foreground">{title}</span>
           <Pressable onPress={onClose} disabled={closeDisabled} accessibilityLabel="Close">
             <div className="flex flex-col p-1.5">

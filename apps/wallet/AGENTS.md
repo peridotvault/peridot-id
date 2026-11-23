@@ -180,6 +180,26 @@ done
 - Exactly one `h1` per screen (screen title; `PushHeader` title is the `h1`
   on pushed screens). Guard: `rg "shared/primitives" apps/wallet/src apps/wallet/App.tsx` must print nothing.
 
+## Done (Phase 14 — legacy inline styles removed)
+
+- All wallet screens are class-only. `shared/styles/theme.ts` keeps `theme`
+  (colors/fonts/layout) and a `styles` block that is LAYOUT ONLY (`shell`,
+  `rail`, `frame`, `wideRow`, `threeCol`, `stickyCol`, `contentWrap`,
+  `stackBox`, `rootFill`, `overlayFull`) — consumed solely by `AppColumn`.
+  The old text tokens (`title`, `subtitle`, `label`, `card`, `mono`, `input`,
+  `error`, `hint`, `container`, `screen`) are gone.
+- `TextField` owns its skin (`FIELD_CLASS`: `rounded-md border border-border
+  bg-surface px-3 py-3 text-base`), so call sites never pass `style`. A field
+  that must sit inside a custom container (login email row) opts out with
+  `border-0 bg-transparent p-0`.
+- Mapping used everywhere: hint `text-xs text-muted-foreground`, error
+  `text-sm text-danger`, label `text-xs font-medium uppercase tracking-[0.6px]
+  text-muted-foreground`, title `text-xl font-semibold`, mono `font-mono
+  text-sm`. No arbitrary `text-[13px]`; radius stays md/lg/xl per control.
+- Inline `style` survives only for things classes cannot express: Pressable
+  `flexDirection` (its base inline style is `column`), dynamic tints
+  (`color + "22"`), computed widths (level bar), QR colors, disabled opacity.
+
 ## Done (Phase 12 — shadcn primitives, ui-sdk behavior)
 
 - `shared/styles/cn.ts` — `cn()` (clsx + tailwind-merge), shadcn's class merge.

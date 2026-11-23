@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { TextField } from "../../../shared/components/ui/TextField";
-import { styles as s } from "../../../shared/styles/theme";
 import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import { AppIdentity } from "./AppIdentity";
@@ -62,13 +61,12 @@ export function EmailOtpForm({
           title="Sign in with email"
           subtitle={step === "email" ? "We'll send you a 6-digit code." : `Code sent to ${email}`}
         />
-        {error && <p role="alert" tabIndex={-1} id="login-otp-error" style={s.error}>{error}</p>}
+        {error && <p role="alert" tabIndex={-1} id="login-otp-error" className="text-sm text-danger">{error}</p>}
         <div className="flex flex-col w-full gap-3">
           {step === "email" ? (
             <TextField
               id="login-email"
               aria-label="Email address"
-              style={s.input}
               className="[--placeholder:var(--color-muted-foreground)] outline-none"
               value={email}
               onChangeText={onEmail}
@@ -83,7 +81,6 @@ export function EmailOtpForm({
             <TextField
               id="login-otp-code"
               aria-label="6-digit verification code"
-              style={s.input}
               className="text-center text-xl tracking-[8px] [--placeholder:var(--color-muted-foreground)] outline-none"
               value={code}
               onChangeText={(t) => onCode(t.replace(/[^0-9]/g, "").slice(0, 6))}

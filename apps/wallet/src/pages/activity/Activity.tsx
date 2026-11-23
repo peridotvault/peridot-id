@@ -6,7 +6,6 @@ import { UIButton } from "../../shared/components/ui/UIButton";
 import { RefreshCw } from "../../shared/components/icons";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import type { FiatItem, FiatLedgerItem } from "../../shared/data/fiat";
 import { useChainHistory } from "../../feat/chain/hooks/useChainHistory";
 import { useFiatHistory } from "../../feat/fiat/hooks/useFiatHistory";
@@ -85,13 +84,13 @@ export function Activity({
       )}
 
       <Section>
-        {busy && <p role="status" style={s.hint} className="px-6 py-3">Loading…</p>}
+        {busy && <p role="status" className="px-6 py-3 text-xs text-muted-foreground">Loading…</p>}
 
         {tab !== "idr" && visible.length === 0 && !busy && (
-          <p style={s.hint} className="px-6 py-3">No activity yet — send, receive, or activate your account to get started.</p>
+          <p className="px-6 py-3 text-xs text-muted-foreground">No activity yet — send, receive, or activate your account to get started.</p>
         )}
         {tab === "idr" && visible.length === 0 && !busy && (
-          <p style={s.hint} className="px-6 py-3">No IDR activity yet — top up to get started.</p>
+          <p className="px-6 py-3 text-xs text-muted-foreground">No IDR activity yet — top up to get started.</p>
         )}
 
         <div className="flex flex-col">
@@ -147,8 +146,8 @@ function ActivityHeader({
 }) {
   return (
     <>
-      <div style={{ flexDirection: "row" }} className="flex items-center justify-between">
-        <h1 style={s.title}>Activity</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-foreground">Activity</h1>
         <Pressable onPress={onRefresh} disabled={busy} accessibilityLabel="Refresh activity">
           <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface">
             <RefreshCw size={16} className="text-foreground" />

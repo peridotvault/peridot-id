@@ -4,7 +4,6 @@ import { TextField } from "../../shared/components/ui/TextField";
 import type { Profile } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { clearApiCache } from "../../shared/data/apiCache";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 
@@ -71,7 +70,7 @@ export function EditProfile({ onDone }: { onDone: () => void }) {
 
         <div className="mt-4 flex flex-col gap-1.5 border-t border-line pt-4">
           <span className="font-sans text-xs uppercase tracking-[0.6px] text-muted-foreground">Display Name</span>
-          <TextField style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={displayName} onChangeText={setDisplayName} placeholder="Display name"  />
+          <TextField className="[--placeholder:var(--color-muted-foreground)]" value={displayName} onChangeText={setDisplayName} placeholder="Display name"  />
         </div>
         </SectionHead>
       </Section>

@@ -12,8 +12,6 @@
 // parent owns loading/error/expired-focus states.
 
 import { formatFeeAmount, type ActivationView, type EvmActivationView } from "@peridotvault/pid-sdk-js";
-import { styles as s } from "../../../shared/styles/theme";
-import { flatten } from "../../../shared/styles/stylesheet";
 import { activationFeeQuote, type ActivationFeeView } from "../utils/activationFee";
 import { FeePanel } from "./FeePanel";
 
@@ -33,8 +31,8 @@ export function ActivationFee({
   if (quote) return <FeePanel quote={quote} assetSymbol={assetSymbol} decimals={decimals} />;
   const legacyLamports = "networkFeeLamports" in view ? String(view.networkFeeLamports) : null;
   return (
-    <div style={s.card} className="flex flex-col">
-      <span style={flatten([s.label, { marginBottom: 6 }])}>Fee quote</span>
+    <div className="flex flex-col gap-1.5 border-t border-line py-3">
+      <span className="mb-1.5 text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Fee quote</span>
       <span className="font-sans text-sm text-muted-foreground">
         {legacyLamports != null ? (
           <>

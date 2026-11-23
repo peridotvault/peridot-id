@@ -5,7 +5,6 @@ import { KeyRound, Plus, Trash2 } from "../../shared/components/icons";
 import type { Authority } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead, invalidate } from "../../shared/data/apiCache";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 
@@ -65,7 +64,7 @@ export function Passkey({ onDone }: { onDone: () => void }) {
       <Section className="border-t-0">
         <SectionHead className="pb-0">
           <PushHeader onBack={onDone} title="Passkeys" />
-          <p style={s.subtitle} className="mt-2">
+          <p className="mt-2 text-sm text-muted-foreground">
             Passkeys authorize your on-chain wallet (secp256r1). Register one on this device to
             sign in and authorize withdrawals. Your last passkey cannot be removed.
           </p>
@@ -89,7 +88,7 @@ export function Passkey({ onDone }: { onDone: () => void }) {
             disabled={busy}
           />
           {authorities.length > 0 && (
-            <p style={s.hint} className="mt-3">One platform passkey per device — add extras from another device or a security key.</p>
+            <p className="mt-3 text-xs text-muted-foreground">One platform passkey per device — add extras from another device or a security key.</p>
           )}
         </div>
 
@@ -127,7 +126,7 @@ export function Passkey({ onDone }: { onDone: () => void }) {
           ))}
         </div>
 
-        {authorities.length === 0 && <p style={s.hint} className="px-6 py-3">No passkeys yet. Add one above.</p>}
+        {authorities.length === 0 && <p className="px-6 py-3 text-xs text-muted-foreground">No passkeys yet. Add one above.</p>}
       </Section>
     </div>
   );

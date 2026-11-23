@@ -36,7 +36,7 @@ export function FiatSection({
       </SectionHead>
 
       <ScrollArea horizontal className="pb-5">
-        <div style={{ flexDirection: "row" }} className="flex gap-3 px-6">
+        <div className="flex flex-row gap-3 px-6">
           {balanceError ? (
             <div className={CARD}>
               <CardTop flag="id.webp" label="Rupiah" />
@@ -77,7 +77,7 @@ export function FiatSection({
 
 function CardTop({ flag, label }: { flag: string; label: string }) {
   return (
-    <div style={{ flexDirection: "row" }} className="flex items-center justify-between">
+    <div className="flex flex-row items-center justify-between">
       <span className="font-sans text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">{label}</span>
       <img src={`/payment-gateway/${flag}`} alt="" className="h-5 w-5 object-cover" />
     </div>

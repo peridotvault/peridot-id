@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { Check } from "../../../shared/components/icons";
-import { styles as s } from "../../../shared/styles/theme";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import type { AccountMenuModel } from "../../../shared/components/shell/AccountMenu";
 import { AppIdentity } from "./AppIdentity";
@@ -63,7 +62,7 @@ export function SsoConsentModal({
         title={appName ? `Continue to ${appName}` : "Continue to this app"}
         subtitle="with your PeridotID"
       />
-      {error && <p role="alert" style={s.error}>{error}</p>}
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {/* II renders the options above the primary button: the card grows
           upward from fixed Continue / Deny / switch at the bottom. */}
       <div
@@ -80,7 +79,7 @@ export function SsoConsentModal({
                 {item}
               </span>
             ))}
-            <span style={s.hint}>Never your passkeys, wallet keys or balances.</span>
+            <span className="text-xs text-muted-foreground">Never your passkeys, wallet keys or balances.</span>
           </div>
         </div>
       </div>

@@ -1,7 +1,5 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { Copy } from "../../../shared/components/icons";
-import { styles as s } from "../../../shared/styles/theme";
-import { flatten } from "../../../shared/styles/stylesheet";
 
 export function DepositAddressCard({
   address,
@@ -17,15 +15,15 @@ export function DepositAddressCard({
   onCopy: () => void;
 }) {
   return (
-    <div style={s.card} className="flex flex-col">
-      <span style={flatten([s.label, { marginBottom: 6 }])}>Your deposit address</span>
+    <div className="flex flex-col gap-1.5 border-t border-line py-3">
+      <span className="mb-1.5 text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Your deposit address</span>
       <span className="font-sans text-sm leading-[19px] text-muted-foreground">
         Send SOL to this address to fund your wallet and cover the first-send setup. The cost
         currently requires about {requiredSol.toFixed(4)} SOL.
       </span>
       <Pressable onPress={onCopy} accessibilityLabel="Copy deposit address">
-        <div style={{ flexDirection: "row" }} className="flex w-full items-center justify-between gap-2 border-t border-line py-3">
-          <span style={s.mono} className="select-text flex-1">
+        <div className="flex w-full items-center justify-between gap-2 border-t border-line py-3">
+          <span className="select-text flex-1 font-mono text-sm text-foreground">
             {address ? `${address.slice(0, 8)}…${address.slice(-8)}` : "—"}
           </span>
           {copied ? (
@@ -35,7 +33,7 @@ export function DepositAddressCard({
           )}
         </div>
       </Pressable>
-      <p style={s.hint}>
+      <p className="text-xs text-muted-foreground">
         Balance: {balanceSol.toFixed(4)} SOL{balanceSol < requiredSol ? ` — top up to at least ${requiredSol.toFixed(4)} SOL` : ""}.
       </p>
     </div>

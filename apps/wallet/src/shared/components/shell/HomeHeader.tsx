@@ -19,7 +19,7 @@ export function HomeHeader({
   onProfile: () => void;
 }) {
   return (
-    <div style={{ flexDirection: "row" }} className="flex items-center justify-between gap-3">
+    <div className="flex items-center justify-between gap-3">
       <BrandTop />
       <ProfileMenu displayName={displayName} avatarUrl={avatarUrl} level={level} menu={menu} onProfile={onProfile} />
     </div>

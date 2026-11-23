@@ -3,7 +3,6 @@ import { Pressable } from "../../../shared/components/ui/Pressable";
 import { Section } from "../../../shared/components/ui/Section";
 import { ChainSelect } from "./ChainSelect";
 import type { NftItem } from "@peridotvault/pid-solana";
-import { styles as s } from "../../../shared/styles/theme";
 import type { Coin } from "../utils/coins";
 
 // Asset group: Tokens/Items tabs on the left, chain picker on the right, then
@@ -28,8 +27,8 @@ export function AssetSection({
 }) {
   return (
     <Section>
-      <div style={{ flexDirection: "row" }} className="flex items-center justify-between gap-4 px-6 pb-2 pt-4">
-        <div style={{ flexDirection: "row" }} className="flex items-center gap-5">
+      <div className="flex flex-row items-center justify-between gap-4 px-6 pb-2 pt-4">
+        <div className="flex items-center gap-5">
           <TabButton label="Tokens" active={tab === "tokens"} onPress={() => onTabChange("tokens")} />
           <TabButton label="Items" active={tab === "items"} onPress={() => onTabChange("items")} />
         </div>
@@ -40,10 +39,10 @@ export function AssetSection({
       ) : tab === "tokens" ? (
         <div className="flex flex-col divide-y divide-line">
           {coins.length === 0 && !busy && (
-            <p style={s.hint} className="px-6 py-3">No assets yet — receive SOL to your address to get started.</p>
+            <p className="px-6 py-3 text-xs text-muted-foreground">No assets yet — receive SOL to your address to get started.</p>
           )}
           {coins.map((coin) => (
-            <div key={coin.key} style={{ flexDirection: "row" }} className="flex items-center gap-3 px-6 py-3">
+            <div key={coin.key} className="flex items-center gap-3 px-6 py-3">
               <CoinIcon symbol={coin.symbol} image={coin.image} />
               <div className="flex flex-col flex-1">
                 <span className="font-sans text-base font-semibold text-foreground">{coin.symbol}</span>
@@ -60,10 +59,10 @@ export function AssetSection({
       ) : (
         <div className="flex flex-col divide-y divide-line">
           {nfts.length === 0 && !busy && (
-            <p style={s.hint} className="px-6 py-3">No items yet — SPL collectibles in this wallet appear here.</p>
+            <p className="px-6 py-3 text-xs text-muted-foreground">No items yet — SPL collectibles in this wallet appear here.</p>
           )}
           {nfts.map((nft) => (
-            <div key={nft.mint} style={{ flexDirection: "row" }} className="flex items-center gap-3 px-6 py-3">
+            <div key={nft.mint} className="flex items-center gap-3 px-6 py-3">
               <div className="flex flex-col flex-1">
                 <span className="font-sans text-base font-semibold text-foreground">{nft.name ?? "Unnamed item"}</span>
                 <span className="font-sans text-xs text-muted-foreground">{nft.mint.slice(0, 4)}…{nft.mint.slice(-4)}</span>
@@ -71,7 +70,7 @@ export function AssetSection({
             </div>
           ))}
           {nfts.length > 0 && (
-            <p style={s.hint} className="px-6 py-3">SPL collectibles only — Token-2022 and compressed NFTs need a DAS RPC.</p>
+            <p className="px-6 py-3 text-xs text-muted-foreground">SPL collectibles only — Token-2022 and compressed NFTs need a DAS RPC.</p>
           )}
         </div>
       )}

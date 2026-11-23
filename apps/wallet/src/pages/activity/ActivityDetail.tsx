@@ -2,7 +2,6 @@ import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { openExternalUrl } from "../../shared/app/openExternal";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import { formatFeeAmount } from "@peridotvault/pid-sdk-js";
-import { styles as s } from "../../shared/styles/theme";
 import { solanaExplorerTxUrl } from "../../shared/data/networkMode";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
@@ -48,7 +47,7 @@ export function ActivityDetail({ tx, onDone }: { tx: WalletTransaction; onDone: 
           {tx.amount != null && <span className="font-mono text-2xl text-foreground">{fmtAmount(tx)}</span>}
 
         {tx.type === "ACTIVATION" && (
-          <div style={s.card} className="mt-3 flex flex-col">
+          <div className="mt-3 flex flex-col border-t border-line py-3">
             <span className="font-sans text-sm leading-[19px] text-muted-foreground">
               Peridot paid the SOL to create your on-chain smart account (PDA). The activation
               cost — rent + network fee + margin — was reimbursed from your wallet to the

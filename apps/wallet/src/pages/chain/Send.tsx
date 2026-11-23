@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Section, SectionHead } from "../../shared/components/ui/Section";
 import { TextField } from "../../shared/components/ui/TextField";
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { sendDestinationError } from "../../feat/chain/utils/solanaAddress";
@@ -315,61 +314,55 @@ export function Send({ onDone }: { onDone: () => void }) {
             <>
               {/* ANT-333: labels explicitly associated with their inputs. */}
               <label htmlFor="send-to">
-                <span style={s.label}>Destination (Solana address)</span>
+                <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Destination (Solana address)</span>
               </label>
               <TextField
                 id="send-to"
                 aria-label="Destination (Solana address)"
-                style={s.input}
-                className="[--placeholder:var(--color-muted-foreground)]"
                 value={to}
                 onChangeText={setTo}
                 autoCapitalize="none"
                 placeholder="Recipient address"
-               />
+              />
               <label htmlFor="send-amount">
-                <span style={s.label}>Amount ({asset === "SOL" ? "SOL" : "raw units"})</span>
+                <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Amount ({asset === "SOL" ? "SOL" : "raw units"})</span>
               </label>
               <TextField
                 id="send-amount"
                 aria-label={`Amount (${asset === "SOL" ? "SOL" : "raw units"})`}
-                style={s.input}
-                className="[--placeholder:var(--color-muted-foreground)]"
                 value={amount}
                 onChangeText={setAmount}
                 keyboardType="decimal-pad"
                 placeholder={asset === "SOL" ? "0.5" : "0"}
-               />
+              />
               <label htmlFor="send-asset">
-                <span style={s.label}>Asset (SOL or mint address)</span>
+                <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Asset (SOL or mint address)</span>
               </label>
               <TextField
                 id="send-asset"
                 aria-label="Asset (SOL or mint address)"
-                style={s.input}
-                className="[--placeholder:var(--color-muted-foreground)]"
                 value={asset}
                 onChangeText={setAsset}
                 autoCapitalize="none"
-               />
-              <p style={s.hint}>{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</p>
-              {error && <p role="alert" tabIndex={-1} id="send-error" style={s.error}>{error}</p>}
-              {result && <span role="status" style={s.mono} className="select-text">{result}</span>}
-              {policyNotice && <p role="status" style={s.hint}>Note: {policyNotice}</p>}
-              {net.switching && <p style={s.hint}>Network is switching — sending is paused until balances reload.</p>}
+              />
+              <p className="text-xs text-muted-foreground">{asset === "SOL" ? "Amount is in SOL. Confirmed with your passkey (WebAuthn)." : "Token amounts are in raw units. Confirmed with your passkey (WebAuthn)."}</p>
+              {error && <p role="alert" tabIndex={-1} id="send-error" className="text-sm text-danger">{error}</p>}
+              {result && <span role="status" className="select-text whitespace-pre-wrap font-mono text-sm text-foreground">{result}</span>}
+              {policyNotice && <p role="status" className="text-xs text-muted-foreground">Note: {policyNotice}</p>}
+              {net.switching && <p className="text-xs text-muted-foreground">Network is switching — sending is paused until balances reload.</p>}
               <UIButton title="Review fees" onPress={send} disabled={!to || !amount || net.switching} variant="primary" />
             </>
           )}
-          {phase === "quoting" && <p role="status" style={s.hint}>Loading fee quote…</p>}
+          {phase === "quoting" && <p role="status" className="text-xs text-muted-foreground">Loading fee quote…</p>}
           {phase === "review" && reviewQuote && (
             <>
-              <h2 id="send-review" tabIndex={-1} style={s.title}>Review fees</h2>
-              <p style={s.hint}>
+              <h2 id="send-review" tabIndex={-1} className="text-xl font-semibold text-foreground">Review fees</h2>
+              <p className="text-xs text-muted-foreground">
                 Send {asset === "SOL" ? `${Number(reviewValue) / LAMPORTS_PER_SOL} SOL` : `${reviewValue} (raw units)`} to {to.trim()}.
                 Nothing is signed until you approve below.
               </p>
               {asset === "SOL" && reviewBalance == null && (
-                <p style={s.hint}>Balance unavailable — the shortfall check is skipped; on-chain checks still apply.</p>
+                <p className="text-xs text-muted-foreground">Balance unavailable — the shortfall check is skipped; on-chain checks still apply.</p>
               )}
               <FeePanel
                 quote={reviewQuote}
@@ -378,8 +371,8 @@ export function Send({ onDone }: { onDone: () => void }) {
                 valueBaseUnits={asset === "SOL" ? reviewValue : null}
                 balanceBaseUnits={asset === "SOL" ? reviewBalance : null}
               />
-              {showFirstAction && <p style={s.hint}>{FIRST_ACTION_REVIEW_NOTICE}</p>}
-              {error && <p role="alert" tabIndex={-1} id="send-error" style={s.error}>{error}</p>}
+              {showFirstAction && <p className="text-xs text-muted-foreground">{FIRST_ACTION_REVIEW_NOTICE}</p>}
+              {error && <p role="alert" tabIndex={-1} id="send-error" className="text-sm text-danger">{error}</p>}
               <UIButton
                 title={approveTitle}
                 onPress={approve}
@@ -390,11 +383,11 @@ export function Send({ onDone }: { onDone: () => void }) {
             </>
           )}
           {phase === "sending" && (
-            <p role="status" style={s.hint}>
+            <p role="status" className="text-xs text-muted-foreground">
               {firstAction ? FIRST_ACTION_SENDING_COPY : "Waiting for passkey… approve in your authenticator to sign the quoted send."}
             </p>
           )}
-          {phase === "activating" && <p role="status" style={s.hint}>{SETUP_PROGRESS_COPY}</p>}
+          {phase === "activating" && <p role="status" className="text-xs text-muted-foreground">{SETUP_PROGRESS_COPY}</p>}
         </SectionHead>
       </Section>
     </div>

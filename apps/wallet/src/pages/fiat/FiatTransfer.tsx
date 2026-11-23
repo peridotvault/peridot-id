@@ -3,7 +3,6 @@ import { Section } from "../../shared/components/ui/Section";
 import { TextField } from "../../shared/components/ui/TextField";
 import type { FiatTransferInquiryView } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../../shared/app/AppContext";
-import { styles as s } from "../../shared/styles/theme";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { isNetworkSwitching, isTestnetMode } from "../../shared/data/networkMode";
@@ -130,8 +129,8 @@ export function FiatTransfer({ onDone }: { onDone: () => void }) {
 
   if (result) {
     return (
-      <div style={s.container} className="flex flex-col">
-        <span style={s.title}>Sent</span>
+      <div className="flex flex-1 flex-col gap-4 p-6">
+        <span className="text-xl font-semibold text-foreground">Sent</span>
         <span className="select-text font-sans text-sm leading-5 text-muted-foreground">{result}</span>
         <UIButton title="Done" onPress={onDone} variant="primary" />
       </div>
@@ -150,7 +149,7 @@ export function FiatTransfer({ onDone }: { onDone: () => void }) {
               <Row label="Service fee" value={fmtIdr(inquiry.feeIdr)} />
               <Row label="Total debited" value={fmtIdr(inquiry.grossIdr)} />
             </div>
-            {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error-review" style={s.error}>{error}</p>}
+            {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error-review" className="text-sm text-danger">{error}</p>}
             <UIButton title={busy ? "Sending…" : "Confirm & send"} onPress={confirm} disabled={busy || gated || frozen} variant="primary" />
         </div>
         </Section>
@@ -163,7 +162,7 @@ export function FiatTransfer({ onDone }: { onDone: () => void }) {
       <Section className="border-t-0">
         <div className="flex flex-col gap-4 px-6 py-6">
           <PushHeader onBack={onDone} title="Transfer" />
-          <p style={s.subtitle}>Send from your balance to any PeridotID user. The fee is quoted from the amount you enter.</p>
+          <p className="text-sm text-muted-foreground">Send from your balance to any PeridotID user. The fee is quoted from the amount you enter.</p>
           {gated && (
             <div className="-mx-6 flex flex-col border-t border-secondary bg-secondary px-6 py-3">
               <span className="font-sans text-sm font-semibold text-foreground">Disabled in Testnet Mode</span>
@@ -172,21 +171,21 @@ export function FiatTransfer({ onDone }: { onDone: () => void }) {
               </span>
             </div>
           )}
-          {frozen && !gated && <p style={s.hint}>Network is switching — transfers pause until balances reload.</p>}
+          {frozen && !gated && <p className="text-xs text-muted-foreground">Network is switching — transfers pause until balances reload.</p>}
           <label htmlFor="fiat-to">
-            <span style={s.label}>Recipient PID</span>
+            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Recipient PID</span>
           </label>
-          <TextField id="fiat-to" aria-label="Recipient PID" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid"  />
+          <TextField id="fiat-to" aria-label="Recipient PID" className="[--placeholder:var(--color-muted-foreground)]" value={to} onChangeText={setTo} autoCapitalize="none" placeholder="live2dev@pid"  />
           <label htmlFor="fiat-amount">
-            <span style={s.label}>Amount (IDR)</span>
+            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Amount (IDR)</span>
           </label>
-          <TextField id="fiat-amount" aria-label="Amount (IDR)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000"  />
+          <TextField id="fiat-amount" aria-label="Amount (IDR)" className="[--placeholder:var(--color-muted-foreground)]" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="100000"  />
           <label htmlFor="fiat-note">
-            <span style={s.label}>Note (optional)</span>
+            <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Note (optional)</span>
           </label>
-          <TextField id="fiat-note" aria-label="Note (optional)" style={s.input} className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for"  />
-          <p style={s.hint}>Recipient must have a PeridotID account.</p>
-          {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error" style={s.error}>{error}</p>}
+          <TextField id="fiat-note" aria-label="Note (optional)" className="[--placeholder:var(--color-muted-foreground)]" value={remark} onChangeText={setRemark} placeholder="What this is for"  />
+          <p className="text-xs text-muted-foreground">Recipient must have a PeridotID account.</p>
+          {error && <p role="alert" tabIndex={-1} id="fiat-transfer-error" className="text-sm text-danger">{error}</p>}
           <UIButton title={busy ? "Checking…" : "Continue"} onPress={prepare} disabled={busy || gated || frozen || !to || !amount} variant="primary" />
         </div>
       </Section>
@@ -197,7 +196,7 @@ export function FiatTransfer({ onDone }: { onDone: () => void }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <span style={s.label}>{label}</span>
+      <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">{label}</span>
       <span className="select-text font-mono text-base text-foreground">{value}</span>
     </div>
   );

@@ -2,7 +2,6 @@ import { Pressable } from "../ui/Pressable";
 import { ScrollArea } from "../ui/ScrollArea";
 import type { AccountView } from "@peridotvault/pid-types";
 import { Check, LogOut, Plus } from "../icons";
-import { styles as s } from "../../styles/theme";
 import { BottomSheet } from "../ui/BottomSheet";
 import { UIButton } from "../ui/UIButton";
 
@@ -37,7 +36,7 @@ export function AccountSwitcherModal({
       closeDisabled={busy}
       scrimLabel="Close account switcher"
     >
-      {error && <p role="alert" style={s.error}>{error}</p>}
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
 
       <ScrollArea className="grow-0">
         <div className="flex flex-col gap-2 py-1">
@@ -48,7 +47,7 @@ export function AccountSwitcherModal({
               disabled={busy || a.isActive}
               accessibilityLabel={`Switch to ${a.pid}`}
             >
-              <div style={{ flexDirection: "row" }} className="flex flex-col w-full items-center gap-3 rounded-lg border border-border p-3">
+              <div className="flex flex-row w-full items-center gap-3 rounded-lg border border-border p-3">
                 {a.avatarUrl ? (
                   <img src={a.avatarUrl} alt="" className="h-9 w-9 rounded-md border border-border"  />
                 ) : (
@@ -80,7 +79,7 @@ export function AccountSwitcherModal({
               </div>
             </Pressable>
           ))}
-          {accounts.length === 0 && <p style={s.hint}>No accounts signed in.</p>}
+          {accounts.length === 0 && <p className="text-xs text-muted-foreground">No accounts signed in.</p>}
         </div>
       </ScrollArea>
 

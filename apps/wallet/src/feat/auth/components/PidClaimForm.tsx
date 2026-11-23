@@ -1,6 +1,5 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import { TextField } from "../../../shared/components/ui/TextField";
-import { styles as s } from "../../../shared/styles/theme";
 import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import type { HandleStatus } from "../hooks/usePidClaim";
@@ -57,14 +56,13 @@ export function PidClaimForm({
           title="Create your PID"
           subtitle={email || displayName ? `Continuing as ${displayName ?? email}` : undefined}
         />
-        {error && <p role="alert" style={s.error}>{error}</p>}
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <div className="flex flex-col w-full gap-3">
           <div className="flex flex-col relative flex-1 justify-center">
             <TextField
                 id="pid-claim-handle"
                 aria-label="Choose your handle"
-              style={[s.input, { paddingRight: 64 }]}
-              className="[--placeholder:var(--color-muted-foreground)] outline-none"
+              className="pr-16 [--placeholder:var(--color-muted-foreground)] outline-none"
               value={handle}
               onChangeText={onHandle}
               autoCapitalize="none"
@@ -75,9 +73,9 @@ export function PidClaimForm({
             <span className="pointer-events-none absolute right-3 font-sans text-base text-muted-foreground">@pid</span>
           </div>
           {handleStatus === "free" && <span className="font-sans text-xs text-success"><span aria-hidden="true">✓ </span>{handle.trim().toLowerCase()}@pid is available</span>}
-          {handleStatus === "taken" && <p role="alert" style={s.error}>Taken — try another handle.</p>}
+          {handleStatus === "taken" && <p role="alert" className="text-sm text-danger">Taken — try another handle.</p>}
           {handleStatus === "invalid" && handle.length > 0 && (
-            <p role="alert" style={s.error}>3-20 chars: lowercase letters, numbers, underscore.</p>
+            <p role="alert" className="text-sm text-danger">3-20 chars: lowercase letters, numbers, underscore.</p>
           )}
           <Pressable
             style={{ flexDirection: "row" }}

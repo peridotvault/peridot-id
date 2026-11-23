@@ -1,6 +1,5 @@
 import { Pressable } from "../../../shared/components/ui/Pressable";
 import type { DepositQuoteView } from "@peridotvault/pid-sdk-js";
-import { styles as s } from "../../../shared/styles/theme";
 import { fmtIdr, sumIdr } from "../../../shared/data/fiat";
 
 // Single copy of the DOKU-checkout quote UI shared by Topup and
@@ -32,7 +31,7 @@ export function FiatQuoteBreakdown({
       </div>
       {editable && (
         <>
-          <span style={s.label}>Payment method</span>
+          <span className="text-xs font-medium uppercase tracking-[0.6px] text-muted-foreground">Payment method</span>
           <div className="flex flex-col mt-0.5 gap-1.5">
             {quote.paymentMethods.map((m) => (
               <Pressable
@@ -40,7 +39,7 @@ export function FiatQuoteBreakdown({
                 onPress={() => onMethod(m.key)}
                 accessibilityLabel={`Pay with ${m.label}`}
               >
-                <div style={{ flexDirection: "row" }} className={`flex flex-col w-full items-center justify-between rounded-lg border px-2.5 py-2 ${method === m.key ? "border-foreground" : "border-border"}`}>
+                <div className={`flex flex-row w-full items-center justify-between rounded-lg border px-2.5 py-2 ${method === m.key ? "border-foreground" : "border-border"}`}>
                   <span className={`font-sans text-sm text-foreground ${method === m.key ? "font-semibold" : ""}`}>{m.label}</span>
                   {m.enabled && <span className="font-mono text-sm text-muted-foreground">{fmtIdr(sumIdr(m.gatewayFeeIdr, m.gatewayTaxIdr))}</span>}
                 </div>
@@ -56,7 +55,7 @@ export function FiatQuoteBreakdown({
 /** One label/value line of the quote breakdown. */
 function Row({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
-    <div style={{ flexDirection: "row" }} className="flex flex-col items-center justify-between">
+    <div className="flex flex-row items-center justify-between">
       <span className={`font-sans text-sm ${strong ? "font-bold text-foreground" : "text-muted-foreground"}`}>{label}</span>
       <span className={`font-mono text-sm text-foreground ${strong ? "font-bold" : ""}`}>{value}</span>
     </div>
