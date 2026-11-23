@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
+import { deliverLoginCode, isExplicitLogin, markExplicitLogin, type LoginContext } from "../utils/popupLogin";
 import type { SsoRequest } from "../utils/sso";
 import type { ClaimState } from "./usePidClaim";
 
@@ -9,6 +9,12 @@ export interface LoginFlowFlags {
   delivered: boolean;
   /** Session presence at tab open: null = unknown, consent depends on it. */
   hadSessionAtOpen: boolean | null;
+}
+
+/** Signed-in identity shown on the consent card. `pid` keys the header read. */
+export interface LoginSession {
+  label: string;
+  pid: string;
 }
 
 // Existing wallet session (SSO / login-tab mode): offers one-tap Allow
@@ -25,7 +31,7 @@ export function useLoginSession(
   },
 ) {
   const { sso, ctx, flags, claim, onCtxDone } = opts;
-  const [session, setSession] = useState<{ label: string } | null | undefined>(sso || ctx ? undefined : null);
+  const [session, setSession] = useState<LoginSession | null | undefined>(sso || ctx ? undefined : null);
   const [showLogin, setShowLogin] = useState(false);
 
   useEffect(() => {
@@ -42,6 +48,9 @@ export function useLoginSession(
         if (cancelled || typeof me !== "object" || me === null || "statusCode" in me) {
           if (!cancelled) {
             if (flags.hadSessionAtOpen === null) flags.hadSessionAtOpen = false;
+            // No session in this tab: the next login here IS explicit, and the
+            // OAuth round-trip must not turn it into "consent needed again".
+            markExplicitLogin();
             setSession(null);
           }
           return;
@@ -52,11 +61,17 @@ export function useLoginSession(
             ? profile.displayName
             : (me as { pid: string }).pid;
         if (!cancelled) {
-          if (flags.hadSessionAtOpen === null) flags.hadSessionAtOpen = true;
-          setSession({ label });
+          // A session this tab created itself (flag survives the OAuth reload)
+          // delivers without a second approval; a pre-existing one asks.
+          if (flags.hadSessionAtOpen === null) flags.hadSessionAtOpen = !isExplicitLogin();
+          setSession({ label, pid: (me as { pid: string }).pid });
         }
       } catch {
-        if (!cancelled) setSession(null);
+        if (!cancelled) {
+          if (flags.hadSessionAtOpen === null) flags.hadSessionAtOpen = false;
+          markExplicitLogin();
+          setSession(null);
+        }
       }
     })();
     return () => {
@@ -79,6 +94,9 @@ export function useLoginSession(
     flags.delivered = true;
     void deliverLoginCode(peridot, ctx).then((ok) => {
       if (ok) onCtxDone?.(false);
+      // Failed mint: release the guard so the consent card's Continue can retry
+      // (and show the real reason) instead of leaving a dead button.
+      else flags.delivered = false;
     });
   }, [ctx, session, claim, showLogin, peridot, flags, onCtxDone]);
 

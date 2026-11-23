@@ -409,8 +409,16 @@ export class AuthService {
     if (!v || v.pid !== pid || !(await this.sessionLive(v.jti))) {
       throw new UnauthorizedException("Account session expired — sign in again");
     }
+    // The access token must carry the provider that authenticated this identity:
+    // consent (`POST /v1/auth/authorize`) mints a pid_code from `user.method` and
+    // fails closed without it, so a switched session would break Allow.
+    const session = await this.prisma.session.findUnique({
+      where: { id: v.jti },
+      include: { device: { select: { authMethod: true } } },
+    });
+    const method = session?.device.authMethod ?? "google";
     const accessToken = await this.jwt.signAsync(
-      { sub: pid, type: "access" },
+      { sub: pid, type: "access", method },
       {
         secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
         expiresIn: ACCESS_TOKEN_TTL,

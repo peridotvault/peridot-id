@@ -53,3 +53,39 @@ describe("readLoginContext", () => {
     });
   });
 });
+
+// "Add account" / first login in this tab must not be treated as a pre-existing
+// session after the OAuth round-trip (that would re-show the consent card for a
+// login the user just performed).
+describe("explicit login flag", () => {
+  const url = `?popup=login&origin=${DAPP_ORIGIN}`;
+
+  it("survives the OAuth reload but is dropped by a fresh dapp request", async () => {
+    const { readLoginContext, isExplicitLogin, markExplicitLogin } = await import(
+      "../src/feat/auth/utils/popupLogin.ts"
+    );
+    await withWindow(url, () => {
+      readLoginContext();
+      markExplicitLogin();
+      // OAuth callback: no query params, context comes from sessionStorage.
+      globalThis.window.location.search = "";
+      readLoginContext();
+      assert.equal(isExplicitLogin(), true);
+      // A new dapp login request on this tab starts from zero.
+      globalThis.window.location.search = url;
+      readLoginContext();
+      assert.equal(isExplicitLogin(), false);
+    });
+  });
+
+  it("is cleared when the flow finishes", async () => {
+    const { clearLoginContext, isExplicitLogin, markExplicitLogin } = await import(
+      "../src/feat/auth/utils/popupLogin.ts"
+    );
+    await withWindow(url, () => {
+      markExplicitLogin();
+      clearLoginContext();
+      assert.equal(isExplicitLogin(), false);
+    });
+  });
+});

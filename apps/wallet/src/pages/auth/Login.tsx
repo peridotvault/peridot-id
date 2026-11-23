@@ -85,8 +85,10 @@ export function Login({
   const { session, setSession, showLogin, setShowLogin } = useLoginSession(peridot, { sso, ctx, flags, claim: claim.claim, onCtxDone: finishCtx });
   const consent = useConsentActions(peridot, { sso, ctx, flags, setSession, setShowLogin, setBusy, setError, onCtxDone: finishCtx });
   // Same avatar + level chip as the wallet topbar, so the consent header reads
-  // as the signed-in identity rather than a second, anonymous one.
-  const header = useHeaderProfile();
+  // as the signed-in identity rather than a second, anonymous one. Keyed by the
+  // active pid: switching accounts must re-read the profile, not keep the old
+  // avatar from the previous identity.
+  const header = useHeaderProfile(session?.pid ?? "");
   // Consent card's profile popover: same menu as the shell topbar, backed by the
   // consent hook so switching here keeps the pending request alive.
   const accountMenu: AccountMenuModel = {

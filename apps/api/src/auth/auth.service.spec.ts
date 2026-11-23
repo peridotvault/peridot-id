@@ -1,6 +1,6 @@
 import { ConflictException, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
-import { accountRefreshCookieName } from "../common/cookies";
+import { accountRefreshCookieName, ACCESS_COOKIE } from "../common/cookies";
 import { AuthService, RefreshTokenPayload } from "./auth.service";
 
 function configMock(overrides: Record<string, unknown> = {}) {
@@ -683,6 +683,23 @@ describe("AuthService account switcher", () => {
 
     const activeRefresh = (res.cookie as jest.Mock).mock.calls.filter(([n]) => n === "pid_refresh").pop()[1];
     expect(activeRefresh).toBe(a.refreshToken);
+  });
+
+  it("keeps the identity's login method on the switched access token (consent mints from it)", async () => {
+    const { service, res } = setup();
+    const a = await service.issueSession(res as never, A, "ua", undefined, "passkey");
+    const req = { cookies: { pid_refresh: a.refreshToken, [accountRefreshCookieName(A)]: a.refreshToken } } as never;
+
+    await service.switchAccount(req, res as never, A);
+
+    const access = (res.cookie as jest.Mock).mock.calls.filter(([n]) => n === ACCESS_COOKIE).pop()[1];
+    const payload = JSON.parse(Buffer.from(access.split(".")[1], "base64url").toString()) as {
+      sub: string;
+      type: string;
+      method?: string;
+    };
+    // `POST /v1/auth/authorize` reads `user.method` and fails closed without it.
+    expect(payload).toMatchObject({ sub: A, type: "access", method: "passkey" });
   });
 
   it("rejects switching to an identity with no stored session", async () => {

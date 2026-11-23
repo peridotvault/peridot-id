@@ -24,11 +24,16 @@ export interface LoginContext {
 }
 
 const KEY = "pid_login_ctx";
+/** This tab's session was created by an explicit login here (survives OAuth). */
+const EXPLICIT_KEY = "pid_login_explicit";
 
 export function readLoginContext(): LoginContext | null {
   if (typeof window === "undefined") return null;
   const p = readPopupParams();
   if (p && p.action === "login") {
+    // A fresh request from a dapp is never an explicit-login continuation: a
+    // stale flag from an abandoned flow must not skip the consent card.
+    clearExplicitLogin();
     const ctx: LoginContext = {
       origin: p.origin,
       ...(p.redirectUri ? { redirectUri: p.redirectUri } : {}),
@@ -56,6 +61,37 @@ export function readLoginContext(): LoginContext | null {
 export function clearLoginContext(): void {
   try {
     sessionStorage.removeItem(KEY);
+  } catch {
+    // ignore
+  }
+  clearExplicitLogin();
+}
+
+/**
+ * "This tab's session came from a login I just did here" — persisted because a
+ * full-page OAuth round-trip remounts the app, and the in-memory flags die. The
+ * consent card must not reappear for a session the user created in this tab
+ * (it still appears for a session that was already there when the tab opened).
+ */
+export function markExplicitLogin(): void {
+  try {
+    sessionStorage.setItem(EXPLICIT_KEY, "1");
+  } catch {
+    // private mode / storage disabled — worst case one extra consent tap
+  }
+}
+
+export function isExplicitLogin(): boolean {
+  try {
+    return sessionStorage.getItem(EXPLICIT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function clearExplicitLogin(): void {
+  try {
+    sessionStorage.removeItem(EXPLICIT_KEY);
   } catch {
     // ignore
   }

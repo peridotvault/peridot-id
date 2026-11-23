@@ -1,9 +1,9 @@
 import { useState } from "react";
 import type { AccountView } from "@peridotvault/pid-types";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { deliverLoginCode, rejectLogin, type LoginContext } from "../utils/popupLogin";
+import { deliverLoginCode, markExplicitLogin, rejectLogin, type LoginContext } from "../utils/popupLogin";
 import { withDenied, withPidCode, type SsoRequest } from "../utils/sso";
-import type { LoginFlowFlags } from "./useLoginSession";
+import type { LoginFlowFlags, LoginSession } from "./useLoginSession";
 import { clearApiCache } from "../../../shared/data/apiCache";
 
 /** The one pause before the browser leaves, hardcoded on purpose (no env). */
@@ -15,7 +15,7 @@ export function useConsentActions(
     sso: SsoRequest | null;
     ctx: LoginContext | null;
     flags: LoginFlowFlags;
-    setSession: (s: { label: string } | null) => void;
+    setSession: (s: LoginSession | null) => void;
     setShowLogin: (b: boolean) => void;
     setBusy: (b: boolean) => void;
     setError: (e: string | null) => void;
@@ -117,7 +117,7 @@ export function useConsentActions(
       flags.delivered = false;
       setPicker(null);
       setShowLogin(false);
-      setSession({ label: account?.displayName ?? pid });
+      setSession({ label: account?.displayName ?? pid, pid });
     } catch (e) {
       setPickerError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -128,6 +128,9 @@ export function useConsentActions(
   /** Add a brand-new identity for this client login (falls back to the form). */
   const addAccountCtx = () => {
     flags.delivered = false;
+    // The login that follows happens here and now: don't ask for consent again
+    // once the OAuth round-trip lands the new session (the flag survives it).
+    markExplicitLogin();
     setPicker(null);
     setSession(null);
     setShowLogin(true);
