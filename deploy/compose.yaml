@@ -57,6 +57,8 @@ services:
       NODE_ENV: production
       PORT: "3301"
       DATABASE_URL: ${DATABASE_URL}
+      # mainnet owns identity; testnet stores data for the same pid only.
+      PID_NETWORK: ${PID_NETWORK:-mainnet}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       EMAIL_OTP_PEPPER: ${EMAIL_OTP_PEPPER:-}
@@ -149,7 +151,10 @@ services:
       - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
       - "traefik.http.services.pid-api${NAMESPACE}.loadbalancer.server.port=3301"
 
+  # Web apps ship on the MAIN stack only. The test stack is API + DB (one
+  # frontend origin pair, mode-switched): `--profile web` selects them.
   app:
+    profiles: ["web"]
     build:
       context: ..
       dockerfile: Dockerfile.app
@@ -181,15 +186,14 @@ services:
       - "traefik.http.services.app${NAMESPACE}.loadbalancer.server.port=3000"
 
   dashboard:
+    profiles: ["web"]
     build:
       context: ..
       dockerfile: Dockerfile.dashboard
       args:
         VITE_API_URL: ${DASHBOARD_API_URL}
         VITE_POPUP_URL: ${DASHBOARD_POPUP_URL}
-        VITE_PID_ENV: ${DASHBOARD_PID_ENV}
         VITE_PID_CLIENT_ID: ${DASHBOARD_PID_CLIENT_ID:-}
-        VITE_OTHER_WORKSPACE_URL: ${DASHBOARD_OTHER_WORKSPACE_URL:-}
     image: peridot-id-dashboard${NAMESPACE}:${TAG:-latest}
     restart: unless-stopped
     logging: *default-logging

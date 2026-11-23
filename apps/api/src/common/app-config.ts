@@ -1,4 +1,5 @@
 import ms from "ms";
+import { stripSandboxHost } from "./network";
 
 /**
  * Hardcoded non-secret runtime constants (ANT-184).
@@ -150,6 +151,17 @@ export function resolveServiceUrls(get: (key: string, def?: string) => unknown):
 /** Every configured service origin (no empties, deduped, trailing slashes stripped). */
 export function serviceOrigins(urls: ServiceUrls): string[] {
   return [...new Set([urls.apiUrl, urls.walletUrl, urls.dashboardUrl, urls.docsUrl].filter(Boolean))] as string[];
+}
+
+/**
+ * Mainnet API origin as seen from the testnet stack, derived from this
+ * deployment's own API_URL (`https://sandbox-api.peridot.id` →
+ * `https://api.peridot.id`). Null on mainnet/local dev — nothing to forward to.
+ */
+export function mainnetApiBase(
+  get: (key: string, def?: string) => unknown = (key, def) => process.env[key] ?? def,
+): string | null {
+  return stripSandboxHost(resolveServiceUrls(get).apiUrl);
 }
 
 /**

@@ -322,6 +322,22 @@ export class AuthController {
    * redirects itself to returnTo with the code. Cookie-authenticated by definition —
    * only callable same-site, so no CSRF vector beyond the session itself.
    */
+  /**
+   * Who is behind this token? Called server-to-server by the testnet stack,
+   * which keeps no identity tables of its own (see common/network.ts), so a
+   * browser session there is verified by asking the mainnet API.
+   */
+  @Get("introspect")
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 300, ttl: 60000 } })
+  introspect(@CurrentUser() user: AuthenticatedUser): { pid: string; scope?: string; app?: string } {
+    return {
+      pid: user.pid,
+      ...(user.scope ? { scope: user.scope } : {}),
+      ...(user.app ? { app: user.app } : {}),
+    };
+  }
+
   @Post("authorize")
   @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard, UserTokenGuard)

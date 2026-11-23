@@ -165,13 +165,11 @@ ledger writes):
   sandbox `*/15`, production `*/5` with `ALERT_ENV=production` for the prod-zero
   invariant). See `deploy/alerts/README.md`.
 
-**Dashboard env switch.** Both stacks bake `VITE_OTHER_WORKSPACE_URL` at
-build time (`up.sh` defaults: sandbox → `https://dashboard.peridot.id`,
-prod → `https://sandbox-dashboard.peridot.id`; overridable via
-`DASHBOARD_OTHER_WORKSPACE_URL` env or Infisical `/apps/api|/apps/wallet`
-same key). If the var is ever unset, the topbar switch hides — the Frontend
-derivation fallback (ANT-291 AC-D1) removes that single point of failure;
-until it lands, keep the var set in both deploys.
+**Network switch.** One dashboard build serves both networks: the topbar
+Mainnet/Testnet switch stores `pid_network_mode` and reloads into that API
+(`VITE_API_URL` plus the derived `sandbox-api` sibling, overridable with
+`VITE_TEST_API_URL`). No per-stack dashboard build args are needed, and the
+wallet is one host too — see `docs/NETWORK_MODES.md`.
 
 ## Update
 
@@ -281,7 +279,7 @@ CI retired-host guard stays green — infra surfaces must stay host-free).
   no retired examples remain.
 - `deploy/up.sh`: per-env deploy-meta defaults only (`NEW_API_HOST`,
   `NEW_WALLET_HOST`, `NEW_DASHBOARD_HOST`, `DASHBOARD_API_URL`,
-  `DASHBOARD_POPUP_URL`, `DASHBOARD_PID_ENV`, `DASHBOARD_OTHER_WORKSPACE_URL`).
+  `DASHBOARD_POPUP_URL`).
   Pre-set env or Infisical values win. `NEW_DOCS_HOST` is gone with the redirect.
 - `Dockerfile.app` / `Dockerfile.dashboard`: build-arg defaults + CSP
   `connect-src` are canonical-host only.

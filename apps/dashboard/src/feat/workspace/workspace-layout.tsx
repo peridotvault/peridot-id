@@ -24,10 +24,11 @@ const SECTION_ICON = {
 };
 
 export function WorkspaceLayout() {
-  const { status, isAdmin, env, otherWorkspaceUrl, pid, busy, error, signIn, signOut } = useWorkspace();
-  const appMatch = useMatch("/apps/:id/*") ?? useMatch("/apps/:id");
+  const { status, isAdmin, env, mode, setMode, pid, busy, error, signIn, signOut } = useWorkspace();
+  const appMatch = useMatch("/apps/:env/:id/*") ?? useMatch("/apps/:env/:id");
   const [params] = useSearchParams();
   const appId = appMatch?.params.id;
+  const appEnv = appMatch?.params.env === "testnet" ? "testnet" : "mainnet";
   const section = params.get("section") ?? "overview";
 
   if (status === "checking") {
@@ -65,7 +66,7 @@ export function WorkspaceLayout() {
     ? [
         { to: "/", label: "All apps", icon: ArrowLeft },
         ...APP_SECTIONS.map((s) => ({
-          to: `/apps/${appId}?section=${s.key}`,
+          to: `/apps/${appEnv}/${appId}?section=${s.key}`,
           label: s.label,
           icon: SECTION_ICON[s.key],
           group: s.group,
@@ -85,13 +86,14 @@ export function WorkspaceLayout() {
           <span className="hidden w-full truncate px-3 pb-1 text-xs text-muted-foreground md:block" title={pid}>
             {pid}
           </span>
-          <a
-            href={otherWorkspaceUrl ?? (env !== "production" ? "https://dashboard.peridot.id" : "https://sandbox-dashboard.peridot.id")}
+          <button
+            type="button"
+            onClick={() => setMode(mode === "testnet" ? "mainnet" : "testnet")}
             className={cn(RAIL_TILE, "md:w-full")}
           >
             <FlaskConical className="size-4 shrink-0" aria-hidden />
-            <span className="whitespace-nowrap">{env !== "production" ? "Production" : "Sandbox"}</span>
-          </a>
+            <span className="whitespace-nowrap">{env !== "production" ? "Mainnet" : "Testnet"}</span>
+          </button>
           <Link to="/demo" className={cn(RAIL_TILE, "md:w-full")}>
             <FlaskConical className="size-4 shrink-0" aria-hidden />
             <span className="whitespace-nowrap">Demo app</span>

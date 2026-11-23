@@ -242,6 +242,16 @@ jobs:
           node .agents/skills/frontend/scripts/validate-architecture.mjs apps/wallet
           node .agents/skills/frontend/scripts/validate-architecture.mjs apps/dashboard
 
+      - name: Network topology guard
+        run: |
+          # One frontend origin pair, two backends (docs/NETWORK_MODES.md): the
+          # main stack owns identity, the test stack owns test data only. A
+          # flipped flag here would point prod at the test DB (or the reverse).
+          grep -qx 'PID_NETWORK=mainnet' deploy/.env.main.example
+          grep -qx 'PID_NETWORK=testnet' deploy/.env.test.example
+          grep -qx 'COOKIE_DOMAIN=.peridot.id' deploy/.env.main.example
+          grep -qx 'COOKIE_DOMAIN=.peridot.id' deploy/.env.test.example
+
       - name: Delegatecall ban guard
         run: |
           # V4_PERMISSIONS.md: no delegatecall anywhere in first-party account code

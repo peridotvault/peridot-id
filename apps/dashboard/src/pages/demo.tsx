@@ -11,10 +11,14 @@ import { Peridot, openLoginTab, type CheckoutDepositView, type FiatLedgerEntry }
 import { Card, ERROR, FIELD, MUTED, MiniButton } from "../shared/ui/kit";
 import { PageHeader } from "../shared/ui/page-header";
 import { resolveBrowserUrl } from "../shared/lib/api-base";
+import { CONFIGURED_API_BASE, CONFIGURED_TESTNET_API_BASE, MODE, POPUP_URL as CONFIGURED_POPUP_URL } from "../shared/lib/config";
 
-const API_BASE = resolveBrowserUrl(import.meta.env.VITE_API_URL ?? "https://api.peridot.id");
+// A sample dapp follows the selected network, exactly like an external app
+// would: its own API build plus the wallet's `?env=` marker.
+const API_BASE = resolveBrowserUrl(MODE === "testnet" ? CONFIGURED_TESTNET_API_BASE : CONFIGURED_API_BASE);
 // Wallet host that renders the approval popup (local Vite web or prod app).
-const POPUP_URL = resolveBrowserUrl(import.meta.env.VITE_POPUP_URL ?? "http://localhost:3302");
+const POPUP_URL = resolveBrowserUrl(CONFIGURED_POPUP_URL);
+const SDK_ENV = MODE === "testnet" ? ("sandbox" as const) : ("production" as const);
 const CLIENT_ID = import.meta.env.VITE_PID_CLIENT_ID; // optional; loopback needs none
 
 function errText(e: unknown): string {
@@ -26,6 +30,7 @@ export default function DemoPage() {
     () =>
       Peridot({
         baseUrl: API_BASE,
+        env: SDK_ENV,
         popupBaseUrl: POPUP_URL, // no passkeySigner → third-party popup mode
         // Rides every popup request so the approval screen can show this app's
         // name/logo (the API only honours it for a registered origin).
@@ -62,6 +67,7 @@ export default function DemoPage() {
         params: {
           popup: "login",
           origin: window.location.origin,
+          env: MODE,
           ...(CLIENT_ID ? { client_id: CLIENT_ID } : {}),
         },
       });

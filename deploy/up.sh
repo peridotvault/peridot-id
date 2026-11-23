@@ -76,16 +76,12 @@ if [ "$ENV" = "test" ]; then
   export VITE_API_URL="${VITE_API_URL:-https://sandbox-api.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox-api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
-  export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-sandbox}"
-  export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://dashboard.peridot.id}"
 else
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-dashboard.peridot.id}"
   export VITE_API_URL="${VITE_API_URL:-https://api.peridot.id}"
   export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://api.peridot.id}"
   export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://peridot.id}"
-  export DASHBOARD_PID_ENV="${DASHBOARD_PID_ENV:-production}"
-  export DASHBOARD_OTHER_WORKSPACE_URL="${DASHBOARD_OTHER_WORKSPACE_URL:-https://sandbox-dashboard.peridot.id}"
 fi
 
 INFISICAL_PROJECT_ID="${INFISICAL_PROJECT_ID:-51f99bb1-16c8-4b74-be1f-52657e066a93}"
@@ -134,8 +130,16 @@ fi
 # (ANT-118) joins the same loop — same pattern, independent image.
 # (docs left the loop in ANT-124: Mintlify-hosted, no VPS image to build.)
 # SKIP_BUILD=1 skips the loop for tag-switch rollbacks (TAG=<prev-sha>).
+# Web services (wallet + dashboard) exist on the MAIN stack only: one frontend
+# origin pair, mode-switched. The test stack is API + DB (`--profile web`).
+SERVICES="api"
+COMPOSE_PROFILE=()
+if [ "$ENV" = "main" ]; then
+  SERVICES="api app dashboard"
+  COMPOSE_PROFILE=(--profile web)
+fi
 if [ "${SKIP_BUILD:-0}" != "1" ]; then
-  for s in api app dashboard; do
+  for s in $SERVICES; do
     echo "==> build $s"
     COMPOSE_PROJECT_NAME="$PROJECT" compose build "$s"
   done
@@ -170,12 +174,12 @@ fi
 
 # --remove-orphans: drops stale containers (renamed services, interrupted recreates)
 # that would otherwise squat on container names and fail the next recreate.
-COMPOSE_PROJECT_NAME="$PROJECT" compose up -d --remove-orphans
+COMPOSE_PROJECT_NAME="$PROJECT" compose ${COMPOSE_PROFILE[@]+"${COMPOSE_PROFILE[@]}"} up -d --remove-orphans
 
 # ANT-385: alias :latest to the just-built :TAG images, record the deploy,
 # and (re)install the alert crons. `docker tag` never pulls — source images
 # were just built above (or reused via SKIP_BUILD=1).
-for s in api app dashboard; do
+for s in $SERVICES; do
   SRC="peridot-id-$s${NAMESPACE}:$TAG"
   if docker image inspect "$SRC" >/dev/null 2>&1; then
     docker tag "$SRC" "peridot-id-$s${NAMESPACE}:latest"

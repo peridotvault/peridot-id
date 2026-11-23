@@ -116,6 +116,8 @@ export class PeridotAuth {
       ...(clientId ? { client_id: clientId } : {}),
       ...(opts?.firstParty ? { first_party: "1" } : {}),
       ...(opts?.sessionScope ? { session_scope: opts.sessionScope } : {}),
+      // One wallet host serves both networks: tell it which API to use.
+      env: this.client.networkMode(),
     };
   }
 

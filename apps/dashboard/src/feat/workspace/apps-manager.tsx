@@ -5,21 +5,45 @@ import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import type { PidApp } from "../../shared/app-types";
 import { unwrap } from "../../shared/api";
-import { Badge, Card, ERROR, FIELD, MUTED, MiniButton } from "../../shared/ui/kit";
+import { Badge, Card, ERROR, FIELD, MUTED, MiniButton, Segmented, SegmentedItem } from "../../shared/ui/kit";
 import { PageHeader } from "../../shared/ui/page-header";
+import type { DashboardMode } from "../../shared/lib/config";
 
-/** Apps list: name only. Every setting lives on the app's detail page. */
-export function AppsManager({ client }: { client: PeridotClient }) {
-  const [apps, setApps] = useState<PidApp[]>([]);
+type Clients = Record<DashboardMode, PeridotClient>;
+
+/** One list across both networks; each row carries its environment badge. */
+interface Row {
+  env: DashboardMode;
+  app: PidApp;
+}
+
+/**
+ * Apps list: name + environment. Every setting lives on the app's detail page,
+ * which is scoped to the app's own network (`/apps/:env/:id`) — a testnet app
+ * never shows mainnet numbers.
+ */
+export function AppsManager({ clients, mode }: { clients: Clients; mode: DashboardMode }) {
+  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [createEnv, setCreateEnv] = useState<DashboardMode>(mode);
   const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
-    setApps(unwrap(await client.get<PidApp[]>("/v1/apps"), "Loading apps"));
-    setError(null);
-  }, [client]);
+    const envs: DashboardMode[] = ["mainnet", "testnet"];
+    const results = await Promise.allSettled(
+      envs.map(async (env): Promise<Row[]> => {
+        const apps = unwrap(await clients[env].get<PidApp[]>("/v1/apps"), "Loading apps");
+        return apps.map((app) => ({ env, app }));
+      }),
+    );
+    const loaded = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+    // Sort by network then name so the badges do not interleave.
+    setRows(loaded.sort((a, b) => a.env.localeCompare(b.env) || a.app.name.localeCompare(b.app.name)));
+    const failures = results.filter((r) => r.status === "rejected").length;
+    setError(failures === 0 ? null : `Couldn't load ${failures === 2 ? "either environment" : "one environment"} — showing what's available.`);
+  }, [clients]);
 
   useEffect(() => {
     load()
@@ -44,7 +68,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
     setCreating(true);
     setError(null);
     try {
-      unwrap(await client.post<PidApp>("/v1/apps", { name: name.trim() }), "App registration");
+      unwrap(await clients[createEnv].post<PidApp>("/v1/apps", { name: name.trim() }), "App registration");
       setName("");
       await load();
     } catch (e) {
@@ -52,14 +76,14 @@ export function AppsManager({ client }: { client: PeridotClient }) {
     } finally {
       setCreating(false);
     }
-  }, [client, name, load]);
+  }, [clients, createEnv, name, load]);
 
   return (
     <section className="mt-8">
       <PageHeader
         eyebrow="App management"
         title="Apps"
-        description="Open an app to manage its origins, backend secret, fees, and balance."
+        description="Mainnet and testnet apps in one list. Open an app to manage its origins, backend secret, fees, and balance."
       />
       {error && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -73,14 +97,17 @@ export function AppsManager({ client }: { client: PeridotClient }) {
         <p role="status" className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
       ) : (
         <div className="mt-4 flex flex-col gap-2">
-          {apps.map((app) => (
+          {rows.map(({ env, app }) => (
             <Link
-              key={app.id}
-              to={`/apps/${app.id}`}
+              key={`${env}:${app.id}`}
+              to={`/apps/${env}/${app.id}`}
               className="flex items-center justify-between gap-3 rounded-md border border-line bg-background px-4 py-3 transition-colors hover:bg-muted/40 focus-ring"
             >
               <span className="min-w-0 truncate font-semibold tracking-tight">
                 {app.name}
+                <Badge tone={env === "testnet" ? "warning" : "success"} className="ml-2 align-middle">
+                  {env}
+                </Badge>
                 {app.isVerified && (
                   <Badge tone="success" className="ml-2 align-middle">
                     <span aria-hidden="true">✓</span>
@@ -93,11 +120,11 @@ export function AppsManager({ client }: { client: PeridotClient }) {
               </span>
             </Link>
           ))}
-          {apps.length === 0 && !error && (
+          {rows.length === 0 && !error && (
             <p className={`text-sm ${MUTED}`}>
               No apps yet — register your first below. New here?{" "}
               <Link to="/demo" className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground">
-                Try the sandbox sample
+                Try the testnet sample
               </Link>
               .
             </p>
@@ -107,7 +134,20 @@ export function AppsManager({ client }: { client: PeridotClient }) {
 
       <Card>
         <h3 className="font-semibold tracking-tight">Register a new app</h3>
-        <p className={`mt-1 text-sm ${MUTED}`}>Just a name — everything else is configured inside the app.</p>
+        <p className={`mt-1 text-sm ${MUTED}`}>
+          Just a name and a network — everything else is configured inside the app. Testnet apps are separate
+          registrations with test money; mainnet apps move real money.
+        </p>
+        <div className="mt-4">
+          <Segmented aria-label="Environment">
+            <SegmentedItem active={createEnv === "mainnet"} onClick={() => setCreateEnv("mainnet")}>
+              Mainnet
+            </SegmentedItem>
+            <SegmentedItem active={createEnv === "testnet"} onClick={() => setCreateEnv("testnet")}>
+              Testnet
+            </SegmentedItem>
+          </Segmented>
+        </div>
         <label className="mt-4 block text-xs">
           Name
           <input
@@ -127,7 +167,7 @@ export function AppsManager({ client }: { client: PeridotClient }) {
           disabled={creating}
           className="mt-3"
         >
-          {creating ? "Registering…" : "Register app"}
+          {creating ? "Registering…" : `Register ${createEnv} app`}
         </MiniButton>
       </Card>
     </section>

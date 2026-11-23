@@ -8,21 +8,35 @@ import { PopupClosedError } from "@peridotvault/pid-sdk-js";
 import { resolveBrowserUrl } from "../lib/api-base";
 import {
   CONFIGURED_API_BASE,
-  OTHER_WORKSPACE_URL,
+  CONFIGURED_TESTNET_API_BASE,
+  MODE,
   PID_ENV,
   POPUP_URL as CONFIGURED_POPUP_URL,
   SESSION_SCOPE,
+  setMode,
+  type DashboardMode,
 } from "../lib/config";
 
 // LAN-safe resolution (loopback→page-host swap) applied at runtime, same as
 // apps/docs. The badge in lib/config follows the configured URL, not this one.
 const API_BASE = resolveBrowserUrl(CONFIGURED_API_BASE);
+const TESTNET_API_BASE = resolveBrowserUrl(CONFIGURED_TESTNET_API_BASE);
 const POPUP_URL = resolveBrowserUrl(CONFIGURED_POPUP_URL);
+
+/** API base per network — one dashboard origin serves both. */
+export const API_BASE_BY_MODE: Record<DashboardMode, string> = {
+  mainnet: API_BASE,
+  testnet: TESTNET_API_BASE,
+};
 
 export type WorkspaceStatus = "checking" | "anonymous" | "owner";
 
 interface WorkspaceContextValue {
   client: PeridotClient;
+  /** Per-network clients: the apps list merges both environments. */
+  clientFor: (mode: DashboardMode) => PeridotClient;
+  mode: DashboardMode;
+  setMode: (mode: DashboardMode) => void;
   status: WorkspaceStatus;
   role: Role;
   isAdmin: boolean;
@@ -31,7 +45,6 @@ interface WorkspaceContextValue {
   tab: string;
   onTab: (key: string) => void;
   env: string;
-  otherWorkspaceUrl?: string;
   busy: boolean;
   error: string | null;
   signIn: () => void;
@@ -47,9 +60,26 @@ export function useWorkspace(): WorkspaceContextValue {
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [client] = useState<PeridotClient>(() =>
-    Peridot({ baseUrl: API_BASE, popupBaseUrl: POPUP_URL, sessionScope: SESSION_SCOPE }),
-  );
+  // One client per network. Both ride the same shared session cookie (mainnet
+  // mints it; the testnet API verifies it by introspection), and each carries
+  // its own `env` so the wallet login tab opens the matching network.
+  const [clients] = useState<Record<DashboardMode, PeridotClient>>(() => ({
+    mainnet: Peridot({
+      baseUrl: API_BASE,
+      popupBaseUrl: POPUP_URL,
+      sessionScope: SESSION_SCOPE,
+      env: "production",
+    }),
+    testnet: Peridot({
+      baseUrl: TESTNET_API_BASE,
+      popupBaseUrl: POPUP_URL,
+      sessionScope: SESSION_SCOPE,
+      env: "sandbox",
+    }),
+  }));
+  const mode = MODE;
+  const client = clients[mode];
+  const clientFor = useCallback((m: DashboardMode) => clients[m], [clients]);
   const [status, setStatus] = useState<WorkspaceStatus>("checking");
   const [role, setRole] = useState<Role>("user");
   const [pid, setIdentityId] = useState("");
@@ -160,6 +190,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const value = useMemo<WorkspaceContextValue>(
     () => ({
       client,
+      clientFor,
+      mode,
+      setMode,
       status,
       role,
       isAdmin,
@@ -168,13 +201,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       tab,
       onTab,
       env: PID_ENV,
-      otherWorkspaceUrl: OTHER_WORKSPACE_URL,
       busy,
       error,
       signIn,
       signOut,
     }),
-    [client, status, role, isAdmin, pid, tabs, tab, onTab, busy, error, signIn, signOut],
+    [client, clientFor, mode, status, role, isAdmin, pid, tabs, tab, onTab, busy, error, signIn, signOut],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
@@ -182,7 +214,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 /** Topbar in front of every route; the session gate stays in the layouts. */
 export function WorkspaceTopbar() {
-  const { tabs, tab, onTab, pid, isAdmin, env, otherWorkspaceUrl, signOut } = useWorkspace();
+  const { tabs, tab, onTab, pid, isAdmin, env, mode, setMode, signOut } = useWorkspace();
   return (
     <Topbar
       tabs={tabs}
@@ -191,7 +223,8 @@ export function WorkspaceTopbar() {
       sessionLabel={pid || "signed out"}
       isAdmin={isAdmin}
       env={env}
-      otherWorkspaceUrl={otherWorkspaceUrl}
+      mode={mode}
+      onMode={setMode}
       onSignOut={() => void signOut()}
     />
   );

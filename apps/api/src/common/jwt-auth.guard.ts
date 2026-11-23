@@ -1,4 +1,4 @@
-import { ExecutionContext, ForbiddenException, Injectable, Logger, Optional } from "@nestjs/common";
+import { ExecutionContext, ForbiddenException, Injectable, Logger, Optional, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { AuthGuard } from "@nestjs/passport";
 import { Request } from "express";
@@ -6,6 +6,9 @@ import { ACCESS_COOKIE, normalizeScope, scopeAccessCookie } from "./cookies";
 import { extractRequestOrigin, getVerifiedAppOrigins, hasSessionCookie } from "./csrf-origin.guard";
 import { isOriginAllowed, staticOriginsFor } from "./cors";
 import { PrismaService } from "../prisma/prisma.service";
+import { mainnetApiBase } from "./app-config";
+import { mainnetSession } from "./network-auth";
+import { pidNetwork } from "./network";
 
 /**
  * Session cookie selection: a client app sends `x-pid-scope: <app>` and gets its
@@ -72,7 +75,47 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
         }
       }
     }
+    // Testnet stack: no identity tables locally, so the session is resolved
+    // against the mainnet API (introspection, cached) instead of a local secret.
+    if (this.config && pidNetwork(this.config.get<string>("PID_NETWORK")) === "testnet") {
+      const session = await mainnetSession(req, {
+        network: "testnet",
+        baseUrl: mainnetApiBase((key, def) => this.config?.get(key, def)),
+      });
+      if (!session) throw new UnauthorizedException("Sign in on PeridotID mainnet first");
+      this.assertMethodAllowed(session, req);
+      (req as Request & { user?: unknown }).user = {
+        pid: session.pid,
+        method: "mainnet",
+        ...(session.scope ? { scope: session.scope } : {}),
+        ...(session.app ? { app: session.app } : {}),
+      };
+      return true;
+    }
     return (await super.canActivate(context)) as boolean;
+  }
+
+  /**
+   * Read-scope / machine-token write rules, shared by the cookie path
+   * (`handleRequest`) and the testnet introspection path so both deployments
+   * enforce exactly the same limits.
+   */
+  private assertMethodAllowed(auth: { app?: string; scope?: string } | null | undefined, req: Request): void {
+    if (!auth) return;
+    if (auth.scope === "read") {
+      if (req.method !== "GET" && req.method !== "HEAD" && !READ_SCOPE_WRITE_ALLOW.some((re) => re.test(req.path))) {
+        throw new ForbiddenException("This token is read-only");
+      }
+      return;
+    }
+    if (!auth.app) return;
+    // ANT-344 H3: transfer power requires the explicit transfer scope.
+    if (auth.scope !== "fiat:transfer" && req.method !== "GET" && req.method !== "HEAD" && /^\/v1\/fiat\/transfers(\/|$)/.test(req.path)) {
+      if (auth.scope === undefined) {
+        this.logger.warn(`rejected legacy app token without scope: app=${auth.app}`);
+      }
+      throw new ForbiddenException("Machine token scope not authorized for transfers");
+    }
   }
 
   /**
@@ -90,30 +133,7 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     context: ExecutionContext,
   ): TUser {
     const authed = super.handleRequest(err, user, info, context, undefined);
-    if (authed && (authed as { scope?: string }).scope === "read") {
-      const req = context.switchToHttp().getRequest<Request>();
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        const allowed = READ_SCOPE_WRITE_ALLOW.some((re) => re.test(req.path));
-        if (!allowed) throw new ForbiddenException("This token is read-only");
-      }
-      return authed;
-    }
-    const claims = authed as { app?: string; scope?: string } | null | undefined;
-    if (authed && claims?.app) {
-      // ANT-344 H3: transfer power requires the explicit transfer scope.
-      // Legacy unscoped machine tokens are rejected here (no back-compat
-      // pass); the SOC signal is the 403 itself plus the service-level
-      // `fiat.transfer.app_token` event on allowed uses.
-      if (claims.scope !== "fiat:transfer") {
-        const req = context.switchToHttp().getRequest<Request>();
-        if (req.method !== "GET" && req.method !== "HEAD" && /^\/v1\/fiat\/transfers(\/|$)/.test(req.path)) {
-          if (claims.scope === undefined) {
-            this.logger.warn(`rejected legacy app token without scope: app=${claims.app}`);
-          }
-          throw new ForbiddenException("Machine token scope not authorized for transfers");
-        }
-      }
-    }
+    this.assertMethodAllowed(authed as { app?: string; scope?: string } | null, context.switchToHttp().getRequest<Request>());
     return authed;
   }
 }

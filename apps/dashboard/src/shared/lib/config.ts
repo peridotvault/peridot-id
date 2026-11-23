@@ -1,9 +1,7 @@
-// Dashboard environment resolution. Ported from
-// apps/docs/app/workspace/_components/workspace-provider.tsx — same behavior,
-// Vite env names (VITE_* instead of NEXT_PUBLIC_PID_*).
+// Dashboard configuration: ONE dashboard origin, TWO APIs.
 //
-// - Explicit VITE_PID_ENV wins; otherwise the badge follows the API URL
-//   (loopback or sandbox-indicating hostname = sandbox) so it can never
+// - Mode (mainnet | testnet) picks the API origin; switching reloads.
+// - The env badge follows the mode, never the hostname, so it can never
 //   disagree with where traffic goes.
 // - The badge follows the *configured* URL, not the LAN-resolved one —
 //   a LAN page still talks to the dev API.
@@ -28,62 +26,82 @@ function apiHost(url: string): string {
   }
 }
 
-/**
- * Env derivation from the configured API base (ANT-694): explicit build env
- * wins; otherwise loopback OR any sandbox-indicating hostname (canonical
- * `sandbox-*` / `*-sandbox` hosts and legacy `*.sandbox.*` / `sandbox.*`
- * in-fix hosts) resolve to sandbox. Previously every non-loopback host fell
- * through to "production", so a sandbox-API build without VITE_PID_ENV got
- * the PROD wallet popup default — login completed against prod while the API
- * stayed sandbox, and the session never established (silent failure).
- */
-export function derivePidEnv(apiBase: string): string {
-  const host = apiHost(apiBase);
-  if (["localhost", "127.0.0.1", "::1"].includes(host)) return "sandbox";
-  if (host.includes("sandbox")) return "sandbox";
-  return "production";
-}
-
 export const CONFIGURED_API_BASE =
   viteEnv("VITE_API_URL") ?? "http://localhost:3300";
+
+/**
+ * Testnet API origin: the same dashboard serves both networks (one origin), so
+ * the second base is derived from the first (`api.peridot.id` →
+ * `sandbox-api.peridot.id`). Local dev keeps ONE API — no second stack to run.
+ */
+export function testnetSibling(mainnet: string): string {
+  try {
+    const url = new URL(mainnet);
+    const local =
+      ["localhost", "127.0.0.1", "::1"].includes(apiHost(mainnet)) ||
+      /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname);
+    if (local || !url.hostname.startsWith("api.")) return mainnet;
+    url.hostname = `sandbox-${url.hostname}`;
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return mainnet;
+  }
+}
+
+export const CONFIGURED_TESTNET_API_BASE =
+  viteEnv("VITE_TEST_API_URL") ?? testnetSibling(CONFIGURED_API_BASE);
 
 export const LOOPBACK = ["localhost", "127.0.0.1", "::1"].includes(
   apiHost(CONFIGURED_API_BASE),
 );
 
-export const PID_ENV: string =
-  viteEnv("VITE_PID_ENV") ?? derivePidEnv(CONFIGURED_API_BASE);
+/** Which network the dashboard is showing/listening to. */
+export type DashboardMode = "mainnet" | "testnet";
 
-// The dashboard is first-party: it authenticates through the wallet app
-// (popup) and shares the session cookie. In dev that wallet is the local
-// Vite wallet app on :3302.
-export const POPUP_URL =
-  viteEnv("VITE_POPUP_URL") ??
-  (LOOPBACK
-    ? "http://localhost:3302"
-    : PID_ENV === "production"
-      ? "https://peridot.id"
-      : "https://sandbox.peridot.id");
-
-export const OTHER_WORKSPACE_URL: string | undefined =
-  viteEnv("VITE_OTHER_WORKSPACE_URL") ?? deriveCounterpartWorkspaceUrl(CONFIGURED_API_BASE, PID_ENV);
+export const NETWORK_MODE_KEY = "pid_network_mode";
 
 /**
- * Sandbox MVP (FR-3 / AC-D1): the env-switch link is ALWAYS rendered. When
- * `VITE_OTHER_WORKSPACE_URL` is unset, derive the counterpart dashboard URL
- * from the configured API base instead of hiding the link.
- *
- * Mapping is canonical-dashboard based (separate deployments, never path
- * prefixes): production ⇄ sandbox-dashboard. Legacy vs canonical API hosts
- * both resolve; loopback still resolves to the canonical counterpart so the
- * link never disappears in dev (it just points at the deployed counterpart).
+ * Boot mode: `?env=testnet|mainnet` wins (deep links, bookmarks), else the
+ * stored choice, else the build env, else mainnet.
  */
-export function deriveCounterpartWorkspaceUrl(apiBase: string, env: string): string {
-  const PROD_DASHBOARD = "https://dashboard.peridot.id";
-  const SANDBOX_DASHBOARD = "https://sandbox-dashboard.peridot.id";
-  void apiBase;
-  return env === "production" ? SANDBOX_DASHBOARD : PROD_DASHBOARD;
+export function readMode(): DashboardMode {
+  try {
+    if (typeof window !== "undefined") {
+      const param = new URLSearchParams(window.location.search).get("env");
+      if (param === "testnet" || param === "mainnet") {
+        window.localStorage.setItem(NETWORK_MODE_KEY, param);
+        return param;
+      }
+      const stored = window.localStorage.getItem(NETWORK_MODE_KEY);
+      if (stored === "testnet" || stored === "mainnet") return stored;
+    }
+  } catch {
+    /* private mode / SSR — fall through */
+  }
+  return viteEnv("VITE_NETWORK_MODE") === "testnet" ? "testnet" : "mainnet";
 }
+
+/** Persist the mode and reload: the API origin is fixed per page load. */
+export function setMode(mode: DashboardMode): void {
+  try {
+    window.localStorage.setItem(NETWORK_MODE_KEY, mode);
+  } catch {
+    /* non-fatal */
+  }
+  window.location.reload();
+}
+
+export const MODE: DashboardMode = readMode();
+
+/** Env badge/labels follow the mode — never the hostname or a build pin. */
+export const PID_ENV: string = MODE === "testnet" ? "sandbox" : "production";
+
+// The dashboard is first-party: it authenticates through the wallet app and
+// shares the session cookie. In dev that wallet is the local Vite wallet app
+// on :3302. One wallet host serves both networks (`?env=` picks the API).
+export const POPUP_URL =
+  viteEnv("VITE_POPUP_URL") ??
+  (LOOPBACK ? "http://localhost:3302" : "https://peridot.id");
 
 // The dashboard's own session namespace: its cookies/session are separate
 // from the wallet's, so signing out here never signs the user out of the

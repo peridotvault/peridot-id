@@ -26,7 +26,8 @@ src/
                       # format.ts (fmtDate feed helper, used by 2 feats),
                       # networkMode.ts (testnet store; view: hooks/useNetworkMode)
     app/              # AppContext.tsx (SDK provider + usePeridot()),
-                      # config.ts (API_BASE_URL), fiatEnsure.ts (post-auth
+                      # config.ts (mainnet/testnet API bases + boot mode),
+                      # fiatEnsure.ts (post-auth
                       # provisioning check), shims.ts (Buffer bootstrap,
                       # first import in main.tsx), openExternal.ts
                       # (openExternalUrl, guards via safeUrl.ts), safeUrl.ts

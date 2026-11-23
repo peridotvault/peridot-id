@@ -1,5 +1,14 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.12.0
+
+- **One wallet host, two APIs.** Hosted login and approval popups now carry
+  `env=mainnet|testnet`, so the wallet opens the network the caller talks to.
+  The sandbox preset's `popupBaseUrl` is the canonical `https://peridot.id`
+  (was `https://sandbox.peridot.id`); the API base is unchanged.
+- `PeridotClient.networkMode()` exposes that vocabulary (`mainnet`/`testnet`)
+  for first-party apps that switch networks themselves.
+
 ## 1.11.3
 
 - **One login-params builder.** `loginTab`/`loginPopup` and the passkey

@@ -77,11 +77,10 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
     setCurrency(c);
   }, []);
 
-  // Server-driven testnet (ANT-15): the API registry stays the source of
-  // truth per selection; the wallet persists the choice, re-fetches
-  // selection-scoped data via the store subscription, and blocks signing
-  // while the switch propagates. NO toggle lives in the account-switch
-  // modal — Settings is the only place.
+  // Mainnet/Testnet are two API deployments (identity on mainnet, data per
+  // network), so the toggle persists the choice and reloads into that
+  // network's API. NO toggle lives in the account-switch modal — Settings is
+  // the only place.
   const net = useNetworkMode();
   const toggleNetwork = useCallback(() => {
     setNetworkMode(net.mode === "testnet" ? "mainnet" : "testnet");
@@ -129,9 +128,9 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
             <div className="flex items-start gap-3">
               <TriangleAlert size={18} className="mt-0.5 shrink-0 text-foreground" />
               <div className="flex flex-1 flex-col gap-1">
-                <span className="font-sans text-sm font-semibold text-foreground">TESTNET — not real money</span>
+                <span className="font-sans text-sm font-semibold text-foreground">TESTNET — test money only</span>
                 <span className="font-sans text-sm leading-5 text-foreground">
-                  Balances are testnet-only and separate from mainnet. Fiat top-ups and transfers are disabled; explorer links carry ?cluster=devnet.
+                  Same PID and passkey, separate balances, levels and XP from mainnet. Testnet data can be reset; fiat top-ups and transfers are disabled.
                 </span>
               </div>
             </div>
@@ -142,8 +141,8 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
       <Group title="Network">
         <ToggleRow
           icon={FlaskConical}
-          label="Testnet Mode"
-          hint={net.testnet ? "On — using testnet chain" : "Off — using mainnet"}
+          label="Testnet"
+          hint={net.testnet ? "On — test money, separate test data" : "Off — Mainnet, real money"}
           on={net.testnet}
           onPress={toggleNetwork}
         />

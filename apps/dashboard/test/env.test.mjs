@@ -1,30 +1,23 @@
-// ANT-694: dashboard env derivation. A sandbox-API build without VITE_PID_ENV
-// used to classify as "production" (only loopback meant sandbox), so the
-// wallet-popup default pointed at PROD while the API stayed sandbox — the
-// popup login "succeeded" but no session ever stuck, with no error shown.
-// Run: `node --test test/` from apps/dashboard.
+// One dashboard origin, two APIs: the testnet base is derived from the
+// configured mainnet one, and local dev keeps a single API.
+// Run: `node --test "test/*.test.mjs"` from apps/dashboard.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { derivePidEnv } from "../src/shared/lib/config.ts";
+import { testnetSibling } from "../src/shared/lib/config.ts";
 
-describe("derivePidEnv", () => {
-  it("treats loopback API hosts as sandbox", () => {
-    assert.equal(derivePidEnv("http://localhost:3300"), "sandbox");
-    assert.equal(derivePidEnv("http://127.0.0.1:3300"), "sandbox");
+describe("testnetSibling", () => {
+  it("maps the canonical API host to its sandbox sibling", () => {
+    assert.equal(testnetSibling("https://api.peridot.id"), "https://sandbox-api.peridot.id");
   });
 
-  it("treats sandbox-indicating API hosts as sandbox (canonical + legacy)", () => {
-    assert.equal(derivePidEnv("https://sandbox-api.peridot.id"), "sandbox");
-    assert.equal(derivePidEnv("https://api.sandbox.pid.peridotvault.com"), "sandbox");
+  it("keeps one API for local dev (loopback + LAN)", () => {
+    assert.equal(testnetSibling("http://localhost:3300"), "http://localhost:3300");
+    assert.equal(testnetSibling("http://127.0.0.1:3300"), "http://127.0.0.1:3300");
+    assert.equal(testnetSibling("http://192.168.1.20:3300"), "http://192.168.1.20:3300");
   });
 
-  it("treats production API hosts as production", () => {
-    assert.equal(derivePidEnv("https://api.peridot.id"), "production");
-    assert.equal(derivePidEnv("https://api.pid.peridotvault.com"), "production");
-  });
-
-  it("falls back to production for unparseable input", () => {
-    assert.equal(derivePidEnv(""), "production");
-    assert.equal(derivePidEnv("not-a-url"), "production");
+  it("leaves non-API hosts and garbage alone", () => {
+    assert.equal(testnetSibling("https://peridot.id"), "https://peridot.id");
+    assert.equal(testnetSibling("not-a-url"), "not-a-url");
   });
 });

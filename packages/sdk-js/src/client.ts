@@ -77,6 +77,9 @@ export class PeridotClient {
     readonly sessionScope?: string,
     private bearer?: string,
     cache?: CacheConfig | false,
+    /** Resolved target environment; carried in popup URLs so the wallet opens
+     *  the same network the caller talks to (one wallet host, two APIs). */
+    readonly env: PeridotEnv = "production",
   ) {
     this.appOptions = appOptions;
     configureCache(cache);
@@ -120,6 +123,11 @@ export class PeridotClient {
     clear: (): void => clearCache(),
     invalidate: (match: string): void => invalidateCache(match),
   };
+
+  /** `testnet` / `mainnet` — the wallet's `?env=` vocabulary for one host. */
+  networkMode(): "mainnet" | "testnet" {
+    return this.env === "sandbox" ? "testnet" : "mainnet";
+  }
 
   /** True when this client authenticates with a bearer token (no cookies). */
   get hasBearer(): boolean {
@@ -240,6 +248,7 @@ export class PeridotClient {
         popup: action,
         ...(expectedPid ? { expected_pid: expectedPid } : {}),
         ...(clientId ? { client_id: clientId } : {}),
+        env: this.networkMode(),
       },
       request: { action, payload, ...(expectedPid ? { expectedPid } : {}) },
     });
@@ -266,5 +275,6 @@ export function Peridot(options: PeridotOptions = {}): PeridotClient {
     options.sessionScope,
     options.bearer,
     options.cache,
+    detectEnv(options.env),
   );
 }

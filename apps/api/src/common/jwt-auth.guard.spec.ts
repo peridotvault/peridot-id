@@ -1,5 +1,6 @@
-import { ExecutionContext, ForbiddenException } from "@nestjs/common";
+import { ExecutionContext, ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { JwtAuthGuard } from "./jwt-auth.guard";
+import { resetMainnetSessionCache } from "./network-auth";
 
 function ctx(method: string, path = "/"): ExecutionContext {
   return { switchToHttp: () => ({ getRequest: () => ({ method, path }) }) } as unknown as ExecutionContext;
@@ -73,5 +74,41 @@ describe("JwtAuthGuard read-scope", () => {
         ctx("POST", "/v1/fiat/transfers/abc/confirm"),
       ),
     ).toThrow(ForbiddenException);
+  });
+});
+
+describe("JwtAuthGuard on the testnet stack", () => {
+  const config = {
+    get: (key: string, def?: string) =>
+      key === "PID_NETWORK" ? "testnet" : key === "API_URL" ? "https://sandbox-api.peridot.id" : def,
+  };
+  const guard = new JwtAuthGuard(config as never);
+
+  function reqCtx(cookie = "tok"): { ctx: ExecutionContext; req: { method: string; path: string; headers: Record<string, string>; cookies: Record<string, string>; user?: unknown } } {
+    const req = { method: "GET", path: "/v1/chains", headers: {} as Record<string, string>, cookies: { pid_access: cookie } };
+    return { ctx: { switchToHttp: () => ({ getRequest: () => req }) } as unknown as ExecutionContext, req };
+  }
+
+  beforeEach(() => {
+    resetMainnetSessionCache();
+    globalThis.fetch = jest.fn(async () =>
+      new Response(JSON.stringify({ pid: "ifal@pid" }), { status: 200, headers: { "content-type": "application/json" } }),
+    ) as unknown as typeof fetch;
+  });
+
+  it("authenticates by introspecting the mainnet API", async () => {
+    const { ctx, req } = reqCtx();
+    await expect(guard.canActivate(ctx)).resolves.toBe(true);
+    expect(req.user).toMatchObject({ pid: "ifal@pid" });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "https://api.peridot.id/v1/auth/introspect",
+      expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer tok" }) }),
+    );
+  });
+
+  it("fails closed when mainnet rejects the session", async () => {
+    globalThis.fetch = jest.fn(async () => new Response("{}", { status: 401 })) as unknown as typeof fetch;
+    const { ctx } = reqCtx();
+    await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
   });
 });

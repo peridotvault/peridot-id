@@ -36,14 +36,10 @@ COPY . .
 # via Infisical/env); Dockerfile fallbacks below are last-resort only.
 ARG VITE_API_URL
 ARG VITE_POPUP_URL
-ARG VITE_PID_ENV
 ARG VITE_PID_CLIENT_ID
-ARG VITE_OTHER_WORKSPACE_URL
 ENV VITE_API_URL=${VITE_API_URL:-https://api.peridot.id} \
     VITE_POPUP_URL=${VITE_POPUP_URL:-https://peridot.id} \
-    VITE_PID_ENV=${VITE_PID_ENV:-production} \
-    VITE_PID_CLIENT_ID=${VITE_PID_CLIENT_ID:-} \
-    VITE_OTHER_WORKSPACE_URL=${VITE_OTHER_WORKSPACE_URL:-}
+    VITE_PID_CLIENT_ID=${VITE_PID_CLIENT_ID:-}
 
 RUN pnpm --filter @peridotvault/pid-types build
 RUN pnpm --filter @peridotvault/pid-core build

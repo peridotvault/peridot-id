@@ -4,11 +4,15 @@ import { NestFactory } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import cookieParser from "cookie-parser";
+import type { NextFunction, Request, Response } from "express";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { PrismaExceptionFilter, Sanitize500Filter } from "./common/prisma-exception.filter";
 import { APP_ORIGINS_TTL_MS, isOriginAllowed, staticOriginsFor } from "./common/cors";
 import { PrismaService } from "./prisma/prisma.service";
+import { identityRouteForbidden, pidNetwork } from "./common/network";
+import { mainnetApiBase } from "./common/app-config";
+import { identityProxy } from "./common/identity-proxy";
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
@@ -26,6 +30,27 @@ async function bootstrap(): Promise<void> {
   }
 
   app.use(cookieParser());
+  // Identity lives only in the mainnet deployment (see common/network.ts).
+  // The testnet stack keeps chain/fiat/XP rows for the same PID but never the
+  // identity itself: its identity routes are forwarded to the mainnet API
+  // (shared cookie domain keeps the browser session working on both hosts).
+  const network = pidNetwork(config.get<string>("PID_NETWORK", "mainnet"));
+  if (network === "testnet") {
+    const mainnet = mainnetApiBase((key, def) => config.get(key, def));
+    if (mainnet) {
+      app.use(identityProxy(mainnet));
+    } else {
+      // Cannot derive the mainnet origin: answer 404 rather than serve a
+      // half-working identity surface from a DB that has no identity tables.
+      app.use((req: Request, res: Response, next: NextFunction) => {
+        if (identityRouteForbidden(req.path, network)) {
+          res.status(404).json({ statusCode: 404, message: "Not found" });
+          return;
+        }
+        next();
+      });
+    }
+  }
   // Secure transport headers (ANT-228). HSTS only in production: emitting it
   // from localhost would poison the dev browser profile (includeSubDomains +
   // localhost HSTS sticks and breaks plain-http dev until expiry).

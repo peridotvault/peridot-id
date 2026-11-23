@@ -8,7 +8,7 @@ export function TestnetBanner() {
   if (!net.testnet) return null;
   return (
     <div className="w-full border-b border-secondary bg-secondary px-6 py-2 text-center">
-      <span className="font-sans text-xs font-bold tracking-[1px] text-foreground">TESTNET — not real money</span>
+      <span className="font-sans text-xs font-bold tracking-[1px] text-foreground">TESTNET — test money only</span>
     </div>
   );
 }

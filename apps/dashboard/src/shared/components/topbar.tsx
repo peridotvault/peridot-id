@@ -1,12 +1,13 @@
 import { Link } from "react-router";
 import { Badge, MiniButton, Segmented, SegmentedItem } from "../../shared/ui/kit";
+import type { DashboardMode } from "../lib/config";
 
 export interface WorkspaceTab {
   key: string;
   label: string;
 }
 
-/** Single-row topbar: brand left, tabs middle, session + sign out right. No sidebar. */
+/** Single-row topbar: brand left, tabs middle, network + session + sign out right. No sidebar. */
 export function Topbar({
   tabs,
   active,
@@ -14,7 +15,8 @@ export function Topbar({
   sessionLabel,
   isAdmin,
   env = "production",
-  otherWorkspaceUrl,
+  mode,
+  onMode,
   onSignOut,
 }: {
   tabs: WorkspaceTab[];
@@ -23,7 +25,8 @@ export function Topbar({
   sessionLabel: string;
   isAdmin: boolean;
   env?: string;
-  otherWorkspaceUrl?: string;
+  mode: DashboardMode;
+  onMode: (mode: DashboardMode) => void;
   onSignOut: () => void;
 }) {
   const isSandbox = env !== "production";
@@ -35,10 +38,10 @@ export function Topbar({
         </Link>
         <Badge
           tone={isSandbox ? "warning" : "success"}
-          title={isSandbox ? "Sandbox: test payments — no real money moves here." : "Production: real payments."}
+          title={isSandbox ? "Testnet: test payments — no real money moves here." : "Mainnet: real payments."}
           className="shrink-0"
         >
-          {isSandbox ? "sandbox" : "production"}
+          {isSandbox ? "testnet" : "mainnet"}
         </Badge>
 
         <Segmented aria-label="Workspace" className="mx-auto min-w-0">
@@ -50,15 +53,16 @@ export function Topbar({
         </Segmented>
 
         <div className="flex min-w-0 shrink-0 items-center gap-3">
-          {/* Sandbox MVP (FR-3 / AC-D1): env switch ALWAYS rendered. The href
-              is the configured VITE_OTHER_WORKSPACE_URL or the derived
-              counterpart (see lib/config.ts) — never hidden. */}
-          <a
-            href={otherWorkspaceUrl ?? (isSandbox ? "https://dashboard.peridot.id" : "https://sandbox-dashboard.peridot.id")}
-            className="hidden text-xs text-muted-foreground transition-colors hover:text-foreground sm:inline"
-          >
-            {isSandbox ? "Switch to production" : "Open sandbox"}
-          </a>
+          {/* One dashboard origin, two APIs: the switch stores the mode and
+              reloads into that network (no hostname to remember). */}
+          <Segmented aria-label="Network" className="hidden sm:flex">
+            <SegmentedItem active={mode === "mainnet"} onClick={() => mode !== "mainnet" && onMode("mainnet")}>
+              Mainnet
+            </SegmentedItem>
+            <SegmentedItem active={mode === "testnet"} onClick={() => mode !== "testnet" && onMode("testnet")}>
+              Testnet
+            </SegmentedItem>
+          </Segmented>
           <span className="hidden min-w-0 items-center gap-2 text-xs text-muted-foreground md:flex">
             {isAdmin && <Badge tone="brand">admin</Badge>}
             <span className="max-w-48 truncate" title={sessionLabel}>

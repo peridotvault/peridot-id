@@ -28,10 +28,10 @@ test("Peridot presets: env picks the canonical hosts; custom baseUrl drops the p
   withNodeEnv("production", () => {
     assert.equal(Peridot().popupBaseUrl, "https://peridot.id");
     // Explicit env override wins (e.g. a production build targeting sandbox).
-    assert.equal(Peridot({ env: "sandbox" }).popupBaseUrl, "https://sandbox.peridot.id");
+    assert.equal(Peridot({ env: "sandbox" }).popupBaseUrl, "https://peridot.id");
   });
   withNodeEnv("development", () => {
-    assert.equal(Peridot().popupBaseUrl, "https://sandbox.peridot.id");
+    assert.equal(Peridot().popupBaseUrl, "https://peridot.id");
     assert.equal(Peridot({ env: "production" }).popupBaseUrl, "https://peridot.id");
   });
   // Caller brings the API origin → caller brings the popup host (first-party inline).
@@ -40,7 +40,7 @@ test("Peridot presets: env picks the canonical hosts; custom baseUrl drops the p
 
 test("resolvePeridotUrls: same table the client uses (for server-to-server backends)", () => {
   assert.deepEqual(resolvePeridotUrls("production"), { baseUrl: "https://api.peridot.id", popupBaseUrl: "https://peridot.id" });
-  assert.deepEqual(resolvePeridotUrls("sandbox"), { baseUrl: "https://sandbox-api.peridot.id", popupBaseUrl: "https://sandbox.peridot.id" });
+  assert.deepEqual(resolvePeridotUrls("sandbox"), { baseUrl: "https://sandbox-api.peridot.id", popupBaseUrl: "https://peridot.id" });
 });
 
 test("Peridot presets: canonical API hosts (AC-D3)", () => {

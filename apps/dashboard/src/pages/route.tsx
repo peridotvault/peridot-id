@@ -37,7 +37,7 @@ export function AppRoutes() {
       <Routes>
         <Route element={<WorkspaceLayout />}>
           <Route path="/" element={<HomePage />} />
-          <Route path="/apps/:id" element={<AppDetailPage />} />
+          <Route path="/apps/:env/:id" element={<AppDetailPage />} />
         </Route>
         <Route path="/demo" element={<DemoPage />} />
 

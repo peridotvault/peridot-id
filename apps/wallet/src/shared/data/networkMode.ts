@@ -1,22 +1,18 @@
 // Network-mode store (ANT-15 req 3+4 UI). Server-driven testnet: the API
-// registry is the source of truth for chain/RPC/program per selection
-// (selection-scoped chain paths land server-side in ANT-24); the wallet only
-// persists the user's selection and re-fetches selection-scoped data on
-// switch. Balances are never merged client-side — every fetch is
-// selection-scoped server-side; the client just reloads on change.
+// registry is the source of truth for chain/RPC/program per selection; the
+// wallet only persists the user's selection and re-fetches selection-scoped
+// data on switch. Balances are never merged client-side.
 //
-// Shape alignment (Theo ANT-23 spec still pending acceptance): mode maps to
-// the registry Solana rows — "mainnet" ↔ reference
-// 4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z, "testnet" ↔ the devnet/testnet Solana
-// row. If the accepted spec picks a different shape, reconcile here first.
+// Since the two networks are two API deployments (identity on mainnet, data
+// per network), the mode picks the API origin once per page load (config.ts)
+// and switching it RELOADS the app — no client, cache, or in-flight request
+// may straddle two networks.
 //
 // Safety: default OFF (mainnet). Only VITE_NETWORK_MODE=testnet opts in.
 
-import { API_BASE_URL } from "../app/config";
+import { API_BASE_URL, BOOT_NETWORK_MODE, NETWORK_MODE_KEY, type NetworkMode } from "../app/config";
 
-export type NetworkMode = "mainnet" | "testnet";
-
-export const NETWORK_MODE_KEY = "pid_network_mode";
+export type { NetworkMode };
 
 /** Failsafe: never leave signing blocked if a reload never settles.
  * 30s — QA (ANT-34 re-run) observed HomeData.load() ~30s on devnet RPC;
@@ -36,25 +32,7 @@ function emit(): void {
   });
 }
 
-function readInitial(): NetworkMode {
-  try {
-    if (typeof window !== "undefined") {
-      const raw = window.localStorage.getItem(NETWORK_MODE_KEY);
-      if (raw === "mainnet" || raw === "testnet") return raw;
-    }
-  } catch {
-    /* private mode — fall through to env/default */
-  }
-  try {
-    const env = import.meta.env.VITE_NETWORK_MODE as string | undefined;
-    if (env === "testnet") return "testnet";
-  } catch {
-    /* non-Vite runtime — ignore */
-  }
-  return "mainnet";
-}
-
-let mem: NetworkMode = readInitial();
+let mem: NetworkMode = BOOT_NETWORK_MODE;
 let switching = false;
 let failsafe: ReturnType<typeof setTimeout> | null = null;
 
@@ -104,18 +82,16 @@ export function beginNetworkTransition(): void {
  * failsafe closes it unconditionally so signing can never stick blocked.
  */
 export function setNetworkMode(mode: NetworkMode): void {
-  if (mode === mem) {
-    if (!switching) return;
-    endNetworkTransition();
-    return;
-  }
+  if (mode === mem) return;
   mem = mode;
   try {
-    if (typeof window !== "undefined") window.localStorage.setItem(NETWORK_MODE_KEY, mode);
+    window.localStorage.setItem(NETWORK_MODE_KEY, mode);
   } catch {
     /* non-fatal */
   }
-  beginNetworkTransition();
+  // The API origin is fixed for this page load (config.ts) — reload so no
+  // client, cache, or in-flight request straddles two networks.
+  window.location.reload();
 }
 
 /** Idempotent: closes the transition window (notifies only on change). */

@@ -39,19 +39,23 @@ wallet popup for the first-party session.
 
 | Var | Dev default | Prod |
 |---|---|---|
-| `VITE_API_URL` | `http://localhost:3300` | `https://api.peridot.id` |
-| `VITE_POPUP_URL` (wallet popup host) | `http://localhost:3302` | `https://peridot.id` (sandbox: `https://sandbox.peridot.id`) |
-| `VITE_PID_ENV` | unset (derived → `sandbox`) | `production` |
+| `VITE_API_URL` (mainnet API) | `http://localhost:3300` | `https://api.peridot.id` |
+| `VITE_TEST_API_URL` | unset → same as `VITE_API_URL` | unset → derived `https://sandbox-api.peridot.id` |
+| `VITE_POPUP_URL` (wallet host) | `http://localhost:3302` | `https://peridot.id` (one host for both networks) |
 | `VITE_PID_CLIENT_ID` | unset (loopback needs none) | optional client_id for the `/demo` sample dapp |
-| `VITE_OTHER_WORKSPACE_URL` (env-switch link) | unset | opposite-env dashboard URL |
+
+The network is a user choice, not a build: a Mainnet/Testnet switch stores
+`pid_network_mode` and reloads into that API (`?env=testnet` deep-links it).
+The env badge follows the mode. Apps from both networks are listed together
+with a badge; a detail route carries its own network (`/apps/:env/:id`).
 
 LAN-safe: a configured loopback URL is host-swapped to the page host at
 runtime (see `src/lib/api-base.ts`), so LAN devices work with zero env.
-The env badge follows the *configured* URL, not the LAN-resolved one.
+The env badge follows the selected network, not the URL.
 
 ## Routes
 
-Workspace (topbar shell): `/` (Apps + session gate), `/apps/:id`, `/demo`.
+Workspace (topbar shell): `/` (Apps + session gate), `/apps/:env/:id`, `/demo`.
 
 Every admin console lives under `/admin/*` behind `AdminLayout`
 (`src/feat/admin/admin-layout.tsx`): session + `role === "admin"` gate, then a

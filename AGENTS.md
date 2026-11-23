@@ -43,6 +43,14 @@ in `dev` — never open a PR unless the owner asks for one.
   identity at `/etc/peridot-id/infisical.env` (0600 root) and pulls via
   `infisical run`; no `deploy/.env.*` on the VPS. Fallback:
   `INFISICAL_ENABLED=0` reads `deploy/.env.$ENV`.
+- **Network modes (mainnet | testnet):** ONE frontend origin pair — wallet
+  `peridot.id`, dashboard `dashboard.peridot.id` — served by the main stack;
+  the testnet stack is API + DB only (`--profile web` is main-only). The mode
+  switch stores `pid_network_mode` and reloads, because the API origin is fixed
+  per page load. Identity (PID, passkey, session) exists only in the mainnet
+  DB; the testnet API proxies identity routes to mainnet and verifies sessions
+  by introspection. One env per stack: `PID_NETWORK=mainnet|testnet`. Full
+  model, reset policy, and consequences: `docs/NETWORK_MODES.md`.
 - **Postgres DB:** `peridot_id` at `localhost:5432` (NOT `peridot`). `DATABASE_URL` in
   Infisical `/apps/api` (env `dev`), legacy fallback `apps/api/.env`.
 - **Solana toolchain:** 2.3.13 at
