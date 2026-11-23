@@ -1,12 +1,12 @@
-import { useNetworkMode } from "../../hooks/useNetworkMode";
 import { useHeaderProfile } from "../../hooks/useHeaderProfile";
 import { useAccountMenu } from "../../hooks/useAccountMenu";
 import { HomeHeader } from "./HomeHeader";
 
-// Header for phone / two-column layouts: brand + profile on one row, plus the
-// persistent TESTNET badge (ANT-15 safety req 4). Mounted once by the shell on
-// tab roots so it never unmounts on navigation. On three-column desktop it is
-// not rendered — the brand moves into the nav and the profile into InfoRail.
+// Header for phone / two-column layouts: brand + profile on one row. The
+// persistent TESTNET badge lives in TestnetBanner, above the header. Mounted
+// once by the shell on tab roots so it never unmounts on navigation. On
+// three-column desktop it is not rendered — the brand moves into the nav and
+// the profile into InfoRail.
 export function TopBar({
   onProfile,
   onSwitched,
@@ -17,7 +17,6 @@ export function TopBar({
   onSwitched: () => void;
   refreshKey: string;
 }) {
-  const net = useNetworkMode();
   const { displayName, avatarUrl, level } = useHeaderProfile(refreshKey);
   const menu = useAccountMenu(onSwitched);
 
@@ -26,11 +25,6 @@ export function TopBar({
       <div className="px-6 pb-3 pt-5">
         <HomeHeader displayName={displayName} avatarUrl={avatarUrl} level={level} menu={menu} onProfile={onProfile} />
       </div>
-      {net.testnet && (
-        <div className="border-t border-secondary bg-secondary px-6 py-1.5">
-          <span className="font-sans text-xs font-bold tracking-[1px] text-foreground">TESTNET</span>
-        </div>
-      )}
     </div>
   );
 }

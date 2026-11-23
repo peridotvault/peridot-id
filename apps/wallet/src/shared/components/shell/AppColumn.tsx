@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { styles as s } from "../../styles/theme";
 import { useWideLayout } from "../../hooks/useWideLayout";
 import { useThreeColumn } from "../../hooks/useThreeColumn";
+import { TestnetBanner } from "./TestnetBanner";
 
 // App shell. One content column everywhere; the chrome around it changes:
 //
@@ -69,11 +70,21 @@ export function AppColumn({
         </div>
       </div>
     );
-  if (!overlay) return shell;
+  // The testnet announcement sits above every column (nav, header, info) and
+  // travels with a push overlay so the warning never disappears mid-flow.
+  if (!overlay) {
+    return (
+      <div className="flex flex-col">
+        <TestnetBanner />
+        {shell}
+      </div>
+    );
+  }
   return (
     <div style={s.rootFill} className="flex flex-col">
       {shell}
       <div style={s.overlayFull} className="flex flex-col">
+        <TestnetBanner />
         <div style={s.rail} className="flex flex-col">{overlay}</div>
       </div>
     </div>
