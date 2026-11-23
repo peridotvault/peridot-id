@@ -1,5 +1,6 @@
 import { Controller, Get, Header } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { pidNetwork } from "../common/network";
 
 /**
  * Self-describing environment endpoint (ANT-287 FR-1).
@@ -17,7 +18,10 @@ export class EnvController {
   @Header("Cache-Control", "public, max-age=60")
   env(): { env: string; dokuMode: string; docs: string } {
     const dokuMode = this.config.get<string>("DOKU_MODE", "sandbox") === "production" ? "production" : "sandbox";
+    // The network flag wins: a testnet stack must never advertise itself as
+    // production just because its fiat provider is configured for real money.
+    const env = pidNetwork(this.config.get<string>("PID_NETWORK")) === "testnet" ? "sandbox" : dokuMode;
     const docs = (this.config.get<string>("DOCS_URL", "") || "").trim() || "https://docs.peridot.id";
-    return { env: dokuMode, dokuMode, docs };
+    return { env, dokuMode, docs };
   }
 }

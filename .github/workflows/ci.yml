@@ -251,6 +251,15 @@ jobs:
           grep -qx 'PID_NETWORK=testnet' deploy/.env.test.example
           grep -qx 'COOKIE_DOMAIN=.peridot.id' deploy/.env.main.example
           grep -qx 'COOKIE_DOMAIN=.peridot.id' deploy/.env.test.example
+          # Real money never runs on the test stack, and test money (faucet)
+          # never on main.
+          grep -qx 'DOKU_MODE=production' deploy/.env.main.example
+          grep -qx 'DOKU_MODE=sandbox' deploy/.env.test.example
+          grep -qx 'PID_FAUCET_ENABLED=true' deploy/.env.test.example
+          if grep -qx 'PID_FAUCET_ENABLED=true' deploy/.env.main.example; then
+            echo "::error::faucet must stay disabled on the main stack"
+            exit 1
+          fi
 
       - name: Delegatecall ban guard
         run: |

@@ -15,6 +15,9 @@ import { identityRouteForbidden } from "./network";
 /** Headers worth relaying back to the browser (hop-by-hop ones are dropped). */
 const RELAY_RESPONSE_HEADERS = ["content-type", "set-cookie", "location", "cache-control", "etag"];
 
+/** Mainnet is one hop away; a hung connection must not hang a browser request. */
+const UPSTREAM_TIMEOUT_MS = 5_000;
+
 function readBody(req: Request): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -39,9 +42,15 @@ export function identityProxy(
     }
     const headers = new Headers();
     for (const [key, value] of Object.entries(req.headers)) {
-      if (typeof value === "string" && key !== "host" && key !== "content-length") headers.set(key, value);
+      if (typeof value === "string" && key !== "host" && key !== "content-length" && key !== "x-forwarded-for") {
+        headers.set(key, value);
+      }
     }
     headers.set("host", targetHost);
+    // Mainnet trusts one proxy hop, so it reads the LAST XFF entry. Forwarding
+    // our client's raw chain would make every testnet user look like this
+    // container — one shared rate-limit bucket. Send the attested client IP.
+    if (req.ip) headers.set("x-forwarded-for", req.ip);
     const hasBody = req.method !== "GET" && req.method !== "HEAD";
     try {
       const upstream = await fetchImpl(`${target}${req.originalUrl}`, {
@@ -49,6 +58,7 @@ export function identityProxy(
         headers,
         ...(hasBody ? { body: new Uint8Array(await readBody(req)) } : {}),
         redirect: "manual",
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
       res.status(upstream.status);
       const setCookies = upstream.headers.getSetCookie?.() ?? [];

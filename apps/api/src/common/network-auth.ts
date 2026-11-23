@@ -64,6 +64,8 @@ export async function mainnetSession(
   try {
     const res = await (opts.fetchImpl ?? fetch)(`${baseUrl}/v1/auth/introspect`, {
       headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+      // Same hop as the identity proxy: a stuck mainnet must fail closed fast.
+      signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) return null;
     const body = (await res.json()) as { pid?: unknown; scope?: unknown; app?: unknown };

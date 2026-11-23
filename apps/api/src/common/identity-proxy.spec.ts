@@ -86,6 +86,24 @@ describe("identityProxy", () => {
     expect(out.statusCode).toBe(502);
   });
 
+  it("sends the attested client IP, not the client's own XFF chain", async () => {
+    const fetchImpl = jest.fn(async () => new Response("{}", { status: 200 }));
+    const { res } = fakeRes();
+    await identityProxy("https://api.peridot.id", fetchImpl as unknown as typeof fetch)(
+      fakeReq("/v1/auth/session", {
+        ip: "203.0.113.9",
+        headers: { cookie: "pid_access=abc", "x-forwarded-for": "1.2.3.4, 5.6.7.8" },
+      }),
+      res,
+      () => {
+        throw new Error("must not fall through");
+      },
+    );
+    const headers = (fetchImpl.mock.calls[0] as unknown[])[1] as { headers: Headers; signal: unknown };
+    expect(headers.headers.get("x-forwarded-for")).toBe("203.0.113.9");
+    expect(headers.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("does nothing when not on testnet", async () => {
     const fetchImpl = jest.fn();
     let nexted = false;

@@ -8,11 +8,14 @@ One frontend, two backends, one identity.
 | Database | prod `peridot_id` | separate test DB |
 | PID, passkey, profile, device, session | ✅ the only copy | ❌ none (identity routes are proxied) |
 | Chain accounts, authorities, intents, tx | ✅ | ✅ (devnet; may be reset) |
-| Fiat / money | real (DOKU production) | test (DOKU sandbox + faucet) |
+| Fiat / money | real (DOKU production) | test (DOKU sandbox + faucet route) |
 | Level / XP / task completion | ✅ persistent | ✅ own copy, resettable |
 | App registry (`pid_apps`, keys, origins, fees) | ✅ | ✅ separate |
 
 Frontend hosts are single: wallet `peridot.id`, dashboard `dashboard.peridot.id`.
+The two stacks are separate machines: main stack (API + wallet + dashboard) and
+the test stack (API + its own DB) on another VPS. They share only the origin
+pair and the `.peridot.id` cookie domain — no shared database, no shared disk.
 Mode (`mainnet` | `testnet`) is a user-visible switch in the wallet (Settings)
 and in the dashboard topbar. Switching stores `pid_network_mode` and **reloads**
 — the API origin is fixed per page load, so no client, cache, or request ever
@@ -43,8 +46,10 @@ Mainnet down ⇒ testnet login unavailable (testnet data stays intact).
 Mode = which network's data is on screen. The signing target is the chain the
 action belongs to, so a testnet action from a mainnet-mode screen is allowed
 and always carries a `TESTNET — test money only` banner. Fiat is the exception:
-test money and real money never share a screen, so fiat actions are refused
-when the mode does not match.
+test money and real money never share a screen, so the wallet gates the fiat
+screens (`Topup`, `FiatTransfer`) off in testnet mode. The test stack still
+keeps its fiat tables and registers the faucet route
+(`PID_FAUCET_ENABLED=true`) for API-level testing; there is no wallet UI for it.
 
 ## Testnet reset policy (safe: testnet only)
 
@@ -64,7 +69,9 @@ accounts from the chain on the next login instead of trusting the cleared DB.
 ## Deploy
 
 - Main stack: API + wallet + dashboard (`--profile web`).
-- Test stack: **API + DB only** (`deploy/compose.yaml` profiles).
+- Test stack: **API + DB only** (`deploy/compose.yaml` profiles) — its own VPS.
 - One new env per stack: `PID_NETWORK=mainnet|testnet`. Nothing else.
+- Boot fails loudly when the flag disagrees with `API_URL` (`networkConsistencyError`):
+  testnet needs a `sandbox-*` host, mainnet must not have one.
 - `deploy/.env.main*` must keep `DOKU_MODE=production` and no
   `PID_FAUCET_ENABLED` (the faucet route is not registered on mainnet).

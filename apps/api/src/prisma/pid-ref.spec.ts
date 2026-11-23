@@ -1,4 +1,4 @@
-import { pidsInCreateData } from "./pid-ref";
+import { pidsInCreateData, pidsInWriteArgs, SHADOWABLE_PID_MODELS } from "./pid-ref";
 
 describe("pidsInCreateData", () => {
   it("reads a single pid", () => {
@@ -18,5 +18,24 @@ describe("pidsInCreateData", () => {
     expect(pidsInCreateData({ pid: "" })).toEqual([]);
     expect(pidsInCreateData({ pid: 7 })).toEqual([]);
     expect(pidsInCreateData(null)).toEqual([]);
+  });
+});
+
+describe("pidsInWriteArgs", () => {
+  it("reads create and data payloads", () => {
+    expect(pidsInWriteArgs({ data: { pid: "a@pid" } })).toEqual(["a@pid"]);
+    expect(pidsInWriteArgs({ create: { pid: "b@pid" } })).toEqual(["b@pid"]);
+  });
+
+  it("reads the where pid of an upsert (no data/create on every model)", () => {
+    expect(pidsInWriteArgs({ where: { pid: "c@pid" }, update: {} })).toEqual(["c@pid"]);
+  });
+
+  it("never shadows identity-owned tables", () => {
+    for (const model of ["Profile", "IdentityCredential", "Device", "ClaimTicket"]) {
+      expect(SHADOWABLE_PID_MODELS.has(model)).toBe(false);
+    }
+    // login events are written on every sign-in and key on identity.pid
+    expect(SHADOWABLE_PID_MODELS.has("LoginEvent")).toBe(true);
   });
 });

@@ -23,11 +23,29 @@ export function pidsInCreateData(data: unknown): string[] {
   return [...new Set(pids)];
 }
 
-/** Models allowed to carry a pid without an identity row on the testnet stack. */
+/**
+ * PIDs a write will reference. `upsert` carries neither `data` nor a plain
+ * `where.pid` on every model, so all three shapes are read here — missing one
+ * means a first-write FK failure on the testnet stack.
+ */
+export function pidsInWriteArgs(args: unknown): string[] {
+  const a = (args ?? {}) as { data?: unknown; create?: unknown; where?: { pid?: unknown } };
+  return [
+    ...new Set([
+      ...pidsInCreateData(a.data),
+      ...pidsInCreateData(a.create),
+      ...(typeof a.where?.pid === "string" ? [a.where.pid] : []),
+    ]),
+  ];
+}
+
+/**
+ * Models allowed to carry a pid without an identity row on the testnet stack.
+ * Identity-owned tables (profile, credential, device, claim ticket) are
+ * deliberately absent: their routes are forwarded to mainnet, so a local write
+ * is a bug that must fail loudly instead of silently forging an identity row.
+ */
 export const SHADOWABLE_PID_MODELS = new Set([
-  "Profile",
-  "IdentityCredential",
-  "Device",
   "ChainAccount",
   "Authority",
   "WalletFeePayer",
@@ -35,6 +53,7 @@ export const SHADOWABLE_PID_MODELS = new Set([
   "Transaction",
   "SecurityEvent",
   "RelayerBroadcast",
+  "LoginEvent",
   "FiatProviderAccount",
   "FiatProviderTransaction",
   "FiatLedgerEntry",
@@ -42,5 +61,4 @@ export const SHADOWABLE_PID_MODELS = new Set([
   "UserXpState",
   "XpTaskCompletion",
   "XpLedgerEntry",
-  "ClaimTicket",
 ]);

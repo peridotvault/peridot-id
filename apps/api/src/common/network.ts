@@ -57,3 +57,27 @@ export function stripSandboxHost(apiUrl: string): string | null {
   url.hostname = url.hostname.slice("sandbox-".length);
   return url.origin;
 }
+
+/**
+ * Boot guard: `PID_NETWORK` decides whether this deployment holds identity, so
+ * it must match the deployment's own API host in production. A flipped flag
+ * would either serve identity routes from a DB that has none (testnet DB,
+ * flag mainnet) or refuse every login while looking healthy (mainnet host,
+ * flag testnet — no sandbox host to derive a peer from). Local dev is exempt:
+ * one API serves both modes on localhost.
+ */
+export function networkConsistencyError(
+  network: PidNetwork,
+  apiUrl: string | undefined,
+  nodeEnv: string | undefined,
+): string | null {
+  if (nodeEnv !== "production") return null;
+  const sandbox = stripSandboxHost((apiUrl ?? "").trim()) !== null;
+  if (network === "testnet" && !sandbox) {
+    return "PID_NETWORK=testnet requires an API_URL on a sandbox-* host (the mainnet origin is derived from it)";
+  }
+  if (network === "mainnet" && sandbox) {
+    return "PID_NETWORK=mainnet on a sandbox-* API_URL — this stack would hold identity it must not own";
+  }
+  return null;
+}

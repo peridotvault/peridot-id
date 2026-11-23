@@ -45,7 +45,9 @@ in `dev` — never open a PR unless the owner asks for one.
   `INFISICAL_ENABLED=0` reads `deploy/.env.$ENV`.
 - **Network modes (mainnet | testnet):** ONE frontend origin pair — wallet
   `peridot.id`, dashboard `dashboard.peridot.id` — served by the main stack;
-  the testnet stack is API + DB only (`--profile web` is main-only). The mode
+  the testnet stack is API + DB only (`--profile web` is main-only) and runs on
+  its own VPS — the stacks share no DB or disk, only the origin pair and the
+  `.peridot.id` cookie domain. The mode
   switch stores `pid_network_mode` and reloads, because the API origin is fixed
   per page load. Identity (PID, passkey, session) exists only in the mainnet
   DB; the testnet API proxies identity routes to mainnet and verifies sessions

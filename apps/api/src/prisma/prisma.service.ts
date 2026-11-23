@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { isTestnetNetwork } from "../common/network";
-import { pidsInCreateData, SHADOWABLE_PID_MODELS } from "./pid-ref";
+import { pidsInWriteArgs, SHADOWABLE_PID_MODELS } from "./pid-ref";
 
 /**
  * DI token for the Prisma client. Nothing constructs it directly — the module
@@ -25,7 +25,7 @@ export function createPrismaClient(): PrismaService {
       $allModels: {
         async $allOperations({ model, args, query }) {
           if (model && SHADOWABLE_PID_MODELS.has(model)) {
-            for (const pid of pidsInCreateData((args as { data?: unknown }).data)) {
+            for (const pid of pidsInWriteArgs(args)) {
               // Raw client on purpose: the extension never runs for Identity.
               await base.identity.upsert({ where: { pid }, create: { pid }, update: {} });
             }
