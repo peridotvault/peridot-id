@@ -1,14 +1,15 @@
 import type { Request, Response } from "express";
 import { identityProxy } from "./identity-proxy";
 
-function fakeReq(path: string, overrides: Partial<Request> = {}): Request {
+function fakeReq(path: string, overrides: Partial<Request> = {}, body = ""): Request {
   return {
     method: "GET",
     path,
     originalUrl: path,
     headers: { cookie: "pid_access=abc" },
-    on: (_event: string, cb: (arg?: unknown) => void) => {
-      if (_event === "end") queueMicrotask(() => cb());
+    on: (event: string, cb: (arg?: unknown) => void) => {
+      if (event === "data" && body) queueMicrotask(() => cb(Buffer.from(body)));
+      if (event === "end") queueMicrotask(() => cb());
       return undefined;
     },
     ...overrides,
@@ -113,5 +114,60 @@ describe("identityProxy", () => {
     });
     expect(nexted).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  describe("app registered in the testnet registry only", () => {
+    const loginBody = JSON.stringify({ returnTo: "http://localhost:3000", clientId: "pidapp_local" });
+    const sentBody = (fetchImpl: jest.Mock): unknown =>
+      JSON.parse(Buffer.from(((fetchImpl.mock.calls[0] as unknown[])[1] as { body: Uint8Array }).body).toString("utf8"));
+
+    it("drops the app binding mainnet cannot resolve", async () => {
+      const fetchImpl = jest.fn(async () => new Response("{}", { status: 200 }));
+      const onUnbound = jest.fn();
+      const { res } = fakeRes();
+      await identityProxy("https://api.peridot.id", fetchImpl as unknown as typeof fetch, "testnet", {
+        localApp: async (clientId) => clientId === "pidapp_local",
+        onUnbound,
+      })(
+        fakeReq("/v1/auth/login", { method: "POST", headers: { "content-type": "application/json" } }, loginBody),
+        res,
+        () => {
+          throw new Error("must not fall through");
+        },
+      );
+      expect(sentBody(fetchImpl)).toEqual({ returnTo: "http://localhost:3000" });
+      expect(onUnbound).toHaveBeenCalledWith("/v1/auth/login", "pidapp_local");
+    });
+
+    it("keeps the binding for an app of the other network", async () => {
+      const fetchImpl = jest.fn(async () => new Response("{}", { status: 200 }));
+      const { res } = fakeRes();
+      await identityProxy("https://api.peridot.id", fetchImpl as unknown as typeof fetch, "testnet", {
+        localApp: async () => false,
+      })(
+        fakeReq("/v1/auth/login", { method: "POST", headers: { "content-type": "application/json" } }, loginBody),
+        res,
+        () => {
+          throw new Error("must not fall through");
+        },
+      );
+      expect(sentBody(fetchImpl)).toEqual(JSON.parse(loginBody));
+    });
+
+    it("never rewrites routes that are not app-bound", async () => {
+      const fetchImpl = jest.fn(async () => new Response("{}", { status: 200 }));
+      const body = JSON.stringify({ clientId: "pidapp_local", code: "abc" });
+      const { res } = fakeRes();
+      await identityProxy("https://api.peridot.id", fetchImpl as unknown as typeof fetch, "testnet", {
+        localApp: async () => true,
+      })(
+        fakeReq("/v1/auth/introspect", { method: "POST", headers: { "content-type": "application/json" } }, body),
+        res,
+        () => {
+          throw new Error("must not fall through");
+        },
+      );
+      expect(sentBody(fetchImpl)).toEqual(JSON.parse(body));
+    });
   });
 });

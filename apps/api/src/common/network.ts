@@ -29,14 +29,25 @@ export const IDENTITY_ROUTE_PREFIXES = [
   "/v1/credentials",
 ] as const;
 
+/**
+ * Routes inside an identity prefix that the testnet stack must serve ITSELF:
+ * they only need the app registry (`pid_apps`), which every stack owns
+ * separately by design (docs/NETWORK_MODES.md). Forwarding them to mainnet made
+ * a testnet app unusable — `app-info` 404 and machine-token 401 "Invalid
+ * client" with no hint that the app simply lives on the other network.
+ */
+export const LOCAL_APP_ROUTES = ["/v1/auth/app-info", "/v1/auth/token"] as const;
+
 /** True when `pathname` belongs to identity and the deployment is testnet. */
 export function identityRouteForbidden(
   pathname: string,
   network: PidNetwork = pidNetwork(),
 ): boolean {
   if (network === "mainnet") return false;
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  if ((LOCAL_APP_ROUTES as readonly string[]).includes(path)) return false;
   return IDENTITY_ROUTE_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
   );
 }
 

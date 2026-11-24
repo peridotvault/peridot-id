@@ -7,7 +7,8 @@ import { extractRequestOrigin, getVerifiedAppOrigins, hasSessionCookie } from ".
 import { isOriginAllowed, staticOriginsFor } from "./cors";
 import { PrismaService } from "../prisma/prisma.service";
 import { mainnetApiBase } from "./app-config";
-import { mainnetSession } from "./network-auth";
+import { mainnetSession, sessionToken } from "./network-auth";
+import { verifyLocalAppToken } from "./local-app-token";
 import { pidNetwork } from "./network";
 
 /**
@@ -78,6 +79,16 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
     // Testnet stack: no identity tables locally, so the session is resolved
     // against the mainnet API (introspection, cached) instead of a local secret.
     if (this.config && pidNetwork(this.config.get<string>("PID_NETWORK")) === "testnet") {
+      // App (machine) tokens are MINTED by this stack (its own `pid_apps`), so
+      // they can never be introspected on mainnet — verify the local signature
+      // first. User sessions are never minted here, so a local pass is always
+      // an app token.
+      const local = this.localAppToken(req);
+      if (local) {
+        this.assertMethodAllowed(local, req);
+        (req as Request & { user?: unknown }).user = local;
+        return true;
+      }
       const session = await mainnetSession(req, {
         network: "testnet",
         baseUrl: mainnetApiBase((key, def) => this.config?.get(key, def)),
@@ -93,6 +104,17 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
       return true;
     }
     return (await super.canActivate(context)) as boolean;
+  }
+
+  /**
+   * Locally-signed app token for this testnet request, or null (then the guard
+   * falls back to mainnet introspection). Only the `pid-app` audience passes.
+   */
+  private localAppToken(req: Request): { pid: string; app: string; scope?: string } | null {
+    const token = sessionToken(req);
+    const secret = this.config?.get<string>("JWT_ACCESS_SECRET");
+    if (!token || !secret) return null;
+    return verifyLocalAppToken(token, secret);
   }
 
   /**

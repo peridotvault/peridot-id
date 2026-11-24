@@ -42,6 +42,37 @@ The testnet API has no identity tables. Instead:
 Consequences: one passkey, one login, and the same PID on both networks.
 Mainnet down ⇒ testnet login unavailable (testnet data stays intact).
 
+## Apps on the testnet stack
+
+The app registry is per-network (`pid_apps` lives in each stack's own DB, and
+the dashboard lists both networks side by side with a `testnet` / `mainnet`
+badge). A testnet app is therefore unknown to mainnet — which is why the two
+app routes that only need the registry are served **locally** on the testnet
+stack instead of being forwarded:
+
+- `GET /v1/auth/app-info` — the consent card (name, logo, login methods).
+- `POST /v1/auth/token` — the machine token, signed with the testnet stack's own
+  `JWT_ACCESS_SECRET`. Mainnet introspection cannot validate it (different
+  secret, no such app), so `common/jwt-auth.guard.ts` verifies the local
+  signature first and only falls back to introspection for user sessions
+  (`common/local-app-token.ts`, `pid-app` audience only).
+
+Everything else that names an app stays forwarded, because it needs identity
+that only mainnet owns. For those calls the proxy **drops the app binding**
+when the `clientId` belongs to a testnet app (`identity-proxy.ts`,
+`APP_BOUND_ROUTES`): `login`, `authorize`, `passkey/finish`, `email/verify`, and
+`exchange` then run as a first-party login, with `returnTo` validated against
+the operator allowlist (loopback always allowed). The developer experience is
+the same as mainnet — set `PID_ENV` (`sandbox` for testnet) and the SDK points
+at the right stack; no second registration, no "Invalid client" on credentials
+they never touched. A testnet app is still a *separate* record from any mainnet
+app: nothing about it is written to the mainnet DB.
+
+Consequence worth knowing: a testnet login is not app-bound, so per-app
+`loginMethods` switches and the unverified-app consent gate apply to mainnet
+apps only. Fees, escrow, XP and app-user data for a testnet app are unaffected —
+they resolve the app from the testnet registry, on the testnet stack.
+
 ## Cross-network signing
 
 Mode = which network's data is on screen. The signing target is the chain the

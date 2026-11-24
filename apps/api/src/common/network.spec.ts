@@ -45,6 +45,11 @@ describe("identityRouteForbidden", () => {
       "/v1/authx",
       "/v1/identities",
       "/v1/apps",
+      // App registry is per-network: these two only need `pid_apps`, so the
+      // testnet stack serves them from its own DB instead of forwarding to a
+      // mainnet registry that never heard of the app.
+      "/v1/auth/app-info",
+      "/v1/auth/token",
     ]) {
       expect(identityRouteForbidden(path, "testnet")).toBe(false);
     }

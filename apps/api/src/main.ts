@@ -106,7 +106,16 @@ async function bootstrap(): Promise<void> {
   if (network === "testnet") {
     const mainnet = mainnetApiBase((key, def) => config.get(key, def));
     if (mainnet) {
-      app.use(identityProxy(mainnet));
+      const prisma = app.get(PrismaService);
+      app.use(
+        identityProxy(mainnet, fetch, "testnet", {
+          // Apps registered on this stack live in the testnet DB only, so their
+          // sign-in calls drop the app binding mainnet could never resolve.
+          localApp: async (clientId) =>
+            (await prisma.pidApp.findUnique({ where: { clientId }, select: { id: true } })) !== null,
+          onUnbound: (path, clientId) => logger.warn(`testnet app ${clientId}: ${path} forwarded without the app binding`),
+        }),
+      );
     } else {
       // Cannot derive the mainnet origin: answer 404 rather than serve a
       // half-working identity surface from a DB that has no identity tables.

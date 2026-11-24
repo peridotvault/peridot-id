@@ -1,6 +1,17 @@
+import { createHmac } from "node:crypto";
 import { ExecutionContext, ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import { resetMainnetSessionCache } from "./network-auth";
+
+const ACCESS_SECRET = "test-access-secret";
+
+/** Same HS256 shape @nestjs/jwt emits for an app access token. */
+function signAppToken(payload: Record<string, unknown>, secret = ACCESS_SECRET): string {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
+  return `${header}.${body}.${signature}`;
+}
 
 function ctx(method: string, path = "/"): ExecutionContext {
   return { switchToHttp: () => ({ getRequest: () => ({ method, path }) }) } as unknown as ExecutionContext;
@@ -110,5 +121,26 @@ describe("JwtAuthGuard on the testnet stack", () => {
     globalThis.fetch = jest.fn(async () => new Response("{}", { status: 401 })) as unknown as typeof fetch;
     const { ctx } = reqCtx();
     await expect(guard.canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+  });
+
+  it("accepts a machine token this stack minted, without asking mainnet", async () => {
+    const local = new JwtAuthGuard({
+      get: (key: string, def?: string) =>
+        key === "PID_NETWORK" ? "testnet" : key === "JWT_ACCESS_SECRET" ? ACCESS_SECRET : def,
+    } as never);
+    const token = signAppToken({
+      sub: "live2dev@pid",
+      app: "pidapp_local",
+      scope: "fiat:transfer",
+      iss: "peridot-id",
+      aud: "pid-app",
+      type: "access",
+      exp: Math.floor(Date.now() / 1000) + 60,
+    });
+    const req = { method: "POST", path: "/v1/fiat/transfers/inquiry", headers: { authorization: `Bearer ${token}` }, cookies: {} };
+    const execution = { switchToHttp: () => ({ getRequest: () => req }) } as unknown as ExecutionContext;
+    await expect(local.canActivate(execution)).resolves.toBe(true);
+    expect(req).toMatchObject({ user: { pid: "live2dev@pid", app: "pidapp_local", scope: "fiat:transfer" } });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });

@@ -11,8 +11,9 @@ schedule, and — because every app owner is a normal identity — its own
 ## Manage in the dashboard
 
 Open the **developer dashboard** (`http://localhost:3303` in local dev) and sign in. The **Apps**
-tab lists your apps (name only); click an app to open its **detail page**, which
-is where every setting lives:
+tab lists your mainnet and testnet apps in one list, each with its network
+badge; click an app to open its **detail page**, which is where every setting
+lives:
 
 - **General** — rename, enable/disable.
 - **client_id** — public identifier for login and API calls.
@@ -48,6 +49,26 @@ Then add origins (`PATCH /v1/apps/:id` with `allowedOrigins`) — bare
 `https://…` origins, no paths. Local development needs nothing: `localhost` /
 `127.0.0.1` are always allowed. See
 [Sign in with PeridotID](/sign-in-with-peridot-id).
+
+## Mainnet or testnet
+
+Pick the network when you register the app (the dashboard's environment
+selector) — **mainnet** moves real money, **testnet** moves test money. The two
+registries are separate: a testnet app is a different record with a different
+`client_id`, and it never appears in the mainnet registry.
+
+Point your build at the matching stack and everything else follows:
+
+```ts
+const peridot = Peridot({ clientId: 'pidapp_…', env: 'sandbox' }); // testnet
+```
+
+`app-info`, the machine token, and all app-scoped API calls then resolve on the
+network the app was registered in, so a testnet app works with testnet
+credentials — no duplicate registration and no "Invalid client" for a secret
+that is perfectly valid on the other network. Sign-in on testnet runs as a
+first-party login on that network, so per-app `loginMethods` switches and the
+unverified-app consent gate apply to mainnet apps only.
 
 ## Machine token
 
