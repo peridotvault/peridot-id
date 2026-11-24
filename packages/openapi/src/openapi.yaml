@@ -5492,6 +5492,7 @@ components:
           description: Canonical docs base URL
       example:
         env: "sandbox"
+        network: "testnet"
         dokuMode: "sandbox"
         docs: "https://docs.peridot.id"
 
