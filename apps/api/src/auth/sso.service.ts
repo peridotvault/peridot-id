@@ -159,6 +159,40 @@ export function isLoopbackReturnTo(returnTo: string): boolean {
   }
 }
 
+/**
+ * True for hosts only reachable from the caller's own machine or LAN: loopback
+ * plus literal RFC1918 / IPv6 ULA / link-local addresses. Same rationale as
+ * loopback — a `pid_code` delivered to `http://192.168.1.20:3001` is useless to
+ * a remote attacker, and requiring registration would break the everyday
+ * "test the dapp from my phone on the dev server" flow. Literal addresses only:
+ * a hostname that merely resolves to a private IP is still rejected, so DNS
+ * rebinding and public redirectors gain nothing.
+ */
+export function isTopologySafeReturnTo(returnTo: string): boolean {
+  if (isLoopbackReturnTo(returnTo)) return true;
+  let host: string;
+  try {
+    const parsed = new URL(returnTo);
+    if (!["http:", "https:"].includes(parsed.protocol)) return false;
+    host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host.includes(":")) {
+    // IPv6: ULA fc00::/7 and link-local fe80::/10.
+    return /^f[cd]/.test(host) || /^fe[89ab]/.test(host);
+  }
+  const octets = host.split(".");
+  if (octets.length !== 4 || octets.some((o) => !/^\d{1,3}$/.test(o) || Number(o) > 255)) return false;
+  const [a, b] = octets.map(Number);
+  return (
+    a === 10 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254)
+  );
+}
+
 /** Origin key for a grant (revocation granularity). Callers only pass validated http(s) URLs. */
 function grantOrigin(redirectTo: string): string {
   return new URL(redirectTo).origin;
@@ -276,11 +310,12 @@ export class SsoService {
    */
   async resolveReturnTo(returnTo: string | undefined, clientId?: string): Promise<ResolvedReturnTo | null> {
     if (!returnTo || !validHttpUrl(returnTo)) return null;
-    if (isLoopbackReturnTo(returnTo)) {
+    if (isTopologySafeReturnTo(returnTo)) {
       // Binding still recorded when supplied, so exchange rules stay uniform —
       // but the app must exist, or the code could never be exchanged.
-      // Loopback reports verified: the code lands on the victim's own machine,
-      // so a remote phisher gains nothing (H4 gate exempts loopback dev).
+      // Machine/LAN targets report verified: the code lands on a host the
+      // caller already controls, so a remote phisher gains nothing (H4 gate
+      // exempts local dev).
       if (clientId) {
         const app = await this.apps.findActive(clientId);
         if (!app) return null;
@@ -312,7 +347,7 @@ export class SsoService {
    * code (`sso_consent_required`) — callers map it to 403.
    */
   requireVerifiedForAutoIssue(resolved: ResolvedReturnTo): void {
-    if (resolved.clientId && !resolved.isVerified && !isLoopbackReturnTo(resolved.redirectTo)) {
+    if (resolved.clientId && !resolved.isVerified && !isTopologySafeReturnTo(resolved.redirectTo)) {
       throw new Error("sso_consent_required");
     }
   }
@@ -438,7 +473,7 @@ export class SsoService {
       // either path is a legacy/confused issuance and must not exchange.
       // Same uniform error either way — no oracle.
       const isPublic = !app.clientSecretHash;
-      const loopback = isLoopbackReturnTo(row.redirectTo);
+      const loopback = isTopologySafeReturnTo(row.redirectTo);
       if (!row.codeChallenge && (isPublic || (!app.isVerified && !loopback))) {
         throw new SsoCodeInvalidError(isPublic ? "pkce_mismatch" : "unverified_no_consent");
       }

@@ -47,7 +47,9 @@ const res = await peridot.post('/v1/apps', { name: 'My Game' });
 
 Then add origins (`PATCH /v1/apps/:id` with `allowedOrigins`) — bare
 `https://…` origins, no paths. Local development needs nothing: `localhost` /
-`127.0.0.1` are always allowed. See
+`127.0.0.1` are always allowed, as are private-network addresses
+(`192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`) — handy for testing from a phone
+against your dev machine. See
 [Sign in with PeridotID](/sign-in-with-peridot-id).
 
 ## Mainnet or testnet

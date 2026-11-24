@@ -41,8 +41,11 @@ Pass the exact return URL in code — its origin must be listed:
 Your redirect URI origins are automatically allowed for browser API calls (within
 ~60s of registering, no redeploy needed). Local development needs nothing at all:
 `http://localhost`, `http://127.0.0.1` and `http://[::1]` (any port, any path) are
-always allowed — arbitrary production hosts are never accepted without registration
-(an open redirect would let anyone steal users' login codes).
+always allowed, and so are private-network addresses — `192.168.x.x`,
+`10.x.x.x`, `172.16–31.x.x`, IPv6 `fd00::/8`, `fe80::/10` — so you can test
+from your phone against the dev server. Arbitrary production hosts are never
+accepted without registration (an open redirect would let anyone steal users'
+login codes).
 
 ## 2. Start the login (new tab)
 

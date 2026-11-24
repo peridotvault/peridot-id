@@ -1,4 +1,4 @@
-import { CODE_TTL_MS, decodeState, encodeState, isLoopbackReturnTo, pkceS256Challenge, pkceVerifyS256, SsoCodeInvalidError, SsoService } from "./sso.service";
+import { CODE_TTL_MS, decodeState, encodeState, isLoopbackReturnTo, isTopologySafeReturnTo, pkceS256Challenge, pkceVerifyS256, SsoCodeInvalidError, SsoService } from "./sso.service";
 import { PidAppsService } from "./apps.service";
 import { mockSecurity } from "../../test/factories";
 
@@ -417,6 +417,31 @@ describe("SsoService", () => {
     expect(isLoopbackReturnTo("https://evillocalhost:3000/")).toBe(false);
     expect(isLoopbackReturnTo("ftp://localhost/x")).toBe(false);
     expect(isLoopbackReturnTo("not a url")).toBe(false);
+  });
+
+  it("isTopologySafeReturnTo covers the dev server on the LAN, literal addresses only", () => {
+    // Testing the dapp from a phone against the dev machine.
+    expect(isTopologySafeReturnTo("http://192.168.100.145:3001/cb")).toBe(true);
+    expect(isTopologySafeReturnTo("http://10.0.0.7:3000")).toBe(true);
+    expect(isTopologySafeReturnTo("http://172.20.1.4:5173")).toBe(true);
+    expect(isTopologySafeReturnTo("http://[fd00::2]:3000/")).toBe(true);
+    expect(isTopologySafeReturnTo("http://localhost:3000")).toBe(true);
+    // Public hosts, hostnames that merely resolve to a private IP, and
+    // out-of-range octets stay rejected. (`http://192.168.1` is not tested: the
+    // URL parser expands it to 192.168.0.1, a real private address.)
+    expect(isTopologySafeReturnTo("https://mygame.dev/cb")).toBe(false);
+    expect(isTopologySafeReturnTo("http://172.32.0.1:3000")).toBe(false);
+    expect(isTopologySafeReturnTo("http://192.169.1.1:3000")).toBe(false);
+    expect(isTopologySafeReturnTo("http://192.168.1.999:3000")).toBe(false);
+    expect(isTopologySafeReturnTo("http://dev.internal:3000")).toBe(false);
+  });
+
+  it("accepts a LAN return target without an app registration", async () => {
+    const { service } = setup();
+    await expect(service.resolveReturnTo("http://192.168.100.145:3001/cb")).resolves.toMatchObject({
+      redirectTo: "http://192.168.100.145:3001/cb",
+      isVerified: true,
+    });
   });
 
   it("binds issued codes to the app: exchange requires the same client_id", async () => {
