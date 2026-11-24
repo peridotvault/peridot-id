@@ -106,6 +106,14 @@ function pingWalletTabs(): void {
   }
 }
 
+/**
+ * Why a verified sign-in still handed nothing back: the app refused a code
+ * (unverified, or its returnTo is not registered). Shared so the picker, the
+ * passkey path and the email path cannot each invent their own silence.
+ */
+export const APP_REFUSED_MESSAGE =
+  "Signed in, but this app can't receive a session yet — it may not be verified. Retry from the app once its owner approves it.";
+
 /** Mint a pid_code for the app and hand it to the opener, then close the window. */
 export async function deliverLoginCode(peridot: PeridotClient, ctx: LoginContext): Promise<boolean> {
   // First-party opener: mint its OWN session (so app logout never touches the

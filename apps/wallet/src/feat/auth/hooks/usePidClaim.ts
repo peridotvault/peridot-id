@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { deliverLoginCode, rejectLogin, type LoginContext } from "../utils/popupLogin";
+import { APP_REFUSED_MESSAGE, deliverLoginCode, rejectLogin, type LoginContext } from "../utils/popupLogin";
 import { finishSso, withPidCode, type SsoRequest } from "../utils/sso";
 import type { ClaimState, HandleStatus, LoginFlowFlags } from "../types/login";
 import { play } from "../../../shared/sfx/player";
@@ -120,7 +120,14 @@ export function usePidClaim(
       // Auth-in-a-new-tab: PID created — mint the app's pid_code and post it back.
       if (ctx) {
         flags.delivered = true;
-        await deliverLoginCode(peridot, ctx);
+        if (await deliverLoginCode(peridot, ctx)) return;
+        // The identity exists but the app refused a code (unverified, or its
+        // returnTo is unregistered). Retrying cannot help, so stop pretending
+        // the picker is still pending and say it.
+        flags.delivered = false;
+        setClaim(null);
+        setError(APP_REFUSED_MESSAGE);
+        play("failed");
         return;
       }
       // SSO claim: the ticket (server-validated) knows where to go back to.
@@ -130,6 +137,15 @@ export function usePidClaim(
         return;
       }
       if (finishSso(sso, res.pidCode)) return;
+      // An unverified app is never auto-issued a code (API H4), so this claim
+      // has nowhere to return to. Home inside the app's popup would look like a
+      // success to the user and leave the dapp waiting — explain instead.
+      if (sso) {
+        setClaim(null);
+        setError(APP_REFUSED_MESSAGE);
+        play("failed");
+        return;
+      }
       onLoggedIn();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

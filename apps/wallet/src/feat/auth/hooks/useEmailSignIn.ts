@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
-import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
+import { APP_REFUSED_MESSAGE, deliverLoginCode, type LoginContext } from "../utils/popupLogin";
 import { finishSso, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "../types/login";
 import { play } from "../../../shared/sfx/player";
@@ -81,7 +81,13 @@ export function useEmailSignIn(
       play("signed-in");
       if (ctx) {
         flags.delivered = true;
-        if (await deliverLoginCode(peridot, ctx)) onCtxDone?.(false);
+        if (await deliverLoginCode(peridot, ctx)) {
+          onCtxDone?.(false);
+          return;
+        }
+        flags.delivered = false;
+        setError(APP_REFUSED_MESSAGE);
+        play("failed");
         return;
       }
       if (finishSso(sso, res.pidCode)) return;

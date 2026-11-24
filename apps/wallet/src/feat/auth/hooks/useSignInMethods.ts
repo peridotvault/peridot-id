@@ -1,6 +1,6 @@
 import type { PeridotClient, WalletConnector } from "@peridotvault/pid-sdk-js";
 import { detectWallets } from "@peridotvault/pid-sdk-js";
-import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
+import { APP_REFUSED_MESSAGE, deliverLoginCode, type LoginContext } from "../utils/popupLogin";
 import { finishSso, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "../types/login";
 import { clearApiCache } from "../../../shared/data/apiCache";
@@ -43,7 +43,13 @@ export function useSignInMethods(
         if (await deliverLoginCode(peridot, ctx)) {
           play("signed-in");
           onCtxDone?.(false);
+          return;
         }
+        // Signed in, but the app refused a code: leaving the popup silent is
+        // what makes this look like a wallet crash.
+        flags.delivered = false;
+        setError(APP_REFUSED_MESSAGE);
+        play("failed");
         return;
       }
       if (finishSso(sso, res.pidCode)) return;
@@ -132,7 +138,13 @@ export function useSignInMethods(
         if (await deliverLoginCode(peridot, ctx)) {
           play("signed-in");
           onCtxDone?.(false);
+          return;
         }
+        // Signed in, but the app refused a code: leaving the popup silent is
+        // what makes this look like a wallet crash.
+        flags.delivered = false;
+        setError(APP_REFUSED_MESSAGE);
+        play("failed");
         return;
       }
       if (finishSso(sso, res.pidCode)) return;
