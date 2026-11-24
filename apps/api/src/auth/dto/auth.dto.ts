@@ -146,4 +146,10 @@ export class SwitchAccountDto {
 export class GrantScopeDto {
   @Matches(/^[a-z0-9][a-z0-9_]{0,31}$/, { message: "scope must be 1-32 chars: lowercase letters, numbers, underscore, no leading underscore" })
   scope!: string;
+
+  /** Sign this scope as another identity already signed in this browser
+   *  (popup approvals), instead of the caller's own. */
+  @IsOptional()
+  @Matches(PID_REGEX, { message: "pid must be <handle>@pid" })
+  pid?: string;
 }

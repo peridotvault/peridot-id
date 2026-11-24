@@ -625,6 +625,10 @@ export class AuthController {
    * Mint an independent session for a first-party client app: sets that app's
    * own (`pid_access_<scope>`) cookies from the caller's wallet session. The
    * wallet session is untouched, so app and wallet log out independently.
+   *
+   * With `pid`, it signs the scope as that OTHER identity instead — only when
+   * this browser holds its refresh cookie. Popup approvals use it to act as the
+   * dapp's account without switching the wallet's active one.
    */
   @Post("session/scope")
   @HttpCode(HttpStatus.OK)
@@ -636,7 +640,17 @@ export class AuthController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: GrantScopeDto,
   ): Promise<{ ok: true; scope: string }> {
-    await this.authService.grantAppSession(res, user.pid, dto.scope, req.headers["user-agent"]);
+    const pid = dto.pid ?? user.pid;
+    if (pid === user.pid) {
+      await this.authService.grantAppSession(res, pid, dto.scope, req.headers["user-agent"]);
+    } else {
+      await this.authService.grantApprovalSession(
+        res,
+        pid,
+        dto.scope,
+        (req as Request & { cookies?: Record<string, string> }).cookies,
+      );
+    }
     return { ok: true, scope: dto.scope };
   }
 

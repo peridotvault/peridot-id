@@ -3807,6 +3807,10 @@ paths:
       description: |
         Sets that app's own `pid_access_<scope>` cookies from the wallet session.
         The wallet session is untouched, so app and wallet log out independently.
+        With `pid`, signs the scope as that OTHER identity already signed in this
+        browser (its `pid_refresh_<pid>` cookie is the proof): access-only, no
+        session row. The popup approval flow uses it so it can sign as the dapp's
+        account without switching the wallet's active one.
       security:
         - cookieAuth: []
       requestBody:
@@ -3818,6 +3822,9 @@ paths:
               required: [scope]
               properties:
                 scope: { type: string, description: First-party app scope label }
+                pid:
+                  type: string
+                  description: Identity to sign the scope as instead of the caller (must be signed in this browser).
       responses:
         "200":
           description: Scoped session issued

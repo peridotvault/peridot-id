@@ -74,7 +74,8 @@ export class PeridotClient {
     private walletOptions: PeridotWalletOptions,
     appOptions: { clientId?: string; clientSecret?: string } = {},
     private onUnauthorized?: () => void,
-    readonly sessionScope?: string,
+    /** Cookie namespace this client authenticates with (`x-pid-scope`). */
+    public sessionScope?: string,
     private bearer?: string,
     cache?: CacheConfig | false,
     /** Resolved target environment; carried in popup URLs so the wallet opens
@@ -112,6 +113,17 @@ export class PeridotClient {
   setBearer(token?: string): void {
     if (this.bearer !== token) clearCache();
     this.bearer = token;
+  }
+
+  /**
+   * Authenticate this client under another cookie namespace (`x-pid-scope`),
+   * or back to the ordinary session with `undefined`. The popup uses one scope
+   * to sign as the dapp's account without touching the wallet's active cookie;
+   * reads are dropped on every change so one namespace never serves another.
+   */
+  setSessionScope(scope?: string): void {
+    if (this.sessionScope !== scope) clearCache();
+    this.sessionScope = scope;
   }
 
   /**

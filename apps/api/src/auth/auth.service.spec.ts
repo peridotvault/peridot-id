@@ -502,6 +502,31 @@ describe("AuthService app sessions (per-first-party logout isolation)", () => {
     expect(names).not.toContain("pid_refresh");
   });
 
+  it("grantApprovalSession signs another signed-in identity in an access-only scope", async () => {
+    const { service, res } = setup();
+    const a = await service.issueSession(resMock() as never, A, "ua");
+    const res2 = resMock();
+
+    await service.grantApprovalSession(res2 as never, A, "approval", {
+      [accountRefreshCookieName(A)]: a.refreshToken,
+    });
+
+    const names = (res2.cookie as jest.Mock).mock.calls.map(([n]) => n);
+    expect(names).toContain("pid_access_approval");
+    // No refresh row/cookie: the approval scope dies with its access token.
+    expect(names).not.toContain("pid_refresh_approval");
+    const access = (res2.cookie as jest.Mock).mock.calls.find(([n]) => n === "pid_access_approval")![1] as string;
+    const payload = JSON.parse(Buffer.from(access.split(".")[1], "base64url").toString()) as { sub: string };
+    expect(payload.sub).toBe(A);
+  });
+
+  it("grantApprovalSession refuses an identity this browser holds no session for", async () => {
+    const { service, res } = setup();
+    await expect(
+      service.grantApprovalSession(res as never, "nobody@pid", "approval", {}),
+    ).rejects.toThrow(UnauthorizedException);
+  });
+
   it("issueSession rejects a scope outside SCOPE_RE (fail-closed for future callers)", async () => {
     const { service, res } = setup();
     await expect(service.issueSession(res as never, A, "ua", undefined, undefined, "_evil")).rejects.toThrow(

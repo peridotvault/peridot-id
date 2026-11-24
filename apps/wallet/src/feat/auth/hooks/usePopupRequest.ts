@@ -13,6 +13,11 @@ import { play } from "../../../shared/sfx/player";
 
 export type PopupPhase = "waiting" | "preparing" | "review" | "busy" | "redirecting" | "done" | "failed";
 
+// Cookie namespace this popup approves under when the dapp asks for another
+// identity than the wallet's active one. Scoped, so the approval signs as that
+// account without switching (or restoring) the wallet's own cookie.
+const APPROVAL_SCOPE = "approval";
+
 // Popup handshake + approve/deny orchestration. Fiat steps are injected:
 // prepare returns the verified summary text, execute runs the money action.
 export type PopupAuthReason = "step-up" | "login";
@@ -45,10 +50,6 @@ export function usePopupRequest(
   optsRef.current = opts;
   const peridotRef = useRef(peridot);
   peridotRef.current = peridot;
-  // Account the last approve/deny must restore: a popup-only switch must not
-  // re-target an open wallet tab. Refs (not state): the approve/deny
-  // callbacks read them without re-subscribing.
-  const restoreRef = useRef<string | null>(null);
   const approverRef = useRef<string | null>(null);
 
   // One silent refresh attempt: turns an expired 15m access into a live
@@ -107,11 +108,21 @@ export function usePopupRequest(
           if (approver !== expected) {
             let ok = false;
             try {
-              ok = await peridotRef.current.auth.switchAccount(expected);
+              ok = await peridotRef.current.auth.grantSession(APPROVAL_SCOPE, expected);
             } catch {
               ok = false;
             }
-            if (ok) ok = (await activePid()) === expected;
+            if (ok) {
+              // Sign the rest of this popup as that identity; the confirmed
+              // /me below proves the scope really resolves to it.
+              peridotRef.current.setSessionScope(APPROVAL_SCOPE);
+              try {
+                ok = ((await peridotRef.current.identity.me()) as { pid?: string }).pid === expected;
+              } catch {
+                ok = false;
+              }
+              if (!ok) peridotRef.current.setSessionScope(undefined);
+            }
             if (!ok) {
               if (!cancelled) {
                 setError(
@@ -121,7 +132,6 @@ export function usePopupRequest(
               }
               return;
             }
-            restoreRef.current = approver;
             if (!cancelled) setSwitched(true);
             approver = expected;
           }
@@ -172,19 +182,10 @@ export function usePopupRequest(
     };
   }, [popup.origin, popup.expectedPid, tryRefreshOnce]);
 
-  const deny = useCallback(async (error = "access_denied") => {    // Best-effort cleanup of server state created during prepare. The checkout
+  const deny = useCallback(async (error = "access_denied") => {
+    // Best-effort cleanup of server state created during prepare. The checkout
     // quote moves no money (no row), so only a transfer inquiry needs cancelling.
     optsRef.current.cancelFiat();
-    // Leave the wallet on the account we found (see restoreRef).
-    const restore = restoreRef.current;
-    restoreRef.current = null;
-    if (restore) {
-      try {
-        await peridotRef.current.auth.switchAccount(restore);
-      } catch {
-        // best-effort: the denial still stands
-      }
-    }
     postPopupResult(popup.origin, { ok: false, error });
     setPhase("done");
     play("cancelled");
@@ -203,19 +204,9 @@ export function usePopupRequest(
     setPhase("busy");
     setError(null);
     const run = () => optsRef.current.execute(action, payload);
-    // Deliver success: restore a popup-only account switch first (an open
-    // wallet tab keeps its account), then echo the approving pid so the dapp
-    // can verify it got the exact account it asked for.
+    // Deliver success: echo the approving pid so the dapp can verify it got
+    // the exact account it asked for.
     const deliver = async (result: unknown, checkoutUrl: string | null) => {
-      const restore = restoreRef.current;
-      restoreRef.current = null;
-      if (restore) {
-        try {
-          await peridotRef.current.auth.switchAccount(restore);
-        } catch {
-          // best-effort: the approval already succeeded
-        }
-      }
       const approver = approverRef.current;
       const data =
         result && typeof result === "object"

@@ -161,7 +161,7 @@ export function PopupReview({
         {approvingPid && (
           <span className="self-start rounded-md border border-line px-2 py-1 font-mono text-xs text-paragraph">
             {approvingPid}
-            {switched ? " · switched to this account for approval" : ""}
+            {switched ? " · signing as this account" : ""}
           </span>
         )}
         <p className="font-sans text-xs text-muted-foreground">Review carefully — approving signs with your passkey.</p>

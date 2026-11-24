@@ -509,8 +509,14 @@ export class PeridotAuth {
    * (`pid_access_<scope>`) from the current wallet session, so the app logs out
    * independently of the wallet.
    */
-  async grantSession(scope: string): Promise<boolean> {
-    const res = await this.client.post("/v1/auth/session/scope", { scope });
+  /**
+   * Mint an app-scoped session (`pid_access_<scope>` cookies) for this client's
+   * identity, or — when `pid` names another identity already signed in this
+   * browser — an access-only scope that signs as that account without switching
+   * the wallet's active one (popup approvals).
+   */
+  async grantSession(scope: string, pid?: string): Promise<boolean> {
+    const res = await this.client.post("/v1/auth/session/scope", { scope, ...(pid ? { pid } : {}) });
     return res.ok;
   }
 }

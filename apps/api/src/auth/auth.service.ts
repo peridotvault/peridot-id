@@ -14,6 +14,7 @@ import {
   scopeRefreshCookie,
   setActiveAuthCookies,
   setAuthCookies,
+  setScopedAccessCookie,
   setScopedAuthCookies,
 } from "../common/cookies";
 import {
@@ -182,15 +183,7 @@ export class AuthService {
     const accessTtl = ACCESS_TOKEN_TTL;
     const refreshTtl = REFRESH_TOKEN_TTL;
 
-    const accessToken = await this.jwt.signAsync(
-      { sub: pid, type: "access", ...(authMethod ? { method: authMethod } : {}) },
-      {
-        secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
-        expiresIn: accessTtl,
-        issuer: JWT_ISSUER,
-        audience: JWT_AUD_SESSION,
-      },
-    );
+    const accessToken = await this.signAccessToken(pid, authMethod, accessTtl);
     const jti = randomUUID();
     const refreshToken = await this.jwt.signAsync(
       { sub: pid, jti, type: "refresh" },
@@ -245,6 +238,37 @@ export class AuthService {
    */
   async grantAppSession(res: Response, pid: string, scope: string, userAgent: string | undefined): Promise<void> {
     await this.issueSession(res, pid, userAgent, undefined, undefined, scope);
+  }
+
+  /**
+   * Access-only scoped session for a DIFFERENT identity that is already signed
+   * in this browser (`pid_refresh_<pid>`): a popup approval then signs as that
+   * account through `x-pid-scope` without switching the wallet's active cookie,
+   * so the open wallet tab keeps its own identity (and a crashed popup leaves
+   * nothing behind). No session row — the scope dies with the access token.
+   */
+  async grantApprovalSession(res: Response, pid: string, scope: string, cookies: Record<string, string> | undefined): Promise<void> {
+    if (!SCOPE_RE.test(scope)) throw new BadRequestException("invalid scope");
+    // Same proof `switchAccount` accepts: the browser holds that pair's refresh.
+    const token = cookies?.[accountRefreshCookieName(pid)];
+    const proof = token ? await this.verifyRefresh(token) : null;
+    if (!proof || proof.pid !== pid || !(await this.sessionLive(proof.jti))) {
+      throw new UnauthorizedException("No session for that account");
+    }
+    setScopedAccessCookie(res, this.config, scope, await this.signAccessToken(pid));
+  }
+
+  /** Access token for one identity; session rows are created by the caller. */
+  private signAccessToken(pid: string, authMethod?: "google" | "email" | "passkey" | "wallet", ttl: string = ACCESS_TOKEN_TTL): Promise<string> {
+    return this.jwt.signAsync(
+      { sub: pid, type: "access", ...(authMethod ? { method: authMethod } : {}) },
+      {
+        secret: this.config.getOrThrow<string>("JWT_ACCESS_SECRET"),
+        expiresIn: ttl,
+        issuer: JWT_ISSUER,
+        audience: JWT_AUD_SESSION,
+      },
+    );
   }
 
   /** Verify options every refresh-token check must use (secret + iss + aud). */

@@ -167,9 +167,19 @@ export function scopeRefreshCookie(scope: string): string {
 }
 
 export function setScopedAuthCookies(res: Response, config: ConfigService, scope: string, access: string, refresh: string): void {
+  setScopedAccessCookie(res, config, scope, access);
+  const opts = baseOpts(config);
+  res.cookie(scopeRefreshCookie(scope), refresh, { ...opts, path: REFRESH_PATH, maxAge: parseTtlMs(REFRESH_TOKEN_TTL, "REFRESH_TOKEN_TTL") });
+}
+
+/**
+ * Access-only scoped cookie: one short-lived session, no refresh row. Popup
+ * approvals use it to sign as an identity that is already signed in this
+ * browser without minting a device/session the Settings list would show.
+ */
+export function setScopedAccessCookie(res: Response, config: ConfigService, scope: string, access: string): void {
   const opts = baseOpts(config);
   res.cookie(scopeAccessCookie(scope), access, { ...opts, path: ACCESS_PATH, maxAge: parseTtlMs(ACCESS_TOKEN_TTL, "ACCESS_TOKEN_TTL") });
-  res.cookie(scopeRefreshCookie(scope), refresh, { ...opts, path: REFRESH_PATH, maxAge: parseTtlMs(REFRESH_TOKEN_TTL, "REFRESH_TOKEN_TTL") });
 }
 
 export function clearScopedAuthCookies(res: Response, config: ConfigService, scope: string): void {

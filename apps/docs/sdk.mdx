@@ -136,6 +136,11 @@ const created = await peridot.wallet.createAccount();
 - The wallet belongs to the PID, not to Google (or any other provider). Unlinking a
   credential leaves it untouched, and logging in from another device does not change it.
 - `create` returns the API error object on validation failure (`400`).
+- Popup approvals accept `popupRequest(action, payload, { expectedPid })`. Pass the
+  PID your app signed in: the popup signs as **that** account even when the
+  browser's PeridotID tab is on another one (it mints an access-only scoped
+  session, so no account is switched and nothing changes for the wallet). Without
+  `expectedPid` the popup signs as whatever account the wallet has active.
 
 ### Chain support
 
