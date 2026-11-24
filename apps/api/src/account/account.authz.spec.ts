@@ -49,7 +49,7 @@ describe("Account authorization & abuse cases (routes)", () => {
             id: `chain-${data.pid}`,
             pid: data.pid,
             chainId: "chain-sol",
-            chain: { namespace: "solana", reference: "ref" },
+            chain: { namespace: "solana", reference: "ref", isTestnet: true },
             address: `addr-${data.pid}`,
             accountType: "smart_account",
             status: "active",

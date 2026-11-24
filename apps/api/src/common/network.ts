@@ -40,6 +40,21 @@ export function identityRouteForbidden(
   );
 }
 
+/**
+ * Chain/money scoping. Identity is shared, chain rows are not: a deployed
+ * stack must never serve the other network's registry or chain accounts.
+ * Local dev is exempt — it runs one stack holding both sets, and the wallet
+ * filters by mode client-side (one API for both modes on localhost).
+ */
+export function chainRowInNetwork(
+  isTestnetRow: boolean,
+  network: PidNetwork = pidNetwork(),
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+): boolean {
+  if (nodeEnv !== "production") return true;
+  return isTestnetRow === (network === "testnet");
+}
+
 /** Non-mainnet API hostname prefixes: canonical `testnet-`, legacy `sandbox-`. */
 const TESTNET_HOST_PREFIXES = ["testnet-", "sandbox-"] as const;
 

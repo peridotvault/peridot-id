@@ -3,7 +3,14 @@
 // Run: `node --test test/` from apps/wallet.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { cachedRead, clearApiCache, invalidate } from "../src/shared/data/apiCache.ts";
+import {
+  CACHE_PREFIX,
+  CACHE_VERSION,
+  cachedRead,
+  clearApiCache,
+  invalidate,
+  peekCached,
+} from "../src/shared/data/apiCache.ts";
 
 describe("cachedRead", () => {
   it("serves the second call from cache inside the TTL", async () => {
@@ -84,11 +91,11 @@ describe("cachedRead", () => {
     const fn = async () => ({ n: ++calls });
     // Write-through: the read lands in storage…
     assert.deepEqual(await cachedRead("t-tier", { ttlMs: 60_000, tier: "session" }, fn), { n: 1 });
-    assert.ok(globalThis.window.sessionStorage.getItem("pid_cache_v1:t-tier"));
+    assert.ok(globalThis.window.sessionStorage.getItem(CACHE_PREFIX + "t-tier"));
     // …and a pre-seeded storage entry is served without calling fn.
     globalThis.window.sessionStorage.setItem(
-      "pid_cache_v1:t-seed",
-      JSON.stringify({ at: Date.now(), value: { n: 7 }, v: 1 }),
+      CACHE_PREFIX + "t-seed",
+      JSON.stringify({ at: Date.now(), value: { n: 7 }, v: CACHE_VERSION }),
     );
     assert.deepEqual(await cachedRead("t-seed", { ttlMs: 60_000, tier: "session" }, fn), { n: 7 });
     assert.equal(calls, 1);
@@ -97,14 +104,31 @@ describe("cachedRead", () => {
     assert.deepEqual(await cachedRead("t-tier", { ttlMs: 60_000, tier: "session" }, fn), { n: 2 });
     // local tier works the same
     await cachedRead("t-local", { ttlMs: 60_000, tier: "local" }, fn);
-    assert.ok(globalThis.window.localStorage.getItem("pid_cache_v1:t-local"));
+    assert.ok(globalThis.window.localStorage.getItem(CACHE_PREFIX + "t-local"));
     invalidate("t-local");
     clearApiCache();
   });
 
+  it("peeks a stale value for the current network (paints before refresh)", async () => {
+    globalThis.window.sessionStorage.setItem(
+      CACHE_PREFIX + "t-stale",
+      JSON.stringify({ at: 0, value: { balanceIdr: "123" }, v: CACHE_VERSION }),
+    );
+    assert.deepEqual(peekCached("t-stale"), { balanceIdr: "123" });
+    // Another network's entry is never visible (keys are mode-namespaced).
+    const other = CACHE_PREFIX.replace(/:mainnet:/, ":testnet:");
+    globalThis.window.sessionStorage.setItem(
+      other + "t-other",
+      JSON.stringify({ at: Date.now(), value: "leak", v: CACHE_VERSION }),
+    );
+    assert.equal(peekCached("t-other"), null);
+    invalidate("t-stale");
+    invalidate("t-other");
+  });
+
   it("ignores entries written by another cache version", async () => {
     globalThis.window.sessionStorage.setItem(
-      "pid_cache_v1:t-old",
+      CACHE_PREFIX + "t-old",
       JSON.stringify({ at: Date.now(), value: 1, v: 9999 }),
     );
     let calls = 0;

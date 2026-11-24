@@ -64,7 +64,7 @@ function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
     id: "chain-1",
     pid: IDENTITY_ID,
     chainId: "chain-sol",
-    chain: { namespace: "solana", reference: SOLANA_DEVNET_REFERENCE },
+    chain: { namespace: "solana", reference: SOLANA_DEVNET_REFERENCE, isTestnet: true },
     address: SMART_ADDR,
     accountType: "smart_account",
     status: "ready",

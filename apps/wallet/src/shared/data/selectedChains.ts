@@ -157,6 +157,16 @@ export function filterChainAccountsForSelection<T extends { chainNamespace: stri
   return (rows ?? []).filter((r) => isChainSelected(sel, r.chainNamespace, r.chainReference));
 }
 
+/** Keep only rows of the caller's network. One API/DB can hold both sets
+ *  (local dev, and identity is shared), so the wallet guarantees the split:
+ *  Mainnet mode never shows test chains, Testnet mode never shows real ones. */
+export function filterChainAccountsForNetwork<T extends { isTestnet: boolean }>(
+  rows: T[],
+  mode: "mainnet" | "testnet",
+): T[] {
+  return (rows ?? []).filter((r) => r.isTestnet === (mode === "testnet"));
+}
+
 // --- registry rows (GET /v1/chains) -----------------------------------------
 
 const CHAINS_TTL_MS = 30_000;

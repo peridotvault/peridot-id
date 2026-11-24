@@ -21,6 +21,7 @@ import {
   UNKNOWN_CHAIN_CODE,
   solanaReferenceFor,
 } from "../common/chains";
+import { chainRowInNetwork } from "../common/network";
 import { decryptSecret } from "../common/secret-crypto";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -303,7 +304,9 @@ export class ChainRegistryService {
       orderBy: [{ namespace: "asc" }, { reference: "asc" }],
     });
     if (rows.length === 0) return this.codeFallback();
-    return rows.map((r) => ({
+    // One DB may hold both networks (local dev); a deployed stack serves only
+    // its own rows so mainnet never lists testnet chains or the reverse.
+    return rows.filter((r) => chainRowInNetwork(r.isTestnet)).map((r) => ({
       id: r.id,
       namespace: r.namespace,
       reference: r.reference,
@@ -332,6 +335,6 @@ export class ChainRegistryService {
       logoUrl: null,
       isTestnet: true,
       contracts: [],
-    }));
+    })).filter((c) => chainRowInNetwork(c.isTestnet));
   }
 }

@@ -28,7 +28,7 @@ export function FiatAccount({
     setBusy(true);
     setError(null);
     try {
-      const v = await cachedRead("fiat.balance", { ttlMs: 10_000 }, () => peridot.fiat.balance());
+      const v = await cachedRead("fiat.balance", { ttlMs: 10_000, tier: "session" }, () => peridot.fiat.balance());
       if ("statusCode" in v) throw new Error("Balance is temporarily unavailable.");
       setBalanceIdr(v.balanceIdr);
     } catch (e) {

@@ -12,6 +12,7 @@ import {
   subscribeNetworkMode,
 } from "../../../shared/data/networkMode";
 import {
+  filterChainAccountsForNetwork,
   filterChainAccountsForSelection,
   getCachedChains,
   getChainsVersion,
@@ -61,7 +62,8 @@ export function useDepositTargets(peridot: PeridotClient) {
         setError(Array.isArray(e.message) ? e.message.join(" ") : e.message);
         return;
       }
-      setAccounts(filterChainAccountsForSelection(acc as ChainAccount[], getSelection()));
+      const seen = filterChainAccountsForNetwork(acc as ChainAccount[], getNetworkMode());
+      setAccounts(filterChainAccountsForSelection(seen, getSelection()));
     } catch (e) {
       setAccounts([]);
       setError(e instanceof Error ? e.message : String(e));

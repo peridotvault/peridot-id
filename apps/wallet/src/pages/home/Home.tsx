@@ -17,9 +17,10 @@ import {
   type Currency,
   type Rates,
 } from "../../shared/data/currency";
-import { cachedRead, clearApiCache } from "../../shared/data/apiCache";
-import { endNetworkTransition, subscribeNetworkMode } from "../../shared/data/networkMode";
+import { cachedRead, clearApiCache, peekCached } from "../../shared/data/apiCache";
+import { endNetworkTransition, getNetworkMode, subscribeNetworkMode } from "../../shared/data/networkMode";
 import {
+  filterChainAccountsForNetwork,
   filterChainAccountsForSelection,
   getSelection,
   isSolanaSelected,
@@ -161,11 +162,15 @@ export function Home({
 function useHomeData(peridot: PeridotClient) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [pid, setPid] = useState<string | null>(null);
-  const [solLamports, setSolLamports] = useState<number>(0);
+  // Seed from this network's last cached read so a reload/switch paints the
+  // previous balance immediately; the load below then refreshes it.
+  const [solLamports, setSolLamports] = useState<number>(() => peekCached<number>("wallet.balance") ?? 0);
   // Balance = the fiat ledger. null = failed load (error shown separately).
-  const [balanceIdr, setBalanceIdr] = useState<string | null>(null);
+  const [balanceIdr, setBalanceIdr] = useState<string | null>(
+    () => peekCached<{ balanceIdr: string }>("fiat.balance")?.balanceIdr ?? null,
+  );
   const [balanceError, setBalanceError] = useState<string | null>(null);
-  const [tokens, setTokens] = useState<TokenInfo[]>([]);
+  const [tokens, setTokens] = useState<TokenInfo[]>(() => peekCached<TokenInfo[]>("wallet.tokens") ?? []);
   const [nfts, setNfts] = useState<NftItem[]>([]);
   const [nftsLoaded, setNftsLoaded] = useState(false);
   const [assetTab, setAssetTab] = useState<"tokens" | "items">("tokens");
@@ -199,7 +204,8 @@ function useHomeData(peridot: PeridotClient) {
         const detail = Array.isArray(acc.message) ? acc.message.join(" ") : acc.message;
         throw new Error(`Failed to create account (${acc.statusCode}${detail ? `: ${detail}` : ""})`);
       }
-      const selectedRows = filterChainAccountsForSelection(acc as ChainAccount[], sel);
+      const seenRows = filterChainAccountsForNetwork(acc as ChainAccount[], getNetworkMode());
+      const selectedRows = filterChainAccountsForSelection(seenRows, sel);
       setEmptySelection(
         sel.mode === "custom" && !selectedRows.some((c) => c.accountType === "smart_account"),
       );
@@ -209,10 +215,10 @@ function useHomeData(peridot: PeridotClient) {
       // explicitly-typed fallbacks keep the allSettled tuple inference
       // intact when the RPC is skipped.
       const balanceP: Promise<number> = solanaOn
-        ? cachedRead("wallet.balance", { ttlMs: 10_000 }, () => peridot.wallet.getBalance())
+        ? cachedRead("wallet.balance", { ttlMs: 10_000, tier: "session" }, () => peridot.wallet.getBalance())
         : Promise.resolve(0);
       const tokensP: Promise<unknown> = solanaOn
-        ? cachedRead("wallet.tokens", { ttlMs: 10_000 }, () =>
+        ? cachedRead("wallet.tokens", { ttlMs: 10_000, tier: "session" }, () =>
             peridot.wallet.tokensEnriched().catch(() => peridot.wallet.tokens()),
           )
         : Promise.resolve([]);
@@ -224,7 +230,7 @@ function useHomeData(peridot: PeridotClient) {
         cachedRead("identity.me", { ttlMs: 60_000, tier: "session" }, () => peridot.identity.me()),
         balanceP,
         tokensP,
-        cachedRead("fiat.balance", { ttlMs: 10_000 }, () => peridot.fiat.balance()),
+        cachedRead("fiat.balance", { ttlMs: 10_000, tier: "session" }, () => peridot.fiat.balance()),
         cachedRead("passkey.list", { ttlMs: 60_000, tier: "session" }, () => peridot.passkey.list()),
         activationP,
       ]);
@@ -306,13 +312,11 @@ function useHomeData(peridot: PeridotClient) {
     };
   }, [assetTab, nftsLoaded, peridot]);
 
-  // Re-fetch balances/assets on network switch, then release the signing
-  // block. Idempotent — a no-op when no switch is in flight. Cached reads are
-  // selection-scoped server-side, so drop them first. A selection switch
-  // does the same via the selection store (strict client filtering).
+  // Re-fetch on network switch, then release the signing block. Idempotent —
+  // a no-op when no switch is in flight. Cache keys are network-namespaced,
+  // so nothing is dropped here: each mode keeps its own last balance.
   useEffect(() => {
     return subscribeNetworkMode(() => {
-      clearApiCache();
       load().then(endNetworkTransition, endNetworkTransition);
     });
   }, [load]);

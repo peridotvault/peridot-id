@@ -4876,7 +4876,7 @@ components:
 
     ChainAccount:
       type: object
-      required: [id, chainNamespace, chainReference, address, accountType, status, createdAt]
+      required: [id, chainNamespace, chainReference, isTestnet, address, accountType, status, createdAt]
       properties:
         id:
           type: string
@@ -4889,6 +4889,9 @@ components:
           type: string
           description: "CAIP-2 reference — genesis-hash prefix (Solana) or decimal chain id (EVM: 10143, 97, 421614)"
           example: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z"
+        isTestnet:
+          type: boolean
+          description: Row belongs to a test chain (the wallet hides it in Mainnet mode)
         address:
           type: string
           description: "PDA (Solana smart_account), CREATE2 counterfactual (EVM smart_account), or user-supplied address (linked_address). Public data only."

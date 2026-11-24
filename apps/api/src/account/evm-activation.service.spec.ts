@@ -52,7 +52,7 @@ function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
     id: "evm-chain-1",
     pid: IDENTITY_ID,
     chainId: "chain-97",
-    chain: { namespace: "eip155", reference: "97" },
+    chain: { namespace: "eip155", reference: "97", isTestnet: true },
     address: "0x883c7FcF54967D2Fc3F769E44Cd78f74560909D6",
     accountType: "smart_account",
     status: "ready",

@@ -1,4 +1,10 @@
-import { identityRouteForbidden, networkConsistencyError, pidNetwork, stripTestnetHost } from "./network";
+import {
+  chainRowInNetwork,
+  identityRouteForbidden,
+  networkConsistencyError,
+  pidNetwork,
+  stripTestnetHost,
+} from "./network";
 
 describe("pidNetwork", () => {
   it("defaults to mainnet", () => {
@@ -77,5 +83,19 @@ describe("networkConsistencyError", () => {
     expect(networkConsistencyError("testnet", "https://sandbox-api.peridot.id", "production")).toBeNull();
     expect(networkConsistencyError("testnet", "http://localhost:3300", "development")).toBeNull();
     expect(networkConsistencyError("mainnet", "http://localhost:3300", "development")).toBeNull();
+  });
+});
+
+describe("chainRowInNetwork", () => {
+  it("keeps each deployed stack on its own chain rows", () => {
+    expect(chainRowInNetwork(false, "mainnet", "production")).toBe(true);
+    expect(chainRowInNetwork(true, "mainnet", "production")).toBe(false);
+    expect(chainRowInNetwork(true, "testnet", "production")).toBe(true);
+    expect(chainRowInNetwork(false, "testnet", "production")).toBe(false);
+  });
+
+  it("serves both sets in local dev (one stack, wallet filters by mode)", () => {
+    expect(chainRowInNetwork(true, "mainnet", "development")).toBe(true);
+    expect(chainRowInNetwork(false, "mainnet", "development")).toBe(true);
   });
 });

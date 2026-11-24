@@ -6,6 +6,7 @@ import {
   SELECTED_CHAINS_KEY,
   applyChainToggle,
   dismissSelectionNotice,
+  filterChainAccountsForNetwork,
   filterChainAccountsForSelection,
   filterChainRowsForSelection,
   getSelection,
@@ -196,6 +197,21 @@ describe("strict row filters (AC1-AC4)", () => {
   it("custom filters chain accounts to the selected set (deposit targets)", () => {
     const sel = { version: 1, mode: "custom", chains: [EVM97] };
     assert.deepEqual(filterChainAccountsForSelection(accounts, sel), [accounts[1]]);
+  });
+
+  it("keeps only the caller's network (mainnet never shows test rows)", () => {
+    const rows = [
+      { chainNamespace: "solana", chainReference: "Dev111", isTestnet: true },
+      { chainNamespace: "eip155", chainReference: "143", isTestnet: false },
+    ];
+    assert.deepEqual(
+      filterChainAccountsForNetwork(rows, "mainnet").map((r) => r.chainReference),
+      ["143"],
+    );
+    assert.deepEqual(
+      filterChainAccountsForNetwork(rows, "testnet").map((r) => r.chainReference),
+      ["Dev111"],
+    );
   });
 
   it("custom filters history rows by chain/network (AC3)", () => {

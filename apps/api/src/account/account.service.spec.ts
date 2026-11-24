@@ -13,7 +13,7 @@ function chainRow(overrides: Partial<Record<string, unknown>> = {}) {
     id: "chain-1",
     pid: "pid_01HASH",
     chainId: "chain-sol",
-    chain: { namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z" },
+    chain: { namespace: "solana", reference: "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z", isTestnet: true },
     address: DERIVED,
     accountType: SMART,
     status: "active",
@@ -259,12 +259,14 @@ describe("AccountService", () => {
     expect(creates.filter((d) => d.chainId !== "chain-sol")).toEqual([]);
   });
 
-  it("ensureAccount fails cleanly when the solana chain is not registered", async () => {
+  it("ensureAccount returns an empty wallet when this deployment has no solana chain", async () => {
+    // Mainnet ships no Solana registry row yet: the wallet is empty rather than
+    // the testnet chain being borrowed to fill it.
     const { service, prisma, chains } = setup();
     (chains.solanaChainIdOrThrow as jest.Mock).mockRejectedValue(new NotFoundException("Solana chain is not registered — run db:seed"));
+    prisma.chainAccount.findMany.mockResolvedValue([]);
 
-    await expect(service.ensureAccount("pid_01HASH")).rejects.toThrow(NotFoundException);
-    await expect(service.ensureAccount("pid_01HASH")).rejects.toThrow("run db:seed");
+    await expect(service.ensureAccount("pid_01HASH")).resolves.toEqual([]);
     expect(prisma.chainAccount.create).not.toHaveBeenCalled();
   });
 

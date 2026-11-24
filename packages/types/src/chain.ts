@@ -72,6 +72,8 @@ export interface ChainAccount {
   id: string;
   chainNamespace: string;
   chainReference: string;
+  /** Chain is a test chain (wallet keeps rows scoped to its network mode). */
+  isTestnet: boolean;
   address: string;
   accountType: "smart_account" | "linked_address";
   status: "inactivated" | "funded" | "ready" | "activating" | "active" | "insufficient";

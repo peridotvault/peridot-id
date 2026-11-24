@@ -3,6 +3,7 @@ import { ChainAccountStatus } from "@prisma/client";
 import { deriveEvmSmartAccountAddressBound } from "@peridotvault/pid-evm";
 import { ChainRegistryService } from "../chain/chain-registry.service";
 import { ACCOUNT_TYPE_SMART, SOLANA_NAMESPACE, SolanaSelection, solanaReferenceFor } from "../common/chains";
+import { chainRowInNetwork } from "../common/network";
 import { deriveSmartAccountAddress } from "../common/smart-account";
 import { coseToCompressedSecp256r1, coseToRawXy } from "../credentials/cose";
 import { isP2002 } from "../prisma/prisma-error";
@@ -13,6 +14,8 @@ export interface ChainAccountView {
   id: string;
   chainNamespace: string;
   chainReference: string;
+  /** Row belongs to a test chain — the wallet filters by its network mode. */
+  isTestnet: boolean;
   address: string;
   accountType: string;
   status: ChainAccountStatus;
@@ -23,7 +26,7 @@ export interface ChainAccountView {
 
 export function toChainView(ca: {
   id: string;
-  chain: { namespace: string; reference: string };
+  chain: { namespace: string; reference: string; isTestnet: boolean };
   address: string;
   accountType: string;
   status: ChainAccountStatus;
@@ -35,6 +38,7 @@ export function toChainView(ca: {
     id: ca.id,
     chainNamespace: ca.chain.namespace,
     chainReference: ca.chain.reference,
+    isTestnet: ca.chain.isTestnet,
     address: ca.address,
     accountType: ca.accountType,
     status: ca.status,
@@ -153,6 +157,10 @@ export class AccountService {
   async ensureAccount(pid: string, selection?: SolanaSelection): Promise<ChainAccountView[]> {
     // Resolve the program id (registry) before any DB write so it can't orphan rows.
     const programId = await this.programId(selection);
+    // This deployment's registry decides whether it serves a Solana chain at
+    // all: mainnet has none until its own program row lands, and a row must
+    // never be created against the other network's chain id.
+    const chainId = await this.chains.solanaChainIdOrThrow(selection).catch(() => null);
 
     // B1 (ANT-866): the Solana PDA commits to the claiming passkey, so the
     // row is deferred until an active authority exists — a keyless row would
@@ -185,8 +193,7 @@ export class AccountService {
       if (recordKey === null || derived === null) {
         // No passkey yet: defer the Solana row too (see above). EVM rows
         // defer the same way; getChains throws NotFound until any row lands.
-      } else {
-        const chainId = await this.chains.solanaChainIdOrThrow(selection);
+      } else if (chainId) {
         try {
           await this.prisma.chainAccount.create({
             data: {
@@ -223,10 +230,19 @@ export class AccountService {
 
     await this.ensureEvmRows(pid);
 
-    return this.getChains(pid);
+    try {
+      return await this.getChains(pid);
+    } catch (err) {
+      // A fresh identity on a deployment with no chains of its own (mainnet
+      // before its registry rows land) is an EMPTY wallet, not an error: the
+      // testnet chains must never be borrowed to fill it.
+      if (err instanceof NotFoundException) return [];
+      throw err;
+    }
   }
 
-  /** Every chain row of the token identity's wallet. */
+  /** Every chain row of the token identity's wallet, for this deployment's
+   *  network only (a row created on the other network is not this wallet's). */
   async getChains(pid: string): Promise<ChainAccountView[]> {
     const rows = await this.prisma.chainAccount.findMany({
       where: { pid },
@@ -234,6 +250,6 @@ export class AccountService {
       orderBy: { createdAt: "asc" },
     });
     if (rows.length === 0) throw new NotFoundException("Account not found");
-    return rows.map(toChainView);
+    return rows.filter((r) => chainRowInNetwork(r.chain.isTestnet)).map(toChainView);
   }
 }
