@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-11-24T14:30:29Z",
+  "builtAt": "2026-11-24T16:19:23Z",
   "contentHash": "26c703c4f66b2421d17b025f3f4df3067226b981b272d12830ae3a718299a5f0",
   "entryCounts": {
     "docs": 244,
@@ -10,5 +10,5 @@
   },
   "generator": "apps/mcp/scripts/sync-docs",
   "llmsEntryCount": null,
-  "sourceSha": "b97f8f214b7daeed99bda4abcd7f9d46ed862ffe"
+  "sourceSha": "86c221582737ae6444dfeb11f5b6a52b0af32425"
 }
