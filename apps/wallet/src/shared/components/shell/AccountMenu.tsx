@@ -49,6 +49,7 @@ export function AccountMenu({
       <button
         type="button"
         aria-label="Close account menu"
+        data-sfx="scrim"
         onClick={onClose}
         className={`fixed inset-0 z-40 cursor-default ${closing ? "scrim-out" : "scrim-in"}`}
       />

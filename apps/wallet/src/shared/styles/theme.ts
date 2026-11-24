@@ -40,7 +40,7 @@ export const theme = {
   // No-op on phones (<576pt); constrains + centers on wide web.
   // Past the md breakpoint the tab bar docks left as a sidebar instead.
   // The whole wallet frame caps wider (frameMaxWidth) while content stays sm.
-  layout: { maxWidth: 576, sidebarBreakpoint: 768, sidebarWidth: 232, threeColumnBreakpoint: 1280, navWidth: 240, infoWidth: 300, frameMaxWidth: 1400, threeColMaxWidth: 1164 },
+  layout: { maxWidth: 576, sidebarBreakpoint: 768, sidebarWidth: 232, threeColumnBreakpoint: 1280, navWidth: 240, infoWidth: 300, frameMaxWidth: 232 + 576, threeColMaxWidth: 1164 },
   fonts: {
     // Single variable families (Google Fonts <link> in index.html) — weight
     // comes from fontWeight at each call site, not the family name.
@@ -75,8 +75,9 @@ export const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderColor: c.line,
   },
-  // Frame caps the whole wallet on very wide windows; the row holds the
-  // sidebar slot + content area, which centers the sm column in the remainder.
+  // Desktop frame: the sidebar and the content column are ONE centered block
+  // (232 + 576), so the nav never hugs the window edge while the column floats
+  // in the middle of the viewport.
   frame: {
     width: "100%",
     maxWidth: theme.layout.frameMaxWidth,

@@ -7,6 +7,7 @@ import { clearApiCache } from "../../shared/data/apiCache";
 import { PushHeader } from "../../shared/components/ui/PushHeader";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { Label } from "../../shared/components/ui/Label";
+import { play } from "../../shared/sfx/player";
 
 export function EditProfile({ onDone }: { onDone: () => void }) {
   const { peridot } = usePeridot();
@@ -42,8 +43,10 @@ export function EditProfile({ onDone }: { onDone: () => void }) {
       clearApiCache();
       setSaved(true);
       setProfile(res as Profile);
+      play("saved");
     } catch (e) {
       setError(String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }

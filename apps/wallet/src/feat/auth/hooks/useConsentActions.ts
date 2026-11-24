@@ -5,6 +5,7 @@ import { deliverLoginCode, markExplicitLogin, rejectLogin, type LoginContext } f
 import { withDenied, withPidCode, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags, LoginSession } from "../types/login";
 import { clearApiCache } from "../../../shared/data/apiCache";
+import { play } from "../../../shared/sfx/player";
 
 /** The one pause before the browser leaves, hardcoded on purpose (no env). */
 const handoff = () => new Promise<void>((resolve) => setTimeout(resolve, 2000));
@@ -40,11 +41,13 @@ export function useConsentActions(
       // Same beat as Internet Identity's redirect view: show the handoff
       // before the browser leaves, instead of a frozen consent card.
       setSigning(true);
+      play("signed-in");
       await handoff();
       window.location.assign(withPidCode(sso.redirectUri, pidCode));
     } catch (e) {
       setSigning(false);
       setError(e instanceof Error ? e.message : String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }
@@ -52,6 +55,7 @@ export function useConsentActions(
 
   const denyApp = () => {
     if (typeof window === "undefined") return;
+    play("cancelled");
     if (ctx) {
       rejectLogin(ctx);
       onCtxDone?.(true);
@@ -77,13 +81,16 @@ export function useConsentActions(
         flags.delivered = false;
         setSigning(false);
         setError("Couldn't authorize — try again.");
+        play("failed");
       } else {
+        play("signed-in");
         onCtxDone?.(false);
       }
     } catch (e) {
       flags.delivered = false;
       setSigning(false);
       setError(e instanceof Error ? e.message : String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }
@@ -113,6 +120,7 @@ export function useConsentActions(
     try {
       if (!(await peridot.auth.switchAccount(pid))) throw new Error("Couldn't switch account.");
       clearApiCache();
+      play("account-switched");
       const account = picker?.find((a) => a.pid === pid);
       flags.delivered = false;
       setPicker(null);
@@ -120,6 +128,7 @@ export function useConsentActions(
       setSession({ label: account?.displayName ?? pid, pid });
     } catch (e) {
       setPickerError(e instanceof Error ? e.message : String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }

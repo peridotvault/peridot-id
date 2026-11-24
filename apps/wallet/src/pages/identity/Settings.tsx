@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Pressable } from "../../shared/components/ui/Pressable";
-import { ChevronRight, FlaskConical, KeyRound, Monitor, Link2, Check, Banknote, TriangleAlert, LayoutGrid } from "../../shared/components/icons";
+import { ChevronRight, KeyRound, Monitor, Link2, Check, Banknote, LayoutGrid, Volume2, VolumeX } from "../../shared/components/icons";
+import { isSoundOn, play, setSoundOn } from "../../shared/sfx/player";
 import type { Authority, IdentityCredential } from "@peridotvault/pid-types";
 import { usePeridot } from "../../shared/app/AppContext";
 import { cachedRead } from "../../shared/data/apiCache";
@@ -12,8 +13,6 @@ import { Retry } from "../../shared/components/ui/Retry";
 import { ToggleRow } from "../../shared/components/ui/ToggleRow";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { CURRENCIES, getCurrency, setCurrency, type Currency } from "../../shared/data/currency";
-import { setNetworkMode } from "../../shared/data/networkMode";
-import { useNetworkMode } from "../../shared/hooks/useNetworkMode";
 import { useSelectedChains } from "../../shared/hooks/useSelectedChains";
 
 interface Props {
@@ -34,6 +33,7 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
   const [credentials, setCredentials] = useState<IdentityCredential[]>([]);
   const [sessions, setSessions] = useState<unknown[]>([]);
   const [currency, setCurrencyState] = useState<Currency>(getCurrency);
+  const [soundOn, setSoundState] = useState(isSoundOn);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -75,17 +75,21 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
   const pickCurrency = useCallback((c: Currency) => {
     setCurrencyState(c);
     setCurrency(c);
+    play("selected");
   }, []);
+
+  const toggleSound = useCallback(() => {
+    const next = !soundOn;
+    setSoundState(next);
+    setSoundOn(next);
+    // Enabling is itself feedback; muting must stay silent.
+    if (next) play("checked");
+  }, [soundOn]);
 
   // Mainnet/Testnet are two API deployments (identity on mainnet, data per
   // network), so the toggle persists the choice and reloads into that
   // network's API. NO toggle lives in the account-switch modal — Settings is
   // the only place.
-  const net = useNetworkMode();
-  const toggleNetwork = useCallback(() => {
-    setNetworkMode(net.mode === "testnet" ? "mainnet" : "testnet");
-  }, [net.mode]);
-
   // Chain selection lives on its own page (pages/identity/Chains); Settings
   // only shows the active selection label on the "Chains" row.
   const sel = useSelectedChains();
@@ -122,35 +126,19 @@ export function Settings({ goChains, goPasskeys, goSessions, goConnected, goAppC
         <Row icon={Monitor} label="Sessions / Devices" value={`${sessions.length} active`} onPress={goSessions} />
       </Group>
 
-      {net.testnet && (
-        <Section className="border-t-secondary bg-secondary">
-          <SectionHead className="py-3">
-            <div className="flex items-start gap-3">
-              <TriangleAlert size={18} className="mt-0.5 shrink-0 text-foreground" />
-              <div className="flex flex-1 flex-col gap-1">
-                <span className="font-sans text-sm font-semibold text-foreground">TESTNET — test money only</span>
-                <span className="font-sans text-sm leading-5 text-foreground">
-                  Same PID and passkey, separate balances, levels and XP from mainnet. Testnet data can be reset; fiat top-ups and transfers are disabled.
-                </span>
-              </div>
-            </div>
-          </SectionHead>
-        </Section>
-      )}
-
       <Group title="Network">
-        <ToggleRow
-          icon={FlaskConical}
-          label="Testnet"
-          hint={net.testnet ? "On — test money, separate test data" : "Off — Mainnet, real money"}
-          on={net.testnet}
-          onPress={toggleNetwork}
-        />
         <Row icon={LayoutGrid} label="Chains" value={sel.label} onPress={goChains} />
       </Group>
 
 
       <Group title="Preferences">
+        <ToggleRow
+          icon={soundOn ? Volume2 : VolumeX}
+          label="Interface sounds"
+          hint={soundOn ? "On — cues for outcomes, copies and toggles" : "Off — the wallet is silent"}
+          on={soundOn}
+          onPress={toggleSound}
+        />
         {/* flexWrap: at 320px the two currency pills drop below the label instead of squeezing. */}
         <div className="flex flex-wrap items-center gap-3 px-6 py-3">
           <RowTile>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AccountView } from "@peridotvault/pid-types";
 import { usePeridot } from "../app/AppContext";
 import type { AccountMenuModel } from "../components/shell/AccountMenu";
+import { play } from "../sfx/player";
 
 /** Shell account popover: lists the identities in this browser and switches
  *  between them. `onSwitched` lets the shell re-bootstrap onto the new one. */
@@ -44,9 +45,11 @@ export function useAccountMenu(onSwitched: () => void): AccountMenuModel {
       try {
         if (!(await peridot.auth.switchAccount(pid))) throw new Error("Couldn't switch account.");
         setOpen(false);
+        play("account-switched");
         onSwitched();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+        play("failed");
       } finally {
         setBusy(false);
       }

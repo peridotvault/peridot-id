@@ -3,6 +3,7 @@ import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
 import { finishSso, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "../types/login";
+import { play } from "../../../shared/sfx/player";
 
 const RESEND_COOLDOWN_S = 60;
 
@@ -43,6 +44,7 @@ export function useEmailSignIn(
     const addr = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) {
       setError("Enter a valid email address.");
+      play("failed");
       return;
     }
     setBusy(true);
@@ -53,8 +55,10 @@ export function useEmailSignIn(
       setStep("code");
       setCode("");
       setResendIn(RESEND_COOLDOWN_S);
+      play("code-sent");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }
@@ -63,6 +67,7 @@ export function useEmailSignIn(
   const verify = async () => {
     if (!/^\d{6}$/.test(code.trim())) {
       setError("Enter the 6-digit code.");
+      play("failed");
       return;
     }
     setBusy(true);
@@ -73,6 +78,7 @@ export function useEmailSignIn(
         await refreshClaim();
         return;
       }
+      play("signed-in");
       if (ctx) {
         flags.delivered = true;
         if (await deliverLoginCode(peridot, ctx)) onCtxDone?.(false);
@@ -82,6 +88,7 @@ export function useEmailSignIn(
       onLoggedIn();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }

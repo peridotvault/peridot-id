@@ -13,6 +13,7 @@ import { FiatQuoteBreakdown } from "../../feat/fiat/components/FiatQuoteBreakdow
 import { digitsOnly, groupDigits } from "../../feat/fiat/utils/topupAmount";
 import { useDepositQuote } from "../../feat/fiat/hooks/useDepositQuote";
 import { useCheckoutSync } from "../../feat/fiat/hooks/useCheckoutSync";
+import { play } from "../../shared/sfx/player";
 
 /**
  * Top up the internal fiat ledger via DOKU Checkout. Enter the NET amount you
@@ -77,11 +78,13 @@ export function Topup({ onDone }: { onDone: () => void }) {
       sync.setPending(deposit);
       setNet("");
       q.setQuote(null);
+      play("checkout-opened");
       // Take the user straight to payment — the manual button below remains
       // as fallback when deep-linking is blocked.
       openUrl(deposit.paymentUrl);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }

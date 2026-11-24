@@ -27,6 +27,7 @@ import {
   isNotActivatedError,
 } from "../../feat/chain/utils/firstAction";
 import { useQuoteCountdown } from "../../feat/chain/hooks/useQuoteCountdown";
+import { play, startLoop, stopLoop } from "../../shared/sfx/player";
 
 const LAMPORTS_PER_SOL = 1e9;
 
@@ -122,6 +123,7 @@ export function Send({ onDone }: { onDone: () => void }) {
     () => () => {
       decisionRef.current?.(false);
       decisionRef.current = null;
+      stopLoop("send");
     },
     [],
   );
@@ -166,6 +168,7 @@ export function Send({ onDone }: { onDone: () => void }) {
         return;
       }
       setPhase("quoting");
+      startLoop("send");
       // Best-effort first-action detection (fail-open: unreadable status
       // takes the normal path; the quote envelope + the setup-and-retry
       // below still cover a first send).
@@ -186,6 +189,7 @@ export function Send({ onDone }: { onDone: () => void }) {
           // Show it, and resolve true only when the user approves the panel —
           // the passkey ceremony runs after, on this same quote.
           onQuote: async (quote) => {
+            stopLoop("send");
             setReviewQuote(quote);
             setReviewValue(lamports);
             setReviewBalance(balanceBaseUnits);
@@ -215,17 +219,21 @@ export function Send({ onDone }: { onDone: () => void }) {
       if (res.feePolicyWarning) setPolicyNotice(res.feePolicyWarning);
       if (res.status === "confirmed") {
         setResult(receiptCopy);
+        play("sent");
       } else {
         // Server already waited ~8s; give it a few more before reporting pending.
         const outcome = await peridot.wallet.waitForConfirmation(res.signature, 6, 1200).catch(() => "pending");
         if (outcome === "confirmed") {
           setResult(receiptCopy);
+          play("sent");
         } else if (outcome === "failed") {
           setError("The transaction failed on-chain — the Solana network rejected it. No funds were moved.");
+          play("failed");
         } else {
           setError(
             "Transaction submitted but not yet confirmed. Check your Activity in a moment — no funds were lost.",
           );
+          play("pending");
         }
       }
       setPhase("form");
@@ -251,6 +259,7 @@ export function Send({ onDone }: { onDone: () => void }) {
         } catch (setupError) {
           setPhase("form");
           setError(setupError instanceof Error ? setupError.message : String(setupError));
+          play("failed");
           return;
         }
         return send();
@@ -262,12 +271,16 @@ export function Send({ onDone }: { onDone: () => void }) {
       setupRetriedRef.current = false;
       reviewRef.current = { quote: null, value: null, balance: null };
       setError(copy);
+      play(e instanceof FeeApprovalDeniedError ? "cancelled" : "failed");
+    } finally {
+      stopLoop("send");
     }
   };
 
   const approve = () => {
     setError(null);
     setPhase("sending");
+    startLoop("send");
     decisionRef.current?.(true);
     decisionRef.current = null;
   };

@@ -8,8 +8,11 @@ import { TestnetBanner } from "./TestnetBanner";
 // App shell. One content column everywhere; the chrome around it changes:
 //
 //   phones (<768)      rail(top + body + bottom tabs)
-//   desktop (768–1279) [sidebar | rail(top + body)]
-//   wide (>=1280)      [nav | rail(body) | info]
+//   desktop (768–1279) [sidebar(brand + tabs + profile) | rail(body)]
+//   wide (>=1280)      [nav(brand + tabs) | rail(body) | info(profile)]
+//
+// The header exists only on phones: past 768 it would be a second chrome row
+// above a sidebar that already carries the brand and the profile.
 //
 // The page scrolls, not the content column: nav/info/top bar/tab bar stick to
 // the viewport edges and only a side column whose own content overflows gets an
@@ -53,7 +56,7 @@ export function AppColumn({
             <div style={s.stickyCol} className="flex flex-col">{side}</div>
             <div style={s.contentWrap} className="flex flex-col">
               <div style={s.rail} className="flex flex-col">
-                <div className={stickyTop}>{top}</div>
+                {top && <div className={stickyTop}>{top}</div>}
                 {body}
               </div>
             </div>
@@ -63,7 +66,7 @@ export function AppColumn({
     ) : (
       <div style={s.shell} className="flex flex-col">
         <div style={s.rail} className="flex flex-col">
-          <div className={stickyTop}>{top}</div>
+          {top && <div className={stickyTop}>{top}</div>}
           {body}
           {/* mt-auto: short pages eat the leftover viewport so the bar still sits at the bottom. */}
           <div className={`${stickyBottom} mt-auto`}>{side}</div>

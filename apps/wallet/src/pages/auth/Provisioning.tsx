@@ -5,6 +5,7 @@ import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { usePeridot } from "../../shared/app/AppContext";
 import { UIButton } from "../../shared/components/ui/UIButton";
 import { ensureChainRows } from "../../feat/chain/utils/chainRows";
+import { play, startLoop, stopLoop } from "../../shared/sfx/player";
 
 type StepKey = "identity" | "passkey" | "wallet";
 type StepStatus = "pending" | "running" | "done" | "failed";
@@ -76,14 +77,17 @@ export function Provisioning({ onContinue }: { onContinue: () => void }) {
   const started = useRef(false);
 
   const run = useCallback(
-    async (key: StepKey): Promise<boolean> => {
+    async (key: StepKey, announce = true): Promise<boolean> => {
       setStates((prev) => ({ ...prev, [key]: { status: "running", error: null } }));
       try {
         await runOne(peridot, key);
         setStates((prev) => ({ ...prev, [key]: { status: "done", error: null } }));
+        // The last step ends in `complete`, so it must not also chirp a step.
+        if (announce) play("progress-step");
         return true;
       } catch (e) {
         setStates((prev) => ({ ...prev, [key]: { status: "failed", error: e instanceof Error ? e.message : String(e) } }));
+        play("failed");
         return false;
       }
     },
@@ -94,11 +98,18 @@ export function Provisioning({ onContinue }: { onContinue: () => void }) {
     if (started.current) return;
     started.current = true;
     void (async () => {
-      for (const step of STEPS) {
-        // eslint-disable-next-line no-await-in-loop
-        if (!(await run(step.key))) break;
+      startLoop("provisioning");
+      try {
+        for (const step of STEPS) {
+          // eslint-disable-next-line no-await-in-loop
+          if (!(await run(step.key, step !== STEPS[STEPS.length - 1]))) return;
+        }
+        play("complete");
+      } finally {
+        stopLoop("provisioning");
       }
     })();
+    return () => stopLoop("provisioning");
   }, [run]);
 
   return (

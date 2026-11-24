@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { play } from "../../../shared/sfx/player";
 
 // Keyed clipboard with a 2s "copied" flag per key. Covers both the
 // multi-address list (ReceiveScreen, keyed by target) and single-address
@@ -17,6 +18,7 @@ export function useCopyAddress() {
   const copy = useCallback(async (key: string, address: string) => {
     try {
       await navigator.clipboard.writeText(address);
+      play("copied");
       setCopiedKey(key);
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopiedKey(null), 2000);

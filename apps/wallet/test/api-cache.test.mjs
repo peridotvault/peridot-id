@@ -1,6 +1,7 @@
 // Request-budget guard: the wallet must not refetch slow-changing reads on
 // every Home mount (per-IP 300/min 429s).
 // Run: `node --test test/` from apps/wallet.
+import "fake-indexeddb/auto";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -8,9 +9,23 @@ import {
   CACHE_VERSION,
   cachedRead,
   clearApiCache,
+  hydrateCache,
   invalidate,
   peekCached,
 } from "../src/shared/data/apiCache.ts";
+import { hydratePrefs, pidDb, prefStorage } from "../src/shared/data/db.ts";
+
+const row = (key) => pidDb().cache.get(CACHE_PREFIX + key);
+const seed = (key, value, extra = {}) =>
+  pidDb().cache.put({
+    key: CACHE_PREFIX + key,
+    at: Date.now(),
+    v: CACHE_VERSION,
+    value,
+    tier: "session",
+    tab: "ssr",
+    ...extra,
+  });
 
 describe("cachedRead", () => {
   it("serves the second call from cache inside the TTL", async () => {
@@ -70,70 +85,74 @@ describe("cachedRead", () => {
     assert.equal(await cachedRead("t-inv-b", 60_000, async () => ++b), 1);
   });
 
-  it("supports the options form with tiers (session/local persist reads)", async () => {
-    // node has no DOM: a minimal window stub exercises the persistence paths.
-    // The module reads `window` lazily, so installing it now still works.
-    const memStore = () => {
-      const m = new Map();
-      return {
-        getItem: (k) => (m.has(k) ? m.get(k) : null),
-        setItem: (k, v) => void m.set(String(k), String(v)),
-        removeItem: (k) => void m.delete(k),
-        key: (i) => [...m.keys()][i] ?? null,
-        get length() {
-          return m.size;
-        },
-      };
-    };
-    globalThis.window = { sessionStorage: memStore(), localStorage: memStore(), addEventListener: () => {} };
-
+  it("persists tiered reads in IndexedDB (Dexie)", async () => {
     let calls = 0;
     const fn = async () => ({ n: ++calls });
-    // Write-through: the read lands in storage…
+    // Write-through: the read lands in the `cache` table…
     assert.deepEqual(await cachedRead("t-tier", { ttlMs: 60_000, tier: "session" }, fn), { n: 1 });
-    assert.ok(globalThis.window.sessionStorage.getItem(CACHE_PREFIX + "t-tier"));
-    // …and a pre-seeded storage entry is served without calling fn.
-    globalThis.window.sessionStorage.setItem(
-      CACHE_PREFIX + "t-seed",
-      JSON.stringify({ at: Date.now(), value: { n: 7 }, v: CACHE_VERSION }),
-    );
+    const written = await row("t-tier");
+    assert.deepEqual(written?.value, { n: 1 });
+    assert.equal(written?.tier, "session");
+    // …and a seeded row is served without calling fn again.
+    await seed("t-seed", { n: 7 });
     assert.deepEqual(await cachedRead("t-seed", { ttlMs: 60_000, tier: "session" }, fn), { n: 7 });
     assert.equal(calls, 1);
+    // A local-tier read is marked as such (survives more than one tab).
+    await cachedRead("t-local", { ttlMs: 60_000, tier: "local" }, fn);
+    assert.equal((await row("t-local"))?.tier, "local");
     invalidate("t-tier");
     invalidate("t-seed");
-    assert.deepEqual(await cachedRead("t-tier", { ttlMs: 60_000, tier: "session" }, fn), { n: 2 });
-    // local tier works the same
-    await cachedRead("t-local", { ttlMs: 60_000, tier: "local" }, fn);
-    assert.ok(globalThis.window.localStorage.getItem(CACHE_PREFIX + "t-local"));
-    invalidate("t-local");
-    clearApiCache();
+    assert.equal(await row("t-tier"), undefined);
+    // Dropped row ⇒ the next read goes to the network again (call #3: the
+    // t-tier miss, t-seed's hit and t-local's write came before it).
+    assert.deepEqual(await cachedRead("t-tier", { ttlMs: 60_000, tier: "session" }, fn), { n: 3 });
   });
 
-  it("peeks a stale value for the current network (paints before refresh)", async () => {
-    globalThis.window.sessionStorage.setItem(
-      CACHE_PREFIX + "t-stale",
-      JSON.stringify({ at: 0, value: { balanceIdr: "123" }, v: CACHE_VERSION }),
-    );
+  it("hydrates a stale value for the current network (paints before refresh)", async () => {
+    // Old enough to be stale for any TTL, young enough to survive the boot prune.
+    await seed("t-stale", { balanceIdr: "123" }, { at: Date.now() - 60_000 });
+    await hydrateCache();
     assert.deepEqual(peekCached("t-stale"), { balanceIdr: "123" });
-    // Another network's entry is never visible (keys are mode-namespaced).
-    const other = CACHE_PREFIX.replace(/:mainnet:/, ":testnet:");
-    globalThis.window.sessionStorage.setItem(
-      other + "t-other",
-      JSON.stringify({ at: Date.now(), value: "leak", v: CACHE_VERSION }),
-    );
+    // Another network's row is never visible (keys are mode-namespaced).
+    await pidDb().cache.put({
+      key: CACHE_PREFIX.replace(/:mainnet:/, ":testnet:") + "t-other",
+      at: Date.now(),
+      v: CACHE_VERSION,
+      value: "leak",
+      tier: "local",
+      tab: null,
+    });
+    await hydrateCache();
     assert.equal(peekCached("t-other"), null);
     invalidate("t-stale");
-    invalidate("t-other");
   });
 
-  it("ignores entries written by another cache version", async () => {
-    globalThis.window.sessionStorage.setItem(
-      CACHE_PREFIX + "t-old",
-      JSON.stringify({ at: Date.now(), value: 1, v: 9999 }),
-    );
+  it("drops rows written by another cache version", async () => {
+    await seed("t-old", 1, { v: 9999 });
     let calls = 0;
     assert.equal(await cachedRead("t-old", { ttlMs: 60_000, tier: "session" }, async () => ++calls), 1);
     assert.equal(calls, 1);
     invalidate("t-old");
+  });
+});
+
+describe("prefs (Dexie mirror)", () => {
+  it("flushes writes to IndexedDB and hydrates them back", async () => {
+    const store = prefStorage();
+    store.setItem("pid:sound", JSON.stringify({ pack: "zen", enabled: false }));
+    // The mirror answers synchronously (first render), the table write follows.
+    assert.equal(JSON.parse(store.getItem("pid:sound")).enabled, false);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal((await pidDb().prefs.get("pid:sound"))?.value, store.getItem("pid:sound"));
+    store.removeItem("pid:sound");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(await pidDb().prefs.get("pid:sound"), undefined);
+  });
+
+  it("hydrates stored prefs for the next boot", async () => {
+    await pidDb().prefs.put({ key: "pid:probe", value: "1" });
+    await hydratePrefs();
+    assert.equal(prefStorage().getItem("pid:probe"), "1");
+    await pidDb().prefs.delete("pid:probe");
   });
 });

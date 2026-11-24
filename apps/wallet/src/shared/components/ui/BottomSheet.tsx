@@ -53,6 +53,7 @@ export function BottomSheet({
         className={visible ? "scrim-in" : "scrim-out"}
         onPress={closeDisabled ? undefined : onClose}
         accessibilityLabel={scrimLabel ?? `Close ${title}`}
+        sfx="scrim"
       />
       <div
         className={cn(
@@ -66,7 +67,7 @@ export function BottomSheet({
       >
         <div className="flex flex-row items-center justify-between">
           <span className="font-sans text-2xl tracking-[-0.3px] text-foreground">{title}</span>
-          <Pressable onPress={onClose} disabled={closeDisabled} accessibilityLabel="Close">
+          <Pressable onPress={onClose} disabled={closeDisabled} accessibilityLabel="Close" sfx="close">
             <div className="flex flex-col p-1.5">
               <X size={18} className="text-muted-foreground" />
             </div>

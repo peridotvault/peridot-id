@@ -24,18 +24,12 @@ import {
   setSelectionCustom,
   toggleChainSelection,
 } from "../src/shared/data/selectedChains.ts";
+import { prefStorage } from "../src/shared/data/db.ts";
 
-// In-memory localStorage behind a window stub (set after imports so module
-// init sees no DOM, exactly like the bundler-less unit runtime).
-const memStore = new Map();
-globalThis.window = {
-  localStorage: {
-    getItem: (k) => (memStore.has(k) ? memStore.get(k) : null),
-    setItem: (k, v) => void memStore.set(k, String(v)),
-    removeItem: (k) => void memStore.delete(k),
-    clear: () => memStore.clear(),
-  },
-};
+// The store persists through the Dexie prefs mirror; in this runtime there is
+// no IndexedDB, so the mirror is the whole storage and reads stay synchronous.
+globalThis.window = {};
+const memStore = prefStorage();
 
 const SOL = { namespace: "solana", reference: "Dev111" };
 const EVM97 = { namespace: "eip155", reference: "97" };
@@ -230,7 +224,7 @@ describe("store writes + registry refresh", () => {
     assert.equal(setSelectionCustom([EVM97]), true);
     assert.deepEqual(getSelection(), { version: 1, mode: "custom", chains: [EVM97] });
     assert.deepEqual(
-      JSON.parse(memStore.get(SELECTED_CHAINS_KEY)),
+      JSON.parse(memStore.getItem(SELECTED_CHAINS_KEY)),
       { version: 1, mode: "custom", chains: [EVM97] },
     );
     assert.equal(setSelectionAll(), true);
@@ -267,10 +261,7 @@ describe("store writes + registry refresh", () => {
     await refreshRegistryChains();
     assert.equal(applyChainToggle("solana", "Dev111"), true);
     assert.deepEqual(getSelection(), { version: 1, mode: "custom", chains: [EVM97, EVM10143] });
-    assert.deepEqual(
-      JSON.parse(memStore.get(SELECTED_CHAINS_KEY)).mode,
-      "custom",
-    );
+    assert.equal(JSON.parse(memStore.getItem(SELECTED_CHAINS_KEY)).mode, "custom");
   });
 
   it("registry failure rejects (AC9 — caller shows retry, no silent switch)", async () => {

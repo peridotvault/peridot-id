@@ -160,10 +160,9 @@ export function LoginOptions({
         {/* Extra top margin: the methods need air under the welcome heading. */}
         <div className="flex flex-col w-full mt-4 gap-3">
           {allows("email") && (
-            <div
-              onClick={() => document.getElementById("login-email-inline")?.focus()}
-              className="flex min-h-13 cursor-text items-center gap-2.5 rounded-lg border border-border bg-elevated px-5 focus-within:border-foreground"
-            >
+            // A <label>, not a div: the whole row is the click target natively,
+            // so it is one control for focus and for UI sounds.
+            <label htmlFor="login-email-inline" className="flex min-h-13 cursor-text items-center gap-2.5 rounded-lg border border-border bg-elevated px-5 focus-within:border-foreground">
               <Mail size={16} className="shrink-0 text-muted-foreground" />
               {/* outline-none! : base.css focus ring is unlayered, plain utilities lose to it */}
               <TextField
@@ -193,7 +192,7 @@ export function LoginOptions({
                   <ArrowRight size={18} />
                 </span>
               </Pressable>
-            </div>
+            </label>
           )}
           {allows("google") && (
             <UIButton

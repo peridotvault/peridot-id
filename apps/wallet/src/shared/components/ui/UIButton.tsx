@@ -15,6 +15,7 @@ export function UIButton({
   variant = "outline",
   align = "center",
   className,
+  sfx,
 }: {
   title: string;
   note?: string;
@@ -24,9 +25,11 @@ export function UIButton({
   variant?: Variant;
   align?: "center" | "left";
   className?: string;
+  /** Dismiss actions get the close cue instead of the plain press. */
+  sfx?: "close" | "scrim" | "action";
 }) {
   return (
-    <Button variant={variant} align={align} disabled={disabled} onClick={onPress} className={className}>
+    <Button variant={variant} align={align} disabled={disabled} onClick={onPress} className={className} sfx={sfx}>
       <span
         className={cn(
           "flex items-center gap-2.5 font-sans text-sm font-medium tracking-[0.4px]",

@@ -1,36 +1,48 @@
 // Display currency + CoinGecko rates for the All-Balance card.
-// ponytail: localStorage on web, in-memory fallback on native (no new dep).
-// Single simple/price call cached 60s; null on failure so the card degrades
-// to fiat + native amounts instead of crashing.
+// The preference itself is a Zustand store with persist over IndexedDB (Dexie
+// `prefs` table): one async write path, no hand-rolled localStorage code.
+// `hydrateCurrency()` runs once at boot so the first render already shows the
+// stored choice. Rates: single simple/price call cached 60s; null on failure so
+// the card degrades to fiat + native amounts instead of crashing.
+
+import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { readPref, removePref, writePref } from "./db.ts";
 
 export type Currency = "IDR" | "USD";
 
 export const CURRENCIES: Currency[] = ["IDR", "USD"];
-const KEY = "pid_currency";
 
-let mem: Currency = "IDR";
+const useCurrencyStore = create<{ currency: Currency; set: (c: Currency) => void }>()(
+  persist(
+    (set) => ({ currency: "IDR", set: (currency) => set({ currency }) }),
+    {
+      name: "pid:currency",
+      storage: createJSONStorage(() => ({
+        getItem: (name) => readPref<string>(name),
+        setItem: (name, value) => writePref(name, value),
+        removeItem: (name) => removePref(name),
+      })),
+      // Anything but the two shipped values falls back to IDR.
+      merge: (stored, current) => {
+        const c = (stored as { currency?: unknown } | null)?.currency;
+        return c === "IDR" || c === "USD" ? { ...current, currency: c } : current;
+      },
+    },
+  ),
+);
+
+/** Load the stored preference before the first render (boot gate). */
+export async function hydrateCurrency(): Promise<void> {
+  await useCurrencyStore.persist.rehydrate();
+}
 
 export function getCurrency(): Currency {
-  try {
-    const raw =
-      typeof window !== "undefined" ? window.localStorage.getItem(KEY) : null;
-    if (raw === "IDR" || raw === "USD") {
-      mem = raw;
-      return raw;
-    }
-  } catch {
-    /* private mode — fall through to memory */
-  }
-  return mem;
+  return useCurrencyStore.getState().currency;
 }
 
 export function setCurrency(c: Currency): void {
-  mem = c;
-  try {
-    if (typeof window !== "undefined") window.localStorage.setItem(KEY, c);
-  } catch {
-    /* non-fatal */
-  }
+  useCurrencyStore.getState().set(c);
 }
 
 export interface Rates {

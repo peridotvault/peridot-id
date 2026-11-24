@@ -7,6 +7,8 @@ type PressableProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "style"> & {
   accessibilityLabel?: string;
   accessibilityRole?: string;
   accessibilityState?: { selected?: boolean; checked?: boolean; disabled?: boolean; busy?: boolean; expanded?: boolean };
+  /** UI sound override: dismiss actions must not sound like a plain press. */
+  sfx?: "close" | "scrim" | "action";
 };
 
 // DOM-first pressable: a plain <button> with the wallet's reset look and
@@ -19,6 +21,7 @@ export function Pressable({
   accessibilityLabel,
   accessibilityRole,
   accessibilityState,
+  sfx,
   children,
   ...rest
 }: PressableProps) {
@@ -28,6 +31,7 @@ export function Pressable({
     <button
       type="button"
       {...rest}
+      data-sfx={sfx}
       aria-label={accessibilityLabel}
       role={accessibilityRole}
       aria-selected={accessibilityState?.selected}

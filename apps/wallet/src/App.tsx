@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, flatten } from "./shared/styles/stylesheet";
 import { Peridot, BrowserPasskeySigner } from "@peridotvault/pid-sdk-js";
 import { readPopupParams } from "@peridotvault/pid-sdk-js";
@@ -19,10 +19,14 @@ import { readSsoParams } from "./feat/auth/utils/sso";
 import { UIButton } from "./shared/components/ui/UIButton";
 import { TabBar, type TabKey } from "./shared/components/shell/TabBar";
 import { useThreeColumn } from "./shared/hooks/useThreeColumn";
+import { useWideLayout } from "./shared/hooks/useWideLayout";
+import { ProfileSlot } from "./shared/components/shell/ProfileSlot";
 import { TopBar } from "./shared/components/shell/TopBar";
 import type { WalletTransaction } from "@peridotvault/pid-types";
 import type { FiatItem, FiatLedgerItem } from "./shared/data/fiat";
 import { pages } from "./pages/route";
+import { pathOf, screenOf } from "./shared/app/routes";
+import { installInteractionSounds, installSoundUnlock, play, stopAllSounds } from "./shared/sfx/player";
 
 // The shell renders pages; the registry owns which page is which screen.
 const {
@@ -102,11 +106,54 @@ export default function App() {
     paused: !!embedParams && !embed.bearer,
   });
   const gate = useStartupGate();
+  // Web Audio starts on the first real gesture; StrictMode remounts re-attach
+  // the listeners without ever creating a second player.
+  useEffect(() => {
+    const offUnlock = installSoundUnlock();
+    const offInputs = installInteractionSounds();
+    return () => {
+      offUnlock();
+      offInputs();
+    };
+  }, []);
   useSessionSync({
     bootstrap: session.bootstrap,
     disabled: !!popupRequest || !!loginContext || !!embedParams,
     isAuthed: session.authed,
   });
+
+  // Address bar mirrors the screen (no router library): a page is linkable and
+  // Back works. Auth screens are skipped — their URL carries query params
+  // (?popup=, ?redirect_uri=, ?pid_code=) that must survive untouched.
+  const urlOwned = !popupRequest && !embedParams && !loginContext;
+  const [deepLink] = useState(() => (urlOwned ? screenOf(window.location.pathname) : null));
+  const deepApplied = useRef(false);
+  useEffect(() => {
+    if (deepApplied.current || !deepLink || !session.authed) return;
+    deepApplied.current = true;
+    if (screen === "home") setScreen(deepLink);
+  }, [deepLink, session.authed, screen]);
+  useEffect(() => {
+    if (!urlOwned || session.bootstrapping) return;
+    if (!session.authed) {
+      // Signed out: a deep link has nothing to show.
+      if (window.location.pathname !== "/") window.history.replaceState({}, "", "/");
+      return;
+    }
+    const path = pathOf(screen);
+    if (window.location.pathname !== path) window.history.pushState({ screen }, "", path);
+  }, [screen, session.authed, session.bootstrapping, urlOwned]);
+  useEffect(() => {
+    if (!urlOwned) return;
+    const onPop = () => {
+      const next = screenOf(window.location.pathname);
+      if (!next) return;
+      setStack([]);
+      setScreen(next);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [urlOwned]);
 
   const [activityTx, setActivityTx] = useState<WalletTransaction | null>(null);
   const [fiatItem, setFiatItem] = useState<FiatItem | null>(null);
@@ -131,6 +178,9 @@ export default function App() {
   // only — pushes render chromeless, as before.
   const isTabRoot = screen === "home" || screen === "activity" || screen === "settings";
   const three = useThreeColumn();
+  // Same breakpoint as the tab bar: past it the sidebar carries the brand and
+  // the profile, so the phone header is gone rather than stacked on top.
+  const wide = useWideLayout();
 
   // The stack only lives under tab roots: leaving them (login, provisioning)
   // drops any stale overlay so it can never resurface on the next identity.
@@ -246,15 +296,21 @@ export default function App() {
       // best-effort: still clear the UI session even if the server call fails
     } finally {
       clearApiCache();
+      stopAllSounds();
+      play("signed-out");
       session.setAuthed(false);
       setScreen("login");
     }
   }, [peridot, session]);
 
   // Profile popover switched identity: drop the overlay stack, drop cached
-  // display reads, and re-bootstrap onto the new account.
+  // display reads, and re-bootstrap onto the new account. Bumping epoch is what
+  // makes it visible: it remounts the base (fresh data) and changes the header's
+  // refreshKey, so the avatar/name are re-read instead of keeping the previous
+  // identity's cached profile.
   const switchDone = useCallback(() => {
     setStack([]);
+    setEpoch((n) => n + 1);
     clearApiCache();
     session.reloadSession();
   }, [session]);
@@ -313,13 +369,26 @@ export default function App() {
         ) : (
           <AppColumn
             top={
-              isTabRoot && !three ? (
+              isTabRoot && !wide ? (
                 <TopBar onProfile={() => push("profile")} onSwitched={switchDone} refreshKey={`${screen}-${epoch}`} />
               ) : undefined
             }
             side={
               isTabRoot ? (
-                <TabBar current={screen} go={goTab} variant={three ? "rail" : "auto"} />
+                <TabBar
+                  current={screen}
+                  go={goTab}
+                  variant={three ? "rail" : "auto"}
+                  footer={
+                    three ? undefined : (
+                      <ProfileSlot
+                        onProfile={() => push("profile")}
+                        onSwitched={switchDone}
+                        refreshKey={`${screen}-${epoch}`}
+                      />
+                    )
+                  }
+                />
               ) : undefined
             }
             info={
@@ -386,7 +455,7 @@ function NullOverlayFallback({ label, onClose }: { label: string; onClose: () =>
     <div style={styles.base} className="flex flex-col">
       <span style={{ fontSize: 18, fontWeight: "700" }}>{label} unavailable</span>
       <span style={{ fontSize: 14, opacity: 0.7 }}>This item is no longer available.</span>
-      <UIButton title="Close" onPress={onClose} variant="primary" />
+      <UIButton title="Close" onPress={onClose} variant="primary" sfx="close" />
     </div>
   );
 }

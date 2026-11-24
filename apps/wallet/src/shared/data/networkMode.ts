@@ -84,6 +84,8 @@ export function beginNetworkTransition(): void {
 export function setNetworkMode(mode: NetworkMode): void {
   if (mode === mem) return;
   mem = mode;
+  // Deliberately localStorage, not the Dexie prefs: `config.ts` reads this key
+  // synchronously at import to pick the API origin, before any async boot work.
   try {
     window.localStorage.setItem(NETWORK_MODE_KEY, mode);
   } catch {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CheckoutDepositView, PeridotClient } from "@peridotvault/pid-sdk-js";
+import { play } from "../../../shared/sfx/player";
 
 /**
  * Check a pending deposit against DOKU and unlock the Saldo when paid.
@@ -20,9 +21,11 @@ export function useCheckoutSync(peridot: PeridotClient) {
       if (tx.providerStatus === "settled" || tx.providerStatus === "success") {
         setSyncMsg("Payment confirmed — your Saldo is updated. You can go back.");
         setPending(null);
+        play("purchased");
       } else if (["failed", "cancelled", "expired"].includes(tx.providerStatus)) {
         setSyncMsg("This payment did not go through — no money moved. You can try again.");
         setPending(null);
+        play(tx.providerStatus === "failed" ? "failed" : "cancelled");
       } else {
         setSyncMsg("Still waiting for your bank transfer — check status again in a bit.");
       }

@@ -106,7 +106,7 @@ export function Approve({ popup, onNeedAuth }: { popup: PopupParams; onNeedAuth?
       ) : req.phase === "failed" ? (
         <>
           <h1 className="self-start text-left font-sans text-xl font-semibold text-foreground">Approve request</h1>
-          <UIButton title="Close" onPress={() => void req.deny(req.expectedPid ? "wrong_account" : "access_denied")} />
+          <UIButton title="Close" sfx="action" onPress={() => void req.deny(req.expectedPid ? "wrong_account" : "access_denied")} />
         </>
       ) : (
         <>

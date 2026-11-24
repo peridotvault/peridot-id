@@ -18,6 +18,7 @@
 // window via endNetworkTransition().
 
 import type { Chain } from "@peridotvault/pid-types";
+import { prefStorage } from "./db.ts";
 
 // NOTE: this module is intentionally import-free (type-only imports erase
 // at runtime) so `node --test` can exercise it without a bundler — the
@@ -87,9 +88,11 @@ export function parseStoredSelection(raw: string | null | undefined): SelectedCh
   }
 }
 
+// IndexedDB (Dexie `prefs`) behind a synchronous mirror: the selection must be
+// readable before the first fetch, and IndexedDB itself is async.
 function storage(): Storage | null {
   try {
-    if (typeof window !== "undefined") return window.localStorage;
+    if (typeof window !== "undefined") return prefStorage();
   } catch {
     /* private mode — in-memory session only */
   }
@@ -105,6 +108,15 @@ function readStored(): SelectedChains {
 }
 
 let mem: SelectedChains = readStored();
+
+/** Boot: adopt the persisted selection once prefs are hydrated from Dexie
+ *  (module init runs before the async read, so it starts at "all"). */
+export function hydrateSelection(): void {
+  const next = readStored();
+  if (JSON.stringify(next) === JSON.stringify(mem)) return;
+  mem = next;
+  emit();
+}
 
 /** Synchronous read — call at the top of every data load so the selection
  *  applies before the first fetch (FR3). */

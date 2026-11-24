@@ -31,15 +31,20 @@ export const buttonVariants = cva(
   },
 );
 
-export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof buttonVariants>;
+export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> &
+  VariantProps<typeof buttonVariants> & {
+    /** UI sound override: dismiss actions must not sound like a plain press. */
+    sfx?: "close" | "scrim" | "action";
+  };
 
-export function Button({ className, variant, align, ...props }: ButtonProps) {
+export function Button({ className, variant, align, sfx, ...props }: ButtonProps) {
   return (
     <button
       type="button"
       data-slot="button"
       data-variant={variant ?? "outline"}
       data-align={align ?? "center"}
+      data-sfx={sfx}
       className={cn(buttonVariants({ variant, align }), className)}
       {...props}
     />

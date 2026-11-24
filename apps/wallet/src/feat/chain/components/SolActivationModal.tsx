@@ -74,7 +74,7 @@ export function SolActivationModal({
             title={target && copiedKey === target.key ? "Copied" : "Copy address"}
             onPress={() => target && onCopy(target.key, target.address)}
           />
-          <UIButton title="Close" onPress={onClose} />
+          <UIButton title="Close" onPress={onClose} sfx="close" />
         </div>
       </div>
     </Modal>

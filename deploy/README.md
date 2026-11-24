@@ -169,6 +169,14 @@ Mainnet/Testnet switch stores `pid_network_mode` and reloads into that API
 `VITE_TEST_API_URL`). No per-stack dashboard build args are needed, and the
 wallet is one host too — see `docs/NETWORK_MODES.md`.
 
+**Wallet URLs.** The wallet mirrors the screen into the address bar
+(`/settings`, `/chains`, `/activity`, …). Its nginx server block must answer
+unknown paths with the SPA shell, or a refresh on a deep link 404s:
+
+```nginx
+location / { try_files $uri $uri/ /index.html; }
+```
+
 ## Update
 
 ```sh

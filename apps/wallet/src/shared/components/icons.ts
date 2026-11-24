@@ -32,6 +32,8 @@ export {
   Trash2,
   TriangleAlert,
   User,
+  Volume2,
+  VolumeX,
   Wallet,
   X,
 } from "lucide-react";

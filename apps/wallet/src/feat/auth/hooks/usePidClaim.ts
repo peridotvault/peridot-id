@@ -3,6 +3,7 @@ import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { deliverLoginCode, rejectLogin, type LoginContext } from "../utils/popupLogin";
 import { finishSso, withPidCode, type SsoRequest } from "../utils/sso";
 import type { ClaimState, HandleStatus, LoginFlowFlags } from "../types/login";
+import { play } from "../../../shared/sfx/player";
 
 // Post-auth PID creation: the handle becomes the permanent `<handle>@pid`
 // identity (never changeable, reused, or reassigned). The user must tick the
@@ -98,6 +99,7 @@ export function usePidClaim(
       setAckPermanent(false);
       setError(null);
       setBusy(false);
+      play("cancelled");
       // Auth-in-a-new-tab: tell the opener PID creation was abandoned, then close.
       if (ctx) rejectLogin(ctx, "pid_creation_cancelled");
     }
@@ -114,6 +116,7 @@ export function usePidClaim(
         url.searchParams.delete("claim");
         window.history.replaceState(null, "", url.toString());
       }
+      play("complete");
       // Auth-in-a-new-tab: PID created — mint the app's pid_code and post it back.
       if (ctx) {
         flags.delivered = true;
@@ -130,6 +133,7 @@ export function usePidClaim(
       onLoggedIn();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }

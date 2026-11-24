@@ -65,7 +65,7 @@ export function SigningScreen({
       ) : (
         <p className="max-w-[280px] text-center font-sans text-sm text-paragraph">{body}</p>
       )}
-      {!pending && <UIButton title="Close" className="mt-2 w-full max-w-[280px]" onPress={() => window.close()} />}
+      {!pending && <UIButton title="Close" className="mt-2 w-full max-w-[280px]" onPress={() => window.close()} sfx="close" />}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { deliverLoginCode, type LoginContext } from "../utils/popupLogin";
 import { finishSso, type SsoRequest } from "../utils/sso";
 import type { LoginFlowFlags } from "../types/login";
 import { clearApiCache } from "../../../shared/data/apiCache";
+import { play } from "../../../shared/sfx/player";
 
 export function useSignInMethods(
   peridot: PeridotClient,
@@ -34,17 +35,23 @@ export function useSignInMethods(
       );
       if (!res.ok) {
         setError("Sign-in was cancelled — try again.");
+        play("cancelled");
         return;
       }
       if (ctx) {
         flags.delivered = true;
-        if (await deliverLoginCode(peridot, ctx)) onCtxDone?.(false);
+        if (await deliverLoginCode(peridot, ctx)) {
+          play("signed-in");
+          onCtxDone?.(false);
+        }
         return;
       }
       if (finishSso(sso, res.pidCode)) return;
+      play("signed-in");
       onLoggedIn();
     } catch (e) {
       setError(String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }
@@ -81,11 +88,13 @@ export function useSignInMethods(
       );
       if (!url) {
         setError("Couldn't reach Google — try again.");
+        play("failed");
         return;
       }
       if (typeof window !== "undefined") window.location.assign(url);
     } catch (e) {
       setError(String(e));
+      play("failed");
     } finally {
       setBusy(false);
     }
@@ -117,16 +126,21 @@ export function useSignInMethods(
       }
       if (ctx) {
         flags.delivered = true;
-        if (await deliverLoginCode(peridot, ctx)) onCtxDone?.(false);
+        if (await deliverLoginCode(peridot, ctx)) {
+          play("signed-in");
+          onCtxDone?.(false);
+        }
         return;
       }
       if (finishSso(sso, res.pidCode)) return;
+      play("signed-in");
       onLoggedIn();
     } catch (e) {
       // Never rewrite the wallet's own reason: the user needs it ("User rejected
       // the request", "already pending for origin", …). Masking it with a
       // friendly string is what hid this bug for three attempts.
       setError(e instanceof Error ? e.message : "Wallet sign-in failed");
+      play("failed");
     } finally {
       setBusy(false);
     }

@@ -9,6 +9,7 @@ import {
 import type { AccountView } from "@peridotvault/pid-types";
 import { isFiatAction, isSessionError, isStepUpError, signInHint, summarize } from "../utils/popupAction";
 import { assertExecuteGateAllows, getExecuteGate } from "../utils/knownPrograms";
+import { play } from "../../../shared/sfx/player";
 
 export type PopupPhase = "waiting" | "preparing" | "review" | "busy" | "redirecting" | "done" | "failed";
 
@@ -162,6 +163,7 @@ export function usePopupRequest(
           }
           setError(signInHint(e));
           setPhase("failed");
+          play("failed");
         }
       }
     })();
@@ -185,6 +187,7 @@ export function usePopupRequest(
     }
     postPopupResult(popup.origin, { ok: false, error });
     setPhase("done");
+    play("cancelled");
   }, [popup.origin]);
 
   const approve = useCallback(async (opts?: { unknownAcknowledged?: boolean }) => {
@@ -194,6 +197,7 @@ export function usePopupRequest(
       assertExecuteGateAllows(action, payload, { unknownAcknowledged: opts?.unknownAcknowledged });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      play("failed");
       return;
     }
     setPhase("busy");
@@ -221,6 +225,7 @@ export function usePopupRequest(
       // payment page: same-window navigation from the Approve click can't be
       // popup-blocked, unlike a dapp-side async popup.
       postPopupResult(popup.origin, { ok: true, data }, checkoutUrl ? { keepOpen: true } : undefined);
+      play("approved");
       if (checkoutUrl && typeof window !== "undefined") {
         setPhase("redirecting");
         window.location.assign(checkoutUrl);
@@ -254,6 +259,7 @@ export function usePopupRequest(
           }
           setError(signInHint(message));
           setPhase("review");
+          play("failed");
           return;
         }
       }
@@ -268,6 +274,7 @@ export function usePopupRequest(
       }
       setError(signInHint(message));
       setPhase("review");
+      play("failed");
     }
   }, [popup.origin, action, payload, tryRefreshOnce]);
 
