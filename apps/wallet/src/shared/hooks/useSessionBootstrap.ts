@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { needsProvisioning } from "../app/fiatEnsure";
-import { cachedRead } from "../data/apiCache";
+import { landingScreen } from "../app/landing";
+import { cachedRead, clearApiCache } from "../data/apiCache";
 
 // Shell screen map. Owned here (not in App.tsx) so the session hooks and the
 // shell share one vocabulary; the router JSX stays in App.
@@ -63,6 +64,16 @@ export function useSessionBootstrap(
     setSessionEpoch((n) => n + 1);
   }, [setScreen]);
 
+  // A claim ticket is a cookie, not a session: it survives a reload and outlives
+  // the account that is signed in, so every post-auth route must consult it.
+  const hasPendingClaim = useCallback(async () => {
+    try {
+      return (await peridot.auth.claimStatus()).pending === true;
+    } catch {
+      return false;
+    }
+  }, [peridot]);
+
   // Post-auth landing: show the stepper only when something actually needs
   // provisioning (fresh account, failed/skipped setup); returning users go
   // straight home. The check is read-only — never traps at login.
@@ -72,16 +83,25 @@ export function useSessionBootstrap(
       setScreen("login");
       return;
     }
+    // A verified credential with no identity yet still needs the PID picker —
+    // this is the "add account" case, where a session is already signed in and
+    // home used to swallow the claim.
+    const pending = await hasPendingClaim();
     let need = false;
-    try {
-      need = await needsProvisioning(peridot);
-    } catch {
-      need = false;
+    if (!pending) {
+      try {
+        need = await needsProvisioning(peridot);
+      } catch {
+        need = false;
+      }
     }
-    setScreen(need ? "provisioning" : "home");
-  }, [peridot, loginContext, setScreen]);
+    setScreen(landingScreen({ authInNewTab: false, pendingClaim: pending, needsSetup: need }));
+  }, [peridot, loginContext, setScreen, hasPendingClaim]);
 
   const handleLoggedIn = useCallback(() => {
+    // A login or a claim can land a different identity than the one whose data
+    // is cached (add account, SSO round-trip): never serve the previous one.
+    clearApiCache();
     setStepUp(false);
     setAuthed(true);
     void routeAfterAuth();
@@ -118,11 +138,18 @@ export function useSessionBootstrap(
           // the pid_code to the opener (or show the PID picker if none yet).
           setScreen("login");
         } else {
-          try {
-            setScreen((await needsProvisioning(peridot)) ? "provisioning" : "home");
-          } catch {
-            setScreen("home");
+          // Same rule as routeAfterAuth: a pending claim (new credential while
+          // another account is signed in) belongs on the PID picker, not home.
+          const pending = await hasPendingClaim();
+          let need = false;
+          if (!pending) {
+            try {
+              need = await needsProvisioning(peridot);
+            } catch {
+              need = false;
+            }
           }
+          setScreen(landingScreen({ authInNewTab: false, pendingClaim: pending, needsSetup: need }));
         }
       }
     } catch {
@@ -144,7 +171,7 @@ export function useSessionBootstrap(
       clearTimeout(timer);
       if (alive) setBootstrapping(false);
     }
-  }, [peridot, loginContext, setScreen]);
+  }, [peridot, loginContext, setScreen, hasPendingClaim]);
 
   useEffect(() => {
     if (paused) return;
