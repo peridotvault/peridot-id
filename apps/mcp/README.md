@@ -23,13 +23,13 @@ no HTTPS outcalls, no timers on the request path (statically checked, see
 # from apps/mcp/
 ./scripts/sync-docs          # regenerate src/generated_docs.rs + src/generated_docs.meta.json
 ./scripts/sync-docs --check  # fail loudly on drift (CI runs this)
-cargo test -p peridot_id_mcp    # 55 tests, must be green
+cargo test -p peridot_id_mcp    # 62 tests, must be green
 ```
 
 Inputs: `apps/docs/*.mdx` (12 guides) + `apps/docs/api/overview.mdx` +
 `apps/docs/openapi.yaml` + `apps/docs/docs.json` (canonical slug list).
-Output: `src/generated_docs.rs` (219 search entries + 15 guides +
-8 verbatim examples + 3 SDK modules, ~108 KiB; budget ≤ 160 KiB) plus
+Output: `src/generated_docs.rs` (244 search entries + 15 guides +
+8 verbatim examples + 3 SDK modules, ~117 KiB; budget ≤ 160 KiB) plus
 `src/generated_docs.meta.json` (`sourceSha`, `contentHash`, `entryCounts`,
 `builtAt`). Regeneration is deterministic and byte-identical; `--check`
 compares the `.rs` bytes plus the meta hash/counts (only `builtAt` differs).

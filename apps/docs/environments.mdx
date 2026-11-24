@@ -7,19 +7,25 @@ PeridotID runs **two fully separate environments**. They share no database,
 credentials, or app registrations — only the same code and (for now) the same
 Google OAuth client.
 
-> **Separate deployments, not a path prefix.** Sandbox is the *same API* on
-> sandbox hosts — there is no `/sandbox/*` path on the production API and no
-> `?env=sandbox` query. If you can reach `GET /v1/env`, it tells you which
-> deployment you hit: `{ "env": "sandbox" }` vs `{ "env": "production" }`.
-> Pointing a sandbox build at the production host (or vice versa) is a
-> configuration bug — the SDK's `checkEnv()` startup check catches it.
+> **Separate API deployments, not a path prefix.** Sandbox is the *same API* on
+> a test host — there is no `/sandbox/*` path on the production API. If you can
+> reach `GET /v1/env`, it tells you which deployment you hit:
+> `{ "env": "sandbox" }` vs `{ "env": "production" }`. Pointing a sandbox build
+> at the production host (or vice versa) is a configuration bug — the SDK's
+> `checkEnv()` startup check catches it.
+>
+> **One wallet, two networks.** Both environments share the single wallet origin
+> `https://peridot.id`. Because a hosted login or approval popup opens there, the
+> SDK adds `env=mainnet|testnet` to the popup URL so the wallet talks to the
+> network your API does — your users switch networks in the app, not by using a
+> second host.
 
 | | Production | Sandbox (test) |
 |---|---|---|
 | Docs (Mintlify) | `https://docs.peridot.id` | `https://docs.peridot.id` (single docs for all envs) |
-| Dashboard | `https://dashboard.peridot.id` | `https://sandbox-dashboard.peridot.id` |
-| Wallet app | `https://peridot.id` | `https://sandbox.peridot.id` |
-| API | `https://api.peridot.id` | `https://sandbox-api.peridot.id` |
+| Dashboard | `https://dashboard.peridot.id` | `https://dashboard.peridot.id` (network switch in the topbar) |
+| Wallet app | `https://peridot.id` | `https://peridot.id` (network switch in Settings → Chains) |
+| API | `https://api.peridot.id` | `https://testnet-api.peridot.id` (legacy alias `sandbox-api.peridot.id`) |
 | Money | **real payments** | **test funds** |
 | Database | `peridot_id` | `peridot_id_test` |
 | Deploy branch | `main` | `test` |
@@ -29,8 +35,11 @@ Google OAuth client.
 - **Payment mode**: production vs `sandbox`. Sandbox top-ups use test payment rails —
   no real money ever moves.
 - **Database** (users, identities, apps, ledger) is separate.
-- **JWT secrets**, cookie domain, and WebAuthn
-  RP id are separate — a session or passkey from one env never works in the other.
+- **Identity is single.** PID, passkey, profile, and session live only in
+  production; the test deployment proxies those routes and verifies sessions by
+  introspection, so you sign in once and keep the same `<handle>@pid` on both
+  networks. Everything else (chain accounts, balances, level/XP, app registry)
+  is that network's own copy and test data can be reset.
 - **App registrations**: `client_id`, allowed origins, backend secret, **fees**,
   and webhook are per environment.
 

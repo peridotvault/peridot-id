@@ -34,11 +34,16 @@ That's the whole config. `clientId` is applied to login, exchange, and fiat call
 automatically. **There is no API URL, base URL, or environment variable to set** —
 the environment is auto-detected: `NODE_ENV === 'production'` →
 production, everything else (unset, `development`, `staging`, `test`, …) →
-sandbox. The API origin, popup host, Solana RPC, and program id all resolve from
-there — chains come from the API registry, not your config.
+sandbox. The API origin, Solana RPC, and program id all resolve from there —
+chains come from the API registry, not your config.
 
 - Force an environment for a staging build with `env: 'sandbox'`.
 - Self-host / localhost: pass advanced `baseUrl` (and `popupBaseUrl`).
+- The **popup host is always `https://peridot.id`**: one wallet serves both
+  networks, and the SDK puts `env=mainnet|testnet` on the hosted login and
+  approval URLs so the wallet opens the network your API belongs to.
+  `peridot.networkMode()` returns that same vocabulary (`'mainnet' | 'testnet'`)
+  when your app switches networks itself.
 - Server-side only: pass `clientSecret` (used by `auth.exchange`) — **never** in
   browser code.
 
