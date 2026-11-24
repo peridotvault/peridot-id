@@ -136,7 +136,7 @@ export function LoginOptions({
       {/* No logo and no tagline here: the brand is the topbar, and the card is
           borderless so this page reads as one surface, not a box in a box. */}
       <ConsentShell seamless>
-        <AuthHeading origin={origin} title="Sign in" subtitle="with your PeridotID" verified={verified} />
+        <AuthHeading origin={origin} title="Yoo! Welcome" align="center" verified={verified} />
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <div className="flex flex-col w-full gap-3">
           {allows("email") && (

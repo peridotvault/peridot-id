@@ -10,19 +10,23 @@ export function AuthHeading({
   title,
   subtitle,
   verified,
+  align = "left",
 }: {
   origin?: string | null;
   title: string;
   subtitle?: string;
   /** Verified partner: PeridotID fee waived (trust signal). */
   verified?: boolean;
+  /** Heading alignment; identity steps centre it, app cards keep it left. */
+  align?: "left" | "center";
 }) {
+  const pos = align === "center" ? "self-center text-center" : "self-start text-left";
   return (
     <div className="flex flex-col items-center gap-2">
       {origin ? <AppOriginBadge origin={origin} /> : null}
-      <h1 className="self-start text-left font-sans text-xl font-semibold text-foreground">{title}</h1>
+      <h1 className={`${pos} font-sans text-xl font-semibold text-foreground`}>{title}</h1>
       {subtitle ? (
-        <span className="self-start text-left font-sans text-sm text-paragraph">{subtitle}</span>
+        <span className={`${pos} font-sans text-sm text-paragraph`}>{subtitle}</span>
       ) : null}
       {verified ? (
         <span className="text-center font-sans text-xs text-success">
