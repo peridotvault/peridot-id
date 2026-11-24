@@ -140,8 +140,8 @@ export function LoginOptions({
           origin={origin}
           title={
             <>
-              <span className="font-bold">Yoo!</span>
-              <span className="font-normal"> Welcome</span>
+              <span className="font-normal">Yoo!</span>
+              <span className="font-bold"> Welcome</span>
             </>
           }
           align="center"
