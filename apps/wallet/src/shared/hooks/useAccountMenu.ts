@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AccountView } from "@peridotvault/pid-types";
 import { usePeridot } from "../app/AppContext";
 import type { AccountMenuModel } from "../components/shell/AccountMenu";
@@ -12,14 +12,24 @@ export function useAccountMenu(onSwitched: () => void): AccountMenuModel {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const openMenu = useCallback(() => {
-    setError(null);
-    setOpen(true);
+  // Read the list up front: the signed-out login page only offers an Accounts
+  // button when something is actually still signed in.
+  const load = useCallback(() => {
     peridot.auth
       .accounts()
       .then((res) => setAccounts(Array.isArray(res) ? (res as AccountView[]) : []))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [peridot]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const openMenu = useCallback(() => {
+    setError(null);
+    setOpen(true);
+    load();
+  }, [load]);
 
   const closeMenu = useCallback(() => setOpen(false), []);
 

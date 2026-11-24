@@ -14,6 +14,8 @@ import { useEmailSignIn } from "../../feat/auth/hooks/useEmailSignIn";
 import { useSignInMethods } from "../../feat/auth/hooks/useSignInMethods";
 import { useConsentActions } from "../../feat/auth/hooks/useConsentActions";
 import { useHeaderProfile } from "../../shared/hooks/useHeaderProfile";
+import { useAccountMenu } from "../../shared/hooks/useAccountMenu";
+import { clearApiCache } from "../../shared/data/apiCache";
 import { PidClaimForm } from "../../feat/auth/components/PidClaimForm";
 import { EmailOtpForm } from "../../feat/auth/components/EmailOtpForm";
 import { LoginOptions } from "../../feat/auth/components/LoginOptions";
@@ -101,6 +103,14 @@ export function Login({
     select: (pid) => void consent.pickAccount(pid),
     add: consent.addAccountCtx,
   };
+  // Signed out but other identities are still signed in on this browser: the
+  // login card offers them in the topbar ("Accounts") so signing back in is one
+  // tap. Only for the plain login — SSO/popup flows have their own consent card.
+  const accounts = useAccountMenu(() => {
+    clearApiCache();
+    onLoggedIn();
+  });
+  const showAccounts = !sso && !ctx && accounts.accounts.length > 0;
   const signIn = useSignInMethods(peridot, {
     sso,
     ctx,
@@ -240,6 +250,7 @@ export function Login({
     <LoginOptions
       busy={busy}
       error={error}
+      accounts={showAccounts ? accounts : null}
       stepUp={!!stepUp}
       ssoOrigin={sso ? ssoOrigin(sso.redirectUri) : null}
       ctxOrigin={ctx?.origin ?? null}

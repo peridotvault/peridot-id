@@ -10,6 +10,7 @@ export {
   ArrowUpRight,
   Banknote,
   Check,
+  ChevronDown,
   ChevronRight,
   Coins,
   Copy,

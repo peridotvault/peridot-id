@@ -40,6 +40,7 @@ export function ConsentShell({
             level={level ?? null}
             label="Accounts"
             menu={accountMenu}
+            variant={seamless ? "text" : "avatar"}
           />
         )}
       </div>

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AccountMenu, type AccountMenuModel } from "./AccountMenu";
 import { ProfileButton } from "./ProfileButton";
+import { Pressable } from "../ui/Pressable";
+import { ChevronDown } from "../icons";
 
 // Profile corner: the avatar button (level chip included) plus its account
 // popover. One component so the shell topbar, the desktop rail and the auth
@@ -12,6 +14,7 @@ export function ProfileMenu({
   label,
   menu,
   onProfile,
+  variant = "avatar",
 }: {
   displayName: string | null;
   avatarUrl: string | null;
@@ -21,6 +24,8 @@ export function ProfileMenu({
   menu: AccountMenuModel;
   /** Profile row in the menu; omit when the screen is the profile itself. */
   onProfile?: () => void;
+  /** "text" = the signed-out login page: no avatar to show, just the list. */
+  variant?: "avatar" | "text";
 }) {
   const anchor = useRef<HTMLDivElement>(null);
   // The menu is portaled to <body>, so its position comes from the button.
@@ -47,13 +52,29 @@ export function ProfileMenu({
 
   return (
     <div ref={anchor} className="relative flex shrink-0">
-      <ProfileButton
-        displayName={displayName}
-        avatarUrl={avatarUrl}
-        level={level}
-        label={label}
-        onProfile={menu.open ? menu.closeMenu : menu.openMenu}
-      />
+      {variant === "text" ? (
+        <Pressable
+          onPress={menu.open ? menu.closeMenu : menu.openMenu}
+          accessibilityLabel={label ?? "Accounts"}
+        >
+          <div className="flex items-center gap-1 rounded-lg border border-line px-3 py-2 hover:bg-surface">
+            <span className="font-sans text-sm text-foreground">{label ?? "Accounts"}</span>
+            <ChevronDown
+              size={14}
+              aria-hidden
+              className={`text-muted-foreground transition-transform ${menu.open ? "rotate-180" : ""}`}
+            />
+          </div>
+        </Pressable>
+      ) : (
+        <ProfileButton
+          displayName={displayName}
+          avatarUrl={avatarUrl}
+          level={level}
+          label={label}
+          onProfile={menu.open ? menu.closeMenu : menu.openMenu}
+        />
+      )}
       {mounted && pos && (
         <AccountMenu
           accounts={menu.accounts}
