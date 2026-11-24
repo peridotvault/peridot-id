@@ -1,6 +1,6 @@
 {
-  "builtAt": "2026-11-24T17:27:51Z",
-  "contentHash": "1920805a7c4fb709802ea6d4fee8f91e425965f65024d0de37c7d5dcc93f2456",
+  "builtAt": "2026-11-24T18:01:45Z",
+  "contentHash": "02e3aa3275230a2c0d8f33a93ecf94e5a9e34f8a2755fbf63486fb59f99a765c",
   "entryCounts": {
     "docs": 245,
     "examples": 8,
@@ -10,5 +10,5 @@
   },
   "generator": "apps/mcp/scripts/sync-docs",
   "llmsEntryCount": null,
-  "sourceSha": "049807a1e79908db397ba158d3b44e9a2c0c2c8d"
+  "sourceSha": "9c8593777312b603caf71338c8a8198d4e50fc31"
 }
