@@ -13,6 +13,7 @@ export function ConsentShell({
   avatarUrl,
   level,
   accountMenu,
+  seamless,
 }: {
   /** Card body. */
   children: ReactNode;
@@ -21,6 +22,8 @@ export function ConsentShell({
   level?: number | null;
   /** Omit in approval: switching identity mid-approval is the popup's job. */
   accountMenu?: AccountMenuModel;
+  /** No card surface: the login page sits straight on the scrim (no border). */
+  seamless?: boolean;
 }) {
   return (
     <div className="flex flex-col absolute inset-0 z-10">
@@ -42,7 +45,11 @@ export function ConsentShell({
           plus a fiat quote — stays reachable instead of clipping at the top. */}
       <div className="flex flex-1 relative z-10 overflow-y-auto">
         <div className="flex min-h-full w-full items-center justify-center p-6">
-          <div className="flex w-full max-w-[380px] flex-col gap-3 rounded-xl border border-border bg-surface p-5">
+          <div
+            className={`flex w-full max-w-[380px] flex-col gap-3 p-5 ${
+              seamless ? "" : "rounded-xl border border-border bg-surface"
+            }`}
+          >
             {children}
           </div>
         </div>

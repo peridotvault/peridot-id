@@ -155,9 +155,6 @@ export function Login({
       <PidClaimForm
         email={claim.claim.email}
         origin={appOrigin}
-        appName={appInfo?.name}
-        logoUrl={appInfo?.logoUrl}
-        description={appInfo?.description}
         verified={appVerified}
         displayName={claim.claim.displayName}
         handle={claim.handle}
@@ -221,9 +218,6 @@ export function Login({
       <EmailOtpForm
         step={emailSignIn.step}
         origin={appOrigin}
-        appName={appInfo?.name}
-        logoUrl={appInfo?.logoUrl}
-        description={appInfo?.description}
         verified={appVerified}
         email={emailSignIn.email}
         code={emailSignIn.code}
@@ -249,9 +243,6 @@ export function Login({
       stepUp={!!stepUp}
       ssoOrigin={sso ? ssoOrigin(sso.redirectUri) : null}
       ctxOrigin={ctx?.origin ?? null}
-      appName={appInfo?.name}
-      logoUrl={appInfo?.logoUrl}
-      description={appInfo?.description}
       verified={appVerified}
       allowedMethods={allowedMethods}
       catalog={catalog}

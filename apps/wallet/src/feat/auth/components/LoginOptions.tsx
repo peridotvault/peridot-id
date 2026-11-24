@@ -7,7 +7,7 @@ import { ArrowRight, Mail, Wallet } from "../../../shared/components/icons";
 import { detectWallets, discoverWallets, type WalletConnector } from "@peridotvault/pid-sdk-js";
 import { useEffect, useMemo, useState } from "react";
 import type { CatalogProvider } from "../hooks/useProviderCatalog";
-import { AppIdentity } from "./AppIdentity";
+import { AuthHeading } from "./AuthHeading";
 import { ConsentShell } from "./ConsentShell";
 
 /** Catalogue icon with fallback; never renders catalogue SVG/HTML. */
@@ -66,9 +66,6 @@ export function LoginOptions({
   stepUp,
   ssoOrigin,
   ctxOrigin,
-  appName,
-  logoUrl,
-  description,
   verified,
   allowedMethods,
   catalog = null,
@@ -84,10 +81,7 @@ export function LoginOptions({
   stepUp: boolean;
   ssoOrigin: string | null;
   ctxOrigin: string | null;
-  /** Registered app name/logo/tagline; omitted on PeridotID's own login. */
-  appName?: string | null;
-  logoUrl?: string | null;
-  description?: string | null;
+  /** Verified partner: PeridotID fee waived (trust signal on the card). */
   verified?: boolean;
   /** App-enabled login methods; null/undefined = all on. */
   allowedMethods: string[] | null;
@@ -139,16 +133,10 @@ export function LoginOptions({
   return (
     <div className="flex flex-col flex-1 relative">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <ConsentShell>
-        <AppIdentity
-          origin={origin}
-          appName={appName}
-          logoUrl={logoUrl}
-          description={description}
-          verified={verified}
-          title="Sign in"
-          subtitle="with your PeridotID"
-        />
+      {/* No logo and no tagline here: the brand is the topbar, and the card is
+          borderless so this page reads as one surface, not a box in a box. */}
+      <ConsentShell seamless>
+        <AuthHeading origin={origin} title="Sign in" subtitle="with your PeridotID" verified={verified} />
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <div className="flex flex-col w-full gap-3">
           {allows("email") && (

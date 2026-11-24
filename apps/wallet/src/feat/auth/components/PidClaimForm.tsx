@@ -3,7 +3,7 @@ import { TextField } from "../../../shared/components/ui/TextField";
 import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
 import { UIButton } from "../../../shared/components/ui/UIButton";
 import type { HandleStatus } from "../types/login";
-import { AppIdentity } from "./AppIdentity";
+import { AuthHeading } from "./AuthHeading";
 import { ConsentShell } from "./ConsentShell";
 
 // Claim branch: verified credential, no identity yet — the only way forward
@@ -17,9 +17,6 @@ export function PidClaimForm({
   busy,
   error,
   origin,
-  appName,
-  logoUrl,
-  description,
   verified,
   onHandle,
   onAck,
@@ -34,9 +31,6 @@ export function PidClaimForm({
   busy: boolean;
   error: string | null;
   origin?: string | null;
-  appName?: string | null;
-  logoUrl?: string | null;
-  description?: string | null;
   verified?: boolean;
   onHandle: (t: string) => void;
   onAck: () => void;
@@ -46,15 +40,12 @@ export function PidClaimForm({
   return (
     <div className="flex flex-col flex-1 relative">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <ConsentShell>
-        <AppIdentity
+      <ConsentShell seamless>
+        <AuthHeading
           origin={origin}
-          appName={appName}
-          logoUrl={logoUrl}
-          description={description}
-          verified={verified}
           title="Create your PID"
           subtitle={email || displayName ? `Continuing as ${displayName ?? email}` : undefined}
+          verified={verified}
         />
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         <div className="flex flex-col w-full gap-3">

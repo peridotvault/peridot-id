@@ -3,7 +3,7 @@ import { Pressable } from "../../../shared/components/ui/Pressable";
 import { TextField } from "../../../shared/components/ui/TextField";
 import { AsciiRidges } from "../../../shared/components/ui/AsciiRidges";
 import { UIButton } from "../../../shared/components/ui/UIButton";
-import { AppIdentity } from "./AppIdentity";
+import { AuthHeading } from "./AuthHeading";
 import { ConsentShell } from "./ConsentShell";
 
 // Email-OTP form: address step, then the 6-digit code step with resend timer.
@@ -17,9 +17,6 @@ export function EmailOtpForm({
   busy,
   error,
   origin,
-  appName,
-  logoUrl,
-  description,
   verified,
   onEmail,
   onCode,
@@ -34,9 +31,6 @@ export function EmailOtpForm({
   busy: boolean;
   error: string | null;
   origin?: string | null;
-  appName?: string | null;
-  logoUrl?: string | null;
-  description?: string | null;
   verified?: boolean;
   onEmail: (t: string) => void;
   onCode: (t: string) => void;
@@ -51,15 +45,12 @@ export function EmailOtpForm({
   return (
     <div className="flex flex-col flex-1 relative">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
-      <ConsentShell>
-        <AppIdentity
+      <ConsentShell seamless>
+        <AuthHeading
           origin={origin}
-          appName={appName}
-          logoUrl={logoUrl}
-          description={description}
-          verified={verified}
           title="Sign in with email"
           subtitle={step === "email" ? "We'll send you a 6-digit code." : `Code sent to ${email}`}
+          verified={verified}
         />
         {error && <p role="alert" tabIndex={-1} id="login-otp-error" className="text-sm text-danger">{error}</p>}
         <div className="flex flex-col w-full gap-3">
