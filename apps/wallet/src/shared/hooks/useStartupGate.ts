@@ -29,6 +29,10 @@ export function useStartupGate() {
   }, []);
   // Failsafe: a hung gate (fonts or network that never settles with no error)
   // must never trap the app on the loader forever — force it open degraded.
+  // 8s proved too long on slow/blocked Google Fonts: the splash held the whole
+  // app for 8s before painting anything. The first screen has no body text
+  // (logo is an SVG), so a 2.5s cap costs at most a font swap, never a blank.
+  const GATE_TIMEOUT_MS = 2500;
   const [gateForced, setGateForced] = useState(false);
 
   useEffect(() => {
@@ -40,9 +44,9 @@ export function useStartupGate() {
   useEffect(() => {
     const id = setTimeout(() => {
       // eslint-disable-next-line no-console
-      console.warn("[startup] gate timed out after 8s — opening degraded");
+      console.warn("[startup] gate timed out — opening degraded (fonts still loading)");
       setGateForced(true);
-    }, 8000);
+    }, GATE_TIMEOUT_MS);
     return () => clearTimeout(id);
   }, []);
 

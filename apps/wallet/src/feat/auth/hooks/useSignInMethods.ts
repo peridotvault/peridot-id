@@ -87,7 +87,10 @@ export function useSignInMethods(
             : undefined,
       );
       if (!url) {
-        setError("Couldn't reach Google — try again.");
+        // login() collapses network failure and API refusal into null; an
+        // unregistered clientId/origin (the usual cause) used to read as a
+        // Google outage, so name both here.
+        setError("Couldn't start sign-in — retry, or check this app is registered for this origin.");
         play("failed");
         return;
       }

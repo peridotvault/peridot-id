@@ -48,6 +48,12 @@ export function useAppInfo(
             isVerified: data.isVerified === true,
             loginMethods: Array.isArray(data.loginMethods) ? data.loginMethods : null,
           });
+        } else if (!cancelled) {
+          // Fail-closed on screen by design, but silence here is what makes a
+          // dead popup look like a session bug: 404 = app (or this origin) is
+          // not registered, and the login that follows cannot mint a code.
+          // eslint-disable-next-line no-console
+          console.warn("[app-info] not answered — app or origin not registered:", { clientId: appClientId, origin: origin ?? null, data: res.data });
         }
       } catch {
         // fail-closed: no badge, default methods
