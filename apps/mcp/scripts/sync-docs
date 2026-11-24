@@ -85,7 +85,17 @@ def read_text(path: Path) -> str:
 
 
 def git_tree_sha() -> str:
+    # The rev is the COMMITTED tree, so uncommitted docs would bake the previous
+    # rev next to the new content — CI then checks out the commit and regenerates
+    # a different artifact. Fail instead of producing a poisoned index.
     try:
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--", "apps/docs"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         out = subprocess.run(
             ["git", "rev-parse", "HEAD:apps/docs"],
             cwd=REPO_ROOT,
@@ -95,6 +105,10 @@ def git_tree_sha() -> str:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         fail(f"cannot run git for source revision: {exc}")
+    if dirty.returncode != 0:
+        fail(f"cannot check working tree of apps/docs: {dirty.stderr.strip()}")
+    if dirty.stdout.strip():
+        fail("apps/docs has uncommitted changes: commit them, then re-run sync-docs")
     if out.returncode != 0:
         fail(f"cannot resolve git tree SHA of apps/docs: {out.stderr.strip()}")
     return out.stdout.strip()
