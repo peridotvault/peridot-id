@@ -136,7 +136,17 @@ export function LoginOptions({
       {/* No logo and no tagline here: the brand is the topbar, and the card is
           borderless so this page reads as one surface, not a box in a box. */}
       <ConsentShell seamless>
-        <AuthHeading origin={origin} title="Yoo! Welcome" align="center" verified={verified} />
+        <AuthHeading
+          origin={origin}
+          title={
+            <>
+              <span className="font-bold">Yoo!</span>
+              <span className="font-normal"> Welcome</span>
+            </>
+          }
+          align="center"
+          verified={verified}
+        />
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
         {/* Extra top margin: the methods need air under the welcome heading. */}
         <div className="flex flex-col w-full mt-4 gap-3">

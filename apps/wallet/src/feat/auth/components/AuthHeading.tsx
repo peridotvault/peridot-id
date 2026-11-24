@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AppOriginBadge } from "./AppOriginBadge";
 
 // Card heading for the identity steps (sign-in, email code, PID claim): the
@@ -13,7 +14,8 @@ export function AuthHeading({
   align = "left",
 }: {
   origin?: string | null;
-  title: string;
+  /** Screen title; a node so a screen can weight part of it. */
+  title: ReactNode;
   subtitle?: string;
   /** Verified partner: PeridotID fee waived (trust signal). */
   verified?: boolean;
