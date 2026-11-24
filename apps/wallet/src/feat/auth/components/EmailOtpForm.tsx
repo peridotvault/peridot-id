@@ -43,7 +43,7 @@ export function EmailOtpForm({
     if (error) document.getElementById("login-otp-error")?.focus?.();
   }, [error]);
   return (
-    <div className="flex flex-col flex-1 relative">
+    <div className="isolate flex flex-col flex-1 relative">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
       <ConsentShell seamless>
         <AuthHeading

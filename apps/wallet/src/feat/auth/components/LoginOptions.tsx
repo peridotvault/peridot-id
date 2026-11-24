@@ -132,7 +132,7 @@ export function LoginOptions({
   };
   const origin = ssoOrigin ?? ctxOrigin;
   return (
-    <div className="flex flex-col flex-1 relative">
+    <div className="isolate flex flex-col flex-1 relative">
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
       {/* No logo and no tagline here: the brand is the topbar, and the card is
           borderless so this page reads as one surface, not a box in a box. */}
