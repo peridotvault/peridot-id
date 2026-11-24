@@ -14,7 +14,6 @@
 #   test stack (up.sh test, NEW_API_HOST=testnet-api.peridot.id) — own VPS,
 #   API + DB only, no web services:
 #     API       testnet-api.peridot.id         → nest  :3301
-#     API alias sandbox-api.peridot.id         → same service (SDKs ≤1.12.x bake it)
 #
 # main: cp deploy/.env.main.example deploy/.env.main && ./deploy/up.sh main
 #

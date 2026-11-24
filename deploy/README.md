@@ -16,7 +16,6 @@ labels. No infra repo changes are ever required.
    - `api.peridot.id` → `76.13.16.183` (API)
    - `dashboard.peridot.id` → `76.13.16.183` (dashboard)
    - `testnet-api.peridot.id` → `107.173.130.7` (test API)
-   - `sandbox-api.peridot.id` → `107.173.130.7` (legacy alias, same API)
    (`docs.peridot.id` is Mintlify-hosted — no VPS records. Retired-host records
    are removed at cutover.)
 3. Google OAuth console: register the redirect URIs on the OAuth 2.0 client
@@ -99,9 +98,8 @@ chmod 600 /etc/peridot-id/infisical.env
 ```
 
 Domains: `testnet-api.peridot.id` on the test VPS — API + DB only, no web
-services (the wallet and dashboard are one origin pair on the main stack). The
-old `sandbox-api.peridot.id` stays routed to the same service as an alias for
-SDK builds that predate the rename. Single Mintlify docs `docs.peridot.id`.
+services (the wallet and dashboard are one origin pair on the main stack).
+Single Mintlify docs `docs.peridot.id`.
 
 **Google OAuth:** the test stack reuses the production Google client, so add
 `https://testnet-api.peridot.id/v1/auth/google/callback` to that
@@ -111,7 +109,7 @@ client's authorized redirect URIs. Never add localhost URIs to the prod client.
 
 Traffic is peridot.id-only on this branch; going live is config + DNS:
 
-- [ ] DNS A-records live for all 5 VPS hosts (human, registrar Hostinger — table below)
+- [ ] DNS A-records live for all 4 VPS hosts (human, registrar Hostinger — table below)
 - [ ] TLS: Traefik `letsencrypt` resolver issues per-host certs on first request
       (~2 min) — verify with the commands below
 - [ ] Infisical `/apps/api` (main + test): `CORS_ORIGINS` holds the canonical
@@ -222,7 +220,7 @@ docker logs -f peridot-id-api-1
 | Dashboard | https://dashboard.peridot.id |
 
 Test stack on its own VPS (`107.173.130.7`): `testnet-api.peridot.id` only
-(API + DB, no web services; `sandbox-api.peridot.id` is a routing alias).
+(API + DB, no web services).
 Single Mintlify docs host `docs.peridot.id`.
 
 ## peridot.id hard cutover (ANT-400 / ANT-405, DevOps-owned)
@@ -250,7 +248,6 @@ Apex = `A`, no CNAME at apex:
 | 2 | `api.peridot.id` | A | `76.13.16.183` | API (router: ANT-116) |
 | 3 | `dashboard.peridot.id` | A | `76.13.16.183` | dashboard (new service) |
 | 4 | `testnet-api.peridot.id` | A | `107.173.130.7` (test VPS) | test API |
-| 5 | `sandbox-api.peridot.id` | A | `107.173.130.7` | legacy alias (same API) |
 
 `www.peridot.id` already resolves to parking — leave it until brand decides
 (redirect vs site); out of scope here.
@@ -260,7 +257,7 @@ request via the existing `letsencrypt` resolver — allow ~2 min):
 
 ```sh
 for h in peridot.id api.peridot.id dashboard.peridot.id \
-         testnet-api.peridot.id sandbox-api.peridot.id; do
+         testnet-api.peridot.id; do
   echo "== $h"; dig +short $h A
   curl -sk -o /dev/null -w "%{http_code}\n" --max-time 10 https://$h/
 done
@@ -275,8 +272,8 @@ CI retired-host guard stays green — infra surfaces must stay host-free).
 ### What this stack change does (and does not do)
 
 - `deploy/compose.yaml`: each router matches its canonical host only
-  (`api.peridot.id` / `testnet-api.peridot.id` + its `sandbox-api` alias,
-  `peridot.id`, `dashboard.peridot.id`). The retired-docs redirect router is REMOVED
+  (`api.peridot.id` / `testnet-api.peridot.id`, `peridot.id`,
+  `dashboard.peridot.id`). The retired-docs redirect router is REMOVED
   (its match host is decommissioned; Mintlify serves `docs.peridot.id`).
 - `deploy/.env.{main,test}.example`: all service URLs are canonical peridot.id;
   no retired examples remain.

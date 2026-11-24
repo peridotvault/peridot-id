@@ -1,6 +1,6 @@
 # Retired hosts (ANT-400 hard cutover)
 
-Canonical hosts are `peridot.id` only. The six retired names below must resolve
+Canonical hosts are `peridot.id` only. The retired names below must resolve
 to nothing after DNS withdrawal (NXDOMAIN / no A record — connection refused).
 
 > Scope note (ANT-426): this file lives in `docs/` **on purpose**. The CI
@@ -19,4 +19,11 @@ for h in pid.peridotvault.com app.pid.peridotvault.com api.pid.peridotvault.com 
   echo "== $h"; dig +short $h A
 done
 # every retired name above must print NOTHING (NXDOMAIN / no A record after DNS withdrawal).
+
+# PeridotID's own pre-rename hosts (`testnet-api.peridot.id` replaces the API
+# alias; one wallet + one dashboard serve both networks):
+for h in sandbox.peridot.id sandbox-dashboard.peridot.id sandbox-api.peridot.id; do
+  echo "== $h"; dig +short $h A
+done
+# same rule: nothing above once their Cloudflare records are withdrawn.
 ```
