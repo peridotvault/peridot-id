@@ -208,6 +208,16 @@ textarea::placeholder {
   }
 }
 
+/* About hero: each rotating word fades in on mount (keyed remount). */
+@keyframes about-word {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes sign-in-breathe {
   0%,
   100% {

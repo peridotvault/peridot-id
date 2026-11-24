@@ -14,7 +14,7 @@ export function PageFooter({ className }: { className?: string }) {
         className,
       )}
     >
-      <span>© PeridotID</span>
+      <span>© Antigane</span>
       <nav className="flex items-center gap-4">
         <a href="/about" className="outline-0 hover:text-foreground focus-visible:underline">
           About
