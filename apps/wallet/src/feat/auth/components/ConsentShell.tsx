@@ -14,6 +14,7 @@ export function ConsentShell({
   level,
   accountMenu,
   seamless,
+  footer,
 }: {
   /** Card body. */
   children: ReactNode;
@@ -24,6 +25,8 @@ export function ConsentShell({
   accountMenu?: AccountMenuModel;
   /** No card surface: the login page sits straight on the scrim (no border). */
   seamless?: boolean;
+  /** Public chrome under the card (sign-in only): the card keeps the space. */
+  footer?: ReactNode;
 }) {
   return (
     <div className="flex flex-col absolute inset-0 z-10">
@@ -54,6 +57,7 @@ export function ConsentShell({
           </div>
         </div>
       </div>
+      {footer ? <div className="relative z-10 shrink-0">{footer}</div> : null}
     </div>
   );
 }

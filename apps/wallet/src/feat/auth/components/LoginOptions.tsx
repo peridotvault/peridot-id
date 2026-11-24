@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CatalogProvider } from "../hooks/useProviderCatalog";
 import { AuthHeading } from "./AuthHeading";
 import { ConsentShell } from "./ConsentShell";
+import { PageFooter } from "../../../shared/components/shell/PageFooter";
 
 /** Catalogue icon with fallback; never renders catalogue SVG/HTML. */
 function CatalogIcon({ provider, fallback }: { provider: CatalogProvider; fallback: React.ReactNode }) {
@@ -135,7 +136,7 @@ export function LoginOptions({
       <AsciiRidges exposure={0.6} gain={3} elementSize={14} opacity={1} layers={8} detail={3} />
       {/* No logo and no tagline here: the brand is the topbar, and the card is
           borderless so this page reads as one surface, not a box in a box. */}
-      <ConsentShell seamless>
+      <ConsentShell seamless footer={<PageFooter />}>
         <AuthHeading
           origin={origin}
           title={
