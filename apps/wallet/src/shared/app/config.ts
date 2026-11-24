@@ -31,7 +31,7 @@ function resolveBaseUrl(configured: string | undefined): string {
   }
 }
 
-/** `https://api.peridot.id` → `https://sandbox-api.peridot.id`; local dev keeps one API. */
+/** `https://api.peridot.id` → `https://testnet-api.peridot.id`; local dev keeps one API. */
 function testnetSibling(mainnet: string): string {
   try {
     const url = new URL(mainnet);
@@ -41,7 +41,7 @@ function testnetSibling(mainnet: string): string {
       url.hostname === "[::1]" ||
       /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname);
     if (local || !url.hostname.startsWith("api.")) return mainnet;
-    url.hostname = `sandbox-${url.hostname}`;
+    url.hostname = `testnet-${url.hostname}`;
     return url.toString().replace(/\/$/, "");
   } catch {
     return mainnet;

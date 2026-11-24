@@ -10,7 +10,7 @@ import { pidNetwork } from "./network";
  * browser session itself. It asks the mainnet deployment once
  * (`GET /v1/auth/introspect`) and caches the answer briefly — no shared JWT
  * secret, no second identity store, no new env var (the mainnet origin is
- * derived from this deployment's `API_URL`, see `stripSandboxHost`).
+ * derived from this deployment's `API_URL`, see `stripTestnetHost`).
  *
  * The cache trades at most CACHE_TTL_MS of staleness for one HTTP call per
  * token per minute; revocation therefore lags by that window, the same order

@@ -40,7 +40,7 @@ wallet popup for the first-party session.
 | Var | Dev default | Prod |
 |---|---|---|
 | `VITE_API_URL` (mainnet API) | `http://localhost:3300` | `https://api.peridot.id` |
-| `VITE_TEST_API_URL` | unset → same as `VITE_API_URL` | unset → derived `https://sandbox-api.peridot.id` |
+| `VITE_TEST_API_URL` | unset → same as `VITE_API_URL` | unset → derived `https://testnet-api.peridot.id` |
 | `VITE_POPUP_URL` (wallet host) | `http://localhost:3302` | `https://peridot.id` (one host for both networks) |
 | `VITE_PID_CLIENT_ID` | unset (loopback needs none) | optional client_id for the `/demo` sample dapp |
 

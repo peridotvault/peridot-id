@@ -40,7 +40,7 @@ test("Peridot presets: env picks the canonical hosts; custom baseUrl drops the p
 
 test("resolvePeridotUrls: same table the client uses (for server-to-server backends)", () => {
   assert.deepEqual(resolvePeridotUrls("production"), { baseUrl: "https://api.peridot.id", popupBaseUrl: "https://peridot.id" });
-  assert.deepEqual(resolvePeridotUrls("sandbox"), { baseUrl: "https://sandbox-api.peridot.id", popupBaseUrl: "https://peridot.id" });
+  assert.deepEqual(resolvePeridotUrls("sandbox"), { baseUrl: "https://testnet-api.peridot.id", popupBaseUrl: "https://peridot.id" });
 });
 
 test("Peridot presets: canonical API hosts (AC-D3)", () => {

@@ -10,7 +10,7 @@ const PRESETS: Record<PeridotEnv, { baseUrl: string; popupBaseUrl: string }> = {
     popupBaseUrl: "https://peridot.id",
   },
   sandbox: {
-    baseUrl: "https://sandbox-api.peridot.id",
+    baseUrl: "https://testnet-api.peridot.id",
     // ONE wallet host serves both networks (`?env=testnet` picks the API), so
     // the sandbox popup is the canonical wallet origin, not a second host.
     popupBaseUrl: "https://peridot.id",

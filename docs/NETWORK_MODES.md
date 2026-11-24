@@ -4,7 +4,7 @@ One frontend, two backends, one identity.
 
 | | Mainnet | Testnet |
 |---|---|---|
-| API host | `api.peridot.id` | `sandbox-api.peridot.id` |
+| API host | `api.peridot.id` | `testnet-api.peridot.id` (legacy alias `sandbox-api.peridot.id`) |
 | Database | prod `peridot_id` | separate test DB |
 | PID, passkey, profile, device, session | ✅ the only copy | ❌ none (identity routes are proxied) |
 | Chain accounts, authorities, intents, tx | ✅ | ✅ (devnet; may be reset) |
@@ -26,7 +26,7 @@ straddles two networks.
 The testnet API has no identity tables. Instead:
 
 - Browser session cookies carry `COOKIE_DOMAIN=.peridot.id` (both stacks), so
-  the one session minted by mainnet is sent to `sandbox-api.peridot.id` too.
+  the one session minted by mainnet is sent to `testnet-api.peridot.id` too.
 - Identity routes (`/v1/auth`, `/v1/identity`, `/v1/pids`, `/v1/profile`,
   `/v1/credentials`) on the testnet stack are **forwarded verbatim** to the
   mainnet API (`common/identity-proxy.ts`) — the testnet DB can never mint a
@@ -34,7 +34,8 @@ The testnet API has no identity tables. Instead:
 - Every other authenticated testnet request is verified by **introspection**
   against mainnet (`GET /v1/auth/introspect`, cached 60s in
   `common/network-auth.ts`). No shared JWT secret; the mainnet origin is
-  derived from the stack's own `API_URL` (`sandbox-api` → `api`).
+  derived from the stack's own `API_URL` (`testnet-api` → `api`; legacy `sandbox-api`
+  is still stripped, so SDK builds that predate the rename keep working).
 - 13+ tables reference `identity.pid`, so the testnet stack materialises a bare
   shadow `Identity` row (pid only) on first write — `prisma/pid-ref.ts`.
 
@@ -72,6 +73,6 @@ accounts from the chain on the next login instead of trusting the cleared DB.
 - Test stack: **API + DB only** (`deploy/compose.yaml` profiles) — its own VPS.
 - One new env per stack: `PID_NETWORK=mainnet|testnet`. Nothing else.
 - Boot fails loudly when the flag disagrees with `API_URL` (`networkConsistencyError`):
-  testnet needs a `sandbox-*` host, mainnet must not have one.
+  testnet needs a `testnet-*` (or legacy `sandbox-*`) host, mainnet must not have one.
 - `deploy/.env.main*` must keep `DOKU_MODE=production` and no
   `PID_FAUCET_ENABLED` (the faucet route is not registered on mainnet).

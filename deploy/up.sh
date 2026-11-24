@@ -44,13 +44,14 @@ PROJECT="peridot-id"
 # NEW_API_HOST is the canonical API hostname (ANT-405 hard cutover — one host
 # per Traefik router, see compose.yaml).
 if [ "$ENV" = "test" ]; then
-  export ENV_SUFFIX="${ENV_SUFFIX:-sandbox.}"
   export NAMESPACE="${NAMESPACE:--test}"
-  export NEW_API_HOST="${NEW_API_HOST:-sandbox-api.peridot.id}"
+  export NEW_API_HOST="${NEW_API_HOST:-testnet-api.peridot.id}"
+  # Published SDKs (<= 1.12.x) bake the old host; keep it routed to the same API.
+  export LEGACY_API_HOST="${LEGACY_API_HOST:-sandbox-api.peridot.id}"
 else
-  export ENV_SUFFIX="${ENV_SUFFIX:-}"
   export NAMESPACE="${NAMESPACE:-}"
   export NEW_API_HOST="${NEW_API_HOST:-api.peridot.id}"
+  export LEGACY_API_HOST=""
 fi
 # Hardening (ANT-121 security review §3): NEW_API_HOST lands verbatim in a Traefik
 # Host() rule — reject anything that is not a plain hostname so a bad env value
@@ -58,24 +59,26 @@ fi
 case "$NEW_API_HOST" in
   *[!a-zA-Z0-9.-]* | "" | .* | *.) echo "error: NEW_API_HOST invalid: '$NEW_API_HOST'" >&2; exit 1 ;;
 esac
+case "${LEGACY_API_HOST:-}" in
+  *[!a-zA-Z0-9.-]*) echo "error: LEGACY_API_HOST invalid: '$LEGACY_API_HOST'" >&2; exit 1 ;;
+esac
+# One Traefik router, host rule built here so the legacy alias never becomes a
+# second router (a router host of its own would make ACME try to issue for it).
+API_HOST_RULE=$(printf 'Host(`%s`)' "$NEW_API_HOST")
+if [ -n "${LEGACY_API_HOST:-}" ]; then
+  API_HOST_RULE="$API_HOST_RULE || $(printf 'Host(`%s`)' "$LEGACY_API_HOST")"
+fi
+export API_HOST_RULE
 
 # Canonical peridot.id hosts (ANT-405 hard cutover): deploy meta, not secrets —
-# hardcoded per stack like ENV_SUFFIX above. Pre-set env vars win (override).
+# hardcoded per stack. Pre-set env vars win (override).
 # The dashboard API default below tracks the same canonical API names so this
 # stack stays correct even if NEW_API_HOST is unset.
 # (Docs are Mintlify-hosted at docs.peridot.id — no VPS redirect anymore, so no
 # docs host var is exported here.)
 if [ "$ENV" = "test" ]; then
-  export NEW_WALLET_HOST="${NEW_WALLET_HOST:-sandbox.peridot.id}"
-  export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-sandbox-dashboard.peridot.id}"
-  # ANT-693: the wallet bakes VITE_API_URL at build time (compose → Dockerfile.app).
-  # Without a per-stack default the sandbox wallet silently baked the prod API
-  # fallback, minting pid_codes in the prod DB that sandbox-api can never
-  # consume (`sso_code_invalid` on every exchange). Same canonical-API rule as
-  # DASHBOARD_API_URL below — pre-set env vars still win.
-  export VITE_API_URL="${VITE_API_URL:-https://sandbox-api.peridot.id}"
-  export DASHBOARD_API_URL="${DASHBOARD_API_URL:-https://sandbox-api.peridot.id}"
-  export DASHBOARD_POPUP_URL="${DASHBOARD_POPUP_URL:-https://sandbox.peridot.id}"
+  # No web services on the test stack (API + DB only) — nothing to bake.
+  :
 else
   export NEW_WALLET_HOST="${NEW_WALLET_HOST:-peridot.id}"
   export NEW_DASHBOARD_HOST="${NEW_DASHBOARD_HOST:-dashboard.peridot.id}"

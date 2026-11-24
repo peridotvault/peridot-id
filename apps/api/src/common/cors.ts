@@ -8,19 +8,17 @@
 export const APP_ORIGINS_TTL_MS = 60_000;
 
 /**
- * First-party origins (ANT-400 hard cutover): *.peridot.id only, prod +
- * sandbox. Built in (not env-only) so a stale CORS_ORIGINS value in
- * Infisical can never dark-out the domains. The env list stays additive
- * for one-off overrides. Legacy hosts are removed (hard cutover).
+ * First-party origins (ANT-400 hard cutover): *.peridot.id only. Built in (not
+ * env-only) so a stale CORS_ORIGINS value in Infisical can never dark-out the
+ * domains. The env list stays additive for one-off overrides.
+ *
+ * One origin pair serves both networks (docs/NETWORK_MODES.md), so there are
+ * no per-network web hosts to allow. Legacy hosts are removed.
  */
 export const FIRST_PARTY_ORIGINS: string[] = [
-  // Prod (ANT-400): wallet + dashboard + docs.
   "https://peridot.id",
   "https://dashboard.peridot.id",
   "https://docs.peridot.id",
-  // Sandbox (ANT-400): wallet + dashboard.
-  "https://sandbox.peridot.id",
-  "https://sandbox-dashboard.peridot.id",
 ];
 
 import type { ConfigService } from "@nestjs/config";

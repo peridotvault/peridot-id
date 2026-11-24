@@ -16,12 +16,13 @@ export class EnvController {
 
   @Get()
   @Header("Cache-Control", "public, max-age=60")
-  env(): { env: string; dokuMode: string; docs: string } {
+  env(): { env: string; network: string; dokuMode: string; docs: string } {
     const dokuMode = this.config.get<string>("DOKU_MODE", "sandbox") === "production" ? "production" : "sandbox";
     // The network flag wins: a testnet stack must never advertise itself as
     // production just because its fiat provider is configured for real money.
-    const env = pidNetwork(this.config.get<string>("PID_NETWORK")) === "testnet" ? "sandbox" : dokuMode;
+    const network = pidNetwork(this.config.get<string>("PID_NETWORK"));
+    const env = network === "testnet" ? "sandbox" : dokuMode;
     const docs = (this.config.get<string>("DOCS_URL", "") || "").trim() || "https://docs.peridot.id";
-    return { env, dokuMode, docs };
+    return { env, network, dokuMode, docs };
   }
 }

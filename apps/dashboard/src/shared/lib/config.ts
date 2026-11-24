@@ -32,7 +32,7 @@ export const CONFIGURED_API_BASE =
 /**
  * Testnet API origin: the same dashboard serves both networks (one origin), so
  * the second base is derived from the first (`api.peridot.id` →
- * `sandbox-api.peridot.id`). Local dev keeps ONE API — no second stack to run.
+ * `testnet-api.peridot.id`). Local dev keeps ONE API — no second stack to run.
  */
 export function testnetSibling(mainnet: string): string {
   try {
@@ -41,7 +41,7 @@ export function testnetSibling(mainnet: string): string {
       ["localhost", "127.0.0.1", "::1"].includes(apiHost(mainnet)) ||
       /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname);
     if (local || !url.hostname.startsWith("api.")) return mainnet;
-    url.hostname = `sandbox-${url.hostname}`;
+    url.hostname = `testnet-${url.hostname}`;
     return url.toString().replace(/\/$/, "");
   } catch {
     return mainnet;

@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { testnetSibling } from "../src/shared/lib/config.ts";
 
 describe("testnetSibling", () => {
-  it("maps the canonical API host to its sandbox sibling", () => {
-    assert.equal(testnetSibling("https://api.peridot.id"), "https://sandbox-api.peridot.id");
+  it("maps the canonical API host to its testnet sibling", () => {
+    assert.equal(testnetSibling("https://api.peridot.id"), "https://testnet-api.peridot.id");
   });
 
   it("keeps one API for local dev (loopback + LAN)", () => {

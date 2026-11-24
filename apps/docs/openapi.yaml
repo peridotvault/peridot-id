@@ -1500,7 +1500,7 @@ paths:
         Public, unauthenticated. Every value is server-derived — any
         client-supplied `?env=` / body value is ignored (never read). SDKs and
         the dashboard call this at startup to verify they reached the intended
-        deployment (sandbox = `sandbox-api.peridot.id`, DOKU test mode, no real
+        deployment (testnet = `testnet-api.peridot.id`, DOKU test mode, no real
         money moves). Cacheable for 60s.
       responses:
         "200":
@@ -5469,12 +5469,19 @@ components:
 
     EnvInfo:
       type: object
-      required: [env, dokuMode, docs]
+      required: [env, network, dokuMode, docs]
       properties:
         env:
           type: string
           enum: [sandbox, production]
           description: Server-derived deployment environment (never echoes client input)
+        network:
+          type: string
+          enum: [mainnet, testnet]
+          description: |
+            Identity network of this deployment. `testnet` holds no identity
+            (PID/passkey/session) and forwards identity routes to mainnet;
+            `sandbox` env always implies `testnet` network.
         dokuMode:
           type: string
           enum: [sandbox, production]
@@ -5485,6 +5492,7 @@ components:
           description: Canonical docs base URL
       example:
         env: "sandbox"
+        network: "testnet"
         dokuMode: "sandbox"
         docs: "https://docs.peridot.id"
 

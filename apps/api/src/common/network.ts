@@ -40,21 +40,26 @@ export function identityRouteForbidden(
   );
 }
 
+/** Non-mainnet API hostname prefixes: canonical `testnet-`, legacy `sandbox-`. */
+const TESTNET_HOST_PREFIXES = ["testnet-", "sandbox-"] as const;
+
 /**
- * Mainnet API origin for a sandbox host, derived from the deployment's own
- * `API_URL` (`https://sandbox-api.peridot.id` → `https://api.peridot.id`) so
- * the test stack needs no extra env var. Returns null on a non-sandbox host
- * (local dev, mainnet): there is nothing to forward to.
+ * Mainnet API origin for a testnet host, derived from the deployment's own
+ * `API_URL` (`https://testnet-api.peridot.id` → `https://api.peridot.id`) so
+ * the test stack needs no extra env var. `sandbox-` is still accepted: SDK
+ * builds that predate the rename bake it. Returns null on a mainnet host
+ * (local dev, production): there is nothing to forward to.
  */
-export function stripSandboxHost(apiUrl: string): string | null {
+export function stripTestnetHost(apiUrl: string): string | null {
   let url: URL;
   try {
     url = new URL(apiUrl);
   } catch {
     return null;
   }
-  if (!url.hostname.startsWith("sandbox-")) return null;
-  url.hostname = url.hostname.slice("sandbox-".length);
+  const prefix = TESTNET_HOST_PREFIXES.find((p) => url.hostname.startsWith(p));
+  if (!prefix) return null;
+  url.hostname = url.hostname.slice(prefix.length);
   return url.origin;
 }
 
@@ -72,12 +77,12 @@ export function networkConsistencyError(
   nodeEnv: string | undefined,
 ): string | null {
   if (nodeEnv !== "production") return null;
-  const sandbox = stripSandboxHost((apiUrl ?? "").trim()) !== null;
-  if (network === "testnet" && !sandbox) {
-    return "PID_NETWORK=testnet requires an API_URL on a sandbox-* host (the mainnet origin is derived from it)";
+  const testnetHost = stripTestnetHost((apiUrl ?? "").trim()) !== null;
+  if (network === "testnet" && !testnetHost) {
+    return "PID_NETWORK=testnet requires an API_URL on a testnet-* host (the mainnet origin is derived from it)";
   }
-  if (network === "mainnet" && sandbox) {
-    return "PID_NETWORK=mainnet on a sandbox-* API_URL — this stack would hold identity it must not own";
+  if (network === "mainnet" && testnetHost) {
+    return "PID_NETWORK=mainnet on a testnet-* API_URL — this stack would hold identity it must not own";
   }
   return null;
 }

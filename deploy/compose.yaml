@@ -11,16 +11,16 @@
 #     dashboard dashboard.peridot.id           → nginx :3001
 #     docs      Mintlify-hosted (docs.peridot.id) — no VPS service since ANT-124:
 #               apps/docs is the Mintlify source (board user deploys manually).
-#   test stack (up.sh test, NEW_API_HOST=sandbox-api.peridot.id):
-#     API       sandbox-api.peridot.id         → nest  :3301
-#     wallet    sandbox.peridot.id             → nginx :3000
-#     dashboard sandbox-dashboard.peridot.id   → nginx :3001
-#     docs      single Mintlify host docs.peridot.id (no sandbox docs host)
+#   test stack (up.sh test, NEW_API_HOST=testnet-api.peridot.id) — own VPS,
+#   API + DB only, no web services:
+#     API       testnet-api.peridot.id         → nest  :3301
+#     API alias sandbox-api.peridot.id         → same service (SDKs ≤1.12.x bake it)
 #
 # main: cp deploy/.env.main.example deploy/.env.main && ./deploy/up.sh main
 #
-# ADR-0006: one VPS runs main + test behind a single Traefik; separation is by
-# hostname (NEW_*_HOST vars), router namespace, and compose project name (up.sh).
+# The two stacks run on separate VPSs (their own DB and disk). Each host runs its
+# own Traefik; separation is by hostname (NEW_*_HOST vars), router namespace, and
+# compose project name (up.sh). They share only the origin pair + cookie domain.
 
 name: peridot-id
 
@@ -144,8 +144,9 @@ services:
     labels:
       - "traefik.enable=true"
       # Canonical host only (ANT-405 hard cutover):
-      # NEW_API_HOST (up.sh: api.peridot.id / sandbox-api.peridot.id).
-      - "traefik.http.routers.pid-api${NAMESPACE}.rule=Host(`${NEW_API_HOST:-api.peridot.id}`)"
+      # API_HOST_RULE built by up.sh from NEW_API_HOST (api.peridot.id /
+      # testnet-api.peridot.id) plus the legacy alias on the test stack only.
+      - "traefik.http.routers.pid-api${NAMESPACE}.rule=${API_HOST_RULE:-Host(`api.peridot.id`)}"
       - "traefik.http.routers.pid-api${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.pid-api${NAMESPACE}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.pid-api${NAMESPACE}.middlewares=security-headers@file"
@@ -178,7 +179,7 @@ services:
     labels:
       - "traefik.enable=true"
       # Canonical wallet host only (ANT-405 hard cutover):
-      # NEW_WALLET_HOST (up.sh: peridot.id / sandbox.peridot.id).
+      # NEW_WALLET_HOST (up.sh: peridot.id; the test stack runs no web services).
       - "traefik.http.routers.app${NAMESPACE}.rule=Host(`${NEW_WALLET_HOST:-peridot.id}`)"
       - "traefik.http.routers.app${NAMESPACE}.entrypoints=websecure"
       - "traefik.http.routers.app${NAMESPACE}.tls.certresolver=letsencrypt"

@@ -30,14 +30,15 @@ describe("CORS origin policy", () => {
 
   it("serves the peridot.id first-party origins (ANT-400 hard cutover)", () => {
     const origins = parseEnvOrigins(
-      "https://peridot.id,https://dashboard.peridot.id,https://docs.peridot.id,https://sandbox.peridot.id,https://sandbox-dashboard.peridot.id",
+      "https://peridot.id,https://dashboard.peridot.id,https://docs.peridot.id",
     );
     // peridot.id hosts work — no redeploy, no code branch per host.
     expect(isOriginAllowed("https://peridot.id", origins, apps)).toBe(true);
     expect(isOriginAllowed("https://dashboard.peridot.id", origins, apps)).toBe(true);
     expect(isOriginAllowed("https://docs.peridot.id", origins, apps)).toBe(true);
-    expect(isOriginAllowed("https://sandbox.peridot.id", origins, apps)).toBe(true);
-    expect(isOriginAllowed("https://sandbox-dashboard.peridot.id", origins, apps)).toBe(true);
+    // Retired per-network web hosts (one origin pair now).
+    expect(isOriginAllowed("https://sandbox.peridot.id", origins, apps)).toBe(false);
+    expect(isOriginAllowed("https://sandbox-dashboard.peridot.id", origins, apps)).toBe(false);
     // Legacy peridotvault hosts are gone (hard cutover).
     expect(isOriginAllowed("https://app.pid.peridotvault.com", origins, apps)).toBe(false);
     expect(isOriginAllowed("https://pid.peridotvault.com", origins, apps)).toBe(false);
@@ -58,11 +59,11 @@ describe("CORS origin policy", () => {
       "https://peridot.id",
       "https://dashboard.peridot.id",
       "https://docs.peridot.id",
-      "https://sandbox.peridot.id",
-      "https://sandbox-dashboard.peridot.id",
     ]) {
       expect(live(o)).toBe(true);
     }
+    // Retired per-network web hosts.
+    expect(live("https://sandbox.peridot.id")).toBe(false);
     // Legacy hosts removed (hard cutover).
     for (const o of [
       "https://app.pid.peridotvault.com",
@@ -102,8 +103,8 @@ describe("CORS origin policy", () => {
     ]) {
       expect(isOriginAllowed(o, origins, [])).toBe(true);
     }
-    // Built-in dual-serve backstop still applies with no env maintenance.
-    expect(isOriginAllowed("https://sandbox.peridot.id", origins, [])).toBe(true);
+    // Built-in first-party backstop still applies with no env maintenance.
+    expect(isOriginAllowed("https://peridot.id", origins, [])).toBe(true);
     expect(isOriginAllowed("https://evil.com", origins, [])).toBe(false);
   });
 

@@ -1,4 +1,4 @@
-import { identityRouteForbidden, networkConsistencyError, pidNetwork, stripSandboxHost } from "./network";
+import { identityRouteForbidden, networkConsistencyError, pidNetwork, stripTestnetHost } from "./network";
 
 describe("pidNetwork", () => {
   it("defaults to mainnet", () => {
@@ -45,30 +45,35 @@ describe("identityRouteForbidden", () => {
   });
 });
 
-describe("stripSandboxHost", () => {
-  it("maps a sandbox API host to its mainnet sibling", () => {
-    expect(stripSandboxHost("https://sandbox-api.peridot.id")).toBe("https://api.peridot.id");
+describe("stripTestnetHost", () => {
+  it("maps a testnet API host to its mainnet sibling", () => {
+    expect(stripTestnetHost("https://testnet-api.peridot.id")).toBe("https://api.peridot.id");
+  });
+
+  it("still accepts the legacy sandbox host (published SDKs bake it)", () => {
+    expect(stripTestnetHost("https://sandbox-api.peridot.id")).toBe("https://api.peridot.id");
   });
 
   it("returns null for mainnet, localhost, and garbage", () => {
-    expect(stripSandboxHost("https://api.peridot.id")).toBeNull();
-    expect(stripSandboxHost("http://localhost:3300")).toBeNull();
-    expect(stripSandboxHost("not a url")).toBeNull();
+    expect(stripTestnetHost("https://api.peridot.id")).toBeNull();
+    expect(stripTestnetHost("http://localhost:3300")).toBeNull();
+    expect(stripTestnetHost("not a url")).toBeNull();
   });
 });
 
 describe("networkConsistencyError", () => {
   it("rejects a testnet flag on a non-sandbox host in production", () => {
-    expect(networkConsistencyError("testnet", "https://api.peridot.id", "production")).toMatch(/sandbox-\* host/);
-    expect(networkConsistencyError("testnet", undefined, "production")).toMatch(/sandbox-\* host/);
+    expect(networkConsistencyError("testnet", "https://api.peridot.id", "production")).toMatch(/testnet-\* host/);
+    expect(networkConsistencyError("testnet", undefined, "production")).toMatch(/testnet-\* host/);
   });
 
   it("rejects a mainnet flag on a sandbox host in production", () => {
-    expect(networkConsistencyError("mainnet", "https://sandbox-api.peridot.id", "production")).toMatch(/must not own/);
+    expect(networkConsistencyError("mainnet", "https://testnet-api.peridot.id", "production")).toMatch(/must not own/);
   });
 
   it("accepts the matching pairs and exempts local dev", () => {
     expect(networkConsistencyError("mainnet", "https://api.peridot.id", "production")).toBeNull();
+    expect(networkConsistencyError("testnet", "https://testnet-api.peridot.id", "production")).toBeNull();
     expect(networkConsistencyError("testnet", "https://sandbox-api.peridot.id", "production")).toBeNull();
     expect(networkConsistencyError("testnet", "http://localhost:3300", "development")).toBeNull();
     expect(networkConsistencyError("mainnet", "http://localhost:3300", "development")).toBeNull();

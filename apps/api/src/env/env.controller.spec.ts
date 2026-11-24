@@ -9,15 +9,21 @@ function ctrl(store: Record<string, string> = {}) {
 
 describe("EnvController (GET /v1/env)", () => {
   it("reports sandbox from the server env flag", () => {
-    expect(ctrl().env()).toEqual({ env: "sandbox", dokuMode: "sandbox", docs: "https://docs.peridot.id" });
+    expect(ctrl().env()).toEqual({ env: "sandbox", network: "mainnet", dokuMode: "sandbox", docs: "https://docs.peridot.id" });
   });
 
   it("reports production with no sandbox marker", () => {
     expect(ctrl({ DOKU_MODE: "production" }).env()).toEqual({
       env: "production",
+      network: "mainnet",
       dokuMode: "production",
       docs: "https://docs.peridot.id",
     });
+  });
+
+  it("reports the testnet stack as sandbox even with a production DOKU rail", () => {
+    const res = ctrl({ PID_NETWORK: "testnet", DOKU_MODE: "production" }).env();
+    expect(res).toMatchObject({ env: "sandbox", network: "testnet", dokuMode: "production" });
   });
 
   it("uses DOCS_URL when configured", () => {

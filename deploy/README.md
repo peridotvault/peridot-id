@@ -11,19 +11,18 @@ labels. No infra repo changes are ever required.
 
 1. VPS bootstrapped with the infra repo (Traefik on 80/443 + `proxy` network):
    `ssh root@VPS && cd /opt/infra && sudo bash bootstrap/bootstrap.sh`
-2. DNS A-records (prod VPS `76.13.16.183`, sandbox VPS `107.173.130.7`):
+2. DNS A-records (main VPS `76.13.16.183`, test VPS `107.173.130.7`):
    - `peridot.id` → `76.13.16.183` (wallet apex)
    - `api.peridot.id` → `76.13.16.183` (API)
    - `dashboard.peridot.id` → `76.13.16.183` (dashboard)
-   - `sandbox.peridot.id` → `107.173.130.7` (sandbox wallet)
-   - `sandbox-api.peridot.id` → `107.173.130.7` (sandbox API)
-   - `sandbox-dashboard.peridot.id` → `107.173.130.7` (sandbox dashboard)
+   - `testnet-api.peridot.id` → `107.173.130.7` (test API)
+   - `sandbox-api.peridot.id` → `107.173.130.7` (legacy alias, same API)
    (`docs.peridot.id` is Mintlify-hosted — no VPS records. Retired-host records
    are removed at cutover.)
 3. Google OAuth console: register the redirect URIs on the OAuth 2.0 client
    (one client shared by prod + sandbox):
    - `https://api.peridot.id/v1/auth/google/callback`
-   - `https://sandbox-api.peridot.id/v1/auth/google/callback`
+   - `https://testnet-api.peridot.id/v1/auth/google/callback`
    (redirect lands back on the wallet via CLIENT_SUCCESS_URL).
 4. Firewall: 80/tcp and 443/tcp open.
 
@@ -39,8 +38,8 @@ Docs are Mintlify-hosted since ANT-124 (`apps/docs` is the Mintlify source, boar
 deploys manually) — no VPS docs service, no build args, no secrets, no env.
 
 There is no `/deploy` folder — it only duplicated the above. Delete it in the
-Infisical UI for every env if it still exists. Deploy meta (`ENV_SUFFIX`,
-`NAMESPACE`) is hardcoded in `up.sh`, not stored as secrets.
+Infisical UI for every env if it still exists. Deploy meta (`NAMESPACE`,
+`NEW_API_HOST`, `LEGACY_API_HOST`) is hardcoded in `up.sh`, not stored as secrets.
 
 ```sh
 ssh root@VPS
@@ -99,28 +98,27 @@ chmod 600 /etc/peridot-id/infisical.env
 ./deploy/up.sh test
 ```
 
-Domains: `sandbox.peridot.id`, `sandbox-api.peridot.id`,
-`sandbox-dashboard.peridot.id` (same VPS, separate Traefik routers via
-`NAMESPACE=-test` / `NEW_API_HOST`). Single Mintlify docs `docs.peridot.id`
-(no sandbox docs host).
+Domains: `testnet-api.peridot.id` on the test VPS — API + DB only, no web
+services (the wallet and dashboard are one origin pair on the main stack). The
+old `sandbox-api.peridot.id` stays routed to the same service as an alias for
+SDK builds that predate the rename. Single Mintlify docs `docs.peridot.id`.
 
-**Google OAuth:** the sandbox reuses the production Google client, so add
-`https://sandbox-api.peridot.id/v1/auth/google/callback` to that
+**Google OAuth:** the test stack reuses the production Google client, so add
+`https://testnet-api.peridot.id/v1/auth/google/callback` to that
 client's authorized redirect URIs. Never add localhost URIs to the prod client.
 
 ## Domain cutover checklist (ANT-405 — operator steps in Infisical, not code)
 
 Traffic is peridot.id-only on this branch; going live is config + DNS:
 
-- [ ] DNS A-records live for all 6 VPS hosts (human, registrar Hostinger — table below)
+- [ ] DNS A-records live for all 5 VPS hosts (human, registrar Hostinger — table below)
 - [ ] TLS: Traefik `letsencrypt` resolver issues per-host certs on first request
       (~2 min) — verify with the commands below
 - [ ] Infisical `/apps/api` (main + test): `CORS_ORIGINS` holds the canonical
-      `https://peridot.id,https://dashboard.peridot.id,https://docs.peridot.id`
-      (+ sandbox mirrors on test); no retired origins
-- [ ] Infisical `/apps/api` (main + test): `COOKIE_DOMAIN` empty (host-only — the compose
-      default). Browsers drop `Domain=` cookies set from a host they don't belong
-      to, breaking sessions there. Security review: Tobias, ANT-119.
+      `https://peridot.id,https://dashboard.peridot.id,https://docs.peridot.id`;
+      no retired origins
+- [ ] Infisical `/apps/api` (main + test): `COOKIE_DOMAIN=.peridot.id` — the one
+      mainnet session must be sent to the testnet API too (CI pins it).
 - [ ] `GOOGLE_CALLBACK_URL` = canonical API callback per env (register both URIs first)
 - [ ] `WALLET_URL` / `CLIENT_SUCCESS_URL` = canonical wallet per env (Thomas, ANT-117)
 - [ ] Still HUMAN-GATED (not flipped by this change): `EMAIL_FROM=no-reply@peridotvault.com`
@@ -129,12 +127,12 @@ Traffic is peridot.id-only on this branch; going live is config + DNS:
       Troy, ANT-120), `WEBAUTHN_RP_ID` (passkeys are bound to the RP ID — changing it
       orphans existing credentials; needs its own migration plan, never a silent flip).
 
-**Google OAuth:** the sandbox reuses the production Google client — both callback
+**Google OAuth:** the test stack reuses the production Google client — both callback
 URIs above are registered on it. Never add localhost URIs to the prod client.
-**WebAuthn** RP ID derives from the wallet host (`peridot.id` /
-`sandbox.peridot.id`) → passkeys are isolated per environment. Existing
-credentials bound to a retired RP ID need their own migration plan (Tyler +
-Security review) — never flip silently.
+**WebAuthn** RP ID derives from the wallet host — `peridot.id` on both stacks
+(one wallet host, identity lives only in the mainnet DB). Existing credentials
+bound to a retired RP ID need their own migration plan (Tyler + Security
+review) — never flip silently.
 
 ### Sandbox SLA + faucet (ANT-287 sandbox MVP, DevOps ANT-290)
 
@@ -167,7 +165,7 @@ ledger writes):
 
 **Network switch.** One dashboard build serves both networks: the topbar
 Mainnet/Testnet switch stores `pid_network_mode` and reloads into that API
-(`VITE_API_URL` plus the derived `sandbox-api` sibling, overridable with
+(`VITE_API_URL` plus the derived `testnet-api` sibling, overridable with
 `VITE_TEST_API_URL`). No per-stack dashboard build args are needed, and the
 wallet is one host too — see `docs/NETWORK_MODES.md`.
 
@@ -215,9 +213,9 @@ docker logs -f peridot-id-api-1
 | Docs      | Mintlify-hosted `docs.peridot.id` (board decision 2026-10-19; user deploys manually — NOT on this VPS) |
 | Dashboard | https://dashboard.peridot.id |
 
-Sandbox mirrors on the sandbox VPS (`107.173.130.7`):
-`sandbox.peridot.id`, `sandbox-api.peridot.id`,
-`sandbox-dashboard.peridot.id`, plus single Mintlify docs `docs.peridot.id` (no sandbox docs host).
+Test stack on its own VPS (`107.173.130.7`): `testnet-api.peridot.id` only
+(API + DB, no web services; `sandbox-api.peridot.id` is a routing alias).
+Single Mintlify docs host `docs.peridot.id`.
 
 ## peridot.id hard cutover (ANT-400 / ANT-405, DevOps-owned)
 
@@ -243,9 +241,8 @@ Apex = `A`, no CNAME at apex:
 | 1 | `peridot.id` | A | `76.13.16.183` (prod VPS) | wallet apex |
 | 2 | `api.peridot.id` | A | `76.13.16.183` | API (router: ANT-116) |
 | 3 | `dashboard.peridot.id` | A | `76.13.16.183` | dashboard (new service) |
-| 4 | `sandbox.peridot.id` | A | `107.173.130.7` (sandbox VPS) | sandbox wallet |
-| 5 | `sandbox-api.peridot.id` | A | `107.173.130.7` | sandbox API |
-| 6 | `sandbox-dashboard.peridot.id` | A | `107.173.130.7` | sandbox dashboard |
+| 4 | `testnet-api.peridot.id` | A | `107.173.130.7` (test VPS) | test API |
+| 5 | `sandbox-api.peridot.id` | A | `107.173.130.7` | legacy alias (same API) |
 
 `www.peridot.id` already resolves to parking — leave it until brand decides
 (redirect vs site); out of scope here.
@@ -255,13 +252,12 @@ request via the existing `letsencrypt` resolver — allow ~2 min):
 
 ```sh
 for h in peridot.id api.peridot.id dashboard.peridot.id \
-         sandbox.peridot.id sandbox-api.peridot.id \
-         sandbox-dashboard.peridot.id; do
+         testnet-api.peridot.id sandbox-api.peridot.id; do
   echo "== $h"; dig +short $h A
   curl -sk -o /dev/null -w "%{http_code}\n" --max-time 10 https://$h/
 done
 curl -sk https://api.peridot.id/v1/health        # {"status":"ok"}
-curl -sk https://sandbox-api.peridot.id/v1/health # {"status":"ok"} (sandbox VPS)
+curl -sk https://testnet-api.peridot.id/v1/health # {"status":"ok"} (test VPS)
 ```
 
 Retired-host expectation (after DNS withdrawal — connection refused / NXDOMAIN):
@@ -271,9 +267,8 @@ CI retired-host guard stays green — infra surfaces must stay host-free).
 ### What this stack change does (and does not do)
 
 - `deploy/compose.yaml`: each router matches its canonical host only
-  (`api.peridot.id` / `sandbox-api.peridot.id`, `peridot.id` /
-  `sandbox.peridot.id`, `dashboard.peridot.id` /
-  `sandbox-dashboard.peridot.id`). The retired-docs redirect router is REMOVED
+  (`api.peridot.id` / `testnet-api.peridot.id` + its `sandbox-api` alias,
+  `peridot.id`, `dashboard.peridot.id`). The retired-docs redirect router is REMOVED
   (its match host is decommissioned; Mintlify serves `docs.peridot.id`).
 - `deploy/.env.{main,test}.example`: all service URLs are canonical peridot.id;
   no retired examples remain.

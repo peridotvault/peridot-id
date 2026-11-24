@@ -1,5 +1,13 @@
 # Changelog — @peridotvault/pid-sdk-js
 
+## 1.13.0
+
+- **Testnet API host renamed.** The `sandbox` preset's `baseUrl` is now
+  `https://testnet-api.peridot.id` (was `https://sandbox-api.peridot.id`).
+  The old host keeps serving as an alias, so already-published SDKs are not
+  stranded. `env: "sandbox"` stays the vocabulary (it is the published API and
+  the server's `/v1/env` contract).
+
 ## 1.12.0
 
 - **One wallet host, two APIs.** Hosted login and approval popups now carry
