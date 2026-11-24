@@ -138,7 +138,8 @@ export function LoginOptions({
       <ConsentShell seamless>
         <AuthHeading origin={origin} title="Yoo! Welcome" align="center" verified={verified} />
         {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-        <div className="flex flex-col w-full gap-3">
+        {/* Extra top margin: the methods need air under the welcome heading. */}
+        <div className="flex flex-col w-full mt-4 gap-3">
           {allows("email") && (
             <div
               onClick={() => document.getElementById("login-email-inline")?.focus()}
