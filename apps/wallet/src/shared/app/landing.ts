@@ -1,4 +1,8 @@
-import type { Screen } from "../hooks/useSessionBootstrap";
+/**
+ * Where an authenticated visit lands. Own union (not the hook's `Screen`): the
+ * hook imports this module, so importing back would be a cycle.
+ */
+export type LandingScreen = "login" | "provisioning" | "home";
 
 /**
  * Where an authenticated visit lands.
@@ -14,7 +18,7 @@ export function landingScreen(opts: {
   pendingClaim: boolean;
   /** Something read-only needs setup (fresh account, skipped onboarding). */
   needsSetup: boolean;
-}): Screen {
+}): LandingScreen {
   if (opts.authInNewTab || opts.pendingClaim) return "login";
   return opts.needsSetup ? "provisioning" : "home";
 }
