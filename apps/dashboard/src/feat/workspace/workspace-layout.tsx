@@ -3,6 +3,7 @@ import { AppWindow, ArrowLeft, FlaskConical, KeyRound, LayoutDashboard, LogOut, 
 import { Card, ERROR, MiniButton, MUTED } from "../../shared/ui/kit";
 import { PageHeader } from "../../shared/ui/page-header";
 import { RAIL_TILE, Shell, type RailItem } from "../../shared/components/shell";
+import { NetworkSwitch } from "../../shared/components/network-switch";
 import { useWorkspace } from "../../shared/components/workspace-provider";
 import { APP_SECTIONS } from "../../shared/app-types";
 import { cn } from "../../shared/lib/cn";
@@ -24,7 +25,7 @@ const SECTION_ICON = {
 };
 
 export function WorkspaceLayout() {
-  const { status, isAdmin, env, mode, setMode, pid, busy, error, signIn, signOut } = useWorkspace();
+  const { status, isAdmin, pid, busy, error, signIn, signOut } = useWorkspace();
   const appMatch = useMatch("/apps/:env/:id/*") ?? useMatch("/apps/:env/:id");
   const [params] = useSearchParams();
   const appId = appMatch?.params.id;
@@ -86,15 +87,6 @@ export function WorkspaceLayout() {
           <span className="hidden w-full truncate px-3 pb-1 text-xs text-muted-foreground md:block" title={pid}>
             {pid}
           </span>
-          <button
-            type="button"
-            title="Switch network (reloads the dashboard)"
-            onClick={() => setMode(mode === "testnet" ? "mainnet" : "testnet")}
-            className={cn(RAIL_TILE, "md:w-full")}
-          >
-            <FlaskConical className="size-4 shrink-0" aria-hidden />
-            <span className="whitespace-nowrap">{env !== "production" ? "Mainnet" : "Testnet"}</span>
-          </button>
           <Link to="/demo" className={cn(RAIL_TILE, "md:w-full")}>
             <FlaskConical className="size-4 shrink-0" aria-hidden />
             <span className="whitespace-nowrap">Demo app</span>
@@ -103,6 +95,7 @@ export function WorkspaceLayout() {
             <LogOut className="size-4 shrink-0" aria-hidden />
             <span className="whitespace-nowrap">Sign out</span>
           </button>
+          <NetworkSwitch />
         </>
       }
     >
