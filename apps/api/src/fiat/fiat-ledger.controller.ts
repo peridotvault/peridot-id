@@ -83,6 +83,13 @@ export class FiatLedgerController {
     return this.ledger.adminReplay();
   }
 
+  /** Admin: exact platform fee totals (SQL aggregate, no row cap). */
+  @Get("admin/treasury")
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  treasuryBalance() {
+    return this.ledger.treasuryBalance();
+  }
+
   /** Admin: immutable journal export + replay verdict for one PID. */
   @Get("admin/journal/:pid")
   @UseGuards(JwtAuthGuard, AdminGuard)

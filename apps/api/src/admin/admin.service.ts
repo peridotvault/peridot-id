@@ -327,6 +327,59 @@ export class AdminService {
     });
   }
 
+  /**
+   * Read-only identity directory for the admin console. Balance is the replayed
+   * fiat ledger sum (same kinds/signs as fiat-ledger-replay.ts), computed in SQL
+   * so the whole list can be ordered highest first and paged. Never deletes.
+   */
+  async listUsers(page?: number) {
+    const pageSize = 25;
+    const current = Number.isSafeInteger(page) && page! >= 1 ? Math.min(page!, 100000) : 1;
+    const offset = (current - 1) * pageSize;
+    const [rows, counted] = await Promise.all([
+      this.prisma.$queryRaw<Array<{ pid: string; displayName: string | null; balanceIdr: string; loginMethod: string | null; lastLoginAt: Date | null }>>`
+        SELECT i.pid,
+               p."displayName" AS "displayName",
+               COALESCE(b.balance, 0)::text AS "balanceIdr",
+               d."authMethod" AS "loginMethod",
+               d."lastSeenAt" AS "lastLoginAt"
+        FROM identities i
+        LEFT JOIN profiles p ON p.pid = i.pid
+        LEFT JOIN (
+          SELECT pid, SUM(CASE
+            WHEN kind IN ('fiat_issue', 'fiat_payment_in', 'fiat_app_fee', 'fiat_transfer_in') THEN "amountIdr"
+            WHEN kind = 'fiat_transfer_out' THEN -"amountIdr"
+            WHEN kind = 'fiat_adjust' AND direction = 'in' THEN "amountIdr"
+            WHEN kind = 'fiat_adjust' AND direction = 'out' THEN -"amountIdr"
+            ELSE 0 END) AS balance
+          FROM fiat_ledger_entries
+          WHERE status = 'posted'
+          GROUP BY pid
+        ) b ON b.pid = i.pid
+        LEFT JOIN LATERAL (
+          SELECT "authMethod", "lastSeenAt" FROM devices
+          WHERE pid = i.pid ORDER BY "lastSeenAt" DESC LIMIT 1
+        ) d ON true
+        WHERE i.status <> 'deleted'
+        ORDER BY COALESCE(b.balance, 0) DESC, i.pid ASC
+        LIMIT ${pageSize} OFFSET ${offset}`,
+      this.prisma.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count FROM identities WHERE status <> 'deleted'`,
+    ]);
+    return {
+      page: current,
+      pageSize,
+      total: Number(counted[0]?.count ?? 0n),
+      users: rows.map((row) => ({
+        pid: row.pid,
+        displayName: row.displayName,
+        balanceIdr: row.balanceIdr,
+        loginMethod: row.loginMethod,
+        lastLoginAt: row.lastLoginAt?.toISOString() ?? null,
+      })),
+    };
+  }
+
   // Curated token registry: Token holds GLOBAL metadata once; deployments
   // hang one token off many chains (chainId FK → chains.id). Single dashboard
   // Save creates token + deployments atomically. No delete — hiding is

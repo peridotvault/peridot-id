@@ -60,6 +60,7 @@ function setup(store?: Record<string, string>, paidAmount: bigint | null = 105_0
       }),
       update: jest.fn(async (args: any) => ({ id: "j0", ...args.data })),
       updateMany: jest.fn(async () => ({ count: 1 })),
+      aggregate: jest.fn(async () => ({ _sum: { amountIdr: null } })),
     },
     fiatFeePolicy: {
       findFirst: jest.fn(async () => ({ version: 3, percentBps: 500, minIdr: 0n, maxIdr: 0n, taxBps: 0, active: true })),
@@ -922,6 +923,24 @@ describe("FiatLedgerService ANT-286 wiring (secret-at-rest + app-token scope)", 
       "fiat.transfer.app_token",
       expect.objectContaining({ app: "pidapp_x", scope: "fiat:transfer", phase: "confirm" }),
     );
+  });
+});
+
+describe("FiatLedgerService.treasuryBalance", () => {
+  it("sums posted fiat_fee/fiat_tax exactly and defaults to 0", async () => {
+    const { service, prisma } = setup();
+    prisma.fiatLedgerEntry.aggregate
+      .mockResolvedValueOnce({ _sum: { amountIdr: 1_234_500n } })
+      .mockResolvedValueOnce({ _sum: { amountIdr: 135_795n } });
+    expect(await service.treasuryBalance()).toEqual({
+      currency: "IDR", treasuryIdr: "1234500", taxIdr: "135795", treasuryPid: null,
+    });
+    expect(prisma.fiatLedgerEntry.aggregate).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { kind: "fiat_fee", status: "posted" } }),
+    );
+
+    prisma.fiatLedgerEntry.aggregate.mockResolvedValue({ _sum: { amountIdr: null } });
+    expect(await service.treasuryBalance()).toMatchObject({ treasuryIdr: "0", taxIdr: "0" });
   });
 });
 

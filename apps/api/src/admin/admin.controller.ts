@@ -188,6 +188,14 @@ export class AdminController {
     return this.adminService.listTokens();
   }
 
+  /** Read-only identity directory: fiat balance (highest first), login method, last login. No delete. */
+  @Get("users")
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  listUsers(@Query("page", new ParseIntPipe({ optional: true })) page?: number) {
+    return this.adminService.listUsers(page);
+  }
+
   @Post("chains/preview")
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseGuards(JwtAuthGuard, AdminGuard)

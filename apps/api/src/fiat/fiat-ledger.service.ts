@@ -910,6 +910,24 @@ export class FiatLedgerService {
     };
   }
 
+  /**
+   * Exact platform fee totals for the admin console. Aggregated in SQL (no row
+   * cap, unlike adminReplay's bounded 5000-row projection). `treasury`/`tax`
+   * are synthetic owners in replay — never identities, never spendable here.
+   */
+  async treasuryBalance() {
+    const [fee, tax] = await Promise.all([
+      this.prisma.fiatLedgerEntry.aggregate({ where: { kind: "fiat_fee", status: "posted" }, _sum: { amountIdr: true } }),
+      this.prisma.fiatLedgerEntry.aggregate({ where: { kind: "fiat_tax", status: "posted" }, _sum: { amountIdr: true } }),
+    ]);
+    return {
+      currency: "IDR" as const,
+      treasuryIdr: (fee._sum.amountIdr ?? 0n).toString(),
+      taxIdr: (tax._sum.amountIdr ?? 0n).toString(),
+      treasuryPid: this.treasuryPid(),
+    };
+  }
+
   // --- hash chain (tamper-evident journal) ---
 
   /** Global advisory lock id serializing chain writes (one ledger head). */

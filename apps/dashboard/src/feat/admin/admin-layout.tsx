@@ -1,5 +1,5 @@
 import { Link, Outlet } from "react-router";
-import { ArrowLeft, Handshake, Layers, Link2, LogIn, LogOut, Plug, Receipt, Settings, Trophy } from "lucide-react";
+import { ArrowLeft, BookOpen, Handshake, Layers, Link2, LogIn, LogOut, Plug, Receipt, Settings, Trophy, Users } from "lucide-react";
 import { Card, ERROR, MUTED, MiniButton } from "../../shared/ui/kit";
 import { RAIL_TILE, Shell } from "../../shared/components/shell";
 import { useWorkspace } from "../../shared/components/workspace-provider";
@@ -12,6 +12,8 @@ const NAV = [
   { to: "/admin/fees", label: "Fees", icon: Receipt },
   { to: "/admin/partners", label: "Partners", icon: Handshake },
   { to: "/admin/login-activity", label: "Login activity", icon: LogIn },
+  { to: "/admin/users", label: "Users", icon: Users },
+  { to: "/admin/ledger", label: "Ledger", icon: BookOpen },
   { to: "/admin/leveling", label: "Leveling", icon: Trophy },
   { to: "/admin/settings", label: "System", icon: Settings },
 ];

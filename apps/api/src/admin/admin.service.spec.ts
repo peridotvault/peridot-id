@@ -36,6 +36,7 @@ function setup() {
       update: jest.fn(async (args: { data: Record<string, unknown> }) => ({ id: "dep-1", ...args.data })),
     },
     identity: { findUnique: jest.fn(async () => ({ role: "admin", status: "active" })) },
+    $queryRaw: jest.fn(async (): Promise<unknown[]> => []),
     pidApp: {
       findUnique: jest.fn(async (): Promise<any> => null),
       findMany: jest.fn(async (): Promise<any[]> => []),
@@ -363,5 +364,25 @@ describe("AdminService", () => {
     );
     expect(updated).toMatchObject({ logoUrl: "https://api.example/v1/tokens/logo?key=public%2Fchains%2Feip155-97.png" });
     expect(security.log).toHaveBeenCalledWith(IDENTITY, "admin.chain.logo.updated", expect.anything());
+  });
+
+  it("lists users with balance highest first (read only) and maps dates", async () => {
+    const { service, prisma } = setup();
+    const at = new Date("2026-11-01T10:00:00.000Z");
+    prisma.$queryRaw
+      .mockResolvedValueOnce([
+        { pid: "rich@pid", displayName: "Rich", balanceIdr: "150000", loginMethod: "google", lastLoginAt: at },
+        { pid: "poor@pid", displayName: null, balanceIdr: "0", loginMethod: null, lastLoginAt: null },
+      ])
+      .mockResolvedValueOnce([{ count: 2n }]);
+    const result = await service.listUsers(2);
+    expect(result).toEqual({
+      page: 2, pageSize: 25, total: 2,
+      users: [
+        { pid: "rich@pid", displayName: "Rich", balanceIdr: "150000", loginMethod: "google", lastLoginAt: at.toISOString() },
+        { pid: "poor@pid", displayName: null, balanceIdr: "0", loginMethod: null, lastLoginAt: null },
+      ],
+    });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 });

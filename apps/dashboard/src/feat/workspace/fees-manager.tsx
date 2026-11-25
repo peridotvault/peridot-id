@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "@ui-sdk/react/tabs";
 import type { FeePolicyView, PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "../../shared/api";
 import type { PaymentFeeRate } from "../../shared/app-types";
-import { Card, DIVIDER, ERROR, FIELD, MUTED, SECTION_LABEL, MiniButton } from "../../shared/ui/kit";
+import { Card, DIVIDER, ERROR, FIELD, METRIC, MUTED, SECTION_LABEL, MiniButton } from "../../shared/ui/kit";
 import { ChainFeesManager } from "./chain-fees-manager";
 import { PageHeader } from "../../shared/ui/page-header";
 
@@ -35,6 +35,8 @@ const pctOnly = (v: string) => v.replace(/[^\d.]/g, "");
 const digitsOnly = (v: string) => v.replace(/\D/g, "");
 const toBps = (percent: string) => Math.round((Number(percent) || 0) * 100);
 
+type TreasuryView = { treasuryIdr: string; taxIdr: string; treasuryPid: string | null };
+
 type Tab = "peridot" | "doku" | "chain";
 
 /**
@@ -48,6 +50,7 @@ type Tab = "peridot" | "doku" | "chain";
 export function FeesManager({ client }: { client: PeridotClient }) {
   const [tab, setTab] = useState<Tab>("peridot");
   const [policy, setPolicy] = useState<FeePolicyView | null>(null);
+  const [treasury, setTreasury] = useState<TreasuryView | null>(null);
   const [policyDraft, setPolicyDraft] = useState({ percent: "", minIdr: "", maxIdr: "", taxPercent: "0" });
   const [rates, setRates] = useState<PaymentFeeRate[]>([]);
   const [drafts, setDrafts] = useState<Record<string, RateDraft>>({});
@@ -92,6 +95,7 @@ export function FeesManager({ client }: { client: PeridotClient }) {
       setDrafts(Object.fromEntries(r.map((x) => [x.methodKey, toDraft(x)])));
       const t = unwrap(await client.get<{ taxBps: number }>("/v1/fiat/admin/doku-tax"), "Loading gateway tax");
       setDokuTaxPercent(t.taxBps ? String(t.taxBps / 100) : "0");
+      setTreasury(unwrap(await client.get<TreasuryView>("/v1/fiat/admin/treasury"), "Loading treasury"));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load fees");
     } finally {
@@ -225,6 +229,23 @@ export function FeesManager({ client }: { client: PeridotClient }) {
         </TabsPanel>
 
         <TabsPanel value="peridot" className="mt-4 grid gap-3 p-0 text-base">
+          <Card>
+            <div className="flex items-center justify-between gap-3">
+              <p className={SECTION_LABEL}>Treasury — accumulated fiat fees</p>
+              <MiniButton size="sm" onClick={() => void load()} disabled={loading}>
+                Refresh
+              </MiniButton>
+            </div>
+            <p className={`mt-2 text-2xl ${METRIC}`}>{treasury ? fmtIdr(treasury.treasuryIdr) : "—"}</p>
+            <p className={`mt-1 text-xs ${MUTED}`}>
+              Global PeridotID fee collected ({treasury?.treasuryPid ? `ops label ${treasury.treasuryPid}` : "synthetic owner"}).
+              PPN held separately as a liability: {treasury ? fmtIdr(treasury.taxIdr) : "—"}.
+            </p>
+            <p className={`mt-1 text-xs ${MUTED}`}>
+              Sum of posted <code className="font-mono">fiat_fee</code> rows — internal ledger balance, not a
+              transferable account. Admin only.
+            </p>
+          </Card>
           <Card>
             <div className="flex items-center justify-between gap-3">
               <p className={SECTION_LABEL}>PeridotID platform fee</p>
