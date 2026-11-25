@@ -2,33 +2,36 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
+import { Plus } from "lucide-react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import type { PidApp } from "../../shared/app-types";
 import { unwrap } from "../../shared/api";
-import { Badge, Card, ERROR, FIELD, MUTED, MiniButton, Segmented, SegmentedItem } from "../../shared/ui/kit";
+import { Badge, Card, Dialog, ERROR, FIELD, METRIC, MUTED, MiniButton, Segmented, SegmentedItem } from "../../shared/ui/kit";
 import { PageHeader } from "../../shared/ui/page-header";
 import type { DashboardMode } from "../../shared/lib/config";
 
 type Clients = Record<DashboardMode, PeridotClient>;
 
-/** One list across both networks; each row carries its environment badge. */
+/** One grid across both networks; each card carries its environment badge. */
 interface Row {
   env: DashboardMode;
   app: PidApp;
 }
 
 /**
- * Apps list: name + environment. Every setting lives on the app's detail page,
- * which is scoped to the app's own network (`/apps/:env/:id`) — a testnet app
- * never shows mainnet numbers.
+ * Apps grid: one card per app plus a create tile that opens the modal. Every
+ * setting lives on the app's detail page, which is scoped to the app's own
+ * network (`/apps/:env/:id`) — a testnet app never shows mainnet numbers.
  */
 export function AppsManager({ clients, mode }: { clients: Clients; mode: DashboardMode }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [createEnv, setCreateEnv] = useState<DashboardMode>(mode);
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const envs: DashboardMode[] = ["mainnet", "testnet"];
@@ -63,19 +66,27 @@ export function AppsManager({ clients, mode }: { clients: Clients; mode: Dashboa
       .finally(() => setLoading(false));
   }, [load]);
 
+  const openCreate = useCallback(() => {
+    setCreateError(null);
+    setName("");
+    setCreateEnv(mode);
+    setCreateOpen(true);
+  }, [mode]);
+
   const create = useCallback(async () => {
     if (!name.trim()) {
-      setError("Give the app a name first.");
+      setCreateError("Give the app a name first.");
       return;
     }
     setCreating(true);
-    setError(null);
+    setCreateError(null);
     try {
       unwrap(await clients[createEnv].post<PidApp>("/v1/apps", { name: name.trim() }), "App registration");
       setName("");
+      setCreateOpen(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "App registration failed");
+      setCreateError(e instanceof Error ? e.message : "App registration failed");
     } finally {
       setCreating(false);
     }
@@ -86,7 +97,7 @@ export function AppsManager({ clients, mode }: { clients: Clients; mode: Dashboa
       <PageHeader
         eyebrow="App management"
         title="Apps"
-        description="Mainnet and testnet apps in one list. Open an app to manage its origins, backend secret, fees, and balance."
+        description="Mainnet and testnet apps in one place. Open an app to manage its origins, backend secret, fees, and balance."
       />
       {error && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -99,46 +110,60 @@ export function AppsManager({ clients, mode }: { clients: Clients; mode: Dashboa
       {loading ? (
         <p role="status" className={`mt-4 text-sm ${MUTED}`}>Loading…</p>
       ) : (
-        <div className="mt-4 flex flex-col gap-2">
-          {rows.map(({ env, app }) => (
-            <Link
-              key={`${env}:${app.id}`}
-              to={`/apps/${env}/${app.id}`}
-              className="flex items-center justify-between gap-3 rounded-md border border-line bg-background px-4 py-3 transition-colors hover:bg-muted/40 focus-ring"
-            >
-              <span className="min-w-0 truncate font-semibold tracking-tight">
-                {app.name}
-                <Badge tone={env === "testnet" ? "warning" : "success"} className="ml-2 align-middle">
-                  {env}
-                </Badge>
-                {app.isVerified && (
-                  <Badge tone="success" className="ml-2 align-middle">
-                    <span aria-hidden="true">✓</span>
-                    <span className="sr-only">Verified</span>
-                  </Badge>
-                )}
-              </span>
-              <span className={`shrink-0 text-xs ${MUTED}`}>
-                {app.isActive ? "Active" : "Disabled"} <span aria-hidden="true">→</span>
-              </span>
-            </Link>
-          ))}
+        <>
           {rows.length === 0 && !error && (
-            <p className={`text-sm ${MUTED}`}>
-              No apps yet — register your first below. New here?{" "}
+            <p className={`mt-4 text-sm ${MUTED}`}>
+              No apps yet. New here?{" "}
               <Link to="/demo" className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground">
                 Try the testnet sample
               </Link>
               .
             </p>
           )}
-        </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {rows.map(({ env, app }) => (
+              <Link key={`${env}:${app.id}`} to={`/apps/${env}/${app.id}`} className="block focus-ring">
+                <Card className="flex h-full flex-col justify-between gap-4 p-4 transition-colors hover:bg-muted/40">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 truncate font-semibold tracking-tight">{app.name}</span>
+                    <Badge tone={env === "testnet" ? "warning" : "success"}>{env}</Badge>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className={app.isActive ? METRIC : MUTED}>{app.isActive ? "Active" : "Disabled"}</span>
+                    {app.isVerified ? (
+                      <Badge tone="success">
+                        <span aria-hidden="true">✓</span>
+                        <span className="sr-only">Verified</span>
+                      </Badge>
+                    ) : (
+                      <span className={MUTED}>Unverified</span>
+                    )}
+                  </div>
+                </Card>
+              </Link>
+            ))}
+            <button
+              type="button"
+              onClick={openCreate}
+              className="flex min-h-24 items-center justify-center gap-2 rounded-xl border border-dashed border-line p-4 text-sm text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40 hover:text-foreground focus-ring"
+            >
+              <Plus className="size-4 shrink-0" aria-hidden />
+              Create app
+            </button>
+          </div>
+        </>
       )}
 
-      <Card>
-        <h3 className="font-semibold tracking-tight">Register a new app</h3>
+      <Dialog
+        open={createOpen}
+        onDismiss={() => {
+          if (!creating) setCreateOpen(false);
+        }}
+        label="Create app"
+      >
+        <h3 className="text-base font-semibold tracking-tight">Create app</h3>
         <p className={`mt-1 text-sm ${MUTED}`}>
-          Just a name and a network — everything else is configured inside the app. Testnet apps are separate
+          Pick a network and a name. Everything else is configured inside the app. Testnet apps are separate
           registrations with test money; mainnet apps move real money.
         </p>
         <div className="mt-4">
@@ -154,6 +179,7 @@ export function AppsManager({ clients, mode }: { clients: Clients; mode: Dashboa
         <label className="mt-4 block text-xs">
           Name
           <input
+            autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
@@ -164,15 +190,16 @@ export function AppsManager({ clients, mode }: { clients: Clients; mode: Dashboa
             className={FIELD}
           />
         </label>
-        <MiniButton variant="solid" size="lg"
-          type="button"
-          onClick={() => void create()}
-          disabled={creating}
-          className="mt-3"
-        >
-          {creating ? "Registering…" : `Register ${createEnv} app`}
-        </MiniButton>
-      </Card>
+        {createError && <p role="alert" className={`mt-3 text-sm ${ERROR}`}>{createError}</p>}
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <MiniButton size="md" onClick={() => setCreateOpen(false)} disabled={creating}>
+            Cancel
+          </MiniButton>
+          <MiniButton variant="solid" size="md" onClick={() => void create()} disabled={creating || !name.trim()}>
+            {creating ? "Registering…" : `Create ${createEnv} app`}
+          </MiniButton>
+        </div>
+      </Dialog>
     </section>
   );
 }

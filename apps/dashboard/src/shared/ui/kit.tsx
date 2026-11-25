@@ -5,6 +5,7 @@ import { inputClass } from "./input";
 // Screen-facing surface: screens import these, never the primitives directly.
 export { Card } from "./card";
 export { Badge } from "./badge";
+export { Dialog } from "./dialog";
 export { Segmented, SegmentedItem } from "./segmented";
 
 /** Small themed button (outline or solid) for card actions. */
