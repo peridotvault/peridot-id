@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Peridot } from "@peridotvault/pid-sdk-js";
 import { Topbar, type WorkspaceTab } from "./topbar";
+import { ProfileMenu } from "./profile-menu";
 import type { PeridotClient, Role } from "@peridotvault/pid-sdk-js";
 import { PopupClosedError } from "@peridotvault/pid-sdk-js";
 import { resolveBrowserUrl } from "../lib/api-base";
@@ -214,16 +215,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 /** Topbar in front of every route; the session gate stays in the layouts. */
 export function WorkspaceTopbar() {
-  const { tabs, tab, onTab, pid, isAdmin, env, signOut } = useWorkspace();
-  return (
-    <Topbar
-      tabs={tabs}
-      active={tab}
-      onTab={onTab}
-      sessionLabel={pid || "signed out"}
-      isAdmin={isAdmin}
-      env={env}
-      onSignOut={() => void signOut()}
-    />
-  );
+  const { tabs, tab, onTab, env } = useWorkspace();
+  return <Topbar tabs={tabs} active={tab} onTab={onTab} env={env} account={<ProfileMenu />} />;
 }

@@ -56,7 +56,9 @@ The env badge follows the selected network, not the URL.
 
 ## Routes
 
-Workspace (topbar shell): `/` (Apps + session gate), `/apps/:env/:id`, `/demo`.
+Workspace (topbar shell, no sidebar at the root): `/` (Apps + session gate),
+`/apps/:env/:id` (the rail shows that app's sections), `/demo`. The pid in the
+topbar is the account menu: Admin (admins only) and Sign out.
 
 Every admin console lives under `/admin/*` behind `AdminLayout`
 (`src/feat/admin/admin-layout.tsx`): session + `role === "admin"` gate, then a

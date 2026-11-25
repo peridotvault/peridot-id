@@ -4,6 +4,10 @@
 @layer ui-sdk;
 @import "tailwindcss";
 @import "@ui-sdk/core/web.css" layer(components);
+@import "@peridotvault/pid-ui/popover.css";
+
+/* Shared UI package (packages/ui) is source-only and lives outside this app. */
+@source "../../packages/ui/src";
 
 /* Drive the `dark:` variant off the `.dark` class. The app is dark-only now:
    index.html sets `class="dark"` so every `dark:` variant resolves. */

@@ -1,5 +1,5 @@
 import { Link, Outlet, useMatch, useSearchParams } from "react-router";
-import { AppWindow, ArrowLeft, FlaskConical, KeyRound, LayoutDashboard, LogOut, Plug, Receipt, Settings, ShieldCheck, Trophy, Users } from "lucide-react";
+import { ArrowLeft, FlaskConical, KeyRound, LayoutDashboard, Plug, Receipt, Settings, ShieldCheck, Trophy, Users } from "lucide-react";
 import { Card, ERROR, MiniButton, MUTED } from "../../shared/ui/kit";
 import { PageHeader } from "../../shared/ui/page-header";
 import { RAIL_TILE, Shell, type RailItem } from "../../shared/components/shell";
@@ -24,7 +24,7 @@ const SECTION_ICON = {
 };
 
 export function WorkspaceLayout() {
-  const { status, isAdmin, pid, busy, error, signIn, signOut } = useWorkspace();
+  const { status, pid, busy, error, signIn } = useWorkspace();
   const appMatch = useMatch("/apps/:env/:id/*") ?? useMatch("/apps/:env/:id");
   const [params] = useSearchParams();
   const appId = appMatch?.params.id;
@@ -61,7 +61,8 @@ export function WorkspaceLayout() {
     );
   }
 
-  // Inside one app the rail becomes that app's sections — one sidebar, never two.
+  // Inside one app the rail becomes that app's sections. The workspace root is
+  // apps-only (tabs in the topbar), so it needs no sidebar at all.
   const nav: RailItem[] = appId
     ? [
         { to: "/", label: "All apps", icon: ArrowLeft },
@@ -73,28 +74,23 @@ export function WorkspaceLayout() {
           active: section === s.key,
         })),
       ]
-    : [
-        { to: "/", label: "Apps", icon: AppWindow },
-        ...(isAdmin ? [{ to: "/admin", label: "Admin", icon: ShieldCheck }] : []),
-      ];
+    : [];
 
   return (
     <Shell
       nav={nav}
       footer={
-        <>
-          <span className="hidden w-full truncate px-3 pb-1 text-xs text-muted-foreground md:block" title={pid}>
-            {pid}
-          </span>
-          <Link to="/demo" className={cn(RAIL_TILE, "md:w-full")}>
-            <FlaskConical className="size-4 shrink-0" aria-hidden />
-            <span className="whitespace-nowrap">Demo app</span>
-          </Link>
-          <button type="button" onClick={() => void signOut()} className={cn(RAIL_TILE, "md:w-full")}>
-            <LogOut className="size-4 shrink-0" aria-hidden />
-            <span className="whitespace-nowrap">Sign out</span>
-          </button>
-        </>
+        appId ? (
+          <>
+            <span className="hidden w-full truncate px-3 pb-1 text-xs text-muted-foreground md:block" title={pid}>
+              {pid}
+            </span>
+            <Link to="/demo" className={cn(RAIL_TILE, "md:w-full")}>
+              <FlaskConical className="size-4 shrink-0" aria-hidden />
+              <span className="whitespace-nowrap">Demo app</span>
+            </Link>
+          </>
+        ) : undefined
       }
     >
       <Outlet />

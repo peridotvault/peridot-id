@@ -1,28 +1,26 @@
+import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { Badge, MiniButton, Segmented, SegmentedItem } from "../../shared/ui/kit";
+import { Badge, Segmented, SegmentedItem } from "../../shared/ui/kit";
 
 export interface WorkspaceTab {
   key: string;
   label: string;
 }
 
-/** Single-row topbar: brand left, tabs middle, network + session + sign out right. No sidebar. */
+/** Single-row topbar: brand left, tabs middle, network badge + account right. */
 export function Topbar({
   tabs,
   active,
   onTab,
-  sessionLabel,
-  isAdmin,
   env = "production",
-  onSignOut,
+  account,
 }: {
   tabs: WorkspaceTab[];
   active: string;
   onTab: (key: string) => void;
-  sessionLabel: string;
-  isAdmin: boolean;
   env?: string;
-  onSignOut: () => void;
+  /** Right slot: the pid account button (ProfileMenu). */
+  account?: ReactNode;
 }) {
   const isSandbox = env !== "production";
   return (
@@ -47,17 +45,7 @@ export function Topbar({
           ))}
         </Segmented>
 
-        <div className="flex min-w-0 shrink-0 items-center gap-3">
-          <span className="hidden min-w-0 items-center gap-2 text-xs text-muted-foreground md:flex">
-            {isAdmin && <Badge tone="brand">admin</Badge>}
-            <span className="max-w-48 truncate" title={sessionLabel}>
-              {sessionLabel}
-            </span>
-          </span>
-          <MiniButton variant="outline" size="md" onClick={onSignOut}>
-            Sign Out
-          </MiniButton>
-        </div>
+        {account}
       </div>
     </header>
   );

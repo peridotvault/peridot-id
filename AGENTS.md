@@ -12,7 +12,8 @@ non-custodial Solana smart account with a **secp256r1 passkey** authority.
   **Published (7):** `pid-types`, `pid-core`, `pid-payments`, `pid-solana`, `pid-evm`,
   `pid-sdk-js`, `pid-react-embed`. **Never published:** `pid-api` and `pid-wallet`
   (the `apps/*` workspaces — `private: true`), `pid-openapi` (spec bundle,
-  private), `pid-stellar` (testnet-only helpers, `private: true`).
+  private), `pid-stellar` (testnet-only helpers, `private: true`), `pid-ui`
+  (source-only UI shared by wallet + dashboard, `private: true`).
   Release: bump the version(s), then push tag `v<sdk-js version>` —
   `.github/workflows/publish.yml` publishes every bumped package with provenance.
   (`apps/docs` is the Mintlify docs source, not an npm package.)
@@ -168,6 +169,13 @@ to the tunnel URL — localhost values never reach DOKU.
   `ChainRow`, dashboard token + chain logos), which stay circular.
 - `packages/react-embed` deliberately stays style-free (published, renders
   inside a host page): no Tailwind, no ui-sdk, no shadcn.
+- `packages/ui` (`@peridotvault/pid-ui`) is the private, source-only shared UI:
+  `Popover` owns the anchored popover chrome (body portal, scrim, fixed
+  position from the anchor, grow-in/shrink-out in `popover.css`, Escape) and is
+  used by both the wallet profile menu and the dashboard pid menu. Each app
+  imports `@peridotvault/pid-ui/popover.css` and lists the source in `@source`
+  (the package lives outside the app's Tailwind scan root). Any new shared
+  component lands there, not copied into a second app.
 
 ## ui-sdk
 

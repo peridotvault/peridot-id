@@ -24,7 +24,7 @@ const NAV = [
  * tokens on every call (AdminGuard) — this guard only avoids dead ends.
  */
 export function AdminLayout() {
-  const { status, isAdmin, env, busy, error, signIn, signOut } = useWorkspace();
+  const { status, isAdmin, env, busy, error, signIn } = useWorkspace();
   const sandbox = env !== "production";
 
   if (status === "checking") {
@@ -73,10 +73,6 @@ export function AdminLayout() {
             <span className="whitespace-nowrap">Workspace</span>
           </Link>
           <NetworkSwitch />
-          <button type="button" onClick={() => void signOut()} className={cn(RAIL_TILE, "md:w-full")}>
-            <LogOut className="size-4 shrink-0" aria-hidden />
-            <span className="whitespace-nowrap">Sign out</span>
-          </button>
         </>
       }
     >

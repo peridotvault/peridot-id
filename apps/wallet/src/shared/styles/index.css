@@ -1,5 +1,9 @@
 @layer ui-sdk;
 @import "tailwindcss";
 @import "@ui-sdk/core/web.css" layer(components);
+@import "@peridotvault/pid-ui/popover.css";
 @import "./tokens.css";
 @import "./base.css";
+
+/* Shared UI package (packages/ui) is source-only and lives outside this app. */
+@source "../../../../../packages/ui/src";

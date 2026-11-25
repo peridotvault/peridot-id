@@ -12,6 +12,7 @@
   "dependencies": {
     "@peridotvault/pid-sdk-js": "workspace:*",
     "@peridotvault/pid-types": "workspace:*",
+    "@peridotvault/pid-ui": "workspace:*",
     "@ui-sdk/core": "0.1.0-beta.13",
     "@ui-sdk/react": "0.1.0-beta.13",
     "buffer": "^6.0.3",

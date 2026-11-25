@@ -1,0 +1,65 @@
+/* Anchored popover motion (packages/ui Popover). Plain classes, not utilities,
+   so Tailwind must not see them as candidates — import this file once per app. */
+
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scrim-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Grows out of the anchor on open, shrinks back on close. */
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+    translate: 0 -4px;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes menu-out {
+  from {
+    opacity: 1;
+    scale: 1;
+    translate: 0 0;
+  }
+  to {
+    opacity: 0;
+    scale: 0.97;
+    translate: 0 -4px;
+  }
+}
+
+.menu-in {
+  transform-origin: top right;
+  animation: menu-in 160ms cubic-bezier(0, 0, 0.2, 1) both;
+}
+
+.menu-out {
+  transform-origin: top right;
+  animation: menu-out 140ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+.scrim-in {
+  animation: scrim-in 240ms cubic-bezier(0, 0, 0.2, 1) both;
+}
+
+.scrim-out {
+  animation: scrim-out 180ms cubic-bezier(0.4, 0, 1, 1) both;
+}

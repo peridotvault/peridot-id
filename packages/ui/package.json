@@ -1,0 +1,22 @@
+{
+  "name": "@peridotvault/pid-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Internal React UI shared by the wallet and the dashboard. Source-only (no build): both apps compile it with their own Vite + Tailwind setup.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./popover.css": "./src/popover.css",
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "react": ">=19",
+    "react-dom": ">=19"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  }
+}
