@@ -100,6 +100,7 @@ export class JwtAuthGuard extends AuthGuard("jwt") {
         method: "mainnet",
         ...(session.scope ? { scope: session.scope } : {}),
         ...(session.app ? { app: session.app } : {}),
+        ...(session.role ? { role: session.role } : {}),
       };
       return true;
     }

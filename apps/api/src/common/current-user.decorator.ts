@@ -8,6 +8,8 @@ export interface AuthenticatedUser {
   scope?: string;
   /** Provider that authenticated this browser session, when known. */
   method?: string;
+  /** Identity role — set only on the testnet path, from mainnet introspection. */
+  role?: string;
 }
 
 export const CurrentUser = createParamDecorator(

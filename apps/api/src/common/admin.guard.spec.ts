@@ -6,8 +6,10 @@ function setup(identity: { role: string; status: string } | null) {
   return new AdminGuard(prisma as never);
 }
 
-function ctx(pid?: string) {
-  return { switchToHttp: () => ({ getRequest: () => ({ user: pid ? { pid } : undefined }) }) } as never;
+function ctx(pid?: string, role?: string) {
+  return {
+    switchToHttp: () => ({ getRequest: () => ({ user: pid ? { pid, ...(role ? { role } : {}) } : undefined }) }),
+  } as never;
 }
 
 describe("AdminGuard", () => {
@@ -33,5 +35,13 @@ describe("AdminGuard", () => {
 
   it("allows active admins", async () => {
     await expect(setup({ role: "admin", status: "active" }).canActivate(ctx("pid_1"))).resolves.toBe(true);
+  });
+
+  it("trusts the mainnet-introspected role when the local row is a testnet shadow", async () => {
+    await expect(setup({ role: "user", status: "active" }).canActivate(ctx("pid_1", "admin"))).resolves.toBe(true);
+    await expect(setup(null).canActivate(ctx("pid_1", "admin"))).resolves.toBe(true);
+    await expect(setup({ role: "user", status: "active" }).canActivate(ctx("pid_1", "user"))).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 });

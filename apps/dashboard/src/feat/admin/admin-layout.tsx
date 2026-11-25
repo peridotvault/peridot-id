@@ -2,6 +2,7 @@ import { Link, Outlet } from "react-router";
 import { ArrowLeft, BookOpen, Handshake, Layers, Link2, LogIn, LogOut, Plug, Receipt, Settings, Trophy, Users } from "lucide-react";
 import { Card, ERROR, MUTED, MiniButton } from "../../shared/ui/kit";
 import { RAIL_TILE, Shell } from "../../shared/components/shell";
+import { NetworkSwitch } from "../../shared/components/network-switch";
 import { useWorkspace } from "../../shared/components/workspace-provider";
 import { cn } from "../../shared/lib/cn";
 
@@ -71,6 +72,7 @@ export function AdminLayout() {
             <ArrowLeft className="size-4 shrink-0" aria-hidden />
             <span className="whitespace-nowrap">Workspace</span>
           </Link>
+          <NetworkSwitch />
           <button type="button" onClick={() => void signOut()} className={cn(RAIL_TILE, "md:w-full")}>
             <LogOut className="size-4 shrink-0" aria-hidden />
             <span className="whitespace-nowrap">Sign out</span>

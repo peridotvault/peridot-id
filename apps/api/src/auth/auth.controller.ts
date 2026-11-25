@@ -26,6 +26,7 @@ import { encodeState, isLoopbackReturnTo, SsoCodeInvalidError, SsoService } from
 import { randomBytes } from "node:crypto";
 import { oauthStateSecret, verifyOAuthState } from "./oauth-state";
 import { resolveServiceUrls } from "../common/app-config";
+import { PrismaService } from "../prisma/prisma.service";
 
 /** Redirect target with a pid_code appended (keeps any existing query string). */
 function withPidCode(returnTo: string, pidCode: string): string {
@@ -77,6 +78,7 @@ export class AuthController {
     private readonly providers: ProvidersService,
     private readonly usage: UsageService,
     private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -330,11 +332,17 @@ export class AuthController {
   @Get("introspect")
   @UseGuards(JwtAuthGuard)
   @Throttle({ default: { limit: 300, ttl: 60000 } })
-  introspect(@CurrentUser() user: AuthenticatedUser): { pid: string; scope?: string; app?: string } {
+  async introspect(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ pid: string; scope?: string; app?: string; role?: string }> {
+    // The testnet stack keeps no identity tables of its own, so its AdminGuard
+    // needs the role alongside the pid it just had verified here.
+    const identity = await this.prisma.identity.findUnique({ where: { pid: user.pid }, select: { role: true } });
     return {
       pid: user.pid,
       ...(user.scope ? { scope: user.scope } : {}),
       ...(user.app ? { app: user.app } : {}),
+      ...(identity?.role ? { role: identity.role } : {}),
     };
   }
 

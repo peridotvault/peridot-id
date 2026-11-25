@@ -45,7 +45,7 @@ wallet popup for the first-party session.
 | `VITE_PID_CLIENT_ID` | unset (loopback needs none) | optional client_id for the `/demo` sample dapp |
 
 The network is a user choice, not a build: a Mainnet/Testnet switch in the
-developer sidebar stores `pid_network_mode` and reloads into that API
+admin sidebar stores `pid_network_mode` and reloads into that API
 (`?env=testnet` deep-links it).
 The env badge follows the mode. Apps from both networks are listed together
 with a badge; a detail route carries its own network (`/apps/:env/:id`).

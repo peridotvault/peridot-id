@@ -17,7 +17,9 @@ The two stacks are separate machines: main stack (API + wallet + dashboard) and
 the test stack (API + its own DB) on another VPS. They share only the origin
 pair and the `.peridot.id` cookie domain — no shared database, no shared disk.
 Mode (`mainnet` | `testnet`) is a user-visible switch in the wallet (Settings)
-and in the dashboard sidebar. Switching stores `pid_network_mode` and **reloads**
+and in the dashboard admin sidebar (admins only — the testnet stack keeps no
+identity tables, so its `AdminGuard` reads the role from introspection).
+Switching stores `pid_network_mode` and **reloads**
 — the API origin is fixed per page load, so no client, cache, or request ever
 straddles two networks.
 

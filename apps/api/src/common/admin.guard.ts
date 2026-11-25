@@ -8,7 +8,9 @@ export class AdminGuard implements CanActivate {
   constructor(private readonly prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest() as { user?: { pid?: string; app?: string } };
+    const req = context.switchToHttp().getRequest() as {
+      user?: { pid?: string; app?: string; role?: string };
+    };
     const pid = req.user?.pid;
     if (!pid) throw new ForbiddenException("Admin access required");
     // Machine (app) tokens are never admin, even for an admin owner.
@@ -17,9 +19,11 @@ export class AdminGuard implements CanActivate {
       where: { pid },
       select: { role: true, status: true },
     });
-    if (!identity || identity.status !== "active" || identity.role !== "admin") {
-      throw new ForbiddenException("Admin access required");
-    }
-    return true;
+    if (identity?.status === "active" && identity.role === "admin") return true;
+    // Testnet keeps only a bare shadow identity (role "user"), so trust the role
+    // mainnet just verified during introspection. Only that path sets
+    // `user.role`, and mainnet rejects suspended identities before introspecting.
+    if (req.user?.role === "admin") return true;
+    throw new ForbiddenException("Admin access required");
   }
 }

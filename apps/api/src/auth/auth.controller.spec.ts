@@ -18,6 +18,7 @@ describe("AuthController.pidAvailable (GET /v1/auth/pid/available)", () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
   const reqWith = (query: unknown): Request => ({ query } as unknown as Request);
 
@@ -80,6 +81,7 @@ describe("AuthController.googleCallback first-party (GET /v1/auth/google/callbac
     {} as never,
     {} as never,
     { get } as never,
+    {} as never,
   );
 
   beforeEach(() => {
@@ -114,7 +116,7 @@ describe("AuthController.googleCallback first-party (GET /v1/auth/google/callbac
  * server-side reason) while the public error stays uniform (no oracle). */
 describe("AuthController.exchange (POST /v1/auth/exchange)", () => {
   const make = (sso: unknown): AuthController =>
-    new AuthController({} as never, {} as never, sso as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+    new AuthController({} as never, {} as never, sso as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
 
   it("passes successful exchanges through untouched", async () => {
     const payload = { pid: "ifal@pid" };
@@ -156,7 +158,7 @@ describe("AuthController.rpRefresh (POST /v1/auth/rp/refresh)", () => {
     const refreshRpSession = jest.fn(async () => rotated);
     const controller = new AuthController(
       {} as never, {} as never, { refreshRpSession } as never, {} as never, {} as never,
-      {} as never, {} as never, {} as never, {} as never,
+      {} as never, {} as never, {} as never, {} as never, {} as never,
     );
     await expect(controller.rpRefresh({ refreshToken: "rp.refresh.jwt.token" })).resolves.toEqual(rotated);
     expect(refreshRpSession).toHaveBeenCalledWith("rp.refresh.jwt.token");

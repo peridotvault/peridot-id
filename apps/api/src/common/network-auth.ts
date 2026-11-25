@@ -21,6 +21,8 @@ export interface MainnetSession {
   pid: string;
   scope?: string;
   app?: string;
+  /** Identity role on mainnet — this stack has no identity row to read. */
+  role?: string;
 }
 
 const CACHE_TTL_MS = 60_000;
@@ -68,12 +70,13 @@ export async function mainnetSession(
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) return null;
-    const body = (await res.json()) as { pid?: unknown; scope?: unknown; app?: unknown };
+    const body = (await res.json()) as { pid?: unknown; scope?: unknown; app?: unknown; role?: unknown };
     if (typeof body.pid !== "string" || body.pid.length === 0) return null;
     const session: MainnetSession = {
       pid: body.pid,
       ...(typeof body.scope === "string" ? { scope: body.scope } : {}),
       ...(typeof body.app === "string" ? { app: body.app } : {}),
+      ...(typeof body.role === "string" ? { role: body.role } : {}),
     };
     if (cache.size >= MAX_CACHE_ENTRIES) cache.clear();
     cache.set(token, { session, expiresAt: Date.now() + CACHE_TTL_MS });

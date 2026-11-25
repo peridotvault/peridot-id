@@ -3,7 +3,6 @@ import { AppWindow, ArrowLeft, FlaskConical, KeyRound, LayoutDashboard, LogOut, 
 import { Card, ERROR, MiniButton, MUTED } from "../../shared/ui/kit";
 import { PageHeader } from "../../shared/ui/page-header";
 import { RAIL_TILE, Shell, type RailItem } from "../../shared/components/shell";
-import { NetworkSwitch } from "../../shared/components/network-switch";
 import { useWorkspace } from "../../shared/components/workspace-provider";
 import { APP_SECTIONS } from "../../shared/app-types";
 import { cn } from "../../shared/lib/cn";
@@ -95,7 +94,6 @@ export function WorkspaceLayout() {
             <LogOut className="size-4 shrink-0" aria-hidden />
             <span className="whitespace-nowrap">Sign out</span>
           </button>
-          <NetworkSwitch />
         </>
       }
     >

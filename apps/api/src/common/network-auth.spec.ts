@@ -43,10 +43,10 @@ describe("mainnetSession", () => {
   });
 
   it("introspects against mainnet and caches the result", async () => {
-    const fetchImpl = jest.fn(async () => jsonResponse({ pid: "ifal@pid", scope: "read" }));
+    const fetchImpl = jest.fn(async () => jsonResponse({ pid: "ifal@pid", scope: "read", role: "admin" }));
     const opts = { network: "testnet", baseUrl: "https://api.peridot.id", fetchImpl: fetchImpl as unknown as typeof fetch };
     const session = await mainnetSession(req({}, { pid_access: "tok" }), opts);
-    expect(session).toEqual({ pid: "ifal@pid", scope: "read" });
+    expect(session).toEqual({ pid: "ifal@pid", scope: "read", role: "admin" });
     expect(fetchImpl).toHaveBeenCalledWith(
       "https://api.peridot.id/v1/auth/introspect",
       expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer tok" }) }),

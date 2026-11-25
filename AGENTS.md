@@ -48,7 +48,7 @@ in `dev` — never open a PR unless the owner asks for one.
   the testnet stack is API + DB only (`--profile web` is main-only) and runs on
   its own VPS — the stacks share no DB or disk, only the origin pair and the
   `.peridot.id` cookie domain. The mode
-  switch stores `pid_network_mode` and reloads, because the API origin is fixed
+  switch (admin sidebar) stores `pid_network_mode` and reloads, because the API origin is fixed
   per page load. Identity (PID, passkey, session) exists only in the mainnet
   DB; the testnet API proxies identity routes to mainnet and verifies sessions
   by introspection. One env per stack: `PID_NETWORK=mainnet|testnet`. Full
