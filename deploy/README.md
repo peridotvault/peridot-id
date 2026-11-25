@@ -161,7 +161,7 @@ ledger writes):
   sandbox `*/15`, production `*/5` with `ALERT_ENV=production` for the prod-zero
   invariant). See `deploy/alerts/README.md`.
 
-**Network switch.** One dashboard build serves both networks: the topbar
+**Network switch.** One dashboard build serves both networks: the sidebar
 Mainnet/Testnet switch stores `pid_network_mode` and reloads into that API
 (`VITE_API_URL` plus the derived `testnet-api` sibling, overridable with
 `VITE_TEST_API_URL`). No per-stack dashboard build args are needed, and the

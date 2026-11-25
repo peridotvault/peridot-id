@@ -1,6 +1,5 @@
 import { Link } from "react-router";
 import { Badge, MiniButton, Segmented, SegmentedItem } from "../../shared/ui/kit";
-import type { DashboardMode } from "../lib/config";
 
 export interface WorkspaceTab {
   key: string;
@@ -15,8 +14,6 @@ export function Topbar({
   sessionLabel,
   isAdmin,
   env = "production",
-  mode,
-  onMode,
   onSignOut,
 }: {
   tabs: WorkspaceTab[];
@@ -25,8 +22,6 @@ export function Topbar({
   sessionLabel: string;
   isAdmin: boolean;
   env?: string;
-  mode: DashboardMode;
-  onMode: (mode: DashboardMode) => void;
   onSignOut: () => void;
 }) {
   const isSandbox = env !== "production";
@@ -53,16 +48,6 @@ export function Topbar({
         </Segmented>
 
         <div className="flex min-w-0 shrink-0 items-center gap-3">
-          {/* One dashboard origin, two APIs: the switch stores the mode and
-              reloads into that network (no hostname to remember). */}
-          <Segmented aria-label="Network" className="hidden sm:flex">
-            <SegmentedItem active={mode === "mainnet"} onClick={() => mode !== "mainnet" && onMode("mainnet")}>
-              Mainnet
-            </SegmentedItem>
-            <SegmentedItem active={mode === "testnet"} onClick={() => mode !== "testnet" && onMode("testnet")}>
-              Testnet
-            </SegmentedItem>
-          </Segmented>
           <span className="hidden min-w-0 items-center gap-2 text-xs text-muted-foreground md:flex">
             {isAdmin && <Badge tone="brand">admin</Badge>}
             <span className="max-w-48 truncate" title={sessionLabel}>

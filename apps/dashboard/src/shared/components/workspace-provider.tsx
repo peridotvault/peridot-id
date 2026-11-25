@@ -214,7 +214,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 /** Topbar in front of every route; the session gate stays in the layouts. */
 export function WorkspaceTopbar() {
-  const { tabs, tab, onTab, pid, isAdmin, env, mode, setMode, signOut } = useWorkspace();
+  const { tabs, tab, onTab, pid, isAdmin, env, signOut } = useWorkspace();
   return (
     <Topbar
       tabs={tabs}
@@ -223,8 +223,6 @@ export function WorkspaceTopbar() {
       sessionLabel={pid || "signed out"}
       isAdmin={isAdmin}
       env={env}
-      mode={mode}
-      onMode={setMode}
       onSignOut={() => void signOut()}
     />
   );

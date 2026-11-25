@@ -39,8 +39,11 @@ export function AppsManager({ clients, mode }: { clients: Clients; mode: Dashboa
       }),
     );
     const loaded = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+    // One API can back both clients (local dev, no VITE_TEST_API_URL): list
+    // each app once instead of twice. Real networks have distinct app ids.
+    const unique = loaded.filter((row, i) => loaded.findIndex((x) => x.app.id === row.app.id) === i);
     // Sort by network then name so the badges do not interleave.
-    setRows(loaded.sort((a, b) => a.env.localeCompare(b.env) || a.app.name.localeCompare(b.app.name)));
+    setRows(unique.sort((a, b) => a.env.localeCompare(b.env) || a.app.name.localeCompare(b.app.name)));
     const failures = results.filter((r) => r.status === "rejected").length;
     setError(failures === 0 ? null : `Couldn't load ${failures === 2 ? "either environment" : "one environment"} — showing what's available.`);
   }, [clients]);

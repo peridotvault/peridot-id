@@ -88,6 +88,7 @@ export function WorkspaceLayout() {
           </span>
           <button
             type="button"
+            title="Switch network (reloads the dashboard)"
             onClick={() => setMode(mode === "testnet" ? "mainnet" : "testnet")}
             className={cn(RAIL_TILE, "md:w-full")}
           >
