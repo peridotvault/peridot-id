@@ -11,7 +11,7 @@ export { Segmented, SegmentedItem } from "./segmented";
 /** Small themed button (outline or solid) for card actions. */
 type MiniButtonProps = Omit<ComponentPropsWithoutRef<"button">, "className"> & {
   className?: string;
-  variant?: "outline" | "solid";
+  variant?: "outline" | "solid" | "danger" | "dangerSolid";
   size?: "xs" | "sm" | "md" | "lg";
 };
 
@@ -19,7 +19,7 @@ type MiniButtonProps = Omit<ComponentPropsWithoutRef<"button">, "className"> & {
 export function MiniButton({ variant = "outline", size = "xs", className, ...rest }: MiniButtonProps) {
   return (
     <Button
-      variant={variant === "solid" ? "default" : "outline"}
+      variant={variant === "solid" ? "default" : variant === "danger" ? "destructive" : variant === "dangerSolid" ? "destructive-solid" : "outline"}
       size={size}
       className={className}
       {...rest}
@@ -38,6 +38,7 @@ export const SECTION_LABEL = "text-xs font-semibold uppercase tracking-wide text
 export const MUTED = "text-muted-foreground";
 export const ERROR = "text-red-600 dark:text-red-400";
 export const WARN = "text-amber-700 dark:text-amber-300";
+export const DANGER = "text-destructive";
 
 /** Big changing figure (balance, counters): mono + tabular so digits do not jitter. */
 export const METRIC = "font-mono font-semibold tabular-nums tracking-tight";

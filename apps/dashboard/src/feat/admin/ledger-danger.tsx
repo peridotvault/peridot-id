@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "../../shared/api";
-import { Card, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "../../shared/ui/kit";
+import { Card, DANGER, ERROR, FIELD, MUTED, SECTION_LABEL, WARN, MiniButton } from "../../shared/ui/kit";
 
 interface ReplayView {
   frozen: boolean;
@@ -134,8 +134,8 @@ export function LedgerDanger({ client }: { client: PeridotClient }) {
         </div>
       )}
 
-      <Card>
-        <p className={SECTION_LABEL}>Freeze switch</p>
+      <Card className="border-destructive/40">
+        <p className={`${SECTION_LABEL} ${DANGER}`}>Freeze switch</p>
         <p className={`mt-1 text-xs ${MUTED}`}>Halts all fiat movement (deposits, sends, adjustments) while engaged.</p>
         <p className="mt-2 text-xs">
           {frozen === null ? <span className={MUTED}>Checking…</span> : frozen ? <span className={WARN}>currently frozen</span> : <span className={MUTED}>currently open</span>}
@@ -147,13 +147,13 @@ export function LedgerDanger({ client }: { client: PeridotClient }) {
           </label>
           {confirmFreeze ? (
             <>
-              <MiniButton variant="solid" onClick={() => void runFreeze(!frozen)} disabled={busy === "freeze"}>
+              <MiniButton variant="dangerSolid" onClick={() => void runFreeze(!frozen)} disabled={busy === "freeze"}>
                 {busy === "freeze" ? "Working…" : frozen ? "Confirm clear freeze" : "Confirm freeze"}
               </MiniButton>
               <MiniButton onClick={() => setConfirmFreeze(false)} disabled={busy === "freeze"}>Cancel</MiniButton>
             </>
           ) : (
-            <MiniButton onClick={() => setConfirmFreeze(true)} disabled={frozen === null || busy === "freeze"}>
+            <MiniButton variant="danger" onClick={() => setConfirmFreeze(true)} disabled={frozen === null || busy === "freeze"}>
               {frozen ? "Clear freeze" : "Freeze ledger"}
             </MiniButton>
           )}
@@ -161,8 +161,8 @@ export function LedgerDanger({ client }: { client: PeridotClient }) {
       </Card>
 
       {unchained > 0 && (
-        <Card>
-          <p className={SECTION_LABEL}>Hash-chain backfill</p>
+        <Card className="border-destructive/40">
+          <p className={`${SECTION_LABEL} ${DANGER}`}>Hash-chain backfill</p>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
             <MiniButton onClick={() => void runBackfill()} disabled={busy === "backfill"}>
               {busy === "backfill" ? "Backfilling…" : `Backfill ${unchained} unchained row(s)`}
@@ -172,8 +172,8 @@ export function LedgerDanger({ client }: { client: PeridotClient }) {
         </Card>
       )}
 
-      <Card>
-        <p className={SECTION_LABEL}>Adjustment — balanced correction (audited)</p>
+      <Card className="border-destructive/40">
+        <p className={`${SECTION_LABEL} ${DANGER}`}>Adjustment — balanced correction (audited)</p>
         <p className={`mt-1 text-xs ${MUTED}`}>
           Debits <span className="font-mono">fromPid</span> and credits <span className="font-mono">toPid</span> with the same amount, one entry group,
           immutable once posted. The sender balance is rechecked inside the transaction.
@@ -223,7 +223,7 @@ export function LedgerDanger({ client }: { client: PeridotClient }) {
               Post now? {adjust.amount} IDR from {adjust.fromPid.trim().toLowerCase()} to {adjust.toPid.trim().toLowerCase()} — this moves real ledger money and cannot be undone.
             </p>
             <div className="flex items-center gap-2">
-              <MiniButton variant="solid" onClick={() => void runAdjust()} disabled={busy === "adjust"}>
+              <MiniButton variant="dangerSolid" onClick={() => void runAdjust()} disabled={busy === "adjust"}>
                 {busy === "adjust" ? "Posting…" : "Post adjustment"}
               </MiniButton>
               <MiniButton onClick={() => setConfirmAdjust(false)} disabled={busy === "adjust"}>Cancel</MiniButton>
@@ -231,7 +231,7 @@ export function LedgerDanger({ client }: { client: PeridotClient }) {
           </div>
         ) : (
           <div className="mt-3 flex items-center gap-2">
-            <MiniButton onClick={() => setConfirmAdjust(true)} disabled={!adjustValid || busy === "adjust"}>
+            <MiniButton variant="danger" onClick={() => setConfirmAdjust(true)} disabled={!adjustValid || busy === "adjust"}>
               Review adjustment
             </MiniButton>
             <span className={MUTED}>Requires two PIDs, a positive whole-IDR amount and a reason.</span>

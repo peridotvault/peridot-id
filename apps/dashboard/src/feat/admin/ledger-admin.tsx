@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { PeridotClient } from "@peridotvault/pid-sdk-js";
 import { unwrap } from "../../shared/api";
-import { Badge, Card, ERROR, FIELD, METRIC, MUTED, SECTION_LABEL, WARN, MiniButton } from "../../shared/ui/kit";
+import { Badge, Card, DANGER, ERROR, FIELD, METRIC, MUTED, SECTION_LABEL, WARN, MiniButton } from "../../shared/ui/kit";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../shared/ui/table";
 
 interface ReplayView {
@@ -202,10 +202,10 @@ export function LedgerAdmin({ client }: { client: PeridotClient }) {
         )}
       </Card>
 
-      <Card>
-        <p className={SECTION_LABEL}>Danger zone</p>
+      <Card className="border-destructive/40">
+        <p className={`${SECTION_LABEL} ${DANGER}`}>Danger zone</p>
         <p className={`mt-1 text-xs ${MUTED}`}>Freeze switch, chain backfill and balanced adjustments move real ledger money.</p>
-        <Link to="/admin/ledger/danger" className="mt-3 inline-block text-sm text-muted-foreground transition-colors hover:text-foreground">
+        <Link to="/admin/ledger/danger" className={`mt-3 inline-block text-sm ${DANGER} transition-opacity hover:opacity-80`}>
           Open ledger operations →
         </Link>
       </Card>
