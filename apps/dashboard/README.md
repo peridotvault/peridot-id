@@ -78,6 +78,9 @@ sidebar shell. Non-admins and anonymous visitors get a gate screen; the API
 | `/admin/fees` | fee consoles |
 | `/admin/partners` | partner directory (verify apps) |
 | `/admin/login-activity` | login history |
+| `/admin/users` | users + ledger balances |
+| `/admin/ledger` | ledger replay, balances, hash-chain integrity (read only) |
+| `/admin/ledger/danger` | freeze switch, chain backfill, balanced adjustment |
 | `/admin/leveling` (+ `levels`, `tasks`, `history`, `settings`, `apps`) | progression admin |
 | `/admin/settings` | system settings |
 

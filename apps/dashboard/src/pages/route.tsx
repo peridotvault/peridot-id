@@ -16,6 +16,7 @@ import AdminProviderDetailPage from "./admin-provider-detail";
 import AdminLoginActivityPage from "./admin-login-activity";
 import AdminUsersPage from "./admin-users";
 import AdminLedgerPage from "./admin-ledger";
+import AdminLedgerDangerPage from "./admin-ledger-danger";
 import ChainsPage from "./chains";
 import ChainsCreatePage from "./chains-create";
 import FeesPage from "./fees";
@@ -62,6 +63,7 @@ export function AppRoutes() {
           <Route path="login-activity" element={<AdminLoginActivityPage />} />
           <Route path="users" element={<AdminUsersPage />} />
           <Route path="ledger" element={<AdminLedgerPage />} />
+          <Route path="ledger/danger" element={<AdminLedgerDangerPage />} />
           <Route path="leveling" element={<LevelingOverviewPage />} />
           <Route path="leveling/levels" element={<LevelingLevelsPage />} />
           <Route path="leveling/tasks" element={<LevelingTasksPage />} />
