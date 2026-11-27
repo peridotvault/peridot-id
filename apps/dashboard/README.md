@@ -47,8 +47,9 @@ wallet popup for the first-party session.
 The network is a user choice, not a build: a Mainnet/Testnet switch in the
 admin sidebar stores `pid_network_mode` and reloads into that API
 (`?env=testnet` deep-links it).
-The env badge follows the mode. Apps from both networks are listed together
-with a badge; a detail route carries its own network (`/apps/:env/:id`).
+The topbar badge is the static "Dashboard" label; mode shows only in that
+switch. Apps from both networks are listed together with a badge; a detail
+route carries its own network (`/apps/:env/:id`).
 
 LAN-safe: a configured loopback URL is host-swapped to the page host at
 runtime (see `src/lib/api-base.ts`), so LAN devices work with zero env.
@@ -81,5 +82,6 @@ sidebar shell. Non-admins and anonymous visitors get a gate screen; the API
 | `/admin/settings` | system settings |
 
 Old top-level admin URLs (`/chains`, `/fees`, `/leveling`, …) are gone and 404.
-Admin tabs render only for `role === "admin"`. Session scope stays `"web"` so
+The topbar carries no navigation: no Apps/Admin tabs. Admin entry is the pid
+popover (admins only). Session scope stays `"web"` so
 existing workspace sessions remain valid.

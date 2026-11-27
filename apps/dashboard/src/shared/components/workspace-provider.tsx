@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { Peridot } from "@peridotvault/pid-sdk-js";
-import { Topbar, type WorkspaceTab } from "./topbar";
+import { Topbar } from "./topbar";
 import { ProfileMenu } from "./profile-menu";
 import type { PeridotClient, Role } from "@peridotvault/pid-sdk-js";
 import { PopupClosedError } from "@peridotvault/pid-sdk-js";
@@ -42,9 +42,6 @@ interface WorkspaceContextValue {
   role: Role;
   isAdmin: boolean;
   pid: string;
-  tabs: WorkspaceTab[];
-  tab: string;
-  onTab: (key: string) => void;
   env: string;
   busy: boolean;
   error: string | null;
@@ -87,7 +84,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { pathname } = useLocation();
 
   // Resolves true when an owner session is established. Every anonymous
   // outcome resolves false so callers can surface it — the session check must
@@ -174,19 +170,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [client, navigate]);
 
   const isAdmin = role === "admin";
-  // Two areas, not two nav sets: the developer workspace owns apps only.
-  // Chains, fees, partners, leveling and system settings live in /admin.
-  const tab = pathname?.startsWith("/admin") === true ? "admin" : "apps";
-  const tabs = useMemo<WorkspaceTab[]>(
-    () => (isAdmin ? [{ key: "apps", label: "Apps" }, { key: "admin", label: "Admin" }] : [{ key: "apps", label: "Apps" }]),
-    [isAdmin],
-  );
-  const onTab = useCallback(
-    (key: string) => {
-      void navigate(key === "admin" ? "/admin" : "/");
-    },
-    [navigate],
-  );
 
   const value = useMemo<WorkspaceContextValue>(
     () => ({
@@ -198,16 +181,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       role,
       isAdmin,
       pid,
-      tabs,
-      tab,
-      onTab,
       env: PID_ENV,
       busy,
       error,
       signIn,
       signOut,
     }),
-    [client, clientFor, mode, status, role, isAdmin, pid, tabs, tab, onTab, busy, error, signIn, signOut],
+    [client, clientFor, mode, status, role, isAdmin, pid, busy, error, signIn, signOut],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
@@ -215,6 +195,5 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 /** Topbar in front of every route; the session gate stays in the layouts. */
 export function WorkspaceTopbar() {
-  const { tabs, tab, onTab, env } = useWorkspace();
-  return <Topbar tabs={tabs} active={tab} onTab={onTab} env={env} account={<ProfileMenu />} />;
+  return <Topbar account={<ProfileMenu />} />;
 }

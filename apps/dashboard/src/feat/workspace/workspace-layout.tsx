@@ -62,7 +62,7 @@ export function WorkspaceLayout() {
   }
 
   // Inside one app the rail becomes that app's sections. The workspace root is
-  // apps-only (tabs in the topbar), so it needs no sidebar at all.
+  // apps-only, so it needs no sidebar at all.
   const nav: RailItem[] = appId
     ? [
         { to: "/", label: "All apps", icon: ArrowLeft },
