@@ -195,5 +195,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
 /** Topbar in front of every route; the session gate stays in the layouts. */
 export function WorkspaceTopbar() {
-  return <Topbar account={<ProfileMenu />} />;
+  const { pid, isAdmin, signOut } = useWorkspace();
+  return <Topbar account={<ProfileMenu pid={pid} isAdmin={isAdmin} signOut={signOut} />} />;
 }

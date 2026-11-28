@@ -19,6 +19,7 @@ COPY packages/solana/package.json ./packages/solana/
 COPY packages/sdk-js/package.json ./packages/sdk-js/
 COPY packages/openapi/package.json ./packages/openapi/
 COPY packages/core/package.json ./packages/core/
+COPY packages/ui/package.json ./packages/ui/
 
 # --ignore-scripts: root postinstall builds types/core/solana/sdk-js but their sources aren't
 # copied yet — we build them explicitly in the builder stage after COPY . .

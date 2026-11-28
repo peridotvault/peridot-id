@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ChevronDown, LogOut, ShieldCheck } from "lucide-react";
 import { Popover } from "@peridotvault/pid-ui";
-import { useWorkspace } from "./workspace-provider";
 import { cn } from "../lib/cn";
 
 const ROW =
@@ -13,8 +12,15 @@ const ROW =
  * Admin (admins only) and Sign out, so both consoles share one account menu.
  * Chrome (scrim, position, motion) is the wallet's Popover — packages/ui.
  */
-export function ProfileMenu() {
-  const { pid, isAdmin, signOut } = useWorkspace();
+export function ProfileMenu({
+  pid,
+  isAdmin,
+  signOut,
+}: {
+  pid: string;
+  isAdmin: boolean;
+  signOut: () => void;
+}) {
   const navigate = useNavigate();
   const anchor = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
