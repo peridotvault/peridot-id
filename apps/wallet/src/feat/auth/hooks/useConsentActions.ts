@@ -9,7 +9,6 @@ import { play } from "../../../shared/sfx/player";
 
 /** The one pause before the browser leaves, hardcoded on purpose (no env). */
 const handoff = () => new Promise<void>((resolve) => setTimeout(resolve, 2000));
-
 export function useConsentActions(
   peridot: PeridotClient,
   opts: {
@@ -73,9 +72,9 @@ export function useConsentActions(
     try {
       flags.delivered = true;
       // The popup-login path closed the window the instant the code was
-      // delivered, so the animation never had a frame. Same handoff here.
+      // delivered, so the animation never had a frame. deliverLoginCode owns
+      // the handoff beat now.
       setSigning(true);
-      await handoff();
       const ok = await deliverLoginCode(peridot, ctx);
       if (!ok) {
         flags.delivered = false;

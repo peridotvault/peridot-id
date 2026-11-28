@@ -89,3 +89,27 @@ describe("explicit login flag", () => {
     });
   });
 });
+
+// The login window must show the "Signing in securely" handoff while it mints
+// the app's code (every path — Google return, passkey, email, claim — funnels
+// through deliverLoginCode).
+describe("delivering signal", () => {
+  it("flips on while the code is minted and off again when it fails", async () => {
+    const { readLoginContext, subscribeDelivering, deliverLoginCode } = await import(
+      "../src/feat/auth/utils/popupLogin.ts"
+    );
+    await withWindow(`?popup=login&origin=${DAPP_ORIGIN}`, async () => {
+      const ctx = readLoginContext();
+      const seen = [];
+      const off = subscribeDelivering((v) => seen.push(v));
+      const ok = await deliverLoginCode(
+        { auth: { authorize: async () => { throw new Error("unverified app"); } } },
+        ctx,
+      );
+      off();
+      assert.equal(ok, false);
+      // Replayed current value first, then on, then back off.
+      assert.deepEqual(seen, [false, true, false]);
+    });
+  });
+});

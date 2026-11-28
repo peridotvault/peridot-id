@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePeridot } from "../../shared/app/AppContext";
-import { readLoginContext, type LoginContext } from "../../feat/auth/utils/popupLogin";
+import { readLoginContext, subscribeDelivering, type LoginContext } from "../../feat/auth/utils/popupLogin";
 import { readSsoParams, ssoOrigin } from "../../feat/auth/utils/sso";
 import { LoadingScreen } from "../../shared/components/shell/LoadingScreen";
 import type { AccountMenuModel } from "../../shared/components/shell/AccountMenu";
@@ -33,6 +33,10 @@ export function Login({
   const { peridot } = usePeridot();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A pid_code is being minted for the app: show the signing handoff instead of
+  // whatever card (or bare window) the delivery interrupt left behind.
+  const [delivering, setDelivering] = useState(false);
+  useEffect(() => subscribeDelivering(setDelivering), []);
   // A `?popup=login` load carries BOTH an origin context and (when the app
   // passed `returnTo`) `redirect_uri`. The popup context wins: the result is
   // handed to the opener and this window closes — never a redirect to the dapp,
@@ -158,6 +162,12 @@ export function Login({
   // yet. Claiming creates it — this screen is the only way forward.
   if (claim.claim === undefined) {
     return <LoadingScreen />;
+  }
+
+  // A pid_code is being minted (or handed back) for the app — the only screen
+  // that belongs on top of a claim/consent card at that moment.
+  if (delivering) {
+    return <SigningScreen origin={appOrigin ?? ""} appName={appInfo?.name} logoUrl={appInfo?.logoUrl} pending />;
   }
 
   if (claim.claim) {

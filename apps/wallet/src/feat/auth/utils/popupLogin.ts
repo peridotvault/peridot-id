@@ -114,24 +114,51 @@ function pingWalletTabs(): void {
 export const APP_REFUSED_MESSAGE =
   "Signed in, but this app can't receive a session yet — it may not be verified. Retry from the app once its owner approves it.";
 
+/** The one pause before the browser leaves, hardcoded on purpose (no env). */
+const handoff = () => new Promise<void>((resolve) => setTimeout(resolve, 2000));
+
+// True while a pid_code is being minted for the opener. Every delivery path
+// (Google return, passkey, email, claim) goes through deliverLoginCode, so this
+// is the one signal the login screen needs to show the signing handoff instead
+// of a frozen card or a silent tab flash.
+let delivering = false;
+const deliveringListeners = new Set<(v: boolean) => void>();
+
+export function subscribeDelivering(fn: (v: boolean) => void): () => void {
+  deliveringListeners.add(fn);
+  fn(delivering);
+  return () => {
+    deliveringListeners.delete(fn);
+  };
+}
+
+function setDelivering(v: boolean): void {
+  delivering = v;
+  for (const fn of deliveringListeners) fn(v);
+}
+
 /** Mint a pid_code for the app and hand it to the opener, then close the window. */
 export async function deliverLoginCode(peridot: PeridotClient, ctx: LoginContext): Promise<boolean> {
-  // First-party opener: mint its OWN session (so app logout never touches the
-  // wallet), then confirm and close. No pid_code either way.
-  if (ctx.firstParty) {
-    if (ctx.sessionScope) {
-      const ok = await peridot.auth.grantSession(ctx.sessionScope);
-      if (!ok) {
-        deliverLoginResult(ctx.origin, { ok: false, error: "Couldn't start the app session — try again." }, ctx.redirectUri);
-        return false;
-      }
-    }
-    pingWalletTabs();
-    deliverLoginResult(ctx.origin, { ok: true }, ctx.redirectUri);
-    clearLoginContext();
-    return true;
-  }
+  setDelivering(true);
   try {
+    // Same beat as Internet Identity's redirect view: the pause before the
+    // window closes reads as work, not as a hang.
+    await handoff();
+    // First-party opener: mint its OWN session (so app logout never touches the
+    // wallet), then confirm and close. No pid_code either way.
+    if (ctx.firstParty) {
+      if (ctx.sessionScope) {
+        const ok = await peridot.auth.grantSession(ctx.sessionScope);
+        if (!ok) {
+          deliverLoginResult(ctx.origin, { ok: false, error: "Couldn't start the app session — try again." }, ctx.redirectUri);
+          return false;
+        }
+      }
+      pingWalletTabs();
+      deliverLoginResult(ctx.origin, { ok: true }, ctx.redirectUri);
+      clearLoginContext();
+      return true;
+    }
     const { pidCode } = await peridot.auth.authorize({
       returnTo: ctx.redirectUri ?? ctx.origin,
       ...(ctx.clientId ? { clientId: ctx.clientId } : {}),
@@ -142,6 +169,8 @@ export async function deliverLoginCode(peridot: PeridotClient, ctx: LoginContext
     return true;
   } catch {
     return false;
+  } finally {
+    setDelivering(false);
   }
 }
 
